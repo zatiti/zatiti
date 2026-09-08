@@ -16,7 +16,7 @@ The user proposes freezing the directory structure and placing task context and 
 
 ## Decision
 
-Freeze ownership roots and seam contracts per execution wave. Implementation structure inside a root may evolve. The table in `docs/plan.md` defines the initial roots. Every active implementation goal declares explicit write scope; concurrently rendered roots must be disjoint, including ancestor/descendant relationships. Cross-module work uses explicit dependencies and an integration task.
+Freeze ownership roots and seam contracts per execution wave. Implementation structure inside a root may evolve. The table in `../plan.md` defines the initial roots. Every active implementation goal declares explicit write scope; concurrently rendered roots must be disjoint, including ancestor/descendant relationships. Cross-module work uses explicit dependencies and an integration task.
 
 Keep authored acceptance criteria in the plan and derive executable goals just in time against the actual dispatch base. Seal the executable acceptance inputs before convergence. Store authoritative goals outside implementing roots under `goals/`; use the installed Kazi format rather than inventing a `kazi.goal` schema. The proposed filename convention is `<task-id>.goal.toml`. It is a convention, not a claim that any file with that extension has been validated or approved.
 

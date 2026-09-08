@@ -6,7 +6,7 @@ Zatiti is an open-source project in Go for defining organizations, equipping wor
 
 A coding agent such as Claude Code, Codex, or Cursor should be able to operate Zatiti through MCP or its command line: create an organization, import a skill, configure a connection, assign a worker, start a task, and follow it to a verified result. CLI and MCP feature parity is a release requirement.
 
-**Status: design stage.** The [RFC](rfc.md) defines the proposed architecture and first release. There is no runnable implementation or published installation command yet. Examples below illustrate the intended interface; they are not commands you can run today. Compatibility with individual agent clients will be tested before it is advertised as supported.
+**Status: design stage.** The [RFC](docs/rfc.md) defines the proposed architecture and first release. There is no runnable implementation or published installation command yet. Examples below illustrate the intended interface; they are not commands you can run today. Compatibility with individual agent clients will be tested before it is advertised as supported.
 
 ## What Zatiti is for
 
@@ -49,7 +49,7 @@ The CLI offers readable output and a stable JSON mode. MCP exposes typed tools b
 
 Resource creation produces drafts where activation changes live configuration. Applying a plan checks its exact contents, current revision, permissions, and required prerequisites. Neither interface provides a shortcut around those checks.
 
-The planned local MCP entry point is `zatiti mcp serve`. Client configuration will select a local credential profile. A configured MCP client needs no separate hosted Zatiti account. See the [transport contract](rfc.md#8-cli-and-mcp-contract) for the proposed connection, Mint generation, and parity rules.
+The planned local MCP entry point is `zatiti mcp serve`. Client configuration will select a local credential profile. A configured MCP client needs no separate hosted Zatiti account. See the [transport contract](docs/rfc.md#8-cli-and-mcp-contract) for the proposed connection, Mint generation, and parity rules.
 
 ## Execution you can inspect
 
@@ -65,7 +65,7 @@ The design favors one shared implementation over separate CLI and MCP behavior. 
 
 ## Contributing
 
-Start with the [RFC](rfc.md). Feedback on the operation model, CLI/MCP parity, worker lifecycle, and first-release boundaries is welcome through [GitHub issues](https://github.com/zatiti/zatiti/issues).
+Start with the [RFC](docs/rfc.md). Feedback on the operation model, CLI/MCP parity, worker lifecycle, and first-release boundaries is welcome through [GitHub issues](https://github.com/zatiti/zatiti/issues).
 
 Keep examples synthetic and configuration exports free of secrets. Design claims and planned tests are not evidence of implemented behavior.
 

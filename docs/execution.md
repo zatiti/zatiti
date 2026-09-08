@@ -2,7 +2,7 @@
 
 ## Authority and inputs
 
-Read `rfc.md` for product requirements, `docs/plan.md` for the current task graph, and ADR 001 for ownership. The plan is not a command to begin execution. Obtain the user's execution scope, available pool, budget and external-action authorization before starting work that requires them.
+Read `rfc.md` for product requirements, `plan.md` for the current task graph, and ADR 001 for ownership. The plan is not a command to begin execution. Obtain the user's execution scope, available pool, budget and external-action authorization before starting work that requires them.
 
 Runtime configuration belongs to the operator. Required semantic fields are execution mode, selected harness, model selection strategy (explicit model or explicitly harness-managed), supported reasoning settings if any, credential references, permission profile, total session budget, per-task session allocation, iteration/spend/time limits, build capacity, integration target, and qualified tool versions. These are requirements for the dispatch adapter, NOT a fabricated Kazi configuration schema. T0.3 maps them onto actual installed help/schema. Do not put credential values in goals, command arguments, logs or generated instructions.
 
@@ -26,7 +26,7 @@ No harness/model default or fixed fallback is permitted. A retry may use only th
 6. Render the scope prompt from the sealed goal and current observations using the installed renderer. Refuse collisions with authored instruction files. Launch at the declared root or deliver the equivalent pinned rendered prompt through the qualified lane adapter.
 7. Converge with the selected runtime profile. Monitor terminal outcomes and resource limits. Unknown termination is not convergence. Inspect permission failures and infrastructure errors before spending more iterations.
 8. Record actual predicates, executed counts, artifacts and unresolved issues. Submit implementation and docs for independent review. Only the integration owner lands after required checks. If Kazi lands internally, that landing must remain within the prequalified review-gated target.
-9. Run affected integrated checks, update task disposition and `docs/roadmap.md`, preserve task/run evidence, then release only claims still owned by the acquired identity. Remove worktrees only after ownership and retained work are accounted for.
+9. Run affected integrated checks, update task disposition and `roadmap.md`, preserve task/run evidence, then release only claims still owned by the acquired identity. Remove worktrees only after ownership and retained work are accounted for.
 
 The generated instruction node is a projection. Updating a source goal invalidates its old projection and requires a new reviewed dispatch; hand-editing AGENTS.md does not change acceptance.
 
