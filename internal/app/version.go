@@ -5,7 +5,7 @@ import (
 	"context"
 	"fmt"
 
-	"zatiti/internal/version"
+	"github.com/zatiti/zatiti/internal/version"
 )
 
 // runVersion: no data-dir, no store, no lock. Version is a fact about

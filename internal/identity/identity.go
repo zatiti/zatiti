@@ -13,7 +13,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
-	"zatiti/internal/state"
+	"github.com/zatiti/zatiti/internal/state"
 )
 
 // Provisioner provisions owner principals and satisfies

@@ -18,11 +18,11 @@ import (
 	"os"
 	"strings"
 
-	"zatiti/internal/authz"
-	"zatiti/internal/controller"
-	"zatiti/internal/identity"
-	"zatiti/internal/state"
-	"zatiti/internal/transport"
+	"github.com/zatiti/zatiti/internal/authz"
+	"github.com/zatiti/zatiti/internal/controller"
+	"github.com/zatiti/zatiti/internal/identity"
+	"github.com/zatiti/zatiti/internal/state"
+	"github.com/zatiti/zatiti/internal/transport"
 )
 
 // mcpLogger writes diagnostics to stderr: stdout is protocol-only.

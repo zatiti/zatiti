@@ -5,7 +5,7 @@ import (
 	"context"
 	"testing"
 
-	"zatiti/internal/operations"
+	"github.com/zatiti/zatiti/internal/operations"
 )
 
 // decideWith uses the real policy table against a synthetic role,

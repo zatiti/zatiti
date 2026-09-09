@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"zatiti/internal/operations"
-	"zatiti/internal/transport"
+	"github.com/zatiti/zatiti/internal/operations"
+	"github.com/zatiti/zatiti/internal/transport"
 )
 
 // TestCLIMCPParity pins the single-source-of-truth contract: the MCP

@@ -15,7 +15,7 @@ import (
 	"log"
 	"time"
 
-	"zatiti/internal/state"
+	"github.com/zatiti/zatiti/internal/state"
 )
 
 // Worker runs leased tasks against a store.

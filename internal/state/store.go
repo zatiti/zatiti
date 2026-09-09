@@ -16,9 +16,9 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"syscall"
 
-	_ "github.com/mattn/go-sqlite3" // pinned driver; version pinned in go.mod
-	"golang.org/x/sys/unix"
+	_ "modernc.org/sqlite" // pure-Go driver: no C toolchain needed; version pinned in go.mod
 )
 
 var (
@@ -50,13 +50,13 @@ func Open(dir string) (*Store, error) {
 		return nil, fmt.Errorf("state: open lock: %w", err)
 	}
 	s.lockFile = lf
-	if err := unix.Flock(int(lf.Fd()), unix.LOCK_EX|unix.LOCK_NB); err != nil {
+	if err := syscall.Flock(int(lf.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
 		lf.Close()
 		return nil, ErrLocked
 	}
 
-	db, err := sql.Open("sqlite3", filepath.Join(dir, "zatiti.db")+
-		"?_journal_mode=WAL&_fk=1&_busy_timeout=5000")
+	db, err := sql.Open("sqlite", filepath.Join(dir, "zatiti.db")+
+		"?_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)")
 	if err != nil {
 		s.Close()
 		return nil, fmt.Errorf("state: open db: %w", err)
@@ -78,7 +78,7 @@ func (s *Store) Close() error {
 		s.db = nil
 	}
 	if s.lockFile != nil {
-		_ = unix.Flock(int(s.lockFile.Fd()), unix.LOCK_UN)
+		_ = syscall.Flock(int(s.lockFile.Fd()), syscall.LOCK_UN)
 		if err := s.lockFile.Close(); err != nil && firstErr == nil {
 			firstErr = err
 		}

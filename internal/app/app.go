@@ -13,10 +13,10 @@ import (
 	"fmt"
 	"path/filepath"
 
-	"zatiti/internal/identity"
-	"zatiti/internal/operations"
-	"zatiti/internal/state"
-	"zatiti/internal/transport"
+	"github.com/zatiti/zatiti/internal/identity"
+	"github.com/zatiti/zatiti/internal/operations"
+	"github.com/zatiti/zatiti/internal/state"
+	"github.com/zatiti/zatiti/internal/transport"
 )
 
 // Exit codes, per RFC §8.4.

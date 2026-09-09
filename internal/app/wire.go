@@ -7,8 +7,8 @@
 package app
 
 import (
-	"zatiti/internal/identity"
-	"zatiti/internal/state"
+	"github.com/zatiti/zatiti/internal/identity"
+	"github.com/zatiti/zatiti/internal/state"
 )
 
 // Compile-time port assertion: identity's provisioner satisfies the

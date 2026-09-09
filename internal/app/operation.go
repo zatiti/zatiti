@@ -15,10 +15,10 @@ import (
 	"fmt"
 	"path/filepath"
 
-	"zatiti/internal/authz"
-	"zatiti/internal/identity"
-	"zatiti/internal/operations"
-	"zatiti/internal/state"
+	"github.com/zatiti/zatiti/internal/authz"
+	"github.com/zatiti/zatiti/internal/identity"
+	"github.com/zatiti/zatiti/internal/operations"
+	"github.com/zatiti/zatiti/internal/state"
 )
 
 func (a *App) runOperation(ctx context.Context, name string, args []string) (int, error) {

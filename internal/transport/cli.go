@@ -12,7 +12,7 @@ import (
 	"io"
 	"strings"
 
-	"zatiti/internal/operations"
+	"github.com/zatiti/zatiti/internal/operations"
 )
 
 // CLI is the human transport adapter.

@@ -14,7 +14,7 @@ import (
 	"errors"
 	"fmt"
 
-	"zatiti/internal/operations"
+	"github.com/zatiti/zatiti/internal/operations"
 )
 
 // ErrDenied is the sentinel denial. Callers map it to exit 3.

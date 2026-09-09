@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"zatiti/internal/operations"
+	"github.com/zatiti/zatiti/internal/operations"
 )
 
 func newTestServer(t *testing.T) (*MCPServer, *bytes.Buffer) {

@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"zatiti/internal/state"
+	"github.com/zatiti/zatiti/internal/state"
 )
 
 type manualTicker struct {

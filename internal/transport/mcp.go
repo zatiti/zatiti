@@ -16,7 +16,7 @@ import (
 	"fmt"
 	"io"
 
-	"zatiti/internal/operations"
+	"github.com/zatiti/zatiti/internal/operations"
 )
 
 // MCPServer serves the MCP protocol over one stdin/stdout pair.

@@ -15,8 +15,8 @@ import (
 	"log"
 	"time"
 
-	"zatiti/internal/state"
-	"zatiti/internal/worker"
+	"github.com/zatiti/zatiti/internal/state"
+	"github.com/zatiti/zatiti/internal/worker"
 )
 
 // Controller is the long-running runtime.

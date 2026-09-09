@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"zatiti/internal/state"
+	"github.com/zatiti/zatiti/internal/state"
 )
 
 func TestReviewLifecycle(t *testing.T) {

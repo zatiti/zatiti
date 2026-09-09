@@ -14,8 +14,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"zatiti/internal/authz"
-	"zatiti/internal/state"
+	"github.com/zatiti/zatiti/internal/authz"
+	"github.com/zatiti/zatiti/internal/state"
 )
 
 func TestRFCConformance(t *testing.T) {

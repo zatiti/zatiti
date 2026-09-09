@@ -10,7 +10,7 @@ import (
 	"fmt"
 	"os"
 
-	"zatiti/internal/app"
+	"github.com/zatiti/zatiti/internal/app"
 )
 
 func main() {

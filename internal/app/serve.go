@@ -11,9 +11,9 @@ import (
 	"fmt"
 	"log"
 
-	"zatiti/internal/controller"
-	"zatiti/internal/state"
-	"zatiti/internal/transport"
+	"github.com/zatiti/zatiti/internal/controller"
+	"github.com/zatiti/zatiti/internal/state"
+	"github.com/zatiti/zatiti/internal/transport"
 )
 
 func (a *App) runServe(ctx context.Context, args []string) (int, error) {

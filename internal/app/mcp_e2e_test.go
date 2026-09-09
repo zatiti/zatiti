@@ -10,9 +10,9 @@ import (
 	"strings"
 	"testing"
 
-	"zatiti/internal/controller"
-	"zatiti/internal/identity"
-	"zatiti/internal/state"
+	"github.com/zatiti/zatiti/internal/controller"
+	"github.com/zatiti/zatiti/internal/identity"
+	"github.com/zatiti/zatiti/internal/state"
 )
 
 func TestMCPAuthenticatedCallParity(t *testing.T) {
