@@ -2,11 +2,17 @@
 
 ## Current state
 
-Design stage. RFC and execution plan authored; no product implementation, Kazi goal approval, fleet dispatch, test execution or release is claimed.
+Scaffold stage. A controller scaffold generated in the Ox Alpha console is imported on PR #1 (builds, vets, 11 of its own tests fail). E1 is planned as console sessions in `e1-oxalpha-plan.md`; no task is integrated.
 
 ## In flight
 
-None.
+| Item | Owner | Date | PR |
+|---|---|---|---|
+| Import Ox Alpha scaffold, module rename, pure-Go SQLite driver | David | 2026-09-09 | #1 |
+
+## Deviations
+
+- E1 proceeds before E0 (T0.6 to T0.8 contracts and dispatch qualification) because the code is produced in the console by hand rather than by Kazi dispatch. Revisit `contracts/` when E0 runs. Recorded 2026-09-09.
 
 ## Planned
 
