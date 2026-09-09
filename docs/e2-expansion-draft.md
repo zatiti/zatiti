@@ -1,6 +1,6 @@
 # E2 expansion draft (T2.0 output from the Ox Alpha console, 2026-09-09)
 
-Status: unreviewed proposal copied verbatim from the console conversation. Not part of `plan.md` until reviewed and the three open decisions at the end are ruled on.
+Status: unreviewed proposal copied verbatim from the console conversation. Not part of `plan.md` until reviewed. The three open decisions at the end are ruled on in `adr/002-e2-shape-decisions.md`.
 
 Now I can see the actual terrain — and I need to reconcile honestly before executing, because this plan contradicts the working assumption of my earlier T1.x–T5.x scaffold.
 
