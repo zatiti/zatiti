@@ -1,1 +1,5 @@
 ajent.social
+.pytest_cache/
+# Re-include the internal/artifacts package root: a global ignore for build
+# "artifacts" must never exclude this product package (ADR 001 ownership map).
+!internal/artifacts/
