@@ -1,0 +1,113 @@
+{
+  "revision": 1,
+  "module": "github.com/zatiti/zatiti",
+  "go_directive": "1.26.0",
+  "toolchain": "go1.26.2",
+  "recorded": "2026-09-09",
+  "owner": "integration (serialized root-file exception per ADR 001)",
+  "scope_note": "Dependency resolution and upstream qualification only. This file records resolved pins and observed evidence; it does not claim upstream behavior beyond what was executed. Regenerate via the named commands when changing any pin; do not edit go.mod pins independently of this report.",
+  "direct_modules": [
+    {
+      "module": "github.com/spf13/cobra",
+      "version": "v1.10.2",
+      "sum": "h1:DMTTonx5m65Ic0GOoRY2c16WCbHxOOw6xxezuLaBpcU=",
+      "license": "Apache-2.0",
+      "role": "CLI command framework (internal/cli)",
+      "qualified": false,
+      "qualification_note": "Version resolution and license verified only; behavioral qualification happens with internal/cli implementation."
+    },
+    {
+      "module": "github.com/modelcontextprotocol/go-sdk",
+      "version": "v1.7.0",
+      "sum": "h1:yqjY2dsbKAC0LSuWZVBMrHgiG8ukXv6NRo0JiALay44=",
+      "license": "Apache-2.0 (transition in progress; residual MIT-licensed contributions retained per LICENSE text)",
+      "role": "Official MCP Go SDK; stdio MCP adapter (internal/mcp)",
+      "qualified": true,
+      "protocol": {
+        "frozen_spec_pin": "2025-11-25",
+        "sdk_supported_versions": [
+          "2026-07-28",
+          "2025-11-25",
+          "2025-06-18",
+          "2025-03-26",
+          "2024-11-05"
+        ],
+        "evidence": "mcp/shared.go:51-55 defines the negotiation constants; 2025-11-25 is the SDK default fallback (mcp/client.go:376). Exported surface NewServer/NewClient/AddTool exists in the mcp subpackage; the module root package has no non-test files, so imports use github.com/modelcontextprotocol/go-sdk/mcp.",
+        "gaps": [
+          "Negotiation may land on 2026-07-28 when the client offers it; internal/mcp must pin the offered/requested version to 2025-11-25 if strict single-version operation is wanted, and must verify _meta behaviors that branch on the higher version.",
+          "Optional extensions (sampling/elicitation/resources/prompts/task) are present in the SDK but disabled during qualification per the internal/mcp brief; leaving them unconfigured is the adapter's responsibility, not the SDK's default in every path."
+        ]
+      }
+    },
+    {
+      "module": "fyne.io/fyne/v2",
+      "version": "v2.8.1",
+      "sum": "h1:EztGuE2W3Qhd0cWVmU+h5rkzNezUD1To6UqsoLQYUIM=",
+      "license": "BSD-3-Clause",
+      "role": "Native Go desktop workspace (internal/desktop, cmd/zatiti-desktop)",
+      "qualified": true,
+      "protocol": {
+        "evidence": "Minimal Fyne program compiled AND linked on darwin/amd64 with Apple clang 17.0.0, CGO_ENABLED=1, go1.26.2 (cgo windowing toolchain exercised end to end). Build-only proof; no GUI behavior executed.",
+        "gaps": [
+          "darwin/arm64 untested on this machine (darwin/amd64 host); CI or qualification must cover the release targets.",
+          "Real GUI/platform journeys are tests/qualification scope, not this report."
+        ]
+      }
+    },
+    {
+      "module": "modernc.org/sqlite",
+      "version": "v1.58.0",
+      "sum": "h1:38u40/bwkfM7f0Myhosl+SEMltSDxnGdQf8o6Kjmys0=",
+      "license": "MIT (sqlite authors); embedding SQLite is public domain, see LICENSE-SQLITE; LICENSE-SQLITE_VEC for the vec extension",
+      "role": "Pure-Go SQLite (no cgo) for internal/storage",
+      "qualified": true,
+      "protocol": {
+        "evidence": "Module resolves with checksum; driver registration compiles under tools anchor build. No database was opened in this pass.",
+        "gaps": [
+          "Open/migrate/transaction behavior is internal/storage wave-0 work; concurrency and durability qualification is tests/integration scope.",
+          "modernc.org/libc v1.75.6 is the load-bearing transitive pin; its version is fixed by this resolution, not chosen independently."
+        ]
+      }
+    }
+  ],
+  "external_services": [
+    {
+      "service": "MCP protocol",
+      "pin": "2025-11-25 (frozen in contracts.md)",
+      "resolution": "Supported end to end by go-sdk v1.7.0; see direct_modules entry for constants and gaps."
+    },
+    {
+      "service": "OpenAI Responses endpoint (hosted provider v1)",
+      "pin": "NOT RESOLVED - requires operator-provided qualified endpoint/profile with configured model and prices before adapters/responses implementation",
+      "resolution": "No account, endpoint, model, or price is pinned by this report; contracts treat it as unavailable until qualified."
+    },
+    {
+      "service": "GitHub REST API",
+      "pin": "documented REST over net/http (no GitHub client library pinned; net/http is standard library)",
+      "resolution": "Mutation retries disabled by contract; adapter qualification is adapters/github implementation scope."
+    },
+    {
+      "service": "Serenity",
+      "pin": "NOT RESOLVED - separate pinned service; exact source/protocol version must be inspected and pinned during foundation/integration before adapters/serenity implementation",
+      "resolution": "No public method is invented from names; contract defers capability qualification explicitly."
+    }
+  ],
+  "test_commands": [
+    "go build ./... && go vet ./... (currently green with only the tools-tag anchor file; re-run after each package lands)",
+    "go test -tags tools ./... (anchor file compiles)",
+    "python3 tools/specgen/render.py --check (specification freshness; currently green)",
+    "python3 -m pytest -q tools/specgen/test_render.py (specification integrity; currently green, 6 tests)",
+    "go test ./... (grows as packages land; integration owns product-wide fixtures)"
+  ],
+  "qualified_features": [
+    "Module graph resolves: 89 modules including test deps of direct pins; go.sum complete (46 module hashes).",
+    "go build -tags tools ./... and go vet -tags tools ./... pass.",
+    "MCP protocol 2025-11-25 supported by the pinned SDK (negotiation constants verified in source).",
+    "Fyne v2.8.1 compiles and links via cgo on darwin/amd64 with the pinned toolchain."
+  ],
+  "unresolved_gaps": [
+    "OpenAI Responses endpoint/profile and Serenity service pin are operator/foundation-integration decisions deferred with contract knowledge; dependent adapters must not start against guessed endpoints.",
+    "Rebuild reproducibility (vendor/ or GONOSUMDB policy) is undecided; go.sum-only pinning is the current state.",
+    "darwin/arm64, linux, and windows release targets unexercised; packaging and CI must qualify before release evidence."
+  ]
+}
