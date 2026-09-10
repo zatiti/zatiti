@@ -31,3 +31,29 @@ that surfaced it.
 - The build-lease claim script dedupes by holder; a holder whose session
   re-claims under a fresh token must release with that fresh SHA, or the
   claim expires by TTL only.
+
+## internal/tasks (wave 2)
+
+- **Evidence comes from the task's evidence rows, not the transition
+  payload.** `_tasks.transition` ignores wire `evidence_ids` for
+  structural success evaluation; the digest fence scans the artifacts
+  registered during the run. Fence tests must register artifacts through
+  the run helpers (`runToVerifying`), not through the transition payload.
+- **Manual label red needs the empty-payload nuance.** Removing the
+  `if manual` fence in `evaluateSuccess` still fails the digest fence
+  when evidence is empty, so a mutation red requires the success-path
+  fixture (pinned-digest artifact + verifier result registered), exactly
+  as `TestFenceSuccessRequiresEvidence/a_manual_label_is_not_verification`
+  sets it up.
+
+## internal/reviews (wave 2)
+
+- **Pre-commit hook runs module-wide `go test ./...` unleased.** A commit
+  therefore needs the lease held across `git commit` so the hook's test
+  pass honors the one-heavy-lane rule, and the commit output must be
+  captured to a file — piping it through `tail` swallowed the failing
+  test name when the hook first rejected the reviews commit.
+- **Hook failure was transient.** One module-wide run failed with no
+  visible test name; an immediate re-run passed. If it recurs, capture
+  the full `go test ./...` output before concluding anything about the
+  package under review.
