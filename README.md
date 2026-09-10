@@ -8,6 +8,8 @@ A coding agent such as Claude Code, Codex, or Cursor should be able to operate Z
 
 **Status: design stage.** The [RFC](docs/rfc.md) defines the proposed architecture and first release. There is no runnable implementation or published installation command yet. Examples below illustrate the intended interface; they are not commands you can run today. Compatibility with individual agent clients will be tested before it is advertised as supported.
 
+The [package implementation scaffold](docs/implementation/README.md) freezes ownership and shared contracts for parallel implementation. Each package directory contains a committed, self-contained `AGENTS.md` with its requirements, interfaces, schemas, and acceptance cases.
+
 ## What Zatiti is for
 
 Give a coding agent persistent, inspectable infrastructure for ongoing work:

@@ -1,0 +1,1914 @@
+[
+  {
+    "id": "Z01.duplicate_controller",
+    "gate": "Z01",
+    "owners": [
+      "platform",
+      "controller",
+      "storage",
+      "integration"
+    ],
+    "setup": "An initialized installation is already served by one controller.",
+    "action": "Start a second controller against the same state directory.",
+    "expected": [
+      "Second controller refuses exclusive ownership and serves no requests.",
+      "Only the original controller admits work; no extra scheduler or writer appears."
+    ]
+  },
+  {
+    "id": "Z01.revoked_principal",
+    "gate": "Z01",
+    "owners": [
+      "identity",
+      "policy",
+      "application",
+      "integration"
+    ],
+    "setup": "A client principal has an authenticated session and an authorized scoped mutation.",
+    "action": "Revoke its credential or grant, then repeat the mutation using the existing session.",
+    "expected": [
+      "Current authorization denies the mutation.",
+      "Revocation is durable and survives controller restart."
+    ]
+  },
+  {
+    "id": "Z01.cross_scope_reference",
+    "gate": "Z01",
+    "owners": [
+      "identity",
+      "configuration",
+      "policy",
+      "integration"
+    ],
+    "setup": "Two organizations contain separate projects, workers and connections with no cross-scope binding.",
+    "action": "Use an otherwise authorized principal to reference the other organization or project in a draft and task.",
+    "expected": [
+      "The unauthorized reference is rejected.",
+      "No activation, task admission or secret lookup occurs until an explicit valid binding exists."
+    ]
+  },
+  {
+    "id": "Z01.credential_custody",
+    "gate": "Z01",
+    "owners": [
+      "identity",
+      "connections",
+      "platform",
+      "integration"
+    ],
+    "setup": "A scoped agent can inspect connection metadata but has no access to owner or provider secret material.",
+    "action": "Inspect credentials through capabilities, CLI, MCP, connection inspection and malformed credential/profile arguments.",
+    "expected": [
+      "Only opaque references and permitted metadata are returned.",
+      "Profile names, MCP client names and socket access do not independently confer authority; owner profile cannot be selected through tool arguments."
+    ]
+  },
+  {
+    "id": "Z02.registry_surface",
+    "gate": "Z02",
+    "owners": [
+      "registry",
+      "cli",
+      "mcp",
+      "integration"
+    ],
+    "setup": "A generated registry enumerates every concrete operation/version, including bootstrap and maintenance.",
+    "action": "Discover CLI mappings and MCP tools and compare them to the registry.",
+    "expected": [
+      "Every registry operation has both mappings and equivalent input/output schemas.",
+      "Generation rejects mapping collisions; capabilities has its declared special mapping.",
+      "Optional MCP resources or prompts are never the sole route to a capability."
+    ]
+  },
+  {
+    "id": "Z02.lifecycle_parity",
+    "gate": "Z02",
+    "owners": [
+      "integration",
+      "registry",
+      "cli",
+      "mcp",
+      "application"
+    ],
+    "setup": "Create isolated matching controllers with equivalent state and principals plus controlled provider fixtures.",
+    "action": "Execute each registry operation through real CLI subprocesses and an MCP client, including lifecycle sequences.",
+    "expected": [
+      "Equivalent results, resource versions, state changes, errors, pagination, authorization and business events are observed.",
+      "Only generated IDs and timestamps are normalized through an explicit mapping; permissions and uncertainty are never normalized away."
+    ]
+  },
+  {
+    "id": "Z02.wire_errors",
+    "gate": "Z02",
+    "owners": [
+      "cli",
+      "mcp",
+      "contract",
+      "integration"
+    ],
+    "setup": "Fixtures include completed, accepted, invalid, denied, review-required, stale, unavailable and unknown operations.",
+    "action": "Call equivalent operations through CLI and MCP.",
+    "expected": [
+      "CLI JSON mode emits exactly one versioned result on stdout and diagnostics on stderr; exit mappings match the specification.",
+      "MCP emits protocol frames only on stdout, returns equivalent structuredContent and JSON text, maps domain faults to isError, and uses protocol errors for malformed protocol messages."
+    ]
+  },
+  {
+    "id": "Z03.agent_setup_mcp",
+    "gate": "Z03",
+    "owners": [
+      "integration",
+      "mcp",
+      "configuration",
+      "connections",
+      "skills",
+      "tasks"
+    ],
+    "setup": "A clean installation and scoped client-agent profile exist; paid execution is initially unavailable.",
+    "action": "Using MCP discovery alone, create an organization and workers, import/evaluate a skill, set up and validate a connection, resolve prerequisites, plan/apply and start work.",
+    "expected": [
+      "The complete authorized setup succeeds without dashboard or repository-source knowledge.",
+      "A verified output artifact is inspectable; paid work remains refused until provider, currency and limits are configured.",
+      "Credential prerequisites return actionable challenges without secret bytes in model-visible input or output."
+    ]
+  },
+  {
+    "id": "Z03.agent_setup_cli",
+    "gate": "Z03",
+    "owners": [
+      "integration",
+      "cli",
+      "configuration",
+      "connections",
+      "skills",
+      "tasks"
+    ],
+    "setup": "Create a fixture equivalent to the MCP setup case with the same authority.",
+    "action": "Perform the complete discovery, organization/skill/worker/connection, prerequisite, activation and first-work journey using CLI JSON mode.",
+    "expected": [
+      "The CLI completes the same lifecycle and produces equivalent authorized state and verified output.",
+      "No TTY or silent prompt is required; incomplete input returns a structured actionable result."
+    ]
+  },
+  {
+    "id": "Z03.bootstrap_parity",
+    "gate": "Z03",
+    "owners": [
+      "installation",
+      "identity",
+      "platform",
+      "cli",
+      "mcp",
+      "integration"
+    ],
+    "setup": "Two matching empty installation destinations and secure credential stores are available.",
+    "action": "Initialize one with zatiti init and the other with zatiti mcp serve --bootstrap; attempt initialization again.",
+    "expected": [
+      "Both use the one-time local initializer and create owner, personal organization and personal chief consistently.",
+      "Results contain metadata only; reinitialization is refused and bootstrap cannot become a normal administration session."
+    ]
+  },
+  {
+    "id": "Z04.concurrent_apply",
+    "gate": "Z04",
+    "owners": [
+      "configuration",
+      "storage",
+      "application",
+      "integration"
+    ],
+    "setup": "Two plans share one active base revision and conflict on at least one object.",
+    "action": "Apply both concurrently.",
+    "expected": [
+      "Exactly one revision activates; the other returns stale/conflicting state.",
+      "Every object in the winning bundle and its event commit atomically; no partial activation occurs."
+    ]
+  },
+  {
+    "id": "Z04.stale_dependencies",
+    "gate": "Z04",
+    "owners": [
+      "configuration",
+      "connections",
+      "reviews",
+      "integration"
+    ],
+    "setup": "A sealed plan pins dependencies, connection identity/validation, compiler/schema versions and a required decision.",
+    "action": "Change a pinned dependency or expire validation before applying; regenerate a changed plan and reuse the old decision.",
+    "expected": [
+      "The original plan cannot activate.",
+      "Regeneration repins dependencies and requires renewal of any decision whose action digest changed."
+    ]
+  },
+  {
+    "id": "Z04.explicit_removal",
+    "gate": "Z04",
+    "owners": [
+      "configuration",
+      "tasks",
+      "effects",
+      "integration"
+    ],
+    "setup": "An active configuration contains workers, projects and retained obligations.",
+    "action": "Apply a patch omitting an object, then explicitly remove/archive an object that owns active work or unknown effects.",
+    "expected": [
+      "Omission does not delete live objects.",
+      "Explicit removal first disables new work and requires archival disposition or refuses destructive removal while obligations remain.",
+      "Artifacts, operation uncertainty and accounting obligations are not discarded."
+    ]
+  },
+  {
+    "id": "Z04.old_authority",
+    "gate": "Z04",
+    "owners": [
+      "configuration",
+      "policy",
+      "identity",
+      "integration"
+    ],
+    "setup": "A principal may edit a draft but cannot expand its own effective grants.",
+    "action": "Submit a plan containing a policy or grant that would authorize its own application.",
+    "expected": [
+      "Apply evaluates existing authority and rejects or requests an eligible exact decision.",
+      "Proposed policy and imported instructions cannot authorize their own activation."
+    ]
+  },
+  {
+    "id": "Z04.submission_replay",
+    "gate": "Z04",
+    "owners": [
+      "application",
+      "evidence",
+      "configuration",
+      "integration"
+    ],
+    "setup": "An apply has committed but its acknowledgement is lost.",
+    "action": "Retry with the same principal, operation version, submission key and canonical input; then reuse that key with different input.",
+    "expected": [
+      "Identical retry returns the original durable command disposition without another revision or event.",
+      "Changed input is refused; command identity survives restart and remains retained through unresolved obligations and at least 30 days."
+    ]
+  },
+  {
+    "id": "Z05.malicious_instructions",
+    "gate": "Z05",
+    "owners": [
+      "skills",
+      "policy",
+      "execution",
+      "integration"
+    ],
+    "setup": "A skill includes instructions to read secrets, self-grant permissions and ignore reviews.",
+    "action": "Import, bind and execute the skill in a constrained task.",
+    "expected": [
+      "Instructions remain untrusted input and install no grants.",
+      "Tool, data and effect access remains limited to the pinned authorized binding closure."
+    ]
+  },
+  {
+    "id": "Z05.archive_safety",
+    "gate": "Z05",
+    "owners": [
+      "skills",
+      "artifacts",
+      "integration"
+    ],
+    "setup": "Prepared archives contain traversal, absolute paths, symlink escapes, device entries, duplicate/case-colliding paths, oversized expansion and dependency cycles.",
+    "action": "Import every malicious archive plus a bounded valid control archive.",
+    "expected": [
+      "Every unsafe archive is rejected before publication and performs no executable side effects.",
+      "Valid import produces immutable hashed draft content and source/license provenance; discovery and extraction execute no scripts."
+    ]
+  },
+  {
+    "id": "Z05.changed_tool_schema",
+    "gate": "Z05",
+    "owners": [
+      "configuration",
+      "policy",
+      "execution",
+      "integration"
+    ],
+    "setup": "An active worker binding pins a tool identity/version/schema.",
+    "action": "Change the provider-discovered schema or executable binding while retaining the old activation plan.",
+    "expected": [
+      "Changed executable meaning cannot silently enter the active tool closure.",
+      "Revalidation and authorized activation are required; unsupported contracts return capability or prerequisite faults."
+    ]
+  },
+  {
+    "id": "Z05.callback_discovery",
+    "gate": "Z05",
+    "owners": [
+      "connections",
+      "effects",
+      "httpread",
+      "integration"
+    ],
+    "setup": "A discovered tool or HTTP response advertises a callback, redirect, external server or subprocess.",
+    "action": "Attempt to follow that behavior outside the registered reviewed destination/adapter contract.",
+    "expected": [
+      "Discovery grants no execution or disclosure authority.",
+      "Unreviewed callbacks, destination changes and arbitrary external MCP/subprocess execution are refused."
+    ]
+  },
+  {
+    "id": "Z05.empty_bindings",
+    "gate": "Z05",
+    "owners": [
+      "configuration",
+      "execution",
+      "policy",
+      "integration"
+    ],
+    "setup": "A worker has no explicit tools or cross-scope bindings.",
+    "action": "Ask it to use a known installation connection and a tool visible in discovery.",
+    "expected": [
+      "The worker receives no implicit global tool or credential access.",
+      "Missing or ambiguous scope produces a named refusal rather than selecting a global organization."
+    ]
+  },
+  {
+    "id": "Z05.agent_self_grant",
+    "gate": "Z05",
+    "owners": [
+      "identity",
+      "configuration",
+      "policy",
+      "integration"
+    ],
+    "setup": "A client agent can create ordinary scoped definitions under a fixed delegation envelope.",
+    "action": "Attempt to enlarge its scope, authorize worker self-modification or establish an autonomy rule above the envelope.",
+    "expected": [
+      "No authority expands without an eligible act under existing policy.",
+      "The exact denial or review requirement identifies the missing authority."
+    ]
+  },
+  {
+    "id": "Z06.admission_claim_revoke",
+    "gate": "Z06",
+    "owners": [
+      "effects",
+      "policy",
+      "accounting",
+      "integration"
+    ],
+    "setup": "A controlled adapter exposes barriers before admission, before claim and before invocation.",
+    "action": "Race revocation or pause against admission and claim in each ordering.",
+    "expected": [
+      "Revocation committed before claim prevents invocation; physical call count is zero.",
+      "Admission reserves and writes intent/evidence atomically; claimed dispatch follows the specified irreversible boundary.",
+      "Revocation after claim is recorded honestly and does not claim to retract transmitted bytes."
+    ]
+  },
+  {
+    "id": "Z06.crash_call_counts",
+    "gate": "Z06",
+    "owners": [
+      "effects",
+      "storage",
+      "controller",
+      "integration"
+    ],
+    "setup": "A controlled provider counts physical invocations and fault injection surrounds admit, claim, network return and record.",
+    "action": "Crash and restart at each boundary, then inspect and reconcile the operation.",
+    "expected": [
+      "No crash recovery blindly repeats a potentially sent effect.",
+      "Attempt records and provider call counts correspond exactly; failed record persistence does not authorize another send."
+    ]
+  },
+  {
+    "id": "Z06.no_hidden_retries",
+    "gate": "Z06",
+    "owners": [
+      "effects",
+      "responses",
+      "github",
+      "httpread",
+      "integration"
+    ],
+    "setup": "Qualified adapters use a provider simulator with transient errors, timeouts and connection resets.",
+    "action": "Invoke each adapter once under a contract that has not established safe retry.",
+    "expected": [
+      "The adapter performs exactly one physical request per claimed attempt.",
+      "SDK or transport mutation retries are disabled; any permitted retry receives a new authorized recorded attempt."
+    ]
+  },
+  {
+    "id": "Z07.exact_action_changes",
+    "gate": "Z07",
+    "owners": [
+      "reviews",
+      "effects",
+      "configuration",
+      "integration"
+    ],
+    "setup": "An approved action binds account, destination, content/media hashes, timing, preconditions, repository head and relevant versions.",
+    "action": "Independently change content, destination, timing, repository head or account before dispatch.",
+    "expected": [
+      "Every material change invalidates the original digest-bound approval where review is required.",
+      "Dispatch waits for a new eligible decision over the exact changed preview."
+    ]
+  },
+  {
+    "id": "Z07.agent_impersonates_human",
+    "gate": "Z07",
+    "owners": [
+      "reviews",
+      "identity",
+      "cli",
+      "mcp",
+      "integration"
+    ],
+    "setup": "A pending review requires a human principal and an agent can call review.decide.",
+    "action": "Submit an approval with an approved_by_human assertion using both transports.",
+    "expected": [
+      "The agent credential cannot satisfy the review regardless of its payload or transport.",
+      "No approval or protected dispatch is committed."
+    ]
+  },
+  {
+    "id": "Z07.reviewer_eligibility",
+    "gate": "Z07",
+    "owners": [
+      "reviews",
+      "identity",
+      "policy",
+      "integration"
+    ],
+    "setup": "Reviews include current version, expiry, proposer-separation and reviewer delegation restrictions.",
+    "action": "Decide using revoked or ineligible delegated credentials, an expired review, a stale version or the prohibited proposer.",
+    "expected": [
+      "Each ineligible decision is refused using current identity and policy.",
+      "A permitted delegation is scoped and cannot bypass human-required or proposer-separation rules."
+    ]
+  },
+  {
+    "id": "Z07.transport_denial",
+    "gate": "Z07",
+    "owners": [
+      "reviews",
+      "cli",
+      "mcp",
+      "integration"
+    ],
+    "setup": "Matching controller fixtures contain an action denied to an agent through MCP.",
+    "action": "Submit the identical decision using CLI with the equivalent agent principal; then use an eligible human principal through each interface.",
+    "expected": [
+      "CLI cannot bypass the MCP denial.",
+      "An eligible human session can decide through either transport without any claim of proving physical human presence."
+    ]
+  },
+  {
+    "id": "Z08.lost_success_response",
+    "gate": "Z08",
+    "owners": [
+      "effects",
+      "accounting",
+      "integration"
+    ],
+    "setup": "A provider commits a mutation but drops the response before Zatiti records its outcome.",
+    "action": "Restart or timeout the sender and inspect the logical operation.",
+    "expected": [
+      "The operation remains outcome_unknown with retained reservation and its original attempt.",
+      "Neither the task result nor the command reports the external write as confirmed successful or safely unsent."
+    ]
+  },
+  {
+    "id": "Z08.failed_retry_after_unknown",
+    "gate": "Z08",
+    "owners": [
+      "effects",
+      "accounting",
+      "integration"
+    ],
+    "setup": "An earlier attempt has an unresolved potentially successful outcome; a qualified contract permits a later attempt.",
+    "action": "Run the later attempt and return a definitive failure for that attempt.",
+    "expected": [
+      "Earlier uncertainty remains attached to the logical operation.",
+      "Failed retry does not erase the earlier attempt, release its unknown reservation or prove no external effect occurred."
+    ]
+  },
+  {
+    "id": "Z08.expired_provider_key",
+    "gate": "Z08",
+    "owners": [
+      "effects",
+      "integration"
+    ],
+    "setup": "A provider idempotency key has exceeded its qualified retention window for an unresolved operation.",
+    "action": "Attempt automatic redispatch using the old key.",
+    "expected": [
+      "The expired key is not treated as proof of safe idempotency.",
+      "Dispatch is blocked unless authoritative nonexecution or another qualified safe contract is established."
+    ]
+  },
+  {
+    "id": "Z08.delayed_confirmation",
+    "gate": "Z08",
+    "owners": [
+      "effects",
+      "evidence",
+      "accounting",
+      "integration"
+    ],
+    "setup": "An operation awaits confirmation or is outcome_unknown and the provider initially returns eventually consistent not-found.",
+    "action": "Reconcile, then deliver delayed authoritative success; separately deliver contradictory late evidence.",
+    "expected": [
+      "Non-authoritative not-found does not establish nonexecution.",
+      "Authoritative success settles according to evidence; contradictory evidence creates a visible correction or dispute instead of rewriting history."
+    ]
+  },
+  {
+    "id": "Z08.cancel_unknown",
+    "gate": "Z08",
+    "owners": [
+      "effects",
+      "tasks",
+      "accounting",
+      "integration"
+    ],
+    "setup": "An effect is already claimed and may have reached its provider.",
+    "action": "Cancel the task or operation and acknowledge the uncertainty as an operator.",
+    "expected": [
+      "Cancellation records restrictive intent but does not reclassify the possibly sent attempt as unsent.",
+      "Unknown outcomes and reservations remain inspectable until supported evidence resolves them."
+    ]
+  },
+  {
+    "id": "Z09.concurrent_reservations",
+    "gate": "Z09",
+    "owners": [
+      "accounting",
+      "storage",
+      "tasks",
+      "execution",
+      "integration"
+    ],
+    "setup": "Installation, ancestor organizations, project, worker and root-task budgets are nearly exhausted.",
+    "action": "Concurrently admit child tasks, evaluation and model calls competing for the remaining funds.",
+    "expected": [
+      "Atomic reservations across all applicable scopes prevent overcommit and use deterministic lock/update order.",
+      "Children and retries consume shared root/ancestor limits rather than independent copies."
+    ]
+  },
+  {
+    "id": "Z09.unknown_external_cost",
+    "gate": "Z09",
+    "owners": [
+      "accounting",
+      "execution",
+      "integration"
+    ],
+    "setup": "A cooperative external worker or provider cannot establish a reliable charge bound.",
+    "action": "Admit work requiring a hard spending cap and report unknown/advisory external usage.",
+    "expected": [
+      "Unenforceable hard-cap mode is refused or explicitly advisory only where policy permits.",
+      "Unknown and advisory usage is reported separately and never treated as zero."
+    ]
+  },
+  {
+    "id": "Z09.missing_price",
+    "gate": "Z09",
+    "owners": [
+      "accounting",
+      "connections",
+      "responses",
+      "integration"
+    ],
+    "setup": "A model profile lacks a required price bound, currency or configured spending limit.",
+    "action": "Attempt a paid model step or memory/evaluation operation requiring that provider.",
+    "expected": [
+      "Admission returns a named prerequisite or budget refusal without a provider call.",
+      "There is no hardcoded account, provider, billing or model fallback."
+    ]
+  },
+  {
+    "id": "Z09.settlement_recovery",
+    "gate": "Z09",
+    "owners": [
+      "accounting",
+      "effects",
+      "storage",
+      "integration"
+    ],
+    "setup": "Reservations include confirmed spend, refundable unused bounds and unknown attempts using exact micro-units and rational rates.",
+    "action": "Record each disposition with a crash before or after transaction commit and recover.",
+    "expected": [
+      "Spent, reserved, estimated and unknown values remain distinct and exact without floating-point drift.",
+      "Settlement is atomic and idempotent; unresolved reservations survive restart and are not released twice."
+    ]
+  },
+  {
+    "id": "Z10.duplicate_schedule_claim",
+    "gate": "Z10",
+    "owners": [
+      "scheduling",
+      "execution",
+      "storage",
+      "integration"
+    ],
+    "setup": "One scheduled occurrence is due and multiple polls and cooperative claimants race.",
+    "action": "Poll repeatedly across timezone/DST boundaries and concurrently claim the same task.",
+    "expected": [
+      "The occurrence key admits at most one occurrence according to the configured misfire rule.",
+      "Only one current attempt owner, lease and generation are committed."
+    ]
+  },
+  {
+    "id": "Z10.restart_identity",
+    "gate": "Z10",
+    "owners": [
+      "execution",
+      "controller",
+      "storage",
+      "integration"
+    ],
+    "setup": "A task has a pinned run, active attempt, checkpoint and resource reservation.",
+    "action": "Restart the controller and continue through the supported recovery path.",
+    "expected": [
+      "Persisted generation advances and recovery uses durable state.",
+      "Task/run history, accepted contract, pinned configuration and checkpoint lineage remain intact; retry creates a distinct attempt."
+    ]
+  },
+  {
+    "id": "Z10.stale_heartbeat",
+    "gate": "Z10",
+    "owners": [
+      "execution",
+      "tasks",
+      "integration"
+    ],
+    "setup": "An attempt lease/generation is stale after expiry or controller restart.",
+    "action": "Send heartbeat, checkpoint and completion report from that stale owner or a different worker.",
+    "expected": [
+      "Stale or mismatched worker/attempt/generation requests cannot mutate current execution or complete the task.",
+      "Lease expiry alone does not assert that the old external process stopped."
+    ]
+  },
+  {
+    "id": "Z10.lost_claim_ack",
+    "gate": "Z10",
+    "owners": [
+      "execution",
+      "application",
+      "evidence",
+      "integration"
+    ],
+    "setup": "A cooperative claim commits and its network acknowledgement is dropped.",
+    "action": "Repeat the claim with the same submission identity and inspect the command.",
+    "expected": [
+      "The claimant recovers the original attempt/lease disposition.",
+      "No duplicate current owner or replacement attempt is created merely because the acknowledgement was lost."
+    ]
+  },
+  {
+    "id": "Z10.cancelled_wake",
+    "gate": "Z10",
+    "owners": [
+      "scheduling",
+      "tasks",
+      "messaging",
+      "integration"
+    ],
+    "setup": "A task is durably waiting for a timer or authenticated reply event.",
+    "action": "Commit cancellation or a qualifying reply concurrently with wake evaluation.",
+    "expected": [
+      "Wake conditions are checked transactionally.",
+      "Cancelled work is not readmitted; a reply already recorded does not cause duplicate or obsolete wake work."
+    ]
+  },
+  {
+    "id": "Z10.conflicting_replacement",
+    "gate": "Z10",
+    "owners": [
+      "execution",
+      "effects",
+      "integration"
+    ],
+    "setup": "An expired attempt may still control a repository resource or have an unresolved provider effect.",
+    "action": "Request a replacement attempt.",
+    "expected": [
+      "Replacement waits for explicit recovery disposition of conflicting resources and possible effects.",
+      "No unsupported containment or successful stop is inferred from lease expiry."
+    ]
+  },
+  {
+    "id": "Z11.exit_zero_missing_output",
+    "gate": "Z11",
+    "owners": [
+      "tasks",
+      "execution",
+      "artifacts",
+      "integration"
+    ],
+    "setup": "A task requires independently verified artifacts.",
+    "action": "Have its worker exit successfully or report success while omitting required output bytes.",
+    "expected": [
+      "Task does not enter succeeded.",
+      "Missing artifacts produce a visible fault and dependents requiring verified success remain blocked."
+    ]
+  },
+  {
+    "id": "Z11.tampered_verifier",
+    "gate": "Z11",
+    "owners": [
+      "tasks",
+      "configuration",
+      "execution",
+      "integration"
+    ],
+    "setup": "A task pins verifier code/version, sealed inputs and expected observations.",
+    "action": "Modify verifier bytes/version or attempt to replace acceptance during the run or retry.",
+    "expected": [
+      "Verification rejects a mismatched or unapproved verifier/contract.",
+      "A worker cannot weaken the accepted contract during execution; retries retain it."
+    ]
+  },
+  {
+    "id": "Z11.worker_assertion",
+    "gate": "Z11",
+    "owners": [
+      "tasks",
+      "execution",
+      "evidence",
+      "integration"
+    ],
+    "setup": "A worker submits plausible narrative success and self-generated tests.",
+    "action": "Report completion without independently accepted check evidence.",
+    "expected": [
+      "Worker assertions are recorded as observations rather than proof.",
+      "Independent verification or an authorized explicitly manual acceptance is still required."
+    ]
+  },
+  {
+    "id": "Z11.failed_child_acceptance",
+    "gate": "Z11",
+    "owners": [
+      "tasks",
+      "execution",
+      "integration"
+    ],
+    "setup": "A parent acceptance contract requires a designated child to pass independent checks.",
+    "action": "Have that child finish execution but fail verification.",
+    "expected": [
+      "The parent and dependent tasks do not satisfy verified-success conditions.",
+      "Failed child acceptance and its evidence remain visible."
+    ]
+  },
+  {
+    "id": "Z11.manual_acceptance_label",
+    "gate": "Z11",
+    "owners": [
+      "tasks",
+      "reviews",
+      "evidence",
+      "integration"
+    ],
+    "setup": "A task contract permits eligible manual acceptance and has no passing automated result.",
+    "action": "Accept using the eligible principal, then inspect CLI/MCP results and evidence.",
+    "expected": [
+      "Acceptance remains explicitly labeled manual.",
+      "The product never presents manual approval as successful independent automated verification."
+    ]
+  },
+  {
+    "id": "Z12.delegation_narrows",
+    "gate": "Z12",
+    "owners": [
+      "tasks",
+      "policy",
+      "accounting",
+      "integration"
+    ],
+    "setup": "A root task has finite scope, allowed tools/destinations, project data, deadline and shared budget.",
+    "action": "Independently delegate children expanding scope, tool access, data access, deadline or spending authority.",
+    "expected": [
+      "Each expansion is refused or reduced only through an explicit valid narrowing contract.",
+      "Delegation cannot grant authority absent from its parent or inherited organization policy."
+    ]
+  },
+  {
+    "id": "Z12.root_limits_shared",
+    "gate": "Z12",
+    "owners": [
+      "tasks",
+      "execution",
+      "accounting",
+      "integration"
+    ],
+    "setup": "A root task is configured with finite child count, depth, concurrency, planner steps and wall-time limits.",
+    "action": "Delegate concurrently and recursively until each limit is reached.",
+    "expected": [
+      "All branches share root budgets and finite limits; limits cannot be reset by making another child.",
+      "Default limits match one worker attempt, four installation attempts, 30 minutes per attempt, 100 steps, eight children, depth three and a 24-hour root deadline where applicable."
+    ]
+  },
+  {
+    "id": "Z13.secret_surfaces",
+    "gate": "Z13",
+    "owners": [
+      "connections",
+      "identity",
+      "artifacts",
+      "evidence",
+      "cli",
+      "mcp",
+      "integration"
+    ],
+    "setup": "Synthetic uniquely marked secrets exist in owner/provider secure stores and setup helpers.",
+    "action": "Exercise setup, rotation, failure logging, CLI/MCP output, organization export, artifact metadata and diagnostics.",
+    "expected": [
+      "No planted raw credential is exposed in tool arguments, ordinary flags, CLI/MCP results, logs or organization exports.",
+      "Setup exposes challenge references and metadata; subprocesses do not inherit owner credential environment by default."
+    ]
+  },
+  {
+    "id": "Z13.advisory_worker",
+    "gate": "Z13",
+    "owners": [
+      "execution",
+      "desktop",
+      "registry",
+      "integration"
+    ],
+    "setup": "A cooperative worker has an unrestricted external shell/network and no qualified containment adapter.",
+    "action": "Inspect capabilities, claim context, usage reports and desktop execution details.",
+    "expected": [
+      "External shell, network and billing limitations are explicitly advisory.",
+      "Lease fencing is described as restricting Zatiti mutations and does not claim the external process is contained or terminated."
+    ]
+  },
+  {
+    "id": "Z13.compatibility_not_containment",
+    "gate": "Z13",
+    "owners": [
+      "execution",
+      "qualification",
+      "integration"
+    ],
+    "setup": "An MCP session succeeds with a named external agent client.",
+    "action": "Evaluate execution capability declarations and release claims.",
+    "expected": [
+      "Client interoperability grants no implicit launch, sandbox, interruption, cost-enforcement or exact-context-replay guarantees.",
+      "Unsupported executor guarantees fail explicitly instead of being inferred from a client, harness, container or subprocess name."
+    ]
+  },
+  {
+    "id": "Z14.atomic_state_event",
+    "gate": "Z14",
+    "owners": [
+      "storage",
+      "evidence",
+      "application",
+      "integration"
+    ],
+    "setup": "Fault injection can fail event/outbox insertion or state persistence inside a shared transaction.",
+    "action": "Perform representative configuration, task and effect transitions with each failure injected.",
+    "expected": [
+      "Neither state without its required event nor an event without its state becomes committed.",
+      "Recovery reads durable records and does not infer success from log text."
+    ]
+  },
+  {
+    "id": "Z14.missing_artifact",
+    "gate": "Z14",
+    "owners": [
+      "artifacts",
+      "tasks",
+      "installation",
+      "integration"
+    ],
+    "setup": "Metadata references a committed content hash whose bytes are missing or corrupt.",
+    "action": "Read the artifact, verify its task and create or inspect a backup.",
+    "expected": [
+      "A visible integrity/artifact fault is returned.",
+      "The missing output is never a successful task result or silently accepted backup; unreferenced staging bytes can be reclaimed separately."
+    ]
+  },
+  {
+    "id": "Z14.paused_restore",
+    "gate": "Z14",
+    "owners": [
+      "installation",
+      "storage",
+      "platform",
+      "artifacts",
+      "integration"
+    ],
+    "setup": "A verified encrypted backup contains a consistent database snapshot and pinned artifact manifest with separately available key prerequisites.",
+    "action": "Enter exclusive maintenance and restore into a clean destination.",
+    "expected": [
+      "Restore verifies contents and starts paused with exclusive ownership.",
+      "No pending paid work or effect dispatch resumes automatically; a live-database file copy alone is not accepted as the backup contract."
+    ]
+  },
+  {
+    "id": "Z14.outbox_revocation_restore",
+    "gate": "Z14",
+    "owners": [
+      "installation",
+      "effects",
+      "accounting",
+      "identity",
+      "memory",
+      "integration"
+    ],
+    "setup": "The backup contains unresolved dispatch/outbox intents, unknown reservations, revoked credentials and pending memory writes/promotions.",
+    "action": "Restore, inspect state, attempt use of revoked credentials and reconcile before resuming.",
+    "expected": [
+      "Unresolved obligations and revocation states are preserved and inspectable.",
+      "Pending effect and memory outcomes require reconciliation; restoring an older database does not claim to undo provider effects."
+    ]
+  },
+  {
+    "id": "Z15.canonical_roundtrip",
+    "gate": "Z15",
+    "owners": [
+      "configuration",
+      "skills",
+      "integration"
+    ],
+    "setup": "A definition contains ordered semantic lists, unordered maps/sets, exact skill bytes, extensions and explicit removals.",
+    "action": "Export, import, plan, activate and export again within the same installation.",
+    "expected": [
+      "Canonical definition meaning and stable identities round-trip without changing semantic order or skill bytes.",
+      "Duplicate keys, invalid references, unsafe paths, unknown executable fields and cycles are rejected; omission is not deletion."
+    ]
+  },
+  {
+    "id": "Z15.cross_installation_rebind",
+    "gate": "Z15",
+    "owners": [
+      "configuration",
+      "connections",
+      "identity",
+      "integration"
+    ],
+    "setup": "An organization export contains stable IDs and opaque connection references from installation A.",
+    "action": "Import into installation B and attempt activation before and after explicit local credential/account rebinding.",
+    "expected": [
+      "Foreign credential references do not become live authority automatically.",
+      "Required rebinding is surfaced; authorized activation uses B-specific bindings while preserving portable definition identity semantics."
+    ]
+  },
+  {
+    "id": "Z15.export_exclusions",
+    "gate": "Z15",
+    "owners": [
+      "configuration",
+      "evidence",
+      "installation",
+      "integration"
+    ],
+    "setup": "An organization owns credentials, completed tasks, unknown operations and run history.",
+    "action": "Create an organization export and separately request run history export and encrypted backup.",
+    "expected": [
+      "Organization export includes versioned definitions but excludes secret values, principal credentials, task history and mutable operation state.",
+      "History export and backup have distinct contracts; required runtime obligations remain in state and backup."
+    ]
+  },
+  {
+    "id": "Z16.cli_to_mcp",
+    "gate": "Z16",
+    "owners": [
+      "integration",
+      "cli",
+      "mcp",
+      "client"
+    ],
+    "setup": "A scoped principal creates and starts durable work through CLI.",
+    "action": "Disconnect the CLI and inspect, decide or continue that same work through MCP.",
+    "expected": [
+      "The second transport uses the same task, command, review, state and authorization.",
+      "No duplicate controller, scheduler or task is created."
+    ]
+  },
+  {
+    "id": "Z16.mcp_to_cli",
+    "gate": "Z16",
+    "owners": [
+      "integration",
+      "cli",
+      "mcp",
+      "client"
+    ],
+    "setup": "A scoped principal creates and starts durable work through MCP.",
+    "action": "Disconnect MCP and continue that work using CLI.",
+    "expected": [
+      "Equivalent authorized state and durable identities are preserved across transports.",
+      "No transport-specific prerequisite is required to continue the workflow."
+    ]
+  },
+  {
+    "id": "Z16.disconnect_command_lookup",
+    "gate": "Z16",
+    "owners": [
+      "application",
+      "evidence",
+      "client",
+      "cli",
+      "mcp",
+      "integration"
+    ],
+    "setup": "A mutation commits immediately before its transport connection drops.",
+    "action": "Reconnect, look up the command by its original submission key and retry only with that key.",
+    "expected": [
+      "The original disposition is recovered without another business mutation or event.",
+      "JSON-RPC request IDs are not treated as durable submission keys."
+    ]
+  },
+  {
+    "id": "Z16.cursor_expiry",
+    "gate": "Z16",
+    "owners": [
+      "evidence",
+      "client",
+      "desktop",
+      "cli",
+      "mcp",
+      "integration"
+    ],
+    "setup": "An event cursor falls outside the retained replay window while scoped state continues changing.",
+    "action": "Resume event reading with that cursor.",
+    "expected": [
+      "A named cursor-expiry result requires a fresh authorized snapshot and new replay position.",
+      "The client never presents an unseen event gap as complete history; both transports preserve equivalent scope and freshness."
+    ]
+  },
+  {
+    "id": "Z16.interrupted_upload",
+    "gate": "Z16",
+    "owners": [
+      "artifacts",
+      "client",
+      "cli",
+      "mcp",
+      "integration"
+    ],
+    "setup": "A bounded chunk upload is partially accepted before a client disconnects.",
+    "action": "Resume or inspect using the stable upload identity, retry an accepted chunk, finish and cancel a separate partial upload.",
+    "expected": [
+      "Chunk retries do not corrupt content or publish duplicate artifacts; finish verifies the full digest and bounds.",
+      "Partial bytes are not published as completed artifacts; cancellation leaves only reclaimable staging data.",
+      "Neither interface accepts an unrestricted controller filesystem path."
+    ]
+  },
+  {
+    "id": "Z16.maintenance_restore_parity",
+    "gate": "Z16",
+    "owners": [
+      "installation",
+      "server",
+      "cli",
+      "mcp",
+      "integration"
+    ],
+    "setup": "A local owner has uploaded a valid encrypted backup artifact.",
+    "action": "Enter quiesced maintenance and restore through CLI on one fixture and MCP on another.",
+    "expected": [
+      "Both invoke the same authorized owner operation using opaque backup references.",
+      "No transport-specific admin endpoint is necessary; both restore paused with equivalent preserved obligations."
+    ]
+  },
+  {
+    "id": "Z17.atomic_chief_creation",
+    "gate": "Z17",
+    "owners": [
+      "configuration",
+      "identity",
+      "memory",
+      "integration"
+    ],
+    "setup": "A root organization exists and a permitted author proposes a child organization with its chief.",
+    "action": "Apply successfully, then inject a transaction failure during a second child creation.",
+    "expected": [
+      "Each active organization has exactly one designated chief.",
+      "Organization and chief activate together or neither activates; creating an ordinary worker does not create an organization."
+    ]
+  },
+  {
+    "id": "Z17.hierarchy_cycles",
+    "gate": "Z17",
+    "owners": [
+      "configuration",
+      "policy",
+      "integration"
+    ],
+    "setup": "Organizations form a valid root/child/grandchild tree.",
+    "action": "Attempt to parent the root under a descendant or create any cycle.",
+    "expected": [
+      "Planning or activation rejects cycles.",
+      "The original hierarchy and inherited limits remain unchanged."
+    ]
+  },
+  {
+    "id": "Z17.chief_replacement",
+    "gate": "Z17",
+    "owners": [
+      "configuration",
+      "memory",
+      "tasks",
+      "evidence",
+      "integration"
+    ],
+    "setup": "An organization has a designated chief, shared memory, responsibilities, pending decisions and history.",
+    "action": "Replace its chief using an authorized exact configuration plan.",
+    "expected": [
+      "The organization keeps its identity, memory, obligations and history.",
+      "Exactly one active chief remains; replacement does not silently grant private memories or excess authority."
+    ]
+  },
+  {
+    "id": "Z17.inherited_denial",
+    "gate": "Z17",
+    "owners": [
+      "policy",
+      "configuration",
+      "integration"
+    ],
+    "setup": "A parent explicitly denies an action that a child policy attempts to allow.",
+    "action": "Plan the child policy and attempt the action in the descendant scope.",
+    "expected": [
+      "The inherited denial wins and child policy cannot enlarge the parent ceiling.",
+      "Parent-chief report access does not imply unrestricted access to descendant credentials, data or private memory."
+    ]
+  },
+  {
+    "id": "Z17.ancestor_budget_exhaustion",
+    "gate": "Z17",
+    "owners": [
+      "accounting",
+      "tasks",
+      "policy",
+      "integration"
+    ],
+    "setup": "A child has local funds but an applicable ancestor budget is exhausted.",
+    "action": "Admit a paid child task or model call.",
+    "expected": [
+      "Admission is refused without provider dispatch.",
+      "Every descendant reserves against applicable ancestor budgets and cannot bypass an exhausted aggregate limit."
+    ]
+  },
+  {
+    "id": "Z17.scoped_reparenting",
+    "gate": "Z17",
+    "owners": [
+      "configuration",
+      "policy",
+      "memory",
+      "tasks",
+      "integration"
+    ],
+    "setup": "A worker or organization with active work and private memory is moved between scopes with different ceilings.",
+    "action": "Apply the move through a configuration plan.",
+    "expected": [
+      "Inherited authority, budgets and memory bindings are rechecked.",
+      "Existing private memories are not silently transferred and active work does not acquire broader authority."
+    ]
+  },
+  {
+    "id": "Z18.unauthorized_brain_not_queried",
+    "gate": "Z18",
+    "owners": [
+      "memory",
+      "serenity",
+      "policy",
+      "integration"
+    ],
+    "setup": "Instrumented brains include permitted worker/org brains and an unbound private descendant brain.",
+    "action": "Recall as a caller lacking the private brain binding.",
+    "expected": [
+      "The unauthorized brain receives zero read/model requests.",
+      "Filtering occurs before retrieval and model composition; hierarchy alone supplies no private-memory access."
+    ]
+  },
+  {
+    "id": "Z18.restricted_project_memory",
+    "gate": "Z18",
+    "owners": [
+      "memory",
+      "configuration",
+      "policy",
+      "integration"
+    ],
+    "setup": "A worker can read one restricted project brain but an organization-wide audience cannot.",
+    "action": "Curate organization memory and recall as an ordinary organization member.",
+    "expected": [
+      "Restricted project content is excluded from the broadly shared brain and model context.",
+      "Promotion cannot disclose it without current source-disclosure and destination-write authority."
+    ]
+  },
+  {
+    "id": "Z18.chief_promotion_provenance",
+    "gate": "Z18",
+    "owners": [
+      "memory",
+      "serenity",
+      "evidence",
+      "accounting",
+      "integration"
+    ],
+    "setup": "A chief has explicit source read/disclosure and destination curate/write permissions under finite budgets.",
+    "action": "Promote a suitable claim from worker or child-organization memory into shared memory.",
+    "expected": [
+      "The new destination claim links source brain, claim/version, supporting artifacts, curator identity and redaction.",
+      "Promotion is scoped admitted work; the copied claim is not independent corroboration of its source."
+    ]
+  },
+  {
+    "id": "Z18.promotion_correction",
+    "gate": "Z18",
+    "owners": [
+      "memory",
+      "serenity",
+      "installation",
+      "integration"
+    ],
+    "setup": "A source claim has several recorded promoted copies and one destination writer is unavailable.",
+    "action": "Correct or retract the source, crash/restart and resume reconciliation.",
+    "expected": [
+      "Durable lineage obligations cover every affected promoted copy and survive restart.",
+      "Unavailable reconciliation remains visible; forget/retract distinguishes active recall removal from erasure of Git history, backups and previous run artifacts."
+    ]
+  },
+  {
+    "id": "Z18.stale_index",
+    "gate": "Z18",
+    "owners": [
+      "memory",
+      "serenity",
+      "tasks",
+      "integration"
+    ],
+    "setup": "A permitted brain has an index behind the required source revision or a failed writer.",
+    "action": "Recall for a task requiring current freshness and inspect memory status.",
+    "expected": [
+      "Results report source/scope/version/confidence/freshness where available.",
+      "The task waits or receives a named prerequisite failure rather than silently treating stale content as current; failed writes are not presented as remembered knowledge."
+    ]
+  },
+  {
+    "id": "Z18.retained_context",
+    "gate": "Z18",
+    "owners": [
+      "memory",
+      "execution",
+      "artifacts",
+      "integration"
+    ],
+    "setup": "A run recalls several authorized brains with distinct revisions.",
+    "action": "Dispatch a model step, later update the brains and inspect the original run context.",
+    "expected": [
+      "The run retains the actual selected memory excerpts and provenance as artifacts.",
+      "Inspection reconstructs what the model received; reads across brains are not falsely described as one atomic snapshot."
+    ]
+  },
+  {
+    "id": "Z18.memory_write_unknown",
+    "gate": "Z18",
+    "owners": [
+      "memory",
+      "serenity",
+      "effects",
+      "accounting",
+      "integration"
+    ],
+    "setup": "A Serenity writer commits a command but its acknowledgement is lost; recall may also incur model charges.",
+    "action": "Recover the command and run recall under a hard disclosure/spend bound.",
+    "expected": [
+      "The prior persisted intent and adapter command identity are reconciled without blind repeat writing.",
+      "Exactly one canonical writer owns each brain; unsupported enforceable recall charge/disclosure bounds make that mode unavailable or explicitly advisory where policy permits."
+    ]
+  },
+  {
+    "id": "Z18.revoked_memory_binding",
+    "gate": "Z18",
+    "owners": [
+      "memory",
+      "policy",
+      "execution",
+      "integration"
+    ],
+    "setup": "A worker previously recalled a brain and then loses its binding.",
+    "action": "Recall again and inspect prior run artifacts.",
+    "expected": [
+      "Subsequent brain retrieval is denied immediately under current authority.",
+      "The system does not claim revocation erases previously disclosed context; historical artifacts remain governed by their own retention/access rules."
+    ]
+  },
+  {
+    "id": "Z19.self_promotion",
+    "gate": "Z19",
+    "owners": [
+      "policy",
+      "identity",
+      "configuration",
+      "integration"
+    ],
+    "setup": "A worker has minimum permissions and may propose a capability promotion.",
+    "action": "Have it approve its own evidence, edit its qualification criteria or raise the governing ceiling.",
+    "expected": [
+      "The worker cannot authorize any of those expansions.",
+      "Without an applicable owner-approved rule, promotion waits for an eligible owner decision."
+    ]
+  },
+  {
+    "id": "Z19.unsupported_evidence",
+    "gate": "Z19",
+    "owners": [
+      "policy",
+      "evidence",
+      "tasks",
+      "integration"
+    ],
+    "setup": "An owner-approved promotion rule requires independently established results in a specified evidence window.",
+    "action": "Submit model assertions, unverified worker tests, stale evidence or provenance-free memory claims as proof.",
+    "expected": [
+      "Insufficient evidence is rejected with an inspectable explanation.",
+      "No grant activates solely from competence narration or a remembered judgment."
+    ]
+  },
+  {
+    "id": "Z19.capability_promotion",
+    "gate": "Z19",
+    "owners": [
+      "policy",
+      "identity",
+      "reviews",
+      "integration"
+    ],
+    "setup": "A rule permits one exact capability/destination for one worker under specified model/tool/skill versions.",
+    "action": "Supply qualifying evidence and evaluate the rule.",
+    "expected": [
+      "Only the exact permitted capability/scope activates within the prior ceiling.",
+      "Unrelated powers remain unavailable; durable events identify the evidence and rule version responsible."
+    ]
+  },
+  {
+    "id": "Z19.version_requalification",
+    "gate": "Z19",
+    "owners": [
+      "policy",
+      "configuration",
+      "skills",
+      "integration"
+    ],
+    "setup": "A worker has qualifications depending on recorded model, tool, skill and evaluator versions.",
+    "action": "Change one relevant version, and separately change an unrelated dependency.",
+    "expected": [
+      "Affected qualifications require requalification before qualifying further admission.",
+      "Only qualifications that depended on the changed configuration are invalidated; unsupported prior evidence is not reused silently."
+    ]
+  },
+  {
+    "id": "Z19.immediate_demotion",
+    "gate": "Z19",
+    "owners": [
+      "policy",
+      "identity",
+      "effects",
+      "integration"
+    ],
+    "setup": "An active earned grant has an owner-approved incident/failure demotion rule.",
+    "action": "Record a qualifying incident concurrently with a new effect admission.",
+    "expected": [
+      "Restriction or demotion commits before any subsequently authorized admission can use the old grant.",
+      "The user can inspect durable reasons and events; no model call or new spending is required to apply restriction."
+    ]
+  },
+  {
+    "id": "Z19.human_review_preserved",
+    "gate": "Z19",
+    "owners": [
+      "policy",
+      "reviews",
+      "integration"
+    ],
+    "setup": "A worker earns a related capability but the governing policy still requires a human for a specific action class.",
+    "action": "Attempt that class under the new qualification.",
+    "expected": [
+      "The human-required decision remains mandatory.",
+      "Only an explicitly authorized owner policy change under existing authority can change the mandatory class."
+    ]
+  },
+  {
+    "id": "Z20.scheduled_cycles",
+    "gate": "Z20",
+    "owners": [
+      "scheduling",
+      "tasks",
+      "execution",
+      "integration"
+    ],
+    "setup": "A responsibility specifies scheduled/event triggers, finite cycle/root limits, timezone and catch-up window.",
+    "action": "Trigger normal, missed and duplicated occurrences and an authenticated event.",
+    "expected": [
+      "Each admitted cycle is bounded and linked to the responsibility; repeated polls/events do not duplicate task admission.",
+      "Default missed occurrences coalesce once within the configured window and pauses disable new admission."
+    ]
+  },
+  {
+    "id": "Z20.reasoning_cycles",
+    "gate": "Z20",
+    "owners": [
+      "scheduling",
+      "execution",
+      "tasks",
+      "integration"
+    ],
+    "setup": "An active responsibility permits repeated reasoning without new external events and has a minimum reconsideration interval.",
+    "action": "Run a reasoning cycle that proposes useful work, then inspect its next wake and outputs.",
+    "expected": [
+      "The cycle is an admitted bounded run with accountable outputs and a persisted next-wake decision.",
+      "Proposed work converges on versioned tasks and stays within task-count, scope and spending limits."
+    ]
+  },
+  {
+    "id": "Z20.bounded_idle_spend",
+    "gate": "Z20",
+    "owners": [
+      "scheduling",
+      "accounting",
+      "execution",
+      "integration"
+    ],
+    "setup": "A responsibility repeatedly finds no useful work and has finite per-cycle/aggregate funds and a minimum interval.",
+    "action": "Advance the deterministic clock through many potential cycles.",
+    "expected": [
+      "The minimum interval prevents a tight reasoning loop.",
+      "Aggregate exhaustion or pause conditions stop new spend; idle reasoning cannot create unlimited tasks or spend indefinitely."
+    ]
+  },
+  {
+    "id": "Z20.restart_at_wake",
+    "gate": "Z20",
+    "owners": [
+      "scheduling",
+      "controller",
+      "storage",
+      "integration"
+    ],
+    "setup": "A durable responsibility wake is due and admission has a controllable transaction boundary.",
+    "action": "Crash immediately before and after wake admission, then restart.",
+    "expected": [
+      "Recovery preserves the correct next-wake decision and occurrence identity.",
+      "Exactly the intended bounded cycle is admitted without loss or duplication."
+    ]
+  },
+  {
+    "id": "Z20.mailbox_redelivery",
+    "gate": "Z20",
+    "owners": [
+      "messaging",
+      "execution",
+      "storage",
+      "integration"
+    ],
+    "setup": "A scoped sender submits a stable message ID to a running worker and an idle worker.",
+    "action": "Lose delivery acknowledgement, redeliver and restart at target admission.",
+    "expected": [
+      "Acknowledgement occurs only after durable target admission and message identity deduplicates redelivery.",
+      "Running workers receive the message at a safe step boundary; idle workers can resume.",
+      "Message content is an untrusted observation and cannot replace authority."
+    ]
+  },
+  {
+    "id": "Z20.duplicate_assignment_conflict",
+    "gate": "Z20",
+    "owners": [
+      "messaging",
+      "tasks",
+      "desktop",
+      "integration"
+    ],
+    "setup": "Direct user and chief conversations reference the same durable task/version.",
+    "action": "Submit conflicting assignment or pending-input updates concurrently.",
+    "expected": [
+      "One accepted version is authoritative and the conflicting update is surfaced.",
+      "The system does not independently schedule duplicate work from the competing conversations."
+    ]
+  },
+  {
+    "id": "Z20.responsibility_pause",
+    "gate": "Z20",
+    "owners": [
+      "scheduling",
+      "tasks",
+      "policy",
+      "desktop",
+      "integration"
+    ],
+    "setup": "Two responsibilities have active/queued work and only one is selected for pause.",
+    "action": "Pause that responsibility and race its next wake.",
+    "expected": [
+      "Restrictive state commits immediately and prevents new admission for that responsibility.",
+      "Unrelated work is not cancelled; already transmitted effects and unresolved outcomes remain visible."
+    ]
+  },
+  {
+    "id": "Z21.first_conversation",
+    "gate": "Z21",
+    "owners": [
+      "desktop",
+      "installation",
+      "configuration",
+      "qualification"
+    ],
+    "setup": "Start the real desktop on a clean supported installation with bootstrap/provider prerequisites handled through its UI.",
+    "action": "Complete first launch and relaunch after selecting a different conversation.",
+    "expected": [
+      "First launch opens the pinned personal-chief conversation with a ready composer.",
+      "Returning launch restores the current conversation; no terminal, operation ID or schema knowledge is required."
+    ]
+  },
+  {
+    "id": "Z21.two_child_chiefs",
+    "gate": "Z21",
+    "owners": [
+      "desktop",
+      "configuration",
+      "messaging",
+      "qualification"
+    ],
+    "setup": "The personal chief has permitted organization-authoring authority.",
+    "action": "Ask it to create marketing and engineering chiefs and build their teams; separately use New organization and New worker.",
+    "expected": [
+      "Each chief creation stages and activates its child organization and chief atomically.",
+      "Cards distinguish proposed, awaiting decision and created using committed controller state; ordinary workers do not create organizations.",
+      "Direct and conversational controls operate the same durable objects."
+    ]
+  },
+  {
+    "id": "Z21.delegate_work",
+    "gate": "Z21",
+    "owners": [
+      "desktop",
+      "tasks",
+      "scheduling",
+      "messaging",
+      "qualification"
+    ],
+    "setup": "A real desktop session has personal, marketing and engineering chiefs plus ordinary workers.",
+    "action": "Assign a bounded task and an ongoing responsibility, delegate work, then inspect a produced result.",
+    "expected": [
+      "The UI exposes durable task/responsibility state, required outputs and acceptance evidence outside message narration.",
+      "Failed checks cannot be represented as successful completion; the responsibility remains independently pausable."
+    ]
+  },
+  {
+    "id": "Z21.hierarchy_navigation",
+    "gate": "Z21",
+    "owners": [
+      "desktop",
+      "configuration",
+      "qualification"
+    ],
+    "setup": "Multiple branches contain workers with duplicate display names and at least one nested organization.",
+    "action": "Use All chats, organization hierarchy filtering, worker search and clickable breadcrumb navigation.",
+    "expected": [
+      "Organization filtering includes its descendants without forcing an administrative landing page.",
+      "Worker labels and full ancestry disambiguate identities; membership is not conveyed by color alone.",
+      "Displayed hierarchy agrees with controller state."
+    ]
+  },
+  {
+    "id": "Z21.exact_decision",
+    "gate": "Z21",
+    "owners": [
+      "desktop",
+      "reviews",
+      "effects",
+      "qualification"
+    ],
+    "setup": "Several organizations contain unresolved human-required actions and one stale reviewed action.",
+    "action": "Open Needs you, inspect an exact action card, approve one eligible action and try the stale action.",
+    "expected": [
+      "The card shows the actual action/destination/content/preconditions and acknowledged disposition with evidence links.",
+      "The stale action cannot reuse approval; Needs you links to unresolved exact decisions.",
+      "A chat assertion does not serve as approval or completion authority."
+    ]
+  },
+  {
+    "id": "Z21.reconnect_no_duplicate",
+    "gate": "Z21",
+    "owners": [
+      "desktop",
+      "client",
+      "application",
+      "qualification"
+    ],
+    "setup": "The desktop sends a mutation whose response is lost before disconnect.",
+    "action": "Show cached history, enter an offline draft, reconnect and retry with original submission identity.",
+    "expected": [
+      "Unsent input and stale cached state remain distinguishable until controller acknowledgement.",
+      "Reconnection restores snapshots/replay and command disposition without duplicate tasks or external effects."
+    ]
+  },
+  {
+    "id": "Z21.close_client",
+    "gate": "Z21",
+    "owners": [
+      "desktop",
+      "controller",
+      "execution",
+      "qualification"
+    ],
+    "setup": "Authorized work is running on an available controller and its continuation behavior was shown during setup.",
+    "action": "Close the desktop process, allow work to continue, then reopen it.",
+    "expected": [
+      "Closing the client does not stop the controller or scheduler.",
+      "Reopened state accurately shows controller progress/results and unresolved effects."
+    ]
+  },
+  {
+    "id": "Z21.groups_and_quiet_coordination",
+    "gate": "Z21",
+    "owners": [
+      "desktop",
+      "messaging",
+      "memory",
+      "policy",
+      "qualification"
+    ],
+    "setup": "Workers from separate organizations share a group conversation and chiefs exchange routine reports.",
+    "action": "Create/join the group, share attachments, deliver routine internal coordination and inspect notifications.",
+    "expected": [
+      "Group membership changes neither worker home organization nor memory/tool authority; attachment sharing remains a governed disclosure.",
+      "Routine coordination does not continually reorder chats, mark them unread or notify the human.",
+      "Reports upward obey explicit reporting/data bindings."
+    ]
+  },
+  {
+    "id": "Z21.capability_and_pause_cards",
+    "gate": "Z21",
+    "owners": [
+      "desktop",
+      "policy",
+      "reviews",
+      "scheduling",
+      "qualification"
+    ],
+    "setup": "A worker has a proposed promotion and active work with a possibly transmitted effect.",
+    "action": "Inspect promotion details, pause or stop the relevant work and observe offline/online acknowledgement.",
+    "expected": [
+      "Autonomy is shown as exact capabilities and authority changes with evidence and rule/decision status, not a universal trust score.",
+      "Pause/stop reports controller acknowledgement and unresolved external effects honestly; responsibility creation does not imply expanded authority."
+    ]
+  },
+  {
+    "id": "JOURNEY.organization_setup_cli",
+    "gate": "JOURNEY",
+    "owners": [
+      "integration",
+      "cli",
+      "configuration",
+      "skills",
+      "connections",
+      "tasks"
+    ],
+    "setup": "Use a fresh controlled installation and scoped external agent principal.",
+    "action": "Discover capabilities, create an organization and two workers, import/evaluate a skill, establish a provider connection, plan/apply and complete first work entirely through CLI.",
+    "expected": [
+      "The first artifact is independently verified and inspectable.",
+      "Provider secrets never enter agent-visible arguments/results; prerequisite resolution requires no dashboard or source knowledge.",
+      "Retain operation traces, state/event observations and verification artifacts."
+    ]
+  },
+  {
+    "id": "JOURNEY.organization_setup_mcp",
+    "gate": "JOURNEY",
+    "owners": [
+      "integration",
+      "mcp",
+      "configuration",
+      "skills",
+      "connections",
+      "tasks"
+    ],
+    "setup": "Use a matching fresh installation with a scoped agent MCP client.",
+    "action": "Perform the full organization, two-worker, skill evaluation, provider setup, activation and first verified artifact journey entirely through MCP.",
+    "expected": [
+      "The same authorized product lifecycle and evidence is obtained as through CLI.",
+      "Every prerequisite and long-running operation remains discoverable and inspectable without optional MCP features."
+    ]
+  },
+  {
+    "id": "JOURNEY.engineering_cli",
+    "gate": "JOURNEY",
+    "owners": [
+      "integration",
+      "cli",
+      "execution",
+      "github",
+      "tasks",
+      "reviews"
+    ],
+    "setup": "A controlled repository has an explicit base head, policy, cooperative worker and independent sealed verifier.",
+    "action": "Through CLI, claim work, checkpoint, submit a patch and independent check evidence, then propose exact repository publication; also run failed-check and stale-head variants.",
+    "expected": [
+      "Successful acceptance is independently established and publication is governed by exact repository/branch/head/change/automation constraints.",
+      "Failed checks block completion and stale head invalidates applicable review.",
+      "Opening a pull request is not automatically treated as harmless when downstream automation broadens consequences."
+    ]
+  },
+  {
+    "id": "JOURNEY.engineering_mcp",
+    "gate": "JOURNEY",
+    "owners": [
+      "integration",
+      "mcp",
+      "execution",
+      "github",
+      "tasks",
+      "reviews"
+    ],
+    "setup": "Use matching repository, worker, policy and sealed verification fixtures.",
+    "action": "Perform claim, checkpoint, patch/evidence submission and exact publication proposal entirely through MCP, including failed checks and stale head.",
+    "expected": [
+      "The same verified acceptance and protected-effect lifecycle is observed as through CLI.",
+      "No arbitrary shell invocation exposed as an MCP substitute counts toward operation parity."
+    ]
+  },
+  {
+    "id": "JOURNEY.research_drafting_cli",
+    "gate": "JOURNEY",
+    "owners": [
+      "integration",
+      "cli",
+      "responses",
+      "httpread",
+      "artifacts",
+      "tasks"
+    ],
+    "setup": "A hosted worker has an authorized model profile, bounded public HTTP destinations and finite cost/disclosure limits.",
+    "action": "Through CLI assign research, gather controlled public sources, produce a cited brief and draft artifact and inspect verification.",
+    "expected": [
+      "The hosted loop uses governed bounded reads/model calls and retains reconstructable context and source references.",
+      "Artifacts satisfy acceptance and no social publishing adapter is required."
+    ]
+  },
+  {
+    "id": "JOURNEY.research_drafting_mcp",
+    "gate": "JOURNEY",
+    "owners": [
+      "integration",
+      "mcp",
+      "responses",
+      "httpread",
+      "artifacts",
+      "tasks"
+    ],
+    "setup": "Use matching hosted worker, public source fixtures and policy limits.",
+    "action": "Perform the research and cited-brief/draft workflow entirely through MCP.",
+    "expected": [
+      "The same scope, disclosure, accounting, context and artifact guarantees are observed as through CLI.",
+      "Long-running work is followed through durable task/command IDs and polling."
+    ]
+  },
+  {
+    "id": "JOURNEY.cross_interface_fault_matrix",
+    "gate": "JOURNEY",
+    "owners": [
+      "integration",
+      "cli",
+      "mcp",
+      "client",
+      "effects",
+      "installation"
+    ],
+    "setup": "Prepare each organization, engineering and research journey at mutation acknowledgement, claim, checkpoint, review, upload, effect return and restart boundaries.",
+    "action": "Interrupt at each boundary and continue through the opposite interface in both directions.",
+    "expected": [
+      "Submission identity, pinned contracts, events and authorization remain equivalent.",
+      "No duplicate protected effect occurs; unknown outcomes remain unknown until qualified reconciliation.",
+      "The evidence names each fault boundary and both starting/continuing transports."
+    ]
+  },
+  {
+    "id": "JOURNEY.desktop_daily_work",
+    "gate": "JOURNEY",
+    "owners": [
+      "qualification",
+      "desktop",
+      "configuration",
+      "tasks",
+      "scheduling",
+      "reviews",
+      "memory",
+      "policy"
+    ],
+    "setup": "Launch the actual packaged desktop on a supported platform with a personal-chief conversation.",
+    "action": "Create marketing/engineering organizations and ordinary workers, assign a bounded task and ongoing responsibility, inspect result and memory, then handle an exact pending decision.",
+    "expected": [
+      "The visible hierarchy and work states match queried controller state rather than model narration.",
+      "Memory scope/lineage and earned autonomy meet their own Z18/Z19 gates.",
+      "Capture executed UI observations for setup and daily results/decisions; mocked view models alone are insufficient."
+    ]
+  },
+  {
+    "id": "QUALIFICATION.macos_distribution",
+    "gate": "QUALIFICATION",
+    "owners": [
+      "qualification",
+      "platform",
+      "installation",
+      "desktop",
+      "controller",
+      "serenity"
+    ],
+    "setup": "Build the documented macOS release artifacts with pinned Go/dependency/protocol/service versions and licenses.",
+    "action": "Install on a clean supported macOS host, bootstrap, run CLI/MCP/desktop journeys, stop/restart controller, back up/restore and uninstall according to documentation.",
+    "expected": [
+      "Documented installation commands work from actual artifacts; private socket, secure-store and local-lock behavior are exercised.",
+      "Serenity process packaging and one-writer lifecycle work with the controller/desktop.",
+      "Release evidence identifies exact OS/architecture/artifact/source/tool versions and observed results; compile success is not platform qualification."
+    ]
+  },
+  {
+    "id": "QUALIFICATION.linux_distribution",
+    "gate": "QUALIFICATION",
+    "owners": [
+      "qualification",
+      "platform",
+      "installation",
+      "desktop",
+      "controller",
+      "serenity"
+    ],
+    "setup": "Build the documented Linux release artifacts with pinned dependencies and an explicitly provisioned supported secret source.",
+    "action": "Install on a clean supported Linux host and run the same controller, CLI/MCP, desktop, restart and backup/restore journeys.",
+    "expected": [
+      "Documented artifact installation and headless/desktop credential prerequisites work without secret exposure.",
+      "Controller ownership, Serenity lifecycle and desktop continuation are exercised on Linux itself.",
+      "Advertised Linux targets match executed OS/architecture evidence; Windows support is not inferred."
+    ]
+  },
+  {
+    "id": "QUALIFICATION.named_agent_clients",
+    "gate": "QUALIFICATION",
+    "owners": [
+      "qualification",
+      "mcp",
+      "client",
+      "integration"
+    ],
+    "setup": "Select exact Claude Code, Codex or Cursor versions for each client compatibility claim intended for release.",
+    "action": "Use actual sessions of every claimed version to discover tools, perform setup, execute long work, encounter denial and recover a disconnected mutation.",
+    "expected": [
+      "Each named client/version has retained executed interoperability evidence.",
+      "Unsupported or untested clients are not advertised as qualified and client compatibility is not an executor-containment claim."
+    ]
+  },
+  {
+    "id": "QUALIFICATION.baseline_mcp",
+    "gate": "QUALIFICATION",
+    "owners": [
+      "qualification",
+      "mcp",
+      "registry",
+      "integration"
+    ],
+    "setup": "A pinned protocol client disables resources, prompts, sampling, elicitation and protocol task extensions.",
+    "action": "Discover and operate all required product capabilities, including setup challenges, long work and recovery.",
+    "expected": [
+      "Baseline stdio tools and durable polling provide complete authorized functionality without optional features.",
+      "Input/output schemas, result/error mapping and negotiated protocol behavior match the pinned supported revision."
+    ]
+  },
+  {
+    "id": "QUALIFICATION.adapter_bounds",
+    "gate": "QUALIFICATION",
+    "owners": [
+      "qualification",
+      "responses",
+      "github",
+      "httpread",
+      "serenity",
+      "effects",
+      "accounting"
+    ],
+    "setup": "Pin public provider, GitHub, bounded HTTP and Serenity adapters with controlled fault simulators and authorized live qualification fixtures where required.",
+    "action": "Exercise cost bounds, disclosure destinations, timeouts, retries, confirmations, repository-head checks, memory freshness and lost acknowledgements.",
+    "expected": [
+      "Record exact adapter/source/protocol/profile versions and observed physical calls.",
+      "Unsupported hard caps, safe-idempotency windows, continuation/context guarantees or memory operations remain unavailable or explicitly advisory as permitted, never inferred from upstream claims."
+    ]
+  },
+  {
+    "id": "QUALIFICATION.release_evidence",
+    "gate": "QUALIFICATION",
+    "owners": [
+      "qualification",
+      "integration",
+      "evidence"
+    ],
+    "setup": "All named acceptance cases have executable harness identities and retained case results.",
+    "action": "Assemble the release report and audit skipped, planned, failed and passing runs against Z01-Z21 and required journeys.",
+    "expected": [
+      "Each required passing case records source/config/tool versions, expected and observed results, and retained failure evidence from fault tests.",
+      "Planned tests, skipped suites, golden files alone and a zero process exit do not satisfy release gates.",
+      "README and installation/client/platform claims match executed evidence; public fixtures use synthetic identities and contain no private operational data."
+    ]
+  }
+]

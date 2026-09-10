@@ -1,0 +1,3359 @@
+{
+  "revision": 1,
+  "requirements": [
+    {
+      "requirement": "R1-002",
+      "section": "1",
+      "kind": "requirement",
+      "owner": "internal/configuration",
+      "participants": [
+        "internal/installation",
+        "tests/integration"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R1-003",
+      "section": "1",
+      "kind": "requirement",
+      "owner": "internal/configuration",
+      "participants": [
+        "internal/installation",
+        "tests/integration"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R1-004",
+      "section": "1",
+      "kind": "requirement",
+      "owner": "internal/configuration",
+      "participants": [
+        "internal/installation",
+        "tests/integration"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R1-005",
+      "section": "1",
+      "kind": "requirement",
+      "owner": "internal/configuration",
+      "participants": [
+        "internal/installation",
+        "tests/integration"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R1-006",
+      "section": "1",
+      "kind": "requirement",
+      "owner": "internal/configuration",
+      "participants": [
+        "internal/installation",
+        "tests/integration"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R2.1-002",
+      "section": "2.1",
+      "kind": "requirement",
+      "owner": "internal/configuration",
+      "participants": [
+        "internal/identity",
+        "internal/policy",
+        "internal/accounting",
+        "internal/memory",
+        "internal/installation",
+        "internal/desktop"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R2.1-003",
+      "section": "2.1",
+      "kind": "requirement",
+      "owner": "internal/configuration",
+      "participants": [
+        "internal/identity",
+        "internal/policy",
+        "internal/accounting",
+        "internal/memory",
+        "internal/installation",
+        "internal/desktop"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R2.1-004",
+      "section": "2.1",
+      "kind": "requirement",
+      "owner": "internal/configuration",
+      "participants": [
+        "internal/identity",
+        "internal/policy",
+        "internal/accounting",
+        "internal/memory",
+        "internal/installation",
+        "internal/desktop"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R2.1-005",
+      "section": "2.1",
+      "kind": "requirement",
+      "owner": "internal/configuration",
+      "participants": [
+        "internal/identity",
+        "internal/policy",
+        "internal/accounting",
+        "internal/memory",
+        "internal/installation",
+        "internal/desktop"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R2.1-006",
+      "section": "2.1",
+      "kind": "requirement",
+      "owner": "internal/configuration",
+      "participants": [
+        "internal/identity",
+        "internal/policy",
+        "internal/accounting",
+        "internal/memory",
+        "internal/installation",
+        "internal/desktop"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R2.2-002",
+      "section": "2.2",
+      "kind": "requirement",
+      "owner": "internal/identity",
+      "participants": [
+        "internal/execution",
+        "internal/cli",
+        "internal/mcp",
+        "internal/desktop"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R2.2-003",
+      "section": "2.2",
+      "kind": "requirement",
+      "owner": "internal/identity",
+      "participants": [
+        "internal/execution",
+        "internal/cli",
+        "internal/mcp",
+        "internal/desktop"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R2.2-004",
+      "section": "2.2",
+      "kind": "requirement",
+      "owner": "internal/identity",
+      "participants": [
+        "internal/execution",
+        "internal/cli",
+        "internal/mcp",
+        "internal/desktop"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R2.2-005",
+      "section": "2.2",
+      "kind": "requirement",
+      "owner": "internal/identity",
+      "participants": [
+        "internal/execution",
+        "internal/cli",
+        "internal/mcp",
+        "internal/desktop"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R2.3-002",
+      "section": "2.3",
+      "kind": "requirement",
+      "owner": "tests/integration",
+      "participants": [
+        "tests/qualification",
+        "internal/desktop",
+        "internal/installation"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R2.3-003",
+      "section": "2.3",
+      "kind": "requirement",
+      "owner": "tests/integration",
+      "participants": [
+        "tests/qualification",
+        "internal/desktop",
+        "internal/installation"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R2.3-004",
+      "section": "2.3",
+      "kind": "requirement",
+      "owner": "tests/integration",
+      "participants": [
+        "tests/qualification",
+        "internal/desktop",
+        "internal/installation"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R2.4-002",
+      "section": "2.4",
+      "kind": "requirement",
+      "owner": "internal/controller",
+      "participants": [
+        "internal/mcp",
+        "internal/execution",
+        "packaging",
+        "tests/qualification"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R2.4-003",
+      "section": "2.4",
+      "kind": "requirement",
+      "owner": "internal/controller",
+      "participants": [
+        "internal/mcp",
+        "internal/execution",
+        "packaging",
+        "tests/qualification"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R3-002",
+      "section": "3",
+      "kind": "requirement",
+      "owner": "internal/storage",
+      "participants": [
+        "internal/platform",
+        "internal/application",
+        "internal/controller",
+        "internal/server",
+        "internal/client",
+        "internal/registry",
+        "internal/installation",
+        "internal/artifacts",
+        "internal/adapters/serenity",
+        "packaging"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R3-003",
+      "section": "3",
+      "kind": "requirement",
+      "owner": "internal/storage",
+      "participants": [
+        "internal/platform",
+        "internal/application",
+        "internal/controller",
+        "internal/server",
+        "internal/client",
+        "internal/registry",
+        "internal/installation",
+        "internal/artifacts",
+        "internal/adapters/serenity",
+        "packaging"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R3-004",
+      "section": "3",
+      "kind": "requirement",
+      "owner": "internal/storage",
+      "participants": [
+        "internal/platform",
+        "internal/application",
+        "internal/controller",
+        "internal/server",
+        "internal/client",
+        "internal/registry",
+        "internal/installation",
+        "internal/artifacts",
+        "internal/adapters/serenity",
+        "packaging"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R3-005",
+      "section": "3",
+      "kind": "requirement",
+      "owner": "internal/storage",
+      "participants": [
+        "internal/platform",
+        "internal/application",
+        "internal/controller",
+        "internal/server",
+        "internal/client",
+        "internal/registry",
+        "internal/installation",
+        "internal/artifacts",
+        "internal/adapters/serenity",
+        "packaging"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R3-006",
+      "section": "3",
+      "kind": "requirement",
+      "owner": "internal/storage",
+      "participants": [
+        "internal/platform",
+        "internal/application",
+        "internal/controller",
+        "internal/server",
+        "internal/client",
+        "internal/registry",
+        "internal/installation",
+        "internal/artifacts",
+        "internal/adapters/serenity",
+        "packaging"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R3-007",
+      "section": "3",
+      "kind": "requirement",
+      "owner": "internal/storage",
+      "participants": [
+        "internal/platform",
+        "internal/application",
+        "internal/controller",
+        "internal/server",
+        "internal/client",
+        "internal/registry",
+        "internal/installation",
+        "internal/artifacts",
+        "internal/adapters/serenity",
+        "packaging"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R3-008",
+      "section": "3",
+      "kind": "requirement",
+      "owner": "internal/storage",
+      "participants": [
+        "internal/platform",
+        "internal/application",
+        "internal/controller",
+        "internal/server",
+        "internal/client",
+        "internal/registry",
+        "internal/installation",
+        "internal/artifacts",
+        "internal/adapters/serenity",
+        "packaging"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R3-009",
+      "section": "3",
+      "kind": "requirement",
+      "owner": "internal/storage",
+      "participants": [
+        "internal/platform",
+        "internal/application",
+        "internal/controller",
+        "internal/server",
+        "internal/client",
+        "internal/registry",
+        "internal/installation",
+        "internal/artifacts",
+        "internal/adapters/serenity",
+        "packaging"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R4-002",
+      "section": "4",
+      "kind": "requirement",
+      "owner": "internal/contract",
+      "participants": [
+        "internal/configuration",
+        "internal/identity",
+        "internal/tasks",
+        "internal/execution",
+        "internal/effects",
+        "tests/integration"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R4-003",
+      "section": "4",
+      "kind": "requirement",
+      "owner": "internal/contract",
+      "participants": [
+        "internal/configuration",
+        "internal/identity",
+        "internal/tasks",
+        "internal/execution",
+        "internal/effects",
+        "tests/integration"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R4-004",
+      "section": "4",
+      "kind": "requirement",
+      "owner": "internal/contract",
+      "participants": [
+        "internal/configuration",
+        "internal/identity",
+        "internal/tasks",
+        "internal/execution",
+        "internal/effects",
+        "tests/integration"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R5-002",
+      "section": "5",
+      "kind": "requirement",
+      "owner": "internal/identity",
+      "participants": [
+        "internal/policy",
+        "internal/reviews",
+        "internal/configuration",
+        "internal/effects",
+        "internal/accounting",
+        "internal/installation"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R5-003",
+      "section": "5",
+      "kind": "requirement",
+      "owner": "internal/identity",
+      "participants": [
+        "internal/policy",
+        "internal/reviews",
+        "internal/configuration",
+        "internal/effects",
+        "internal/accounting",
+        "internal/installation"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R5-004",
+      "section": "5",
+      "kind": "requirement",
+      "owner": "internal/identity",
+      "participants": [
+        "internal/policy",
+        "internal/reviews",
+        "internal/configuration",
+        "internal/effects",
+        "internal/accounting",
+        "internal/installation"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R5-005",
+      "section": "5",
+      "kind": "requirement",
+      "owner": "internal/identity",
+      "participants": [
+        "internal/policy",
+        "internal/reviews",
+        "internal/configuration",
+        "internal/effects",
+        "internal/accounting",
+        "internal/installation"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R5-006",
+      "section": "5",
+      "kind": "requirement",
+      "owner": "internal/identity",
+      "participants": [
+        "internal/policy",
+        "internal/reviews",
+        "internal/configuration",
+        "internal/effects",
+        "internal/accounting",
+        "internal/installation"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R5-007",
+      "section": "5",
+      "kind": "requirement",
+      "owner": "internal/identity",
+      "participants": [
+        "internal/policy",
+        "internal/reviews",
+        "internal/configuration",
+        "internal/effects",
+        "internal/accounting",
+        "internal/installation"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R5-008",
+      "section": "5",
+      "kind": "requirement",
+      "owner": "internal/identity",
+      "participants": [
+        "internal/policy",
+        "internal/reviews",
+        "internal/configuration",
+        "internal/effects",
+        "internal/accounting",
+        "internal/installation"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R5-009",
+      "section": "5",
+      "kind": "requirement",
+      "owner": "internal/identity",
+      "participants": [
+        "internal/policy",
+        "internal/reviews",
+        "internal/configuration",
+        "internal/effects",
+        "internal/accounting",
+        "internal/installation"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R5-010",
+      "section": "5",
+      "kind": "requirement",
+      "owner": "internal/identity",
+      "participants": [
+        "internal/policy",
+        "internal/reviews",
+        "internal/configuration",
+        "internal/effects",
+        "internal/accounting",
+        "internal/installation"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R6-002",
+      "section": "6",
+      "kind": "requirement",
+      "owner": "internal/configuration",
+      "participants": [
+        "internal/identity",
+        "internal/connections",
+        "internal/desktop",
+        "tests/integration"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R6-003",
+      "section": "6",
+      "kind": "requirement",
+      "owner": "internal/configuration",
+      "participants": [
+        "internal/identity",
+        "internal/connections",
+        "internal/desktop",
+        "tests/integration"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R6-004",
+      "section": "6",
+      "kind": "requirement",
+      "owner": "internal/configuration",
+      "participants": [
+        "internal/identity",
+        "internal/connections",
+        "internal/desktop",
+        "tests/integration"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R6-005",
+      "section": "6",
+      "kind": "requirement",
+      "owner": "internal/configuration",
+      "participants": [
+        "internal/identity",
+        "internal/connections",
+        "internal/desktop",
+        "tests/integration"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R6-006",
+      "section": "6",
+      "kind": "requirement",
+      "owner": "internal/configuration",
+      "participants": [
+        "internal/identity",
+        "internal/connections",
+        "internal/desktop",
+        "tests/integration"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R6-007",
+      "section": "6",
+      "kind": "requirement",
+      "owner": "internal/configuration",
+      "participants": [
+        "internal/identity",
+        "internal/connections",
+        "internal/desktop",
+        "tests/integration"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R6-008",
+      "section": "6",
+      "kind": "requirement",
+      "owner": "internal/configuration",
+      "participants": [
+        "internal/identity",
+        "internal/connections",
+        "internal/desktop",
+        "tests/integration"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R7.1-002",
+      "section": "7.1",
+      "kind": "requirement",
+      "owner": "internal/skills",
+      "participants": [
+        "internal/configuration",
+        "internal/policy"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R7.1-003",
+      "section": "7.1",
+      "kind": "requirement",
+      "owner": "internal/skills",
+      "participants": [
+        "internal/configuration",
+        "internal/policy"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R7.1-004",
+      "section": "7.1",
+      "kind": "requirement",
+      "owner": "internal/skills",
+      "participants": [
+        "internal/configuration",
+        "internal/policy"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R7.2-002",
+      "section": "7.2",
+      "kind": "requirement",
+      "owner": "internal/connections",
+      "participants": [
+        "internal/effects",
+        "internal/execution",
+        "internal/registry",
+        "internal/mcp"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R7.2-003",
+      "section": "7.2",
+      "kind": "requirement",
+      "owner": "internal/connections",
+      "participants": [
+        "internal/effects",
+        "internal/execution",
+        "internal/registry",
+        "internal/mcp"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R7.3-002",
+      "section": "7.3",
+      "kind": "requirement",
+      "owner": "internal/connections",
+      "participants": [
+        "internal/platform",
+        "internal/effects",
+        "internal/adapters/responses",
+        "internal/server",
+        "internal/client"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R7.3-003",
+      "section": "7.3",
+      "kind": "requirement",
+      "owner": "internal/connections",
+      "participants": [
+        "internal/platform",
+        "internal/effects",
+        "internal/adapters/responses",
+        "internal/server",
+        "internal/client"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R7.3-004",
+      "section": "7.3",
+      "kind": "requirement",
+      "owner": "internal/connections",
+      "participants": [
+        "internal/platform",
+        "internal/effects",
+        "internal/adapters/responses",
+        "internal/server",
+        "internal/client"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R8.1-002",
+      "section": "8.1",
+      "kind": "requirement",
+      "owner": "internal/registry",
+      "participants": [
+        "internal/application",
+        "internal/cli",
+        "internal/mcp",
+        "tests/integration"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R8.1-003",
+      "section": "8.1",
+      "kind": "requirement",
+      "owner": "internal/registry",
+      "participants": [
+        "internal/application",
+        "internal/cli",
+        "internal/mcp",
+        "tests/integration"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R8.1-004",
+      "section": "8.1",
+      "kind": "requirement",
+      "owner": "internal/registry",
+      "participants": [
+        "internal/application",
+        "internal/cli",
+        "internal/mcp",
+        "tests/integration"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R8.1-005",
+      "section": "8.1",
+      "kind": "requirement",
+      "owner": "internal/registry",
+      "participants": [
+        "internal/application",
+        "internal/cli",
+        "internal/mcp",
+        "tests/integration"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R8.1-006",
+      "section": "8.1",
+      "kind": "requirement",
+      "owner": "internal/registry",
+      "participants": [
+        "internal/application",
+        "internal/cli",
+        "internal/mcp",
+        "tests/integration"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R8.2-002",
+      "section": "8.2",
+      "kind": "requirement",
+      "owner": "internal/cli",
+      "participants": [
+        "internal/client",
+        "cmd/zatiti"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R8.2-003",
+      "section": "8.2",
+      "kind": "requirement",
+      "owner": "internal/cli",
+      "participants": [
+        "internal/client",
+        "cmd/zatiti"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R8.2-004",
+      "section": "8.2",
+      "kind": "requirement",
+      "owner": "internal/cli",
+      "participants": [
+        "internal/client",
+        "cmd/zatiti"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R8.2-005",
+      "section": "8.2",
+      "kind": "requirement",
+      "owner": "internal/cli",
+      "participants": [
+        "internal/client",
+        "cmd/zatiti"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R8.3-002",
+      "section": "8.3",
+      "kind": "requirement",
+      "owner": "internal/mcp",
+      "participants": [
+        "internal/client",
+        "cmd/zatiti",
+        "tests/qualification"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R8.3-003",
+      "section": "8.3",
+      "kind": "requirement",
+      "owner": "internal/mcp",
+      "participants": [
+        "internal/client",
+        "cmd/zatiti",
+        "tests/qualification"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R8.3-004",
+      "section": "8.3",
+      "kind": "requirement",
+      "owner": "internal/mcp",
+      "participants": [
+        "internal/client",
+        "cmd/zatiti",
+        "tests/qualification"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R8.4-002",
+      "section": "8.4",
+      "kind": "requirement",
+      "owner": "internal/contract",
+      "participants": [
+        "internal/evidence",
+        "internal/application",
+        "internal/server",
+        "internal/client",
+        "internal/cli",
+        "internal/mcp",
+        "internal/artifacts",
+        "internal/installation",
+        "tests/integration"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R8.4-003",
+      "section": "8.4",
+      "kind": "requirement",
+      "owner": "internal/contract",
+      "participants": [
+        "internal/evidence",
+        "internal/application",
+        "internal/server",
+        "internal/client",
+        "internal/cli",
+        "internal/mcp",
+        "internal/artifacts",
+        "internal/installation",
+        "tests/integration"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R8.4-004",
+      "section": "8.4",
+      "kind": "requirement",
+      "owner": "internal/contract",
+      "participants": [
+        "internal/evidence",
+        "internal/application",
+        "internal/server",
+        "internal/client",
+        "internal/cli",
+        "internal/mcp",
+        "internal/artifacts",
+        "internal/installation",
+        "tests/integration"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R8.4-005",
+      "section": "8.4",
+      "kind": "requirement",
+      "owner": "internal/contract",
+      "participants": [
+        "internal/evidence",
+        "internal/application",
+        "internal/server",
+        "internal/client",
+        "internal/cli",
+        "internal/mcp",
+        "internal/artifacts",
+        "internal/installation",
+        "tests/integration"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R8.4-006",
+      "section": "8.4",
+      "kind": "requirement",
+      "owner": "internal/contract",
+      "participants": [
+        "internal/evidence",
+        "internal/application",
+        "internal/server",
+        "internal/client",
+        "internal/cli",
+        "internal/mcp",
+        "internal/artifacts",
+        "internal/installation",
+        "tests/integration"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R8.4-007",
+      "section": "8.4",
+      "kind": "requirement",
+      "owner": "internal/contract",
+      "participants": [
+        "internal/evidence",
+        "internal/application",
+        "internal/server",
+        "internal/client",
+        "internal/cli",
+        "internal/mcp",
+        "internal/artifacts",
+        "internal/installation",
+        "tests/integration"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R8.4-008",
+      "section": "8.4",
+      "kind": "requirement",
+      "owner": "internal/contract",
+      "participants": [
+        "internal/evidence",
+        "internal/application",
+        "internal/server",
+        "internal/client",
+        "internal/cli",
+        "internal/mcp",
+        "internal/artifacts",
+        "internal/installation",
+        "tests/integration"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R9-002",
+      "section": "9",
+      "kind": "requirement",
+      "owner": "internal/tasks",
+      "participants": [
+        "internal/execution",
+        "internal/scheduling",
+        "internal/messaging",
+        "internal/accounting",
+        "internal/adapters/responses",
+        "internal/controller"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R9-003",
+      "section": "9",
+      "kind": "requirement",
+      "owner": "internal/tasks",
+      "participants": [
+        "internal/execution",
+        "internal/scheduling",
+        "internal/messaging",
+        "internal/accounting",
+        "internal/adapters/responses",
+        "internal/controller"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R9-004",
+      "section": "9",
+      "kind": "requirement",
+      "owner": "internal/tasks",
+      "participants": [
+        "internal/execution",
+        "internal/scheduling",
+        "internal/messaging",
+        "internal/accounting",
+        "internal/adapters/responses",
+        "internal/controller"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R9-005",
+      "section": "9",
+      "kind": "requirement",
+      "owner": "internal/tasks",
+      "participants": [
+        "internal/execution",
+        "internal/scheduling",
+        "internal/messaging",
+        "internal/accounting",
+        "internal/adapters/responses",
+        "internal/controller"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R9-006",
+      "section": "9",
+      "kind": "requirement",
+      "owner": "internal/tasks",
+      "participants": [
+        "internal/execution",
+        "internal/scheduling",
+        "internal/messaging",
+        "internal/accounting",
+        "internal/adapters/responses",
+        "internal/controller"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R9-007",
+      "section": "9",
+      "kind": "requirement",
+      "owner": "internal/tasks",
+      "participants": [
+        "internal/execution",
+        "internal/scheduling",
+        "internal/messaging",
+        "internal/accounting",
+        "internal/adapters/responses",
+        "internal/controller"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R9-008",
+      "section": "9",
+      "kind": "requirement",
+      "owner": "internal/tasks",
+      "participants": [
+        "internal/execution",
+        "internal/scheduling",
+        "internal/messaging",
+        "internal/accounting",
+        "internal/adapters/responses",
+        "internal/controller"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R9-009",
+      "section": "9",
+      "kind": "requirement",
+      "owner": "internal/tasks",
+      "participants": [
+        "internal/execution",
+        "internal/scheduling",
+        "internal/messaging",
+        "internal/accounting",
+        "internal/adapters/responses",
+        "internal/controller"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R9-010",
+      "section": "9",
+      "kind": "requirement",
+      "owner": "internal/tasks",
+      "participants": [
+        "internal/execution",
+        "internal/scheduling",
+        "internal/messaging",
+        "internal/accounting",
+        "internal/adapters/responses",
+        "internal/controller"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R9-011",
+      "section": "9",
+      "kind": "requirement",
+      "owner": "internal/tasks",
+      "participants": [
+        "internal/execution",
+        "internal/scheduling",
+        "internal/messaging",
+        "internal/accounting",
+        "internal/adapters/responses",
+        "internal/controller"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R9-012",
+      "section": "9",
+      "kind": "requirement",
+      "owner": "internal/tasks",
+      "participants": [
+        "internal/execution",
+        "internal/scheduling",
+        "internal/messaging",
+        "internal/accounting",
+        "internal/adapters/responses",
+        "internal/controller"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R9-013",
+      "section": "9",
+      "kind": "requirement",
+      "owner": "internal/tasks",
+      "participants": [
+        "internal/execution",
+        "internal/scheduling",
+        "internal/messaging",
+        "internal/accounting",
+        "internal/adapters/responses",
+        "internal/controller"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R10-002",
+      "section": "10",
+      "kind": "requirement",
+      "owner": "internal/effects",
+      "participants": [
+        "internal/reviews",
+        "internal/accounting",
+        "internal/controller",
+        "internal/adapters/github",
+        "internal/adapters/httpread",
+        "internal/adapters/responses",
+        "internal/adapters/serenity"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R10-003",
+      "section": "10",
+      "kind": "requirement",
+      "owner": "internal/effects",
+      "participants": [
+        "internal/reviews",
+        "internal/accounting",
+        "internal/controller",
+        "internal/adapters/github",
+        "internal/adapters/httpread",
+        "internal/adapters/responses",
+        "internal/adapters/serenity"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R10-004",
+      "section": "10",
+      "kind": "requirement",
+      "owner": "internal/effects",
+      "participants": [
+        "internal/reviews",
+        "internal/accounting",
+        "internal/controller",
+        "internal/adapters/github",
+        "internal/adapters/httpread",
+        "internal/adapters/responses",
+        "internal/adapters/serenity"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R10-005",
+      "section": "10",
+      "kind": "requirement",
+      "owner": "internal/effects",
+      "participants": [
+        "internal/reviews",
+        "internal/accounting",
+        "internal/controller",
+        "internal/adapters/github",
+        "internal/adapters/httpread",
+        "internal/adapters/responses",
+        "internal/adapters/serenity"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R10-006",
+      "section": "10",
+      "kind": "requirement",
+      "owner": "internal/effects",
+      "participants": [
+        "internal/reviews",
+        "internal/accounting",
+        "internal/controller",
+        "internal/adapters/github",
+        "internal/adapters/httpread",
+        "internal/adapters/responses",
+        "internal/adapters/serenity"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R10-007",
+      "section": "10",
+      "kind": "requirement",
+      "owner": "internal/effects",
+      "participants": [
+        "internal/reviews",
+        "internal/accounting",
+        "internal/controller",
+        "internal/adapters/github",
+        "internal/adapters/httpread",
+        "internal/adapters/responses",
+        "internal/adapters/serenity"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R10-008",
+      "section": "10",
+      "kind": "requirement",
+      "owner": "internal/effects",
+      "participants": [
+        "internal/reviews",
+        "internal/accounting",
+        "internal/controller",
+        "internal/adapters/github",
+        "internal/adapters/httpread",
+        "internal/adapters/responses",
+        "internal/adapters/serenity"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R11-002",
+      "section": "11",
+      "kind": "requirement",
+      "owner": "internal/accounting",
+      "participants": [
+        "internal/evidence",
+        "internal/artifacts",
+        "internal/installation",
+        "internal/platform",
+        "internal/storage",
+        "packaging"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R11-003",
+      "section": "11",
+      "kind": "requirement",
+      "owner": "internal/accounting",
+      "participants": [
+        "internal/evidence",
+        "internal/artifacts",
+        "internal/installation",
+        "internal/platform",
+        "internal/storage",
+        "packaging"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R11-004",
+      "section": "11",
+      "kind": "requirement",
+      "owner": "internal/accounting",
+      "participants": [
+        "internal/evidence",
+        "internal/artifacts",
+        "internal/installation",
+        "internal/platform",
+        "internal/storage",
+        "packaging"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R11-005",
+      "section": "11",
+      "kind": "requirement",
+      "owner": "internal/accounting",
+      "participants": [
+        "internal/evidence",
+        "internal/artifacts",
+        "internal/installation",
+        "internal/platform",
+        "internal/storage",
+        "packaging"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R11-006",
+      "section": "11",
+      "kind": "requirement",
+      "owner": "internal/accounting",
+      "participants": [
+        "internal/evidence",
+        "internal/artifacts",
+        "internal/installation",
+        "internal/platform",
+        "internal/storage",
+        "packaging"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R12-002",
+      "section": "12",
+      "kind": "requirement",
+      "owner": "tests/integration",
+      "participants": [
+        "tests/qualification"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R12-003",
+      "section": "12",
+      "kind": "requirement",
+      "owner": "tests/integration",
+      "participants": [
+        "tests/qualification"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R12-004",
+      "section": "12",
+      "kind": "requirement",
+      "owner": "tests/integration",
+      "participants": [
+        "tests/qualification"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R12-005",
+      "section": "12",
+      "kind": "requirement",
+      "owner": "tests/integration",
+      "participants": [
+        "tests/qualification"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R12-006",
+      "section": "12",
+      "kind": "requirement",
+      "owner": "tests/integration",
+      "participants": [
+        "tests/qualification"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R12-007",
+      "section": "12",
+      "kind": "requirement",
+      "owner": "tests/integration",
+      "participants": [
+        "tests/qualification"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R12-008",
+      "section": "12",
+      "kind": "requirement",
+      "owner": "tests/integration",
+      "participants": [
+        "tests/qualification"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R13-002",
+      "section": "13",
+      "kind": "requirement",
+      "owner": "tests/integration",
+      "participants": [
+        "tests/qualification",
+        ".github/workflows",
+        "packaging"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R13-003",
+      "section": "13",
+      "kind": "requirement",
+      "owner": "tests/integration",
+      "participants": [
+        "tests/qualification",
+        ".github/workflows",
+        "packaging"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R14-002",
+      "section": "14",
+      "kind": "requirement",
+      "owner": "packaging",
+      "participants": [
+        ".github/workflows",
+        "tests/integration"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R14-003",
+      "section": "14",
+      "kind": "requirement",
+      "owner": "packaging",
+      "participants": [
+        ".github/workflows",
+        "tests/integration"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R14-004",
+      "section": "14",
+      "kind": "requirement",
+      "owner": "packaging",
+      "participants": [
+        ".github/workflows",
+        "tests/integration"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R15-002",
+      "section": "15",
+      "kind": "requirement",
+      "owner": "internal/memory",
+      "participants": [
+        "internal/adapters/serenity",
+        "internal/execution",
+        "internal/policy",
+        "internal/installation",
+        "internal/desktop"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R15-003",
+      "section": "15",
+      "kind": "requirement",
+      "owner": "internal/memory",
+      "participants": [
+        "internal/adapters/serenity",
+        "internal/execution",
+        "internal/policy",
+        "internal/installation",
+        "internal/desktop"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R15-004",
+      "section": "15",
+      "kind": "requirement",
+      "owner": "internal/memory",
+      "participants": [
+        "internal/adapters/serenity",
+        "internal/execution",
+        "internal/policy",
+        "internal/installation",
+        "internal/desktop"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R15-005",
+      "section": "15",
+      "kind": "requirement",
+      "owner": "internal/memory",
+      "participants": [
+        "internal/adapters/serenity",
+        "internal/execution",
+        "internal/policy",
+        "internal/installation",
+        "internal/desktop"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R15-006",
+      "section": "15",
+      "kind": "requirement",
+      "owner": "internal/memory",
+      "participants": [
+        "internal/adapters/serenity",
+        "internal/execution",
+        "internal/policy",
+        "internal/installation",
+        "internal/desktop"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R15-007",
+      "section": "15",
+      "kind": "requirement",
+      "owner": "internal/memory",
+      "participants": [
+        "internal/adapters/serenity",
+        "internal/execution",
+        "internal/policy",
+        "internal/installation",
+        "internal/desktop"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R15-008",
+      "section": "15",
+      "kind": "requirement",
+      "owner": "internal/memory",
+      "participants": [
+        "internal/adapters/serenity",
+        "internal/execution",
+        "internal/policy",
+        "internal/installation",
+        "internal/desktop"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R15-009",
+      "section": "15",
+      "kind": "requirement",
+      "owner": "internal/memory",
+      "participants": [
+        "internal/adapters/serenity",
+        "internal/execution",
+        "internal/policy",
+        "internal/installation",
+        "internal/desktop"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R16-002",
+      "section": "16",
+      "kind": "requirement",
+      "owner": "internal/desktop",
+      "participants": [
+        "internal/messaging",
+        "internal/configuration",
+        "internal/client",
+        "tests/qualification"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R16-003",
+      "section": "16",
+      "kind": "requirement",
+      "owner": "internal/desktop",
+      "participants": [
+        "internal/messaging",
+        "internal/configuration",
+        "internal/client",
+        "tests/qualification"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R16-004",
+      "section": "16",
+      "kind": "requirement",
+      "owner": "internal/desktop",
+      "participants": [
+        "internal/messaging",
+        "internal/configuration",
+        "internal/client",
+        "tests/qualification"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R16-005",
+      "section": "16",
+      "kind": "requirement",
+      "owner": "internal/desktop",
+      "participants": [
+        "internal/messaging",
+        "internal/configuration",
+        "internal/client",
+        "tests/qualification"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R16-006",
+      "section": "16",
+      "kind": "requirement",
+      "owner": "internal/desktop",
+      "participants": [
+        "internal/messaging",
+        "internal/configuration",
+        "internal/client",
+        "tests/qualification"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R16-007",
+      "section": "16",
+      "kind": "requirement",
+      "owner": "internal/desktop",
+      "participants": [
+        "internal/messaging",
+        "internal/configuration",
+        "internal/client",
+        "tests/qualification"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R16-008",
+      "section": "16",
+      "kind": "requirement",
+      "owner": "internal/desktop",
+      "participants": [
+        "internal/messaging",
+        "internal/configuration",
+        "internal/client",
+        "tests/qualification"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R16-009",
+      "section": "16",
+      "kind": "requirement",
+      "owner": "internal/desktop",
+      "participants": [
+        "internal/messaging",
+        "internal/configuration",
+        "internal/client",
+        "tests/qualification"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R16-010",
+      "section": "16",
+      "kind": "requirement",
+      "owner": "internal/desktop",
+      "participants": [
+        "internal/messaging",
+        "internal/configuration",
+        "internal/client",
+        "tests/qualification"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R17-002",
+      "section": "17",
+      "kind": "reference",
+      "owner": "tests/integration",
+      "participants": [
+        "tests/qualification"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    }
+  ],
+  "acceptance_cases": [
+    {
+      "id": "Z01.duplicate_controller",
+      "gate": "Z01",
+      "scopes": [
+        "internal/platform",
+        "internal/controller",
+        "internal/storage",
+        "tests/integration"
+      ]
+    },
+    {
+      "id": "Z01.revoked_principal",
+      "gate": "Z01",
+      "scopes": [
+        "internal/identity",
+        "internal/policy",
+        "internal/application",
+        "tests/integration"
+      ]
+    },
+    {
+      "id": "Z01.cross_scope_reference",
+      "gate": "Z01",
+      "scopes": [
+        "internal/identity",
+        "internal/configuration",
+        "internal/policy",
+        "tests/integration"
+      ]
+    },
+    {
+      "id": "Z01.credential_custody",
+      "gate": "Z01",
+      "scopes": [
+        "internal/identity",
+        "internal/connections",
+        "internal/platform",
+        "tests/integration"
+      ]
+    },
+    {
+      "id": "Z02.registry_surface",
+      "gate": "Z02",
+      "scopes": [
+        "internal/registry",
+        "internal/cli",
+        "internal/mcp",
+        "tests/integration"
+      ]
+    },
+    {
+      "id": "Z02.lifecycle_parity",
+      "gate": "Z02",
+      "scopes": [
+        "tests/integration",
+        "internal/registry",
+        "internal/cli",
+        "internal/mcp",
+        "internal/application"
+      ]
+    },
+    {
+      "id": "Z02.wire_errors",
+      "gate": "Z02",
+      "scopes": [
+        "internal/cli",
+        "internal/mcp",
+        "internal/contract",
+        "tests/integration"
+      ]
+    },
+    {
+      "id": "Z03.agent_setup_mcp",
+      "gate": "Z03",
+      "scopes": [
+        "tests/integration",
+        "internal/mcp",
+        "internal/configuration",
+        "internal/connections",
+        "internal/skills",
+        "internal/tasks"
+      ]
+    },
+    {
+      "id": "Z03.agent_setup_cli",
+      "gate": "Z03",
+      "scopes": [
+        "tests/integration",
+        "internal/cli",
+        "internal/configuration",
+        "internal/connections",
+        "internal/skills",
+        "internal/tasks"
+      ]
+    },
+    {
+      "id": "Z03.bootstrap_parity",
+      "gate": "Z03",
+      "scopes": [
+        "internal/installation",
+        "internal/identity",
+        "internal/platform",
+        "internal/cli",
+        "internal/mcp",
+        "tests/integration"
+      ]
+    },
+    {
+      "id": "Z04.concurrent_apply",
+      "gate": "Z04",
+      "scopes": [
+        "internal/configuration",
+        "internal/storage",
+        "internal/application",
+        "tests/integration"
+      ]
+    },
+    {
+      "id": "Z04.stale_dependencies",
+      "gate": "Z04",
+      "scopes": [
+        "internal/configuration",
+        "internal/connections",
+        "internal/reviews",
+        "tests/integration"
+      ]
+    },
+    {
+      "id": "Z04.explicit_removal",
+      "gate": "Z04",
+      "scopes": [
+        "internal/configuration",
+        "internal/tasks",
+        "internal/effects",
+        "tests/integration"
+      ]
+    },
+    {
+      "id": "Z04.old_authority",
+      "gate": "Z04",
+      "scopes": [
+        "internal/configuration",
+        "internal/policy",
+        "internal/identity",
+        "tests/integration"
+      ]
+    },
+    {
+      "id": "Z04.submission_replay",
+      "gate": "Z04",
+      "scopes": [
+        "internal/application",
+        "internal/evidence",
+        "internal/configuration",
+        "tests/integration"
+      ]
+    },
+    {
+      "id": "Z05.malicious_instructions",
+      "gate": "Z05",
+      "scopes": [
+        "internal/skills",
+        "internal/policy",
+        "internal/execution",
+        "tests/integration"
+      ]
+    },
+    {
+      "id": "Z05.archive_safety",
+      "gate": "Z05",
+      "scopes": [
+        "internal/skills",
+        "internal/artifacts",
+        "tests/integration"
+      ]
+    },
+    {
+      "id": "Z05.changed_tool_schema",
+      "gate": "Z05",
+      "scopes": [
+        "internal/configuration",
+        "internal/policy",
+        "internal/execution",
+        "tests/integration"
+      ]
+    },
+    {
+      "id": "Z05.callback_discovery",
+      "gate": "Z05",
+      "scopes": [
+        "internal/connections",
+        "internal/effects",
+        "internal/adapters/httpread",
+        "tests/integration"
+      ]
+    },
+    {
+      "id": "Z05.empty_bindings",
+      "gate": "Z05",
+      "scopes": [
+        "internal/configuration",
+        "internal/execution",
+        "internal/policy",
+        "tests/integration"
+      ]
+    },
+    {
+      "id": "Z05.agent_self_grant",
+      "gate": "Z05",
+      "scopes": [
+        "internal/identity",
+        "internal/configuration",
+        "internal/policy",
+        "tests/integration"
+      ]
+    },
+    {
+      "id": "Z06.admission_claim_revoke",
+      "gate": "Z06",
+      "scopes": [
+        "internal/effects",
+        "internal/policy",
+        "internal/accounting",
+        "tests/integration"
+      ]
+    },
+    {
+      "id": "Z06.crash_call_counts",
+      "gate": "Z06",
+      "scopes": [
+        "internal/effects",
+        "internal/storage",
+        "internal/controller",
+        "tests/integration"
+      ]
+    },
+    {
+      "id": "Z06.no_hidden_retries",
+      "gate": "Z06",
+      "scopes": [
+        "internal/effects",
+        "internal/adapters/responses",
+        "internal/adapters/github",
+        "internal/adapters/httpread",
+        "tests/integration"
+      ]
+    },
+    {
+      "id": "Z07.exact_action_changes",
+      "gate": "Z07",
+      "scopes": [
+        "internal/reviews",
+        "internal/effects",
+        "internal/configuration",
+        "tests/integration"
+      ]
+    },
+    {
+      "id": "Z07.agent_impersonates_human",
+      "gate": "Z07",
+      "scopes": [
+        "internal/reviews",
+        "internal/identity",
+        "internal/cli",
+        "internal/mcp",
+        "tests/integration"
+      ]
+    },
+    {
+      "id": "Z07.reviewer_eligibility",
+      "gate": "Z07",
+      "scopes": [
+        "internal/reviews",
+        "internal/identity",
+        "internal/policy",
+        "tests/integration"
+      ]
+    },
+    {
+      "id": "Z07.transport_denial",
+      "gate": "Z07",
+      "scopes": [
+        "internal/reviews",
+        "internal/cli",
+        "internal/mcp",
+        "tests/integration"
+      ]
+    },
+    {
+      "id": "Z08.lost_success_response",
+      "gate": "Z08",
+      "scopes": [
+        "internal/effects",
+        "internal/accounting",
+        "tests/integration"
+      ]
+    },
+    {
+      "id": "Z08.failed_retry_after_unknown",
+      "gate": "Z08",
+      "scopes": [
+        "internal/effects",
+        "internal/accounting",
+        "tests/integration"
+      ]
+    },
+    {
+      "id": "Z08.expired_provider_key",
+      "gate": "Z08",
+      "scopes": [
+        "internal/effects",
+        "tests/integration"
+      ]
+    },
+    {
+      "id": "Z08.delayed_confirmation",
+      "gate": "Z08",
+      "scopes": [
+        "internal/effects",
+        "internal/evidence",
+        "internal/accounting",
+        "tests/integration"
+      ]
+    },
+    {
+      "id": "Z08.cancel_unknown",
+      "gate": "Z08",
+      "scopes": [
+        "internal/effects",
+        "internal/tasks",
+        "internal/accounting",
+        "tests/integration"
+      ]
+    },
+    {
+      "id": "Z09.concurrent_reservations",
+      "gate": "Z09",
+      "scopes": [
+        "internal/accounting",
+        "internal/storage",
+        "internal/tasks",
+        "internal/execution",
+        "tests/integration"
+      ]
+    },
+    {
+      "id": "Z09.unknown_external_cost",
+      "gate": "Z09",
+      "scopes": [
+        "internal/accounting",
+        "internal/execution",
+        "tests/integration"
+      ]
+    },
+    {
+      "id": "Z09.missing_price",
+      "gate": "Z09",
+      "scopes": [
+        "internal/accounting",
+        "internal/connections",
+        "internal/adapters/responses",
+        "tests/integration"
+      ]
+    },
+    {
+      "id": "Z09.settlement_recovery",
+      "gate": "Z09",
+      "scopes": [
+        "internal/accounting",
+        "internal/effects",
+        "internal/storage",
+        "tests/integration"
+      ]
+    },
+    {
+      "id": "Z10.duplicate_schedule_claim",
+      "gate": "Z10",
+      "scopes": [
+        "internal/scheduling",
+        "internal/execution",
+        "internal/storage",
+        "tests/integration"
+      ]
+    },
+    {
+      "id": "Z10.restart_identity",
+      "gate": "Z10",
+      "scopes": [
+        "internal/execution",
+        "internal/controller",
+        "internal/storage",
+        "tests/integration"
+      ]
+    },
+    {
+      "id": "Z10.stale_heartbeat",
+      "gate": "Z10",
+      "scopes": [
+        "internal/execution",
+        "internal/tasks",
+        "tests/integration"
+      ]
+    },
+    {
+      "id": "Z10.lost_claim_ack",
+      "gate": "Z10",
+      "scopes": [
+        "internal/execution",
+        "internal/application",
+        "internal/evidence",
+        "tests/integration"
+      ]
+    },
+    {
+      "id": "Z10.cancelled_wake",
+      "gate": "Z10",
+      "scopes": [
+        "internal/scheduling",
+        "internal/tasks",
+        "internal/messaging",
+        "tests/integration"
+      ]
+    },
+    {
+      "id": "Z10.conflicting_replacement",
+      "gate": "Z10",
+      "scopes": [
+        "internal/execution",
+        "internal/effects",
+        "tests/integration"
+      ]
+    },
+    {
+      "id": "Z11.exit_zero_missing_output",
+      "gate": "Z11",
+      "scopes": [
+        "internal/tasks",
+        "internal/execution",
+        "internal/artifacts",
+        "tests/integration"
+      ]
+    },
+    {
+      "id": "Z11.tampered_verifier",
+      "gate": "Z11",
+      "scopes": [
+        "internal/tasks",
+        "internal/configuration",
+        "internal/execution",
+        "tests/integration"
+      ]
+    },
+    {
+      "id": "Z11.worker_assertion",
+      "gate": "Z11",
+      "scopes": [
+        "internal/tasks",
+        "internal/execution",
+        "internal/evidence",
+        "tests/integration"
+      ]
+    },
+    {
+      "id": "Z11.failed_child_acceptance",
+      "gate": "Z11",
+      "scopes": [
+        "internal/tasks",
+        "internal/execution",
+        "tests/integration"
+      ]
+    },
+    {
+      "id": "Z11.manual_acceptance_label",
+      "gate": "Z11",
+      "scopes": [
+        "internal/tasks",
+        "internal/reviews",
+        "internal/evidence",
+        "tests/integration"
+      ]
+    },
+    {
+      "id": "Z12.delegation_narrows",
+      "gate": "Z12",
+      "scopes": [
+        "internal/tasks",
+        "internal/policy",
+        "internal/accounting",
+        "tests/integration"
+      ]
+    },
+    {
+      "id": "Z12.root_limits_shared",
+      "gate": "Z12",
+      "scopes": [
+        "internal/tasks",
+        "internal/execution",
+        "internal/accounting",
+        "tests/integration"
+      ]
+    },
+    {
+      "id": "Z13.secret_surfaces",
+      "gate": "Z13",
+      "scopes": [
+        "internal/connections",
+        "internal/identity",
+        "internal/artifacts",
+        "internal/evidence",
+        "internal/cli",
+        "internal/mcp",
+        "tests/integration"
+      ]
+    },
+    {
+      "id": "Z13.advisory_worker",
+      "gate": "Z13",
+      "scopes": [
+        "internal/execution",
+        "internal/desktop",
+        "internal/registry",
+        "tests/integration"
+      ]
+    },
+    {
+      "id": "Z13.compatibility_not_containment",
+      "gate": "Z13",
+      "scopes": [
+        "internal/execution",
+        "tests/qualification",
+        "tests/integration"
+      ]
+    },
+    {
+      "id": "Z14.atomic_state_event",
+      "gate": "Z14",
+      "scopes": [
+        "internal/storage",
+        "internal/evidence",
+        "internal/application",
+        "tests/integration"
+      ]
+    },
+    {
+      "id": "Z14.missing_artifact",
+      "gate": "Z14",
+      "scopes": [
+        "internal/artifacts",
+        "internal/tasks",
+        "internal/installation",
+        "tests/integration"
+      ]
+    },
+    {
+      "id": "Z14.paused_restore",
+      "gate": "Z14",
+      "scopes": [
+        "internal/installation",
+        "internal/storage",
+        "internal/platform",
+        "internal/artifacts",
+        "tests/integration"
+      ]
+    },
+    {
+      "id": "Z14.outbox_revocation_restore",
+      "gate": "Z14",
+      "scopes": [
+        "internal/installation",
+        "internal/effects",
+        "internal/accounting",
+        "internal/identity",
+        "internal/memory",
+        "tests/integration"
+      ]
+    },
+    {
+      "id": "Z15.canonical_roundtrip",
+      "gate": "Z15",
+      "scopes": [
+        "internal/configuration",
+        "internal/skills",
+        "tests/integration"
+      ]
+    },
+    {
+      "id": "Z15.cross_installation_rebind",
+      "gate": "Z15",
+      "scopes": [
+        "internal/configuration",
+        "internal/connections",
+        "internal/identity",
+        "tests/integration"
+      ]
+    },
+    {
+      "id": "Z15.export_exclusions",
+      "gate": "Z15",
+      "scopes": [
+        "internal/configuration",
+        "internal/evidence",
+        "internal/installation",
+        "tests/integration"
+      ]
+    },
+    {
+      "id": "Z16.cli_to_mcp",
+      "gate": "Z16",
+      "scopes": [
+        "tests/integration",
+        "internal/cli",
+        "internal/mcp",
+        "internal/client"
+      ]
+    },
+    {
+      "id": "Z16.mcp_to_cli",
+      "gate": "Z16",
+      "scopes": [
+        "tests/integration",
+        "internal/cli",
+        "internal/mcp",
+        "internal/client"
+      ]
+    },
+    {
+      "id": "Z16.disconnect_command_lookup",
+      "gate": "Z16",
+      "scopes": [
+        "internal/application",
+        "internal/evidence",
+        "internal/client",
+        "internal/cli",
+        "internal/mcp",
+        "tests/integration"
+      ]
+    },
+    {
+      "id": "Z16.cursor_expiry",
+      "gate": "Z16",
+      "scopes": [
+        "internal/evidence",
+        "internal/client",
+        "internal/desktop",
+        "internal/cli",
+        "internal/mcp",
+        "tests/integration"
+      ]
+    },
+    {
+      "id": "Z16.interrupted_upload",
+      "gate": "Z16",
+      "scopes": [
+        "internal/artifacts",
+        "internal/client",
+        "internal/cli",
+        "internal/mcp",
+        "tests/integration"
+      ]
+    },
+    {
+      "id": "Z16.maintenance_restore_parity",
+      "gate": "Z16",
+      "scopes": [
+        "internal/installation",
+        "internal/server",
+        "internal/cli",
+        "internal/mcp",
+        "tests/integration"
+      ]
+    },
+    {
+      "id": "Z17.atomic_chief_creation",
+      "gate": "Z17",
+      "scopes": [
+        "internal/configuration",
+        "internal/identity",
+        "internal/memory",
+        "tests/integration"
+      ]
+    },
+    {
+      "id": "Z17.hierarchy_cycles",
+      "gate": "Z17",
+      "scopes": [
+        "internal/configuration",
+        "internal/policy",
+        "tests/integration"
+      ]
+    },
+    {
+      "id": "Z17.chief_replacement",
+      "gate": "Z17",
+      "scopes": [
+        "internal/configuration",
+        "internal/memory",
+        "internal/tasks",
+        "internal/evidence",
+        "tests/integration"
+      ]
+    },
+    {
+      "id": "Z17.inherited_denial",
+      "gate": "Z17",
+      "scopes": [
+        "internal/policy",
+        "internal/configuration",
+        "tests/integration"
+      ]
+    },
+    {
+      "id": "Z17.ancestor_budget_exhaustion",
+      "gate": "Z17",
+      "scopes": [
+        "internal/accounting",
+        "internal/tasks",
+        "internal/policy",
+        "tests/integration"
+      ]
+    },
+    {
+      "id": "Z17.scoped_reparenting",
+      "gate": "Z17",
+      "scopes": [
+        "internal/configuration",
+        "internal/policy",
+        "internal/memory",
+        "internal/tasks",
+        "tests/integration"
+      ]
+    },
+    {
+      "id": "Z18.unauthorized_brain_not_queried",
+      "gate": "Z18",
+      "scopes": [
+        "internal/memory",
+        "internal/adapters/serenity",
+        "internal/policy",
+        "tests/integration"
+      ]
+    },
+    {
+      "id": "Z18.restricted_project_memory",
+      "gate": "Z18",
+      "scopes": [
+        "internal/memory",
+        "internal/configuration",
+        "internal/policy",
+        "tests/integration"
+      ]
+    },
+    {
+      "id": "Z18.chief_promotion_provenance",
+      "gate": "Z18",
+      "scopes": [
+        "internal/memory",
+        "internal/adapters/serenity",
+        "internal/evidence",
+        "internal/accounting",
+        "tests/integration"
+      ]
+    },
+    {
+      "id": "Z18.promotion_correction",
+      "gate": "Z18",
+      "scopes": [
+        "internal/memory",
+        "internal/adapters/serenity",
+        "internal/installation",
+        "tests/integration"
+      ]
+    },
+    {
+      "id": "Z18.stale_index",
+      "gate": "Z18",
+      "scopes": [
+        "internal/memory",
+        "internal/adapters/serenity",
+        "internal/tasks",
+        "tests/integration"
+      ]
+    },
+    {
+      "id": "Z18.retained_context",
+      "gate": "Z18",
+      "scopes": [
+        "internal/memory",
+        "internal/execution",
+        "internal/artifacts",
+        "tests/integration"
+      ]
+    },
+    {
+      "id": "Z18.memory_write_unknown",
+      "gate": "Z18",
+      "scopes": [
+        "internal/memory",
+        "internal/adapters/serenity",
+        "internal/effects",
+        "internal/accounting",
+        "tests/integration"
+      ]
+    },
+    {
+      "id": "Z18.revoked_memory_binding",
+      "gate": "Z18",
+      "scopes": [
+        "internal/memory",
+        "internal/policy",
+        "internal/execution",
+        "tests/integration"
+      ]
+    },
+    {
+      "id": "Z19.self_promotion",
+      "gate": "Z19",
+      "scopes": [
+        "internal/policy",
+        "internal/identity",
+        "internal/configuration",
+        "tests/integration"
+      ]
+    },
+    {
+      "id": "Z19.unsupported_evidence",
+      "gate": "Z19",
+      "scopes": [
+        "internal/policy",
+        "internal/evidence",
+        "internal/tasks",
+        "tests/integration"
+      ]
+    },
+    {
+      "id": "Z19.capability_promotion",
+      "gate": "Z19",
+      "scopes": [
+        "internal/policy",
+        "internal/identity",
+        "internal/reviews",
+        "tests/integration"
+      ]
+    },
+    {
+      "id": "Z19.version_requalification",
+      "gate": "Z19",
+      "scopes": [
+        "internal/policy",
+        "internal/configuration",
+        "internal/skills",
+        "tests/integration"
+      ]
+    },
+    {
+      "id": "Z19.immediate_demotion",
+      "gate": "Z19",
+      "scopes": [
+        "internal/policy",
+        "internal/identity",
+        "internal/effects",
+        "tests/integration"
+      ]
+    },
+    {
+      "id": "Z19.human_review_preserved",
+      "gate": "Z19",
+      "scopes": [
+        "internal/policy",
+        "internal/reviews",
+        "tests/integration"
+      ]
+    },
+    {
+      "id": "Z20.scheduled_cycles",
+      "gate": "Z20",
+      "scopes": [
+        "internal/scheduling",
+        "internal/tasks",
+        "internal/execution",
+        "tests/integration"
+      ]
+    },
+    {
+      "id": "Z20.reasoning_cycles",
+      "gate": "Z20",
+      "scopes": [
+        "internal/scheduling",
+        "internal/execution",
+        "internal/tasks",
+        "tests/integration"
+      ]
+    },
+    {
+      "id": "Z20.bounded_idle_spend",
+      "gate": "Z20",
+      "scopes": [
+        "internal/scheduling",
+        "internal/accounting",
+        "internal/execution",
+        "tests/integration"
+      ]
+    },
+    {
+      "id": "Z20.restart_at_wake",
+      "gate": "Z20",
+      "scopes": [
+        "internal/scheduling",
+        "internal/controller",
+        "internal/storage",
+        "tests/integration"
+      ]
+    },
+    {
+      "id": "Z20.mailbox_redelivery",
+      "gate": "Z20",
+      "scopes": [
+        "internal/messaging",
+        "internal/execution",
+        "internal/storage",
+        "tests/integration"
+      ]
+    },
+    {
+      "id": "Z20.duplicate_assignment_conflict",
+      "gate": "Z20",
+      "scopes": [
+        "internal/messaging",
+        "internal/tasks",
+        "internal/desktop",
+        "tests/integration"
+      ]
+    },
+    {
+      "id": "Z20.responsibility_pause",
+      "gate": "Z20",
+      "scopes": [
+        "internal/scheduling",
+        "internal/tasks",
+        "internal/policy",
+        "internal/desktop",
+        "tests/integration"
+      ]
+    },
+    {
+      "id": "Z21.first_conversation",
+      "gate": "Z21",
+      "scopes": [
+        "internal/desktop",
+        "internal/installation",
+        "internal/configuration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "id": "Z21.two_child_chiefs",
+      "gate": "Z21",
+      "scopes": [
+        "internal/desktop",
+        "internal/configuration",
+        "internal/messaging",
+        "tests/qualification"
+      ]
+    },
+    {
+      "id": "Z21.delegate_work",
+      "gate": "Z21",
+      "scopes": [
+        "internal/desktop",
+        "internal/tasks",
+        "internal/scheduling",
+        "internal/messaging",
+        "tests/qualification"
+      ]
+    },
+    {
+      "id": "Z21.hierarchy_navigation",
+      "gate": "Z21",
+      "scopes": [
+        "internal/desktop",
+        "internal/configuration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "id": "Z21.exact_decision",
+      "gate": "Z21",
+      "scopes": [
+        "internal/desktop",
+        "internal/reviews",
+        "internal/effects",
+        "tests/qualification"
+      ]
+    },
+    {
+      "id": "Z21.reconnect_no_duplicate",
+      "gate": "Z21",
+      "scopes": [
+        "internal/desktop",
+        "internal/client",
+        "internal/application",
+        "tests/qualification"
+      ]
+    },
+    {
+      "id": "Z21.close_client",
+      "gate": "Z21",
+      "scopes": [
+        "internal/desktop",
+        "internal/controller",
+        "internal/execution",
+        "tests/qualification"
+      ]
+    },
+    {
+      "id": "Z21.groups_and_quiet_coordination",
+      "gate": "Z21",
+      "scopes": [
+        "internal/desktop",
+        "internal/messaging",
+        "internal/memory",
+        "internal/policy",
+        "tests/qualification"
+      ]
+    },
+    {
+      "id": "Z21.capability_and_pause_cards",
+      "gate": "Z21",
+      "scopes": [
+        "internal/desktop",
+        "internal/policy",
+        "internal/reviews",
+        "internal/scheduling",
+        "tests/qualification"
+      ]
+    },
+    {
+      "id": "JOURNEY.organization_setup_cli",
+      "gate": "JOURNEY",
+      "scopes": [
+        "tests/integration",
+        "internal/cli",
+        "internal/configuration",
+        "internal/skills",
+        "internal/connections",
+        "internal/tasks"
+      ]
+    },
+    {
+      "id": "JOURNEY.organization_setup_mcp",
+      "gate": "JOURNEY",
+      "scopes": [
+        "tests/integration",
+        "internal/mcp",
+        "internal/configuration",
+        "internal/skills",
+        "internal/connections",
+        "internal/tasks"
+      ]
+    },
+    {
+      "id": "JOURNEY.engineering_cli",
+      "gate": "JOURNEY",
+      "scopes": [
+        "tests/integration",
+        "internal/cli",
+        "internal/execution",
+        "internal/adapters/github",
+        "internal/tasks",
+        "internal/reviews"
+      ]
+    },
+    {
+      "id": "JOURNEY.engineering_mcp",
+      "gate": "JOURNEY",
+      "scopes": [
+        "tests/integration",
+        "internal/mcp",
+        "internal/execution",
+        "internal/adapters/github",
+        "internal/tasks",
+        "internal/reviews"
+      ]
+    },
+    {
+      "id": "JOURNEY.research_drafting_cli",
+      "gate": "JOURNEY",
+      "scopes": [
+        "tests/integration",
+        "internal/cli",
+        "internal/adapters/responses",
+        "internal/adapters/httpread",
+        "internal/artifacts",
+        "internal/tasks"
+      ]
+    },
+    {
+      "id": "JOURNEY.research_drafting_mcp",
+      "gate": "JOURNEY",
+      "scopes": [
+        "tests/integration",
+        "internal/mcp",
+        "internal/adapters/responses",
+        "internal/adapters/httpread",
+        "internal/artifacts",
+        "internal/tasks"
+      ]
+    },
+    {
+      "id": "JOURNEY.cross_interface_fault_matrix",
+      "gate": "JOURNEY",
+      "scopes": [
+        "tests/integration",
+        "internal/cli",
+        "internal/mcp",
+        "internal/client",
+        "internal/effects",
+        "internal/installation"
+      ]
+    },
+    {
+      "id": "JOURNEY.desktop_daily_work",
+      "gate": "JOURNEY",
+      "scopes": [
+        "tests/qualification",
+        "internal/desktop",
+        "internal/configuration",
+        "internal/tasks",
+        "internal/scheduling",
+        "internal/reviews",
+        "internal/memory",
+        "internal/policy"
+      ]
+    },
+    {
+      "id": "QUALIFICATION.macos_distribution",
+      "gate": "QUALIFICATION",
+      "scopes": [
+        "tests/qualification",
+        "internal/platform",
+        "internal/installation",
+        "internal/desktop",
+        "internal/controller",
+        "internal/adapters/serenity"
+      ]
+    },
+    {
+      "id": "QUALIFICATION.linux_distribution",
+      "gate": "QUALIFICATION",
+      "scopes": [
+        "tests/qualification",
+        "internal/platform",
+        "internal/installation",
+        "internal/desktop",
+        "internal/controller",
+        "internal/adapters/serenity"
+      ]
+    },
+    {
+      "id": "QUALIFICATION.named_agent_clients",
+      "gate": "QUALIFICATION",
+      "scopes": [
+        "tests/qualification",
+        "internal/mcp",
+        "internal/client",
+        "tests/integration"
+      ]
+    },
+    {
+      "id": "QUALIFICATION.baseline_mcp",
+      "gate": "QUALIFICATION",
+      "scopes": [
+        "tests/qualification",
+        "internal/mcp",
+        "internal/registry",
+        "tests/integration"
+      ]
+    },
+    {
+      "id": "QUALIFICATION.adapter_bounds",
+      "gate": "QUALIFICATION",
+      "scopes": [
+        "tests/qualification",
+        "internal/adapters/responses",
+        "internal/adapters/github",
+        "internal/adapters/httpread",
+        "internal/adapters/serenity",
+        "internal/effects",
+        "internal/accounting"
+      ]
+    },
+    {
+      "id": "QUALIFICATION.release_evidence",
+      "gate": "QUALIFICATION",
+      "scopes": [
+        "tests/qualification",
+        "tests/integration",
+        "internal/evidence"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,521 @@
+{
+  "revision": 1,
+  "packages": [
+    {
+      "name": "contract",
+      "path": "internal/contract",
+      "kind": "foundation",
+      "imports": [],
+      "mission": "Own shared Go types, strict wire validation, canonicalization, schema-derived primitives and stable faults.",
+      "design": "Implement the exact declarations in the shared contract. No domain services, persistence, SDKs, global configuration or controller side effects. Provide Canonicalize([]byte) ([]byte,error), Hash([]byte) Digest, DecodeStrict([]byte,any) error, ValidateSchema(json.RawMessage,json.RawMessage) error, NewID() ID, and CLIExit(*Fault) int / HTTPStatus(*Fault) int. Hash hashes exact bytes; callers canonicalize JSON first. Validate JSON Schema 2020-12, local $defs/$ref, formats, oneOf/anyOf, strict objects, integer bounds and collection limits; never fetch remote schema references. Registered tool/skill JSON schemas are untrusted bounded data and cannot execute callbacks. Public identifiers/enums and generated DTO names are fixed; behavior-private helpers remain local. Schema validation and decoding must agree on duplicate keys and integer precision. Keep descriptor data secret-free.",
+      "tests": "Canonical JSON golden vectors with duplicate keys, integer overflow, semantic array order/set sorting, exact skill bytes; typed decode errors; all error/exit/HTTP mappings; UUID and digest validation.",
+      "wave": 0
+    },
+    {
+      "name": "platform",
+      "path": "internal/platform",
+      "kind": "foundation",
+      "imports": [
+        "contract"
+      ],
+      "mission": "Own OS locks, protected local configuration, secret custody, encrypted blob files and client secure storage.",
+      "design": "Expose Config{StateDir string; CredentialBackend string; MasterKeyRef string; MaxArtifactBytes int64}; Open(Config) (*Platform,error); (*Platform).Acquire(context.Context) (contract.Ownership,error); Secrets() contract.SecretStore; Blobs() contract.BlobStore; Close() error. SecretStore and BlobStore implementations are separate objects; use OS keychain/Secret Service or explicitly provisioned headless key source. State root 0700, sensitive files 0600, private Unix socket 0600, forbid unsafe symlink traversal and network-filesystem claims. A held exclusive OS file lock spans controller lifetime; close/release is explicit. No plaintext fallback if secure store unavailable. Encrypt sensitive blob bytes using authenticated encryption with per-object nonce and authenticated digest/metadata; master key lives outside SQLite/backups. Stage returns opaque staging identity, digest of plaintext exact bytes, and bounded size. Publish is atomic and durable before metadata reference; repeated identical publication is idempotent. Open decrypts/verifies full integrity before returning bounded requested bytes; missing/corrupt bytes fail artifact_fault. Never return local absolute paths through product interfaces. Disk pressure rejects new artifact-producing admissions and preserves referenced/unknown-obligation data. Export secret helper support through local trusted process plumbing, never model input. Client credentials, TLS keys and offline drafts use protected storage; do not inherit owner secrets into workers.",
+      "tests": "Competing process lock, permissions, interrupted stage/publish, encrypted roundtrip/tamper, symlink escape, unavailable key store, redacted errors, disk-pressure refusal, secret absence from child environment.",
+      "wave": 0
+    },
+    {
+      "name": "storage",
+      "path": "internal/storage",
+      "kind": "foundation",
+      "imports": [
+        "contract"
+      ],
+      "mission": "Own the SQLite writer, consistent reads, transaction Unit, migrations and atomic event outbox.",
+      "design": "Expose Config{Path string; BusyTimeout time.Duration}; Open(context.Context,Config) (contract.Database,error). Caller must hold platform installation lock. Implement StartGeneration(context.Context) (int64,error) and Generation(context.Context) (int64,error) on Database; assembly calls StartGeneration once after migrations and before serving under held ownership. SQLite driver family is modernc.org/sqlite; integration pins exact release. Migrate only with exclusive ownership; validate per-owner monotonic versions and migration SHA256, reject changed applied migration. Enforce owner table namespaces through review and migration validation; application supplies actor/scope and never exposes raw Unit externally. Implement ReadOnly guard in Unit.ExecContext/Emit; consistent snapshot Reader on one connection. Write serializes, starts short explicit transaction, calls callback once, commits state/events together, rolls back on failure/panic. SQL busy waits are bounded. Event sequence persisted increasing globally, payload redacted and authorized by evidence owner before exposure. Database.Events is trusted internal raw feed and not directly public. Backup uses actual consistent SQLite backup mechanism, not copy of a live DB main file. No domain schemas in this package.",
+      "tests": "Rollback and fault injection between state/outbox writes, concurrent serialized writers, busy deadline, read snapshot consistency, callback called once, migration digest mismatch, restart generation, valid WAL backup/restore.",
+      "wave": 0
+    },
+    {
+      "name": "identity",
+      "path": "internal/identity",
+      "kind": "domain",
+      "imports": [
+        "contract"
+      ],
+      "mission": "Own principals, grants, authentication metadata, credential references and immediate revocation.",
+      "design": "Own identity_principals, identity_grants, identity_credentials and immutable revocation records. Hash authentication tokens with a suitable one-way token verifier; raw bytes reside only in platform custody. Runtime principal/grant administration is explicitly authorized under current authority; cannot smuggle a permission expansion through principal.update or revoked credential reattachment. Principal scope and delegated grants can only fit the delegator's ceiling. Separate agent/client/worker/service/human kinds. Same-user OS access is installation trust boundary, never a claim of tenant isolation. Provision accepts only a helper-verified opaque reference for the requested principal. New credentials cannot be returned as model-visible bytes. Authentication checks revocation and expiry on every request; physical claims recheck current state. Retain revocations through backup rewind. Internal bootstrap is callable only from installation under exclusive uninitialized mode; internal promote accepts deterministic qualification bound to prior rule/ceiling and cannot approve evidence itself.",
+      "tests": "Revoked/expired credential, forged profile/username/human kind, cross-scope principal reference, grant widening, bootstrap replay, credential secrecy and revoked restore.",
+      "wave": 1
+    },
+    {
+      "name": "configuration",
+      "path": "internal/configuration",
+      "kind": "domain",
+      "imports": [
+        "contract"
+      ],
+      "mission": "Own organizations, chiefs, teams, projects, worker definitions, bindings, drafts, plans, revisions and the sole definition compiler.",
+      "design": "Own configuration_* tables for effective entities and immutable revision/plan lineage; other domains keep their own effective slices activated through their internal owner methods. Export schema is zatiti.organization/v1: installation_id, organization identity/base_revision, teams, projects, workers, skill_refs, bindings, connections metadata, policies, schedules, responsibilities, memory_bindings, execution_profiles, budgets, extensions. Include no credentials, task history or live operations. Cross-installation references explicitly rebind; preserve stable IDs or report collisions. Draft input changes use kind discriminator and full typed definition plus explicit action; zero expected_version only for creation, nonzero for existing. Plans seal complete candidate, base head, dependency/prerequisite versions, compiler/schema versions, authority delta and decisions. Apply reads old authority first, validates every owner, rechecks head/dependencies and activates all slices + revision/event atomically. No network in compiler. Ordinary typed create/update invokes _configuration.stage; bootstrap is sole uninitialized special case. Organization creation stages org/chief as one bundle and exactly one designated chief per active org. Parent tree must be acyclic; keys scoped; workers have one home org. Replacement preserves org identity/memory/history. Moves recheck inherited policy/budgets/bindings and explicitly preserve old private-memory boundaries; they cannot widen active-run authority. Parent reports require explicit reporting binding. Organization archive disables admission first; unresolved runs/artifacts/effects block final destructive removal. Omission never deletes. Definitions remain exportable even when executable prerequisites unavailable; executable activation names missing connection/profile/price. Bootstrap chief may have null profile/limits and cannot run paid work.",
+      "tests": "Atomic child/chief creation, ordinary worker no child org, duplicate chief/cycle, stale/concurrent apply, exact replay after head changes, old-policy authorization, scoped move/privacy, archive obligations, export/import/rebinding roundtrip.",
+      "wave": 1
+    },
+    {
+      "name": "skills",
+      "path": "internal/skills",
+      "kind": "domain",
+      "imports": [
+        "contract"
+      ],
+      "mission": "Own immutable skill versions, safe import validation and sealed evaluation jobs.",
+      "design": "Own skills_versions/dependencies/evaluations. SKILL.md import adapter follows published Agent Skills metadata, retains exact instruction/support file bytes and provenance/license, and stores Zatiti execution schemas/tool requirements separately. Imported text/frontmatter never installs permission. File enumeration/extraction is local IO phase with strict total/entry/path limits before publication. Reject traversal, symlink escape, devices, duplicate/case collisions, cycles and expansion bombs; do not run any imported script. Imported version starts draft; activation via compiler and explicit bindings only. Evaluations become bounded tasks/effects with pinned evaluator identity/version, sealed fixtures, candidate/model/profile/limits. Store actual observations separately from self-authored tests. Changes invalidate only dependent qualifications through policy. Expose accurate evaluation job status/artifact evidence; failed/skipped evaluation grants nothing.",
+      "tests": "Archive/path adversarial corpus, immutable content hashing, dependency cycle, schema changes, no import execution, pinned evaluator, evaluation limits and dependent qualification invalidation.",
+      "wave": 2
+    },
+    {
+      "name": "connections",
+      "path": "internal/connections",
+      "kind": "domain",
+      "imports": [
+        "contract"
+      ],
+      "mission": "Own trusted tool contracts, connection definitions, validation freshness and credential setup challenges.",
+      "design": "Own connections_contracts/connections/validations/challenges. Built-in trusted adapter contracts only; external MCP discovery/imported plugins do not install runnable code. Tool schema/account/destination/version changes require explicit candidate and qualified contract, never silent fallback. Connection create/update stages through compiler. Probe/rotation/setup remote work uses prepared governed effect or trusted local helper, not network inside Unit. Challenge begin/status/complete/cancel is typed and versioned with expiry; bind challenge to initiating principal, account and connection. Complete accepts opaque helper receipt only, verify it internally; no pasted OAuth code/token. Browser consent link is an actionable external prerequisite, not approval evidence. Same-account rotation distinct from substitution; account mismatch produces exact review/new configuration. Revoke immediately blocks claim and leaves pending physical outcomes visible. Model disclosure requires active destination/classification binding; lowering classification or changing provider requires old authority. Never put raw provider body or secret in diagnostics. Validation validity is exact connection version/account/scopes and expires at configured profile bound.",
+      "tests": "Credential challenge expiry/cancel/replay, helper forgery, raw-secret rejection, same-account rotation vs substitution, stale validation, bound destination/redirect, external plugin discovery no execution.",
+      "wave": 2
+    },
+    {
+      "name": "policy",
+      "path": "internal/policy",
+      "kind": "domain",
+      "imports": [
+        "contract"
+      ],
+      "mission": "Own deterministic authority intersection, standing/exact-review policy and earned autonomy.",
+      "design": "Own policy_definitions/restrictions/promotion_rules/qualifications and immutable evaluation evidence links. Policy rules are interpreted bounded declarative conditions only. Supported condition keys: max_cost (Money), required_classification (enum), not_before/expires_at (UTC), required_tool_version (Ref), required_worker_id (ID), required_review (bool); reject unknown executable conditions. Intersect current principal grants, hierarchy ceilings, project/binding, worker/task envelope, restrictions and current resources. Explicit deny wins; missing required condition refuses admission. Default publication/outbound messages/merge/deploy/account substitution/permission expansion require eligible owner review absent narrower prior standing policy. Expansion always under old policy. Promotions bind capability/destination/worker/model/tool/skill versions/window/rule version and independently established evidence; workers cannot approve own evidence, change evaluator/criteria or widen ceiling. Permit automatic narrow grant only under previously approved rule. Relevant changes invalidate affected qualification before new admission; incidents immediately restrict/demote before continued work. Human-required classes persist until owner explicitly changes governing rule. Model summaries and memory judgments are evidence candidates, never policy authority.",
+      "tests": "Deny intersection, missing condition, self-grant, old/new policy race, precise human-required class, qualification evidence independence/version binding, auto demotion before claim, parent ceiling.",
+      "wave": 2
+    },
+    {
+      "name": "reviews",
+      "path": "internal/reviews",
+      "kind": "domain",
+      "imports": [
+        "contract"
+      ],
+      "mission": "Own exact reviews, eligibility checks, immutable decisions and delegated review authority.",
+      "design": "Own reviews_requests/decisions/delegations. Review preview is the actual immutable Action, not a model summary. Digest binds account/destination/content/media hashes/timing/preconditions/config/tool versions, including repository head and automation consequences. Recheck principal kind/current grant, expiry/version/action digest, optional proposer separation on decide and on effect claim. Agent cannot satisfy human-required review through CLI, claimed boolean or acting as a different profile. Human credentials in a human-authorized process do not prove physical human presence. Delegation cannot broaden eligible class, scope or authority. Changed action creates a new review or invalidates old one; keep history. Manual task acceptance is a separate eligible task operation and remains distinctly labeled.",
+      "tests": "Changed content/destination/time/head, revoked/delegated reviewer, proposer separation, stale review, agent posing human, exact preview/transport denial equivalence.",
+      "wave": 2
+    },
+    {
+      "name": "accounting",
+      "path": "internal/accounting",
+      "kind": "domain",
+      "imports": [
+        "contract"
+      ],
+      "mission": "Own budget definitions, atomic reservations and exact cost/uncertainty ledgers.",
+      "design": "Own accounting_limits/reservations/entries. Reserve installation, ancestor organizations from root down, project, worker and root task in stable order under one caller transaction. Count model/evaluation/retry/delegation/Serenity spend and concurrency under same limits. Exact integer currency micro-units; rational price numerator/denominator and checked ceil for reservations, never floating-point money. Currency mismatches and overflow fail input/prerequisite, missing price refuses paid admission. Proposed defaults do not grant paid spending. Keep spent/reserved/estimated/unknown distinct; unknown physical effects retain reservations. Settlement can release only established unused bound; unknown/advisory external spend cannot be presented as zero or enforced hard cap. Budget expansion stages configuration under current old authority. Root/ancestor caps are shared across children, not copied to each child as an independent allowance.",
+      "tests": "Concurrent child/model reservations, ancestor exhaustion, exact rounding/overflow/currency, missing price, unknown cost preservation, restart settlement, no double reservation on command replay.",
+      "wave": 2
+    },
+    {
+      "name": "tasks",
+      "path": "internal/tasks",
+      "kind": "domain",
+      "imports": [
+        "contract"
+      ],
+      "mission": "Own durable outcomes, immutable accepted contracts, dependency graph and narrowing delegation.",
+      "design": "Own tasks_tasks/dependencies/acceptance/history. States: draft→ready→running→verifying→succeeded or failed; running/ready/verifying may wait with explicit reason and resume to prior admissible state; authorized cancel records intent first, terminal cancelled after stop/fencing disposition. Retry from failed/cancelled creates a new run/attempt under same accepted contract after recovery prerequisites. A worker cannot transition directly to succeeded. Parent success checks explicit required child acceptance, not merely child exit. Prevent dependency cycles. Seal verifier code/version, inputs and expected observations before execution; pending input edits require version and cannot replace accepted verifier in flight. Independent verification runs trusted pinned code through an explicitly qualified verifier runner with artifacts isolated from worker rewriting. V1 built-ins: artifact presence/digest/schema and repository patch check using pinned controlled verification command/profile; arbitrary worker-supplied verifier code is never executed as acceptance authority. Manual acceptance requires eligible configured principal and distinct manual flag. Direct user and chief assignment update same versioned task. Delegation intersects tools/destinations/project data/deadline and shares root budgets; enforce finite depth/count/concurrency/planner/model/time limits.",
+      "tests": "Exit zero missing artifact, tampered verifier, worker assertion, failed-child acceptance, manual label, stale concurrent assignment, dependency cycle, cancellation with unknown effect, narrowed delegation.",
+      "wave": 2
+    },
+    {
+      "name": "scheduling",
+      "path": "internal/scheduling",
+      "kind": "domain",
+      "imports": [
+        "contract"
+      ],
+      "mission": "Own durable schedules, responsibility reasoning cycles, occurrence identities and wake conditions.",
+      "design": "Own scheduling_definitions/responsibilities/wakes/occurrences/cycles. Scheduler is driven only by controller; no goroutine scheduler in service constructor or external fleet. Cron syntax is five-field minute/hour/day-of-month/month/day-of-week with IANA time zone; when both day fields restricted, use OR semantics. Repeated local time during DST uses UTC occurrence identity, admit each defined distinct instant once; nonexistent spring-forward local occurrence skipped. Default misfire coalesces one newest eligible missed occurrence within catch_up_seconds; older misses recorded skipped. Empty catch-up window means no catch-up. Occurrence key is schedule ID + pinned template version + UTC instant (or durable event ID for event wake). Recheck pause/cancel/reply condition at transactional admission; authenticated explicit reply events only, no external chat ingestion. Persist task creation, occurrence key and next wake atomically. Responsibilities define signals/triggers, finite per-cycle and aggregate limits, minimum reconsideration interval, pause/escalation conditions and durable outputs even on idle cycles. No arbitrary unbounded polling; controller bounded tick uses injected clock. Pause responsibility independently of unrelated work. Safe mailbox/reply wake admission is deduplicated.",
+      "tests": "DST repeats/gaps, duplicate polls/restart, catch-up coalescing, cancellation/reply at wake, durable next-wake, bounded idle cycles, aggregate cost, responsibility-only pause.",
+      "wave": 2
+    },
+    {
+      "name": "messaging",
+      "path": "internal/messaging",
+      "kind": "domain",
+      "imports": [
+        "contract"
+      ],
+      "mission": "Own conversations, durable mailboxes, participant disclosure and meaningful activity projections.",
+      "design": "Own messaging_conversations/messages/recipients/receipts/read_markers. Group membership is conversation state, not organization membership, grant or memory binding. Authorize body/attachment disclosure for all recipients before delivery; do not retroactively disclose restricted history on joining. Messages have stable ID, authenticated sender, recipients/scope/task refs. Ack after durable target inbox admission, retry deduplicates ID with content hash; different content under same ID conflicts. Workers ingest at safe step boundary; idle resume uses scheduling/execution ownership, not separate task graph. User requests/chief assignments call versioned task operations with shared task identity. Content is untrusted and cannot change grants or verifier. Persist user messages and actual delivered agent input for reconstructable owned model context. Distinguish meaningful human-facing event from routine reasoning/coordination: quiet internal work does not reorder chats, mark unread or notify. Projection action cards derive committed controller operation/task/review state; text claims are not state. Bootstrap pinned personal-chief conversation. Server scopes all conversation list/hierarchy filters, not only UI.",
+      "tests": "Mailbox redelivery/crash-after-admit, forged sender, cross-scope attachment, safe-boundary injection, group no extra authority, concurrent assignments, quiet routine messages and committed card state.",
+      "wave": 2
+    },
+    {
+      "name": "execution",
+      "path": "internal/execution",
+      "kind": "domain",
+      "imports": [
+        "contract"
+      ],
+      "mission": "Own runs, executor attempts, leases, hosted loop context, cooperative protocol and verification coordination.",
+      "design": "Own execution_runs/attempts/leases/checkpoints/context_lineage/verification_jobs. Run pins effective configuration and task inputs; attempt owns executor/lease/generation/reservation/output disposition. Concurrent claim must choose one current owner, replay lost ack returns same lease. Default heartbeat interval 15s, lease 60s capped by deadline; no revival after expiry/generation change. Stale lease fences Zatiti mutation but does not prove external process death; replacement blocks on explicit conflicting-resource/effect recovery. Hosted loop uses responses adapter only through effects; store all model-visible user messages/tools/results/memory/instructions/agent messages before dispatch. Compaction persists source lineage and actual compacted context artifact. Parse model tool proposals as untrusted typed requests and authorize through effects. Limits apply each step including continuation/evaluation. Cooperative claims return pinned task/context/bindings/capabilities and advisory usage disclaimer, never dispatch credential or owner secrets. Reports bind exact worker/attempt/lease/generation; independent verifier controls task completion. V1 verifier runner executes only accepted pinned verifier profiles in controlled environment, captures observations/artifact hashes, and cannot be replaced by reported worker checks. Cancellation requests owned-loop interrupt and retains unknown physical effects. Own attempt admission counter and release only safe concurrency resources; uncertain cost reservation stays in accounting.",
+      "tests": "Concurrent claims/lost ack, heartbeat/lease expiry/generation restart, fenced report, owned context reconstruction/compaction, safe replacement, bounded model steps, independent verification, advisory external worker limits.",
+      "wave": 2
+    },
+    {
+      "name": "effects",
+      "path": "internal/effects",
+      "kind": "domain",
+      "imports": [
+        "contract"
+      ],
+      "mission": "Own immutable actions, logical effects, physical attempts, dispatch claims and reconciliation history.",
+      "design": "Own effects_actions/operations/attempts/claims/observations/obligations. Persist exact action before any dispatch. Action preconditions support repository_head, expected_resource_versions, not_before, expires_at and allowed_automation; tool contract fixes allowed keys and parameter schema. Unknown preconditions fail. States prepared→awaiting_review/ready/denied; ready→executing after claimed admitted attempt; executing→succeeded/failed/awaiting_confirmation/outcome_unknown. Unsent expired/cancelled/denied allowed only if no earlier attempt can still act. Known provider acceptance is awaiting_confirmation, not success. Admit and claim each recheck relevant current policy and exact review. Current authorization plus budget reservation/attempt/intent/evidence is one transaction. Controller owns actual Invoke and record transaction; service never does network. Idempotency qualifications bind equivalent request/account/destination and real provider retention window. Retry is separate physical attempt with current checks, never hidden adapter retry. Unknown older attempt survives newer failure. Reconciliation bounded read needs own authorization/attempt/cost; authoritative no-effect evidence differs from eventual-consistency not-found. Compensation/replacement new linked operation with independent review. Late contradictory evidence appends explicit correction/dispute; immutable observations never rewritten. Expose unknown status honestly to UI/CLI/MCP/backup.",
+      "tests": "Admission/claim/revoke/crash interleavings with exact physical call count, lost provider success ack, failed retry after unknown, expired key, delayed confirmation/cancel, late contradiction, compensation review.",
+      "wave": 2
+    },
+    {
+      "name": "memory",
+      "path": "internal/memory",
+      "kind": "domain",
+      "imports": [
+        "contract"
+      ],
+      "mission": "Own scoped memory bindings, governed Serenity jobs and promotion/retraction lineage.",
+      "design": "Own memory_brains/bindings/jobs/intents/promotions/reconciliation, not canonical Serenity claims store. Distinct brain for each worker/org and installation, including separate personal-chief/root-org/install brain. Private restricted project knowledge stays in narrower bound brain or governed artifact, never leaked into broadly readable org brain. Select authorized brains before recall/model composition; current scope/grants/bindings and revocation matter at retrieval. Parentage/group membership no implicit read. Recall is potentially paid disclosure: effect admission/reservations govern recall/composition/embedding/extraction/curation; required unenforceable bounds make mode unavailable or explicitly advisory only where policy permits. Store actual selected context artifact retaining source/confidence/version/freshness. Cross-brain reads are not atomic snapshot; minimum unavailable freshness waits/refuses. Chief automatic curation stays within standing source disclosure and destination curate/write authority, budgets and evidence. Promotion creates new claim linked source brain/claim version/evidence/curator/redaction; copied statements not independent corroboration. Corrections/retractions create durable downstream obligations. Immediate revocation excludes future retrieval but cannot erase past disclosures/Git/backups/history. Persist writer intent and adapter command identity BEFORE dispatch to sole writer per brain. Lost ack reconciles qualified writer disposition, never blind repeat. Memory.inspect must be an authorized local read-facade query with no external paid work; if not available return prerequisite_missing directing caller to recall job. Backup manifests include brain revisions and key prerequisites; restore paused pending reconciliation.",
+      "tests": "Unauthorized brain never queried, restricted project leakage, source/destination promotion checks, provenance/correction lineage, stale freshness, actual context artifact, lost writer ack, bounded paid recall, distinct bootstrap brains.",
+      "wave": 2
+    },
+    {
+      "name": "artifacts",
+      "path": "internal/artifacts",
+      "kind": "domain",
+      "imports": [
+        "contract"
+      ],
+      "mission": "Own immutable artifact metadata, resumable bounded uploads and integrity-visible byte access.",
+      "design": "Own artifacts_metadata/uploads/chunks/pins/faults. BlobStore owns bytes/encryption and filesystem operations. Use local IO prepare/perform/finish interface to stream/stage/hash/publish outside Unit; publish file before committing metadata. Upload begin binds caller/scope/expected size/hash/classification/media type. Chunk requires exact contiguous offset or identical existing chunk replay, validates decoded <=1 MiB and chunk digest, different replay conflicts. Finish checks total bytes/hash, publishes CAS and then metadata/event atomically. Crash after file publish creates reclaimable orphan; after metadata but missing bytes yields visible artifact_fault and blocks success. Never accept server file paths. Range reads authorize metadata/classification then verify integrity before bounded disclosure; returned base64 reflects actual bytes. Sensitive bytes encrypted with external key; metadata hashes not proof of external custody. Retention pins unresolved work/context/verifier/backup references; staging GC only unreferenced expired items. Disk pressure pauses producing work, never erases uncertainty.",
+      "tests": "Interrupted upload/chunk replay/conflict/limit, forged digest, scope read denial, publish/commit crash positions, missing bytes fault, encrypted tamper, pinned retention and bounded range.",
+      "wave": 2
+    },
+    {
+      "name": "evidence",
+      "path": "internal/evidence",
+      "kind": "domain",
+      "imports": [
+        "contract"
+      ],
+      "mission": "Own durable command replay, authorized event reads and receipts projected from actual evidence.",
+      "design": "Own evidence_commands/receipts/retention_pins; storage owns append-only transactional event/outbox records. Event/command outputs must authorize scope/principal and redact before persistence where possible. Keys bind principal/op/version/canonical request hash, same payload returns original complete/accepted/failed disposition, different content conflicts. Reserve identity and successful state in one writer transaction. Application records rejected mutation disposition separately after rollback with concurrency-safe same-key behavior. Retain keys >=30 days AND as long as any unresolved obligation depends on them. Event cursor scopes filters/principal and snapshot; authenticated opaque token expiry explicit, new snapshot required after retention gap. Storage.Events is trusted raw feed, not a bypass endpoint. Receipts link immutable decisions/provider observations/artifact digests, not worker assertion or log text. Arbitrary secret recognition/infallible history is not claimed; host/DB admin outside threat model. No pruning unresolved evidence to appear healthy.",
+      "tests": "Duplicate command concurrency/hash conflict/lost ack/replay stale head, rollback+durable refusal, principal isolation, event cursor scope/expiry, state-event atomicity, secret redaction and unresolved retention.",
+      "wave": 2
+    },
+    {
+      "name": "installation",
+      "path": "internal/installation",
+      "kind": "domain",
+      "imports": [
+        "contract"
+      ],
+      "mission": "Own bootstrap, installation restriction/maintenance state, health, encrypted backup and paused restore jobs.",
+      "design": "Own installation_state/jobs/manifests/recovery_obligations. Initialize only local OS-authorized uninitialized destination under exclusive lock. Trusted helper creates owner secret outside transaction, then one bootstrap transaction initializes identity + root organization/chief + distinct memory brains + pinned conversation and evidence. Handle crash between helper and transaction with opaque pending bootstrap intent and recover/cleanup without exporting token; refuse reinitialization. Init selects secure store and creates metadata only, no paid model until configured. Bootstrap MCP mode ends after success and cannot become admin session. Maintenance/pause is immediate acknowledged restriction; drains/fences owned work, preserve unknown effects. Backup IO obtains SQLite consistent backup plus pinned artifact manifest/brain revisions at quiesced boundary, encrypts and verifies whole bundle before completed. Backups use schema zatiti.backup/v1: installation_id, generation, database_digest, artifact manifest entries, brain revisions, retained command/revocation obligations and opaque key prerequisites. Never include decrypting master keys in same bundle. Restore uploaded reference only, maintenance exclusive ownership, validate integrity/version/keys, starts paused. Preserve both backup and later durable revocation/command/claimed-effect obligations across rewind: before restore export an encrypted current recovery overlay, merge monotonically after restore; fail closed on unresolved conflicts and keep overlay. Reconcile pending effects/memory writes before resume; a database rewind cannot undo providers. Doctor names missing provider/price/profile/Serenity/platform limitations without secrets. Local IO executor handles backup/helper work; no IO in Unit.",
+      "tests": "One-time init parity/lock/crash cleanup, no owner token in result, provider-less chief, backup WAL+artifact consistency/encryption/verify, current revocation overlay survives old backup, paused restore and unresolved provider/memory obligations.",
+      "wave": 2
+    },
+    {
+      "name": "registry",
+      "path": "internal/registry",
+      "kind": "infrastructure",
+      "imports": [
+        "contract"
+      ],
+      "mission": "Own typed operation registration, collision checks, discovery, schema/OpenAPI generation and parity enumeration.",
+      "design": "Expose New([]contract.Module) (*Registry,error), Lookup(string,int64) (contract.Descriptor,contract.Handler,error), Public() []contract.Descriptor, OpenAPI() ([]byte,error), and Bind generic helper exactly as shared contract. Implement capabilities as registry-owned Module; dependency-free descriptor discovery avoids recursive self-registration. Freeze public IDs/CLI/MCP names and schemas from embedded catalog. Validate unique IDs/version, owner, exact DTO schemas, dot/underscore name collisions, complete mappings, descriptor mode and submission semantics. Internal descriptors never appear in Public/OpenAPI/CLI/MCP or accepted public routing. OpenAPI 3.1 emits local schemas, error/result envelopes, request bodies and explicit accepted references. Generated client-facing catalog is derived from runtime typed registry, never another behavior authority. Baseline functionality cannot depend on optional MCP resources/prompts.",
+      "tests": "All operation mappings/schema conformance, collision rejection, internal visibility, deterministic OpenAPI and self-discovery, DTO validation consistency.",
+      "wave": 1
+    },
+    {
+      "name": "application",
+      "path": "internal/application",
+      "kind": "infrastructure",
+      "imports": [
+        "contract",
+        "registry"
+      ],
+      "mission": "Own authenticated operation execution, transaction composition, internal port allowlists and durable submission replay.",
+      "design": "Expose New(contract.Database,*registry.Registry,contract.Authenticator,contract.Clock,contract.IDSource) (*Application,error); Invoke(context.Context,contract.Actor,string,contract.Request) (contract.Result,error); Internal(context.Context,contract.Actor,contract.Scope,contract.Invocation) (contract.Payload,error); Authenticate(context.Context,[]byte) (contract.Actor,error); AuthenticateCertificate(context.Context,contract.Digest) (contract.Actor,error); Ports() contract.Ports. Application consumes only registry/contract, never imports domain packages. Expose NewPorts() *PortRouter, (*PortRouter).For(string) contract.Ports, and Bind(*Application) error for the exact two-phase assembly specified in common contract. Composition registers modules and injects app Ports using a constructor-safe late-bound dispatcher; no service calls until assembly complete. Public Invoke derives Unit scope from validated input plus referenced resource, revalidates authenticated actor, rejects internal operation. Gate _policy.check for every public capability; exceptions only bootstrap/capabilities as explicitly specified. Create mutation command identity/replay before stale checks; invoke handler in same ordered transaction; wrap result. Internal method callable only trusted controller scope, checks service principal and allowed entrypoints; ordinary domain Ports calls retain same actor/Unit and caller stack. Enforce catalog callers/visibility/mode, no recursive operation loop, no impersonation. Separate local IO prepare/perform/finish paths for explicitly registered IO modules; repeat authorization and version check at final metadata publication/disclosure. An accepted external job is not dispatched in request transaction. Record known refusal after rollback without losing dedupe concurrency. Bootstrap invokes shared installation initializer with special local capability granted by owner lock only.",
+      "tests": "Cross-owner rollback, no network under Unit, same-unit actor propagation, forbidden internal transport call, allowlist and cycle check, duplicate commands, IO conflict/revocation races, denial parity.",
+      "wave": 1
+    },
+    {
+      "name": "controller",
+      "path": "internal/controller",
+      "kind": "infrastructure",
+      "imports": [
+        "contract",
+        "application",
+        "platform",
+        "storage"
+      ],
+      "mission": "Own one controller lifetime, adapter dispatch, durable background work and recovery coordination.",
+      "design": "Expose Config{StateDir string; TickInterval time.Duration; MaxDispatch int}; New(Config,*application.Application,contract.Database,contract.Ownership,map[string]contract.Adapter,contract.Clock) (*Controller,error); Run(context.Context) error; Stop(context.Context) error. Entrypoint startup holder acquires platform lock, migrates DB and advances generation before constructing controller/listener; controller receives held Ownership, does not lock or advance twice, and stops admission on Ownership.Lost. Tick default 1s and max batch 100, bounded by installation concurrency; no scheduler in MCP/desktop/service New. Resolve durable due wakes and pending intents, admit then claim via app.Internal, call exactly one adapter outside tx, record observation. Persist ambiguity when process dies after claim; restart fences old generation and never resends claimed effects blindly. Owned model/memory/probe outcomes delivered to corresponding internal record/observation methods transactionally after effect record using durable deduplicated outbox. Worker loop context bytes staged and published before context pin and effect intent. Trusted verifier runner and local IO background jobs execute outside tx with own pinned accepted profile; record results through task/execution owner. Loss of installation lock/ownership immediately stops admission; graceful shutdown fences or records unresolved work, never invents provider cancellation. Run remains active after desktop disconnect. Secret helper/Serenity process lifecycle belongs controller installation packaging, one writer/brain; refuse unsupported version/capability.",
+      "tests": "Duplicate controller, startup crash generation, dispatch exact counts, record write loss, wake/mailbox replay, graceful stop versus unknown outcome, client closes while work continues.",
+      "wave": 3
+    },
+    {
+      "name": "server",
+      "path": "internal/server",
+      "kind": "infrastructure",
+      "imports": [
+        "contract",
+        "application"
+      ],
+      "mission": "Own private socket HTTP/JSON and explicit remote-desktop mutual TLS transport.",
+      "design": "Expose Config{SocketPath string; RemoteAddress string; TLSConfig *tls.Config; MaxBodyBytes int64}; New(Config,*application.Application) (*Server,error); Serve(context.Context) error; Close(context.Context) error. net/http over private Unix socket, no unauthenticated public bind. Selected client credential arrives in Authorization header from secure client storage, never operation input/logs; TLS certificate maps to provisioned principal and still checks current app authority. Versioned POST operation endpoint only; public descriptor allowlist. Request limits/timeouts, strict content type/envelope, bounded responses, request cancellation never assumes accepted command rollback. Authenticate before data lookup. Domain faults encoded in envelope with shared HTTP mapping; protocol malformed bodies mapped invalid_input. No scheduler/DB raw handler, no alternate restore/admin endpoint. Local-only bootstrap route guarded by initializer lock/state; remote cannot bootstrap.",
+      "tests": "Unix permissions, profile-name spoof, token redaction, TLS principal/revocation, remote bootstrap denial, malformed/oversized body, disconnect after commit and key recovery.",
+      "wave": 2
+    },
+    {
+      "name": "client",
+      "path": "internal/client",
+      "kind": "infrastructure",
+      "imports": [
+        "contract"
+      ],
+      "mission": "Own shared controller client, secure credential plumbing, reconnect and explicit submission-key retry.",
+      "design": "Expose Config{SocketPath string; RemoteURL string; TLSConfig *tls.Config; Timeout time.Duration}; New(Config,contract.CredentialSource) (*Client,error); (*Client).Call(context.Context,string,contract.Request) (contract.Result,error), implementing contract.Operator. Local Unix HTTP transport; explicit remote TLS only for configured desktop. CredentialSource provides header bytes securely per request, never JSON/tool arguments. Strict envelope validation and bounded body reads. Never replace a mutation key after timeout. Auto retries only safe transport connection establishment before any request bytes, or explicit identical submission with same key; unknown ack resolved command.get. Cursor expiry surfaces snapshot_required so caller refreshes snapshot before replay; never fill gap silently. No server file opens, scheduler, model defaults or hidden paid fallback. Cancellation of local wait is not cancellation of accepted command.",
+      "tests": "Disconnect-before/after-commit, original key replay, malformed envelope, unavailable controller, TLS validation, no secret in diagnostics, expired cursor snapshot recovery.",
+      "wave": 1
+    },
+    {
+      "name": "cli",
+      "path": "internal/cli",
+      "kind": "infrastructure",
+      "imports": [
+        "contract",
+        "registry",
+        "client"
+      ],
+      "mission": "Own Cobra command generation, structured input, deterministic JSON output and process exit mapping.",
+      "design": "Expose IO{In io.Reader; Out io.Writer; Err io.Writer}; New(contract.Operator,[]contract.Descriptor,IO) (*cobra.Command,error); Execute(context.Context,[]string,contract.Operator,[]contract.Descriptor,IO) int. Generate all public product commands from descriptor mappings. --input @file / --input - / inline JSON read on client side; all convenience flags fill same schema. --json one complete envelope to stdout, diagnostics stderr; no TTY requirement/silent input prompts. Missing fields fail invalid_input. capabilities shortcut explicit. Transport mechanics serve/mcp serve/help/completion belong cmd assembly and cannot register shadow product operations. Bootstrap uses same initializer via local client mode; credential profile is startup configuration inaccessible in operation arguments. Read artifact bytes into chosen client path only; never send a server path. Preserve command IDs, accepted job refs, version/key/error/cursor semantics. Human rendering derives same result and honest unknown/manual/advisory labels.",
+      "tests": "Every descriptor subprocess mapping, stdin/file/inline equivalence, no TTY, exact stdout/exit, stderr secrets, accepted long task vs failure, bootstrap and key replay parity.",
+      "wave": 2
+    },
+    {
+      "name": "mcp",
+      "path": "internal/mcp",
+      "kind": "infrastructure",
+      "imports": [
+        "contract",
+        "registry",
+        "client"
+      ],
+      "mission": "Own stdio MCP adapter over the common authenticated controller client.",
+      "design": "Expose Serve(context.Context,io.Reader,io.Writer,io.Writer,contract.Operator,[]contract.Descriptor) error. Pin official SDK and supported protocol during foundation qualification. stdout only MCP frames, diagnostics stderr. Register each public descriptor as actual typed tool, no shell/CLI wrapper. Common request schema including submission_key is tool input; descriptor data schema wraps common result for output. structuredContent and text JSON equivalent; domain failed => isError, malformed protocol => protocol error. Tool args cannot pick credential profile. Missing controller named controller_unavailable, never start another scheduler. Baseline only initialize/tools/list/tools/call and Zatiti polling; optional sampling/elicitation/resources/prompts/task extensions disabled during qualification. Bootstrap --bootstrap is separate one-time local initializer session, exits after success, cannot become privileged ordinary session. No remote HTTP MCP in v1.",
+      "tests": "Protocol initialization/frames/error distinction, all tools mapped and structured/text equality, no optional features, scoped credential spoof, missing controller, bootstrap lifecycle, real client parity.",
+      "wave": 2
+    },
+    {
+      "name": "desktop",
+      "path": "internal/desktop",
+      "kind": "infrastructure",
+      "imports": [
+        "contract",
+        "client"
+      ],
+      "mission": "Own native Fyne chat-first human workspace and acknowledged controller-derived views.",
+      "design": "Expose Config{ApplicationID string; CacheDir string}; New(Config,contract.Operator) (*Desktop,error); Run(context.Context) error. Fyne v2 chosen to keep implementation Go-scoped; actual macOS/Linux GUI qualification required. Use platform protected secure credential/cache plumbing from entrypoint, never embed tokens in UI model context. Main layout: left sidebar All chats and optional organization selector, main conversation list/selected conversation, composer, optional details panel. Initial onboarding runs necessary bootstrap/connection/limits prerequisites then opens pinned personal-chief chat ready composer; returning launch restores selected conversation. New menu worker/org/group; org optional parent defaults current context. Chat/direct controls stage exact same compiler objects; cards distinguish proposed/awaiting decision/committed created. Org filter includes descendants, worker label muted org, clickable full ancestry breadcrumb, disambiguating search, not color-only membership. User can speak directly to any worker. Group chats create no org/grants/memory permissions. Durable task/responsibility/files/reviews/memory remain discoverable outside scroll. Needs you shows exact current human decisions and links evidence. Actions show controller disposition, not model narration. Quiet internal reasoning does not reorder/unread/notify. Offline display labels cached/stale and unsent drafts; never show pause/approval/delivery acknowledged until server confirms. Reconnect snapshots+events and original command keys, explicit expired cursor recovery. Capability-specific autonomy cards show exact evidence/rule/authority change, not global trust score. Pause/stop controls report acknowledgment and unknown effects. Closing client leaves server running, disclosed during setup. Memory UI shows scope/sources/freshness and active recall removal vs historical erasure.",
+      "tests": "Real first-chief and two-child-chief journey, ordinary workers, group/no extra authority, breadcrumbs/filter, durable responsibility/result/exact approval, offline stale/unsent/reconnect, quiet coordination, close while controller runs.",
+      "wave": 3
+    },
+    {
+      "name": "responses",
+      "path": "internal/adapters/responses",
+      "kind": "adapter",
+      "imports": [
+        "contract"
+      ],
+      "mission": "Qualified hosted Responses model adapter.",
+      "design": "Adapter name responses; profile schema zatiti.responses/v1 has endpoint, model, connection_id, input/output token bounds, max_response_bytes, timeout_seconds, currency, input/output rational rates, capability evidence artifact. Endpoint/provider/model are installation inputs, no default account/model/price. Pin documented Responses wire fields during qualification and preserve full model-visible request artifact. Input Action.parameters includes context_artifact, max_output_tokens, tool_contract_versions; output Observation.evidence includes response_id, output artifact refs, typed tool proposals and finish reason. Never execute model tool proposals in adapter. Enforce explicit disclosure destination/classification and bounded token charges; refuse hard cap if selected API cannot bound required spend. One physical HTTP invocation per Invoke, no mutation retry. Timeout after bytes sent => unknown; provider response acceptance not invented success. Sanitize provider bodies/errors; usage exact observed tokens/prices or unknown. Reconciliation only documented authoritative lookup under qualified retention, otherwise preserve unknown. No hidden provider/model fallback.",
+      "tests": "Controlled-server physical call counts, exact request/account/destination, timeout-after-success unknown, no hidden retries, bound enforcement, secret redaction, supported real profile/version qualification.",
+      "wave": 2
+    },
+    {
+      "name": "github",
+      "path": "internal/adapters/github",
+      "kind": "adapter",
+      "imports": [
+        "contract"
+      ],
+      "mission": "Qualified GitHub repository artifact/publication adapter.",
+      "design": "Adapter name github; profile schema zatiti.github/v1 has api_base, allowed_repositories, allowed_actions, max_response_bytes, timeout_seconds, idempotency_profile and automation_constraints. Action.parameters discriminated kind read_repository/create_branch/push_commit/open_pull_request/merge_pull_request; exact repository owner/name, branch/head SHA, base SHA, patch/content artifact hashes, PR title/body artifact and relevant workflow/automation bounds. Restrict v1 publication to qualified forms, unsupported action named capability_unsupported. Review binds exact repo/head/content/timing/account and downstream automation effects; opening PR is consequential. Fetch/check current preconditions immediately before governed call where contract supports, but no unrecorded additional HTTP calls: preflight is its own admitted read. No automatic hidden write retry. Provider accepted/confirmed/unknown distinguished; GitHub eventual not-found cannot prove nonexecution. Repository outputs are governed immutable artifacts, never unbounded controller working-directory shell execution. HTTP redirects cannot widen host/account scope.",
+      "tests": "Controlled-server physical call counts, exact request/account/destination, timeout-after-success unknown, no hidden retries, bound enforcement, secret redaction, supported real profile/version qualification.",
+      "wave": 2
+    },
+    {
+      "name": "httpread",
+      "path": "internal/adapters/httpread",
+      "kind": "adapter",
+      "imports": [
+        "contract"
+      ],
+      "mission": "Qualified bounded public HTTP reads for research.",
+      "design": "Adapter name httpread; profile schema zatiti.httpread/v1 has allowed_origins, max_bytes, timeout_seconds, max_redirects, allowed_media_types. Action.parameters url, method fixed GET, permitted headers excluding raw secret input, expected_media_type. Current authorization/classification/disclosure and cost bound apply even to reads. Enforce response size/time bounds before consuming unlimited bytes, restrict redirect origins and resolve destination at each hop. Refuse local/private/link-local/metadata addresses unless separately explicit installation-authorized destination binding; prevent DNS rebinding by binding validated dial addresses. Each actual physical request/redirect is an accounted effect attempt; simplest v1 qualified profile sets max_redirects=0 and returns prerequisite for an explicit redirected read. Record requested/resolved URL, status, bounded content digest/artifact and freshness for cited brief. No arbitrary shell/browser/script execution.",
+      "tests": "Controlled-server physical call counts, exact request/account/destination, timeout-after-success unknown, no hidden retries, bound enforcement, secret redaction, supported real profile/version qualification.",
+      "wave": 2
+    },
+    {
+      "name": "serenity",
+      "path": "internal/adapters/serenity",
+      "kind": "adapter",
+      "imports": [
+        "contract"
+      ],
+      "mission": "Qualified public Serenity protocol/read-facade adapter and writer capability report.",
+      "design": "Adapter name serenity; profile schema zatiti.serenity/v1 has exact version/commit, public endpoint/brain root mapping, writer ownership, supported operations, cost/disclosure enforcement profile, command status lookup semantics, freshness/index capability, timeout_seconds, max_bytes and backup revision protocol. During foundation integration inspect public upstream API and pin exact source/protocol; never invent a public method from name or import internal packages. Adapter action kind recall/remember/inspect/promote/retract/export_revision, brain_id and stable adapter_command_id plus bounded payload. Brain selected by memory owner authorization, adapter cannot widen query. Canonical writes only one writer per brain; exported Go facade only for compatible reads. Recall may call models and incur charges, so required bound/disclosure enforcement must be qualified before enabling. If actual API cannot provide safe command lookup after lost ack, retain unknown and require explicit reconciliation; do not claim idempotency. Preserve provenance/source/version/freshness in observations. Backup pins real brain revisions, handles Git/history and keys, restore paused pending writer/promotion obligations. Report unsupported guarantees honestly and gate release until required first-release modes qualified.",
+      "tests": "Controlled-server physical call counts, exact request/account/destination, timeout-after-success unknown, no hidden retries, bound enforcement, secret redaction, supported real profile/version qualification.",
+      "wave": 2
+    },
+    {
+      "name": "zatiti",
+      "path": "cmd/zatiti",
+      "kind": "entrypoint",
+      "imports": [
+        "contract",
+        "platform",
+        "storage",
+        "identity",
+        "configuration",
+        "skills",
+        "connections",
+        "policy",
+        "reviews",
+        "accounting",
+        "tasks",
+        "scheduling",
+        "messaging",
+        "execution",
+        "effects",
+        "memory",
+        "artifacts",
+        "evidence",
+        "installation",
+        "registry",
+        "application",
+        "controller",
+        "server",
+        "client",
+        "cli",
+        "mcp",
+        "responses",
+        "github",
+        "httpread",
+        "serenity"
+      ],
+      "mission": "Assemble controller/CLI/MCP binary and local bootstrap/helper mechanics.",
+      "design": "Own main.go and local entrypoint helpers only. Wire concrete modules to registry/app Ports, storage/platform, adapters/controller/server. main delegates run(ctx,args,stdin,stdout,stderr) int for testability. Commands serve and mcp serve are transport mechanics; public operations come only from registry-generated CLI. Explicit config/profile selection outside model-visible operation arguments. serve owns always-on lock/scheduler; mcp serve uses existing controller and scoped client, no database writer. init and mcp serve --bootstrap call shared local initializer under one-time lock, secret helper local IO, return metadata and end bootstrap mode. No automatic launch of arbitrary client/harness. Configure slog redacted stderr/protected files, signals and bounded shutdown. Root dependencies and CI belong integration, not this scope.",
+      "tests": "Actual binary init/status/serve/MCP subprocess, signal shutdown, missing controller, one scheduler, stdout cleanliness, credential environment isolation.",
+      "wave": 3
+    },
+    {
+      "name": "zatiti_desktop",
+      "path": "cmd/zatiti-desktop",
+      "kind": "entrypoint",
+      "imports": [
+        "contract",
+        "platform",
+        "client",
+        "desktop"
+      ],
+      "mission": "Assemble the separately packaged native desktop client.",
+      "design": "main delegates testable run; load explicit protected client config/profile, construct shared client and desktop. Setup may request local controller service installation/start through explicit OS helper but closing desktop does not own controller shutdown. Remote endpoint only explicit TLS configured. No DB, domain modules, scheduler or model provider directly in desktop process. OS-specific lifecycle integration is packaged/qualified by distribution owner. Surface startup prerequisites without raw secret/path disclosure in conversations.",
+      "tests": "Real GUI launch on macOS/Linux, existing controller reconnect, close without server stop, secure credential setup and remote TLS.",
+      "wave": 3
+    },
+    {
+      "name": "integration",
+      "path": "tests/integration",
+      "kind": "verification",
+      "imports": [
+        "contract",
+        "platform",
+        "storage",
+        "identity",
+        "configuration",
+        "skills",
+        "connections",
+        "policy",
+        "reviews",
+        "accounting",
+        "tasks",
+        "scheduling",
+        "messaging",
+        "execution",
+        "effects",
+        "memory",
+        "artifacts",
+        "evidence",
+        "installation",
+        "registry",
+        "application",
+        "controller",
+        "server",
+        "client",
+        "cli",
+        "mcp",
+        "desktop",
+        "responses",
+        "github",
+        "httpread",
+        "serenity"
+      ],
+      "mission": "Own real cross-package fixtures, atomicity, transport parity and end-to-end journeys.",
+      "design": "Implement package integration_test. Sole integration owner also has separately serialized root-file assignment for go.mod/go.sum, root build configuration and qualified dependency lock. Never dispatch that root assignment concurrently with child scopes. Establish go module/toolchain and exact library pins before dependent agents start; generate baseline contract package first. Dependency plan is a pinned lock report docs/implementation/dependencies.lock.json with module/version/sum/license, external service commit/protocol, qualified features/gaps and named test commands; this file is an explicit integration-owner exception to test write scope. Do not edit frozen prompts/contracts to make tests pass. Construct real SQLite controllers with controlled provider servers, fake clock and secure temporary stores; use actual CLI subprocesses and MCP client, not direct handler-only parity. Compare identical principal/state fixtures and normalize ONLY generated IDs/timestamps via explicit map; preserve permissions/versions/business events/outcome uncertainty. Drive all named acceptance cases and journeys, inject crash at transactional/provider boundaries, retain results and failure evidence. Test desktop view logic locally; real GUI/platform qualification lives qualification. Record dependency changes through designated root owner, not all agents. All spec-only tests must be labeled planned until actually executed.",
+      "tests": "All embedded acceptance cases assigned integration, complete registry parity, three journeys each CLI/MCP plus interrupted cross-interface recovery; no skipped suite as pass.",
+      "wave": 4
+    },
+    {
+      "name": "qualification",
+      "path": "tests/qualification",
+      "kind": "verification",
+      "imports": [
+        "contract",
+        "client",
+        "desktop",
+        "responses",
+        "github",
+        "httpread",
+        "serenity"
+      ],
+      "mission": "Own executable external adapter, real desktop/platform/client qualification and release evidence.",
+      "design": "Implement package qualification_test and controlled subprocess/GUI drivers in this root. Qualifications bind exact source/config/dependency/tool/profile/client/platform versions and expected/observed evidence. Run first-release desktop onboarding/daily result/decision paths against actual controller; verify UI against committed state, not narration or screenshots alone. Qualify macOS and Linux packaging (controller always-on, desktop closing, Serenity one writer/brain/key setup, secure helper, backup restore). Test actual named agent-client versions before advertising compatibility; MCP baseline with optional features disabled. Adapters qualify public APIs with explicit test accounts/operator-controlled safe destinations; scripts must not embed credentials or silently perform irreversible real publication. Unit fakes cannot stand in for real protocol capabilities. Missing credentials/platform prerequisites report not-run and block relevant release claims. Additional remote MCP, contained executor, Windows and providers are outside v1 scope.",
+      "tests": "Real versioned platform/client/GUI/provider evidence and Z01-Z21 release report; never compile-only compatibility.",
+      "wave": 4
+    },
+    {
+      "name": "distribution",
+      "path": "packaging",
+      "kind": "support",
+      "imports": [],
+      "mission": "Own release manifests, service launchers, secure helper and Serenity distribution lifecycle.",
+      "design": "This is a non-Go ownership root: commit platform service templates/scripts/manifests and qualification instructions. macOS LaunchAgent and Linux user systemd unit keep controller alive independently of desktop. Package binaries plus pinned Serenity runtime/read facade as qualified; one writer owner per brain and one controller state lock. Artifact manifest includes version/checksum/licenses/SBOM, supported protocol/profiles and required native Fyne dependencies. Secret/key provisioning uses trusted local OS helper, never flags/chat/environment inherited by worker. Install/uninstall preserve state unless explicit operator removal requested; no invented working install command before built artifacts tested. Avoid signing/notarization/publishing claims without actual evidence. Root release CI is separate workflow owner. Backup/restoration key prerequisites documented without private paths or real secrets.",
+      "tests": "Clean macOS/Linux install/launch/upgrade/restart/uninstall preserve state, secure permissions, controller survives desktop close, Serenity lifecycle and license notice audit.",
+      "wave": 4
+    },
+    {
+      "name": "ci",
+      "path": ".github/workflows",
+      "kind": "support",
+      "imports": [],
+      "mission": "Own CI workflow validation and release qualification orchestration.",
+      "design": "Build pinned Go toolchain and dependency lock on macOS/Linux, run spec renderer --check first, unit/integration/race tests appropriate to supported package/platform capabilities, controlled provider/subprocess parity and artifact retention. Native desktop build/test prerequisites follow pinned Fyne qualification. Required release jobs cannot silently skip mandatory platform/GUI/provider qualifications. Dependency/cache keys bind lock and toolchain. Never publish automatically from unreviewed branch or infer release permission from this prompt. Use read-only defaults, no secrets in PR logs/artifacts. Preserve Apache notices and build provenance. Windows/remote MCP/contained runner are not v1 advertised targets.",
+      "tests": "Workflow syntax, clean checkout generation drift check, failed/omitted required gate blocks release, bounded logs and evidence artifacts.",
+      "wave": 4
+    }
+  ]
+}

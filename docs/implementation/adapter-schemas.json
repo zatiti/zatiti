@@ -1,0 +1,3767 @@
+{
+  "definitions": {
+    "ID": {
+      "type": "string",
+      "format": "uuid",
+      "maxLength": 36,
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "Digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "maxLength": 64,
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "UTC": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "Z$",
+      "maxLength": 40,
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "Version": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9223372036854775807,
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "Currency": {
+      "type": "string",
+      "pattern": "^[A-Z]{3}$",
+      "maxLength": 3,
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "Classification": {
+      "type": "string",
+      "enum": [
+        "public",
+        "internal",
+        "restricted"
+      ],
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "HTTPSURL": {
+      "type": "string",
+      "format": "uri",
+      "pattern": "^https://",
+      "maxLength": 4096,
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "Scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "installation_id": {
+          "$ref": "#/$defs/ID"
+        },
+        "organization_id": {
+          "$ref": "#/$defs/ID"
+        },
+        "project_id": {
+          "$ref": "#/$defs/ID"
+        },
+        "worker_id": {
+          "$ref": "#/$defs/ID"
+        },
+        "task_id": {
+          "$ref": "#/$defs/ID"
+        }
+      },
+      "required": [
+        "installation_id"
+      ],
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "VersionRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/ID"
+        },
+        "version": {
+          "$ref": "#/$defs/Version"
+        }
+      },
+      "required": [
+        "id",
+        "version"
+      ],
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "ArtifactRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/ID"
+        },
+        "digest": {
+          "$ref": "#/$defs/Digest"
+        }
+      },
+      "required": [
+        "id",
+        "digest"
+      ],
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "Money": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "currency": {
+          "$ref": "#/$defs/Currency"
+        },
+        "micro_units": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        }
+      },
+      "required": [
+        "currency",
+        "micro_units"
+      ],
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "Usage": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "currency": {
+          "$ref": "#/$defs/Currency"
+        },
+        "spent": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
+        "reserved": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
+        "estimated": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
+        "unknown": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
+        "advisory": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "currency",
+        "spent",
+        "reserved",
+        "estimated",
+        "unknown",
+        "advisory"
+      ],
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "RationalRate": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "numerator_micro_units": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
+        "denominator_units": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9223372036854775807
+        },
+        "unit": {
+          "type": "string",
+          "enum": [
+            "input_token",
+            "output_token",
+            "request",
+            "byte",
+            "second"
+          ]
+        }
+      },
+      "required": [
+        "numerator_micro_units",
+        "denominator_units",
+        "unit"
+      ],
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "CapabilityEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "artifact": {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        "adapter_version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "source_revision": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "protocol_revision": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "profile_digest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "qualified_at": {
+          "$ref": "#/$defs/UTC"
+        },
+        "capabilities": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "minItems": 0,
+          "maxItems": 128
+        },
+        "limitations": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048
+          },
+          "minItems": 0,
+          "maxItems": 128
+        }
+      },
+      "required": [
+        "artifact",
+        "adapter_version",
+        "source_revision",
+        "protocol_revision",
+        "profile_digest",
+        "qualified_at",
+        "capabilities",
+        "limitations"
+      ],
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "BoundEnforcement": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "cost": {
+          "type": "string",
+          "enum": [
+            "enforced",
+            "advisory",
+            "unsupported"
+          ]
+        },
+        "disclosure": {
+          "type": "string",
+          "enum": [
+            "enforced",
+            "advisory",
+            "unsupported"
+          ]
+        },
+        "maximum_cost": {
+          "$ref": "#/$defs/Money"
+        },
+        "provider_destinations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/HTTPSURL"
+          },
+          "minItems": 0,
+          "maxItems": 64
+        },
+        "classifications": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Classification"
+          },
+          "minItems": 1,
+          "maxItems": 3
+        },
+        "evidence": {
+          "$ref": "#/$defs/CapabilityEvidence"
+        }
+      },
+      "required": [
+        "cost",
+        "disclosure",
+        "maximum_cost",
+        "provider_destinations",
+        "classifications",
+        "evidence"
+      ],
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "StagedOutput": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "staging_ref": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "digest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 268435456
+        },
+        "media_type": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "classification": {
+          "$ref": "#/$defs/Classification"
+        },
+        "purpose": {
+          "type": "string",
+          "enum": [
+            "provider_response",
+            "model_text",
+            "context",
+            "tool_result",
+            "repository",
+            "public_source",
+            "memory",
+            "verification",
+            "backup",
+            "export"
+          ]
+        }
+      },
+      "required": [
+        "staging_ref",
+        "digest",
+        "size",
+        "media_type",
+        "classification",
+        "purpose"
+      ],
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "ArtifactLocator": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "artifact",
+              "type": "string"
+            },
+            "artifact": {
+              "$ref": "#/$defs/ArtifactRef"
+            }
+          },
+          "required": [
+            "kind",
+            "artifact"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "staged",
+              "type": "string"
+            },
+            "staging_ref": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "digest": {
+              "$ref": "#/$defs/Digest"
+            }
+          },
+          "required": [
+            "kind",
+            "staging_ref",
+            "digest"
+          ]
+        }
+      ],
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "PhysicalCallEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "operation_id": {
+          "$ref": "#/$defs/ID"
+        },
+        "attempt_id": {
+          "$ref": "#/$defs/ID"
+        },
+        "account_identity": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "requested_destination": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "resolved_destination": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "profile_digest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "capability_evidence": {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        "started_at": {
+          "$ref": "#/$defs/UTC"
+        },
+        "finished_at": {
+          "$ref": "#/$defs/UTC"
+        },
+        "request_context": {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        "request_sent": {
+          "type": "string",
+          "enum": [
+            "no",
+            "yes",
+            "unknown"
+          ]
+        },
+        "confirmation": {
+          "type": "string",
+          "enum": [
+            "authoritative_success",
+            "authoritative_failure",
+            "provider_accepted",
+            "authoritative_nonexecution",
+            "unknown"
+          ]
+        },
+        "http_status": {
+          "type": "integer",
+          "minimum": 100,
+          "maximum": 599
+        },
+        "provider_reference": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 1024
+        },
+        "error_code": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 128
+        },
+        "error_message": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 2048
+        }
+      },
+      "required": [
+        "operation_id",
+        "attempt_id",
+        "account_identity",
+        "requested_destination",
+        "resolved_destination",
+        "profile_digest",
+        "capability_evidence",
+        "started_at",
+        "finished_at",
+        "request_context",
+        "request_sent",
+        "confirmation"
+      ],
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "ProviderUsage": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "accounting": {
+          "$ref": "#/$defs/Usage"
+        },
+        "billing": {
+          "type": "string",
+          "enum": [
+            "observed",
+            "bounded_estimate",
+            "unknown",
+            "advisory",
+            "no_charge"
+          ]
+        },
+        "input_tokens": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
+        "output_tokens": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
+        "input_rate": {
+          "$ref": "#/$defs/RationalRate"
+        },
+        "output_rate": {
+          "$ref": "#/$defs/RationalRate"
+        },
+        "provider_usage_reference": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 1024
+        }
+      },
+      "required": [
+        "accounting",
+        "billing"
+      ],
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "InertSchema": {
+      "type": "object",
+      "description": "A bounded JSON Schema 2020-12 document. Local references only; validators reject remote references, duplicate keys, excessive depth/node count and unsupported executable behavior. This is schema data, not authority.",
+      "maxProperties": 256,
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "ToolArguments": {
+      "type": "object",
+      "description": "Strictly validate against the exact pinned tool input schema before use. Unknown tool fields fail. This open container is never an executable grant.",
+      "maxProperties": 256,
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "ModelToolProposal": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "tool": {
+          "$ref": "#/$defs/VersionRef"
+        },
+        "operation_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "operation_version": {
+          "$ref": "#/$defs/Version"
+        },
+        "input": {
+          "$ref": "#/$defs/ToolArguments"
+        },
+        "source_context": {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        "explanation": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 8192
+        }
+      },
+      "required": [
+        "id",
+        "tool",
+        "operation_id",
+        "operation_version",
+        "input",
+        "source_context"
+      ],
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "ContextText": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "text",
+          "type": "string"
+        },
+        "text": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 262144
+        }
+      },
+      "required": [
+        "kind",
+        "text"
+      ],
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "ContextArtifactPart": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "artifact",
+          "type": "string"
+        },
+        "artifact": {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        "media_type": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "classification": {
+          "$ref": "#/$defs/Classification"
+        },
+        "label": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 256
+        }
+      },
+      "required": [
+        "kind",
+        "artifact",
+        "media_type",
+        "classification"
+      ],
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "ContextToolCall": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "tool_call",
+          "type": "string"
+        },
+        "proposal": {
+          "$ref": "#/$defs/ModelToolProposal"
+        }
+      },
+      "required": [
+        "kind",
+        "proposal"
+      ],
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "ContextToolResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "tool_result",
+          "type": "string"
+        },
+        "proposal_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "operation_id": {
+          "$ref": "#/$defs/ID"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "completed",
+            "accepted",
+            "failed"
+          ]
+        },
+        "artifact": {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        "error_code": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 128
+        }
+      },
+      "required": [
+        "kind",
+        "proposal_id",
+        "operation_id",
+        "status",
+        "artifact"
+      ],
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "ContextMemoryExcerpt": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "memory_excerpt",
+          "type": "string"
+        },
+        "brain_id": {
+          "$ref": "#/$defs/ID"
+        },
+        "claim": {
+          "$ref": "#/$defs/VersionRef"
+        },
+        "text": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 262144
+        },
+        "sources": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ArtifactRef"
+          },
+          "minItems": 0,
+          "maxItems": 256
+        },
+        "confidence": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000
+        },
+        "freshness": {
+          "$ref": "#/$defs/UTC"
+        },
+        "scope": {
+          "$ref": "#/$defs/Scope"
+        },
+        "selected_context": {
+          "$ref": "#/$defs/ArtifactRef"
+        }
+      },
+      "required": [
+        "kind",
+        "brain_id",
+        "claim",
+        "text",
+        "sources",
+        "confidence",
+        "freshness",
+        "scope",
+        "selected_context"
+      ],
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "ContextPart": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/ContextText"
+        },
+        {
+          "$ref": "#/$defs/ContextArtifactPart"
+        },
+        {
+          "$ref": "#/$defs/ContextToolCall"
+        },
+        {
+          "$ref": "#/$defs/ContextToolResult"
+        },
+        {
+          "$ref": "#/$defs/ContextMemoryExcerpt"
+        }
+      ],
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "ContextMessage": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/ID"
+        },
+        "role": {
+          "type": "string",
+          "enum": [
+            "system",
+            "developer",
+            "user",
+            "assistant",
+            "tool"
+          ]
+        },
+        "origin": {
+          "type": "string",
+          "enum": [
+            "effective_instruction",
+            "user_message",
+            "model_output",
+            "tool_result",
+            "memory_recall",
+            "agent_message",
+            "compaction"
+          ]
+        },
+        "parts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ContextPart"
+          },
+          "minItems": 1,
+          "maxItems": 512
+        },
+        "source_artifacts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ArtifactRef"
+          },
+          "minItems": 0,
+          "maxItems": 512
+        },
+        "sender_id": {
+          "$ref": "#/$defs/ID"
+        },
+        "message_id": {
+          "$ref": "#/$defs/ID"
+        },
+        "created_at": {
+          "$ref": "#/$defs/UTC"
+        }
+      },
+      "required": [
+        "id",
+        "role",
+        "origin",
+        "parts",
+        "source_artifacts"
+      ],
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "ContextToolDefinition": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "tool": {
+          "$ref": "#/$defs/VersionRef"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "description": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 16384
+        },
+        "input_schema": {
+          "$ref": "#/$defs/InertSchema"
+        },
+        "output_schema": {
+          "$ref": "#/$defs/InertSchema"
+        },
+        "effect": {
+          "type": "string",
+          "enum": [
+            "local",
+            "disclosure",
+            "external_read",
+            "external_mutation"
+          ]
+        },
+        "destinations": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          },
+          "minItems": 0,
+          "maxItems": 64
+        },
+        "binding_id": {
+          "$ref": "#/$defs/ID"
+        },
+        "schema_digest": {
+          "$ref": "#/$defs/Digest"
+        }
+      },
+      "required": [
+        "tool",
+        "name",
+        "description",
+        "input_schema",
+        "output_schema",
+        "effect",
+        "destinations",
+        "binding_id",
+        "schema_digest"
+      ],
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "ContextArtifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema": {
+          "const": "zatiti.context/v1",
+          "type": "string"
+        },
+        "attempt_id": {
+          "$ref": "#/$defs/ID"
+        },
+        "scope": {
+          "$ref": "#/$defs/Scope"
+        },
+        "configuration_revision": {
+          "$ref": "#/$defs/Version"
+        },
+        "worker": {
+          "$ref": "#/$defs/VersionRef"
+        },
+        "execution_profile": {
+          "$ref": "#/$defs/VersionRef"
+        },
+        "skill_versions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/VersionRef"
+          },
+          "minItems": 0,
+          "maxItems": 256
+        },
+        "messages": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ContextMessage"
+          },
+          "minItems": 0,
+          "maxItems": 4096
+        },
+        "tools": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ContextToolDefinition"
+          },
+          "minItems": 0,
+          "maxItems": 256
+        },
+        "source_artifacts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ArtifactRef"
+          },
+          "minItems": 0,
+          "maxItems": 4096
+        },
+        "capture": {
+          "type": "string",
+          "enum": [
+            "complete",
+            "partial",
+            "advisory"
+          ]
+        },
+        "created_at": {
+          "$ref": "#/$defs/UTC"
+        },
+        "compaction": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "source_contexts": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/ArtifactRef"
+              },
+              "minItems": 1,
+              "maxItems": 256
+            },
+            "compactor_profile": {
+              "$ref": "#/$defs/VersionRef"
+            },
+            "summary_artifact": {
+              "$ref": "#/$defs/ArtifactRef"
+            }
+          },
+          "required": [
+            "source_contexts",
+            "compactor_profile",
+            "summary_artifact"
+          ]
+        }
+      },
+      "required": [
+        "schema",
+        "attempt_id",
+        "scope",
+        "configuration_revision",
+        "worker",
+        "execution_profile",
+        "skill_versions",
+        "messages",
+        "tools",
+        "source_artifacts",
+        "capture",
+        "created_at"
+      ],
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "ModelOutput": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema": {
+          "const": "zatiti.model-output/v1",
+          "type": "string"
+        },
+        "response_id": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 1024
+        },
+        "request_context": {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        "finish_reason": {
+          "type": "string",
+          "enum": [
+            "completed",
+            "tool_calls",
+            "length_limit",
+            "refused",
+            "interrupted",
+            "failed",
+            "unknown"
+          ]
+        },
+        "text_outputs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ArtifactLocator"
+          },
+          "minItems": 0,
+          "maxItems": 256
+        },
+        "tool_proposals": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ModelToolProposal"
+          },
+          "minItems": 0,
+          "maxItems": 256
+        },
+        "usage": {
+          "$ref": "#/$defs/ProviderUsage"
+        },
+        "refusal": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 8192
+        },
+        "continuation_reference": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 1024
+        }
+      },
+      "required": [
+        "schema",
+        "response_id",
+        "request_context",
+        "finish_reason",
+        "text_outputs",
+        "tool_proposals",
+        "usage"
+      ],
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "ResponsesProfile": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema": {
+          "const": "zatiti.responses/v1",
+          "type": "string"
+        },
+        "endpoint": {
+          "$ref": "#/$defs/HTTPSURL"
+        },
+        "model": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "connection_id": {
+          "$ref": "#/$defs/ID"
+        },
+        "max_input_tokens": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10000000
+        },
+        "max_output_tokens": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000000
+        },
+        "max_response_bytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 268435456
+        },
+        "timeout_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1800
+        },
+        "currency": {
+          "$ref": "#/$defs/Currency"
+        },
+        "input_rate": {
+          "$ref": "#/$defs/RationalRate"
+        },
+        "output_rate": {
+          "$ref": "#/$defs/RationalRate"
+        },
+        "enforcement": {
+          "$ref": "#/$defs/BoundEnforcement"
+        },
+        "capability_evidence": {
+          "$ref": "#/$defs/CapabilityEvidence"
+        }
+      },
+      "required": [
+        "schema",
+        "endpoint",
+        "model",
+        "connection_id",
+        "max_input_tokens",
+        "max_output_tokens",
+        "max_response_bytes",
+        "timeout_seconds",
+        "currency",
+        "input_rate",
+        "output_rate",
+        "enforcement",
+        "capability_evidence"
+      ],
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "ResponsesParameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema": {
+          "const": "zatiti.responses.action/v1",
+          "type": "string"
+        },
+        "kind": {
+          "const": "model_step",
+          "type": "string"
+        },
+        "context_artifact": {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        "max_output_tokens": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000000
+        },
+        "tool_contract_versions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/VersionRef"
+          },
+          "minItems": 0,
+          "maxItems": 256
+        },
+        "continuation_reference": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 1024
+        }
+      },
+      "required": [
+        "schema",
+        "kind",
+        "context_artifact",
+        "max_output_tokens",
+        "tool_contract_versions"
+      ],
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "ResponsesEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema": {
+          "const": "zatiti.responses.evidence/v1",
+          "type": "string"
+        },
+        "physical_call": {
+          "$ref": "#/$defs/PhysicalCallEvidence"
+        },
+        "response_id": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 1024
+        },
+        "output": {
+          "$ref": "#/$defs/ModelOutput"
+        },
+        "staged_outputs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/StagedOutput"
+          },
+          "minItems": 0,
+          "maxItems": 256
+        },
+        "output_artifacts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ArtifactRef"
+          },
+          "minItems": 0,
+          "maxItems": 256
+        }
+      },
+      "required": [
+        "schema",
+        "physical_call",
+        "response_id",
+        "output",
+        "staged_outputs",
+        "output_artifacts"
+      ],
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "Repository": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "owner": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9-]{0,99}$"
+        },
+        "name": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_.-]{1,100}$"
+        }
+      },
+      "required": [
+        "owner",
+        "name"
+      ],
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "GitSHA": {
+      "type": "string",
+      "pattern": "^([0-9a-f]{40}|[0-9a-f]{64})$",
+      "maxLength": 64,
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "GitBranch": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024,
+      "description": "Validate as a safe Git branch/ref name; reject traversal, control characters and invalid Git ref syntax.",
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "RepositoryPath": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096,
+      "description": "Normalized relative repository path; reject absolute paths, dot/dot-dot components, NUL, backslash ambiguity and path escapes.",
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "AutomationConstraints": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "allowed_workflows": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          },
+          "minItems": 0,
+          "maxItems": 256
+        },
+        "allowed_deployment_environments": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "minItems": 0,
+          "maxItems": 128
+        },
+        "allow_external_notifications": {
+          "type": "boolean"
+        },
+        "allow_automatic_merge": {
+          "type": "boolean"
+        },
+        "unknown_automation": {
+          "type": "string",
+          "enum": [
+            "deny",
+            "review"
+          ]
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ArtifactRef"
+          },
+          "minItems": 0,
+          "maxItems": 256
+        }
+      },
+      "required": [
+        "allowed_workflows",
+        "allowed_deployment_environments",
+        "allow_external_notifications",
+        "allow_automatic_merge",
+        "unknown_automation",
+        "evidence"
+      ],
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "GitHubIdempotencyProfile": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": [
+            "none",
+            "qualified_key",
+            "authoritative_nonexecution"
+          ]
+        },
+        "retention_seconds": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
+        "equivalence_fields": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "minItems": 0,
+          "maxItems": 64
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ArtifactRef"
+          },
+          "minItems": 0,
+          "maxItems": 64
+        }
+      },
+      "required": [
+        "mode",
+        "retention_seconds",
+        "equivalence_fields",
+        "evidence"
+      ],
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "GitHubProfile": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema": {
+          "const": "zatiti.github/v1",
+          "type": "string"
+        },
+        "api_base": {
+          "$ref": "#/$defs/HTTPSURL"
+        },
+        "allowed_repositories": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Repository"
+          },
+          "minItems": 1,
+          "maxItems": 256
+        },
+        "allowed_actions": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "read_repository",
+              "create_branch",
+              "push_commit",
+              "open_pull_request",
+              "merge_pull_request"
+            ]
+          },
+          "minItems": 1,
+          "maxItems": 5
+        },
+        "max_response_bytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 268435456
+        },
+        "timeout_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1800
+        },
+        "idempotency_profile": {
+          "$ref": "#/$defs/GitHubIdempotencyProfile"
+        },
+        "automation_constraints": {
+          "$ref": "#/$defs/AutomationConstraints"
+        },
+        "capability_evidence": {
+          "$ref": "#/$defs/CapabilityEvidence"
+        }
+      },
+      "required": [
+        "schema",
+        "api_base",
+        "allowed_repositories",
+        "allowed_actions",
+        "max_response_bytes",
+        "timeout_seconds",
+        "idempotency_profile",
+        "automation_constraints",
+        "capability_evidence"
+      ],
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "GitHubReadRepository": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema": {
+          "const": "zatiti.github.action/v1",
+          "type": "string"
+        },
+        "repository": {
+          "$ref": "#/$defs/Repository"
+        },
+        "kind": {
+          "const": "read_repository",
+          "type": "string"
+        },
+        "resource": {
+          "type": "string",
+          "enum": [
+            "metadata",
+            "ref",
+            "commit",
+            "tree",
+            "blob",
+            "pull_request"
+          ]
+        },
+        "branch": {
+          "$ref": "#/$defs/GitBranch"
+        },
+        "sha": {
+          "$ref": "#/$defs/GitSHA"
+        },
+        "path": {
+          "$ref": "#/$defs/RepositoryPath"
+        },
+        "pull_request_number": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9223372036854775807
+        },
+        "preflight_for_operation_id": {
+          "$ref": "#/$defs/ID"
+        }
+      },
+      "required": [
+        "schema",
+        "repository",
+        "kind",
+        "resource"
+      ],
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "GitHubCreateBranch": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema": {
+          "const": "zatiti.github.action/v1",
+          "type": "string"
+        },
+        "repository": {
+          "$ref": "#/$defs/Repository"
+        },
+        "kind": {
+          "const": "create_branch",
+          "type": "string"
+        },
+        "branch": {
+          "$ref": "#/$defs/GitBranch"
+        },
+        "base_sha": {
+          "$ref": "#/$defs/GitSHA"
+        },
+        "expected_absent": {
+          "const": "required",
+          "type": "string"
+        },
+        "automation_constraints": {
+          "$ref": "#/$defs/AutomationConstraints"
+        },
+        "preflight_evidence": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ArtifactRef"
+          },
+          "minItems": 1,
+          "maxItems": 64
+        }
+      },
+      "required": [
+        "schema",
+        "repository",
+        "kind",
+        "branch",
+        "base_sha",
+        "expected_absent",
+        "automation_constraints",
+        "preflight_evidence"
+      ],
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "GitHubPushCommit": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema": {
+          "const": "zatiti.github.action/v1",
+          "type": "string"
+        },
+        "repository": {
+          "$ref": "#/$defs/Repository"
+        },
+        "kind": {
+          "const": "push_commit",
+          "type": "string"
+        },
+        "branch": {
+          "$ref": "#/$defs/GitBranch"
+        },
+        "expected_head_sha": {
+          "$ref": "#/$defs/GitSHA"
+        },
+        "prepared_commit_sha": {
+          "$ref": "#/$defs/GitSHA"
+        },
+        "base_sha": {
+          "$ref": "#/$defs/GitSHA"
+        },
+        "patch": {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        "content_artifacts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ArtifactRef"
+          },
+          "minItems": 0,
+          "maxItems": 4096
+        },
+        "force": {
+          "const": false,
+          "type": "boolean"
+        },
+        "automation_constraints": {
+          "$ref": "#/$defs/AutomationConstraints"
+        },
+        "preflight_evidence": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ArtifactRef"
+          },
+          "minItems": 1,
+          "maxItems": 64
+        }
+      },
+      "required": [
+        "schema",
+        "repository",
+        "kind",
+        "branch",
+        "expected_head_sha",
+        "prepared_commit_sha",
+        "base_sha",
+        "patch",
+        "content_artifacts",
+        "force",
+        "automation_constraints",
+        "preflight_evidence"
+      ],
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "GitHubOpenPullRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema": {
+          "const": "zatiti.github.action/v1",
+          "type": "string"
+        },
+        "repository": {
+          "$ref": "#/$defs/Repository"
+        },
+        "kind": {
+          "const": "open_pull_request",
+          "type": "string"
+        },
+        "head_branch": {
+          "$ref": "#/$defs/GitBranch"
+        },
+        "head_sha": {
+          "$ref": "#/$defs/GitSHA"
+        },
+        "base_branch": {
+          "$ref": "#/$defs/GitBranch"
+        },
+        "base_sha": {
+          "$ref": "#/$defs/GitSHA"
+        },
+        "title": {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        "body": {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        "patch": {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        "draft": {
+          "type": "boolean"
+        },
+        "automation_constraints": {
+          "$ref": "#/$defs/AutomationConstraints"
+        },
+        "preflight_evidence": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ArtifactRef"
+          },
+          "minItems": 1,
+          "maxItems": 64
+        }
+      },
+      "required": [
+        "schema",
+        "repository",
+        "kind",
+        "head_branch",
+        "head_sha",
+        "base_branch",
+        "base_sha",
+        "title",
+        "body",
+        "patch",
+        "draft",
+        "automation_constraints",
+        "preflight_evidence"
+      ],
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "GitHubMergePullRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema": {
+          "const": "zatiti.github.action/v1",
+          "type": "string"
+        },
+        "repository": {
+          "$ref": "#/$defs/Repository"
+        },
+        "kind": {
+          "const": "merge_pull_request",
+          "type": "string"
+        },
+        "pull_request_number": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9223372036854775807
+        },
+        "expected_head_sha": {
+          "$ref": "#/$defs/GitSHA"
+        },
+        "expected_base_sha": {
+          "$ref": "#/$defs/GitSHA"
+        },
+        "merge_method": {
+          "type": "string",
+          "enum": [
+            "merge",
+            "squash",
+            "rebase"
+          ]
+        },
+        "commit_title": {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        "commit_body": {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        "automation_constraints": {
+          "$ref": "#/$defs/AutomationConstraints"
+        },
+        "preflight_evidence": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ArtifactRef"
+          },
+          "minItems": 1,
+          "maxItems": 64
+        }
+      },
+      "required": [
+        "schema",
+        "repository",
+        "kind",
+        "pull_request_number",
+        "expected_head_sha",
+        "expected_base_sha",
+        "merge_method",
+        "commit_title",
+        "commit_body",
+        "automation_constraints",
+        "preflight_evidence"
+      ],
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "GitHubParameters": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/GitHubReadRepository"
+        },
+        {
+          "$ref": "#/$defs/GitHubCreateBranch"
+        },
+        {
+          "$ref": "#/$defs/GitHubPushCommit"
+        },
+        {
+          "$ref": "#/$defs/GitHubOpenPullRequest"
+        },
+        {
+          "$ref": "#/$defs/GitHubMergePullRequest"
+        }
+      ],
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "GitHubEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema": {
+          "const": "zatiti.github.evidence/v1",
+          "type": "string"
+        },
+        "physical_call": {
+          "$ref": "#/$defs/PhysicalCallEvidence"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "read_repository",
+            "create_branch",
+            "push_commit",
+            "open_pull_request",
+            "merge_pull_request"
+          ]
+        },
+        "repository": {
+          "$ref": "#/$defs/Repository"
+        },
+        "usage": {
+          "$ref": "#/$defs/ProviderUsage"
+        },
+        "staged_outputs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/StagedOutput"
+          },
+          "minItems": 0,
+          "maxItems": 256
+        },
+        "output_artifacts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ArtifactRef"
+          },
+          "minItems": 0,
+          "maxItems": 256
+        },
+        "branch": {
+          "$ref": "#/$defs/GitBranch"
+        },
+        "observed_head_sha": {
+          "$ref": "#/$defs/GitSHA"
+        },
+        "observed_base_sha": {
+          "$ref": "#/$defs/GitSHA"
+        },
+        "commit_sha": {
+          "$ref": "#/$defs/GitSHA"
+        },
+        "pull_request_number": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9223372036854775807
+        },
+        "pull_request_url": {
+          "$ref": "#/$defs/HTTPSURL"
+        },
+        "automation_evidence": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ArtifactRef"
+          },
+          "minItems": 0,
+          "maxItems": 256
+        }
+      },
+      "required": [
+        "schema",
+        "physical_call",
+        "kind",
+        "repository",
+        "usage",
+        "staged_outputs",
+        "output_artifacts"
+      ],
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "HTTPOrigin": {
+      "type": "string",
+      "format": "uri",
+      "pattern": "^https?://[^/?#]+$",
+      "maxLength": 2048,
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "HTTPURL": {
+      "type": "string",
+      "format": "uri",
+      "pattern": "^https?://",
+      "maxLength": 4096,
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "HTTPReadProfile": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema": {
+          "const": "zatiti.httpread/v1",
+          "type": "string"
+        },
+        "allowed_origins": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/HTTPOrigin"
+          },
+          "minItems": 1,
+          "maxItems": 256
+        },
+        "max_bytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 268435456
+        },
+        "timeout_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1800
+        },
+        "max_redirects": {
+          "type": "integer",
+          "const": 0
+        },
+        "allowed_media_types": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "minItems": 1,
+          "maxItems": 128
+        },
+        "capability_evidence": {
+          "$ref": "#/$defs/CapabilityEvidence"
+        }
+      },
+      "required": [
+        "schema",
+        "allowed_origins",
+        "max_bytes",
+        "timeout_seconds",
+        "max_redirects",
+        "allowed_media_types",
+        "capability_evidence"
+      ],
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "HTTPReadHeader": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "enum": [
+            "Accept",
+            "Accept-Language",
+            "If-None-Match",
+            "If-Modified-Since",
+            "User-Agent"
+          ]
+        },
+        "value": {
+          "type": "string",
+          "maxLength": 1024,
+          "pattern": "^[^\r\n]*$"
+        }
+      },
+      "required": [
+        "name",
+        "value"
+      ],
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "HTTPReadParameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema": {
+          "const": "zatiti.httpread.action/v1",
+          "type": "string"
+        },
+        "kind": {
+          "const": "read",
+          "type": "string"
+        },
+        "url": {
+          "$ref": "#/$defs/HTTPURL"
+        },
+        "method": {
+          "const": "GET",
+          "type": "string"
+        },
+        "headers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/HTTPReadHeader"
+          },
+          "minItems": 0,
+          "maxItems": 16
+        },
+        "expected_media_type": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        }
+      },
+      "required": [
+        "schema",
+        "kind",
+        "url",
+        "method",
+        "headers",
+        "expected_media_type"
+      ],
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "HTTPReadEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema": {
+          "const": "zatiti.httpread.evidence/v1",
+          "type": "string"
+        },
+        "physical_call": {
+          "$ref": "#/$defs/PhysicalCallEvidence"
+        },
+        "requested_url": {
+          "$ref": "#/$defs/HTTPURL"
+        },
+        "resolved_url": {
+          "$ref": "#/$defs/HTTPURL"
+        },
+        "validated_dial_addresses": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "minItems": 0,
+          "maxItems": 32
+        },
+        "status": {
+          "type": "integer",
+          "minimum": 100,
+          "maximum": 599
+        },
+        "media_type": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 256
+        },
+        "freshness": {
+          "$ref": "#/$defs/UTC"
+        },
+        "usage": {
+          "$ref": "#/$defs/ProviderUsage"
+        },
+        "staged_outputs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/StagedOutput"
+          },
+          "minItems": 0,
+          "maxItems": 1
+        },
+        "output_artifacts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ArtifactRef"
+          },
+          "minItems": 0,
+          "maxItems": 1
+        },
+        "content_digest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "content_size": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 268435456
+        },
+        "etag": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 1024
+        },
+        "last_modified": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 128
+        },
+        "redirect_location": {
+          "$ref": "#/$defs/HTTPURL"
+        }
+      },
+      "required": [
+        "schema",
+        "physical_call",
+        "requested_url",
+        "resolved_url",
+        "validated_dial_addresses",
+        "status",
+        "media_type",
+        "freshness",
+        "usage",
+        "staged_outputs",
+        "output_artifacts"
+      ],
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "SerenityBrainMapping": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "brain_id": {
+          "$ref": "#/$defs/ID"
+        },
+        "endpoint": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "root_ref": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "writer_owner": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "classification": {
+          "$ref": "#/$defs/Classification"
+        }
+      },
+      "required": [
+        "brain_id",
+        "endpoint",
+        "root_ref",
+        "writer_owner",
+        "classification"
+      ],
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "SerenityLookupSemantics": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": [
+            "authoritative",
+            "non_authoritative",
+            "unsupported"
+          ]
+        },
+        "retention_seconds": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
+        "command_identity_supported": {
+          "type": "boolean"
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ArtifactRef"
+          },
+          "minItems": 0,
+          "maxItems": 64
+        }
+      },
+      "required": [
+        "mode",
+        "retention_seconds",
+        "command_identity_supported",
+        "evidence"
+      ],
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "SerenityFreshnessCapability": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "source_revision_supported": {
+          "type": "boolean"
+        },
+        "index_revision_supported": {
+          "type": "boolean"
+        },
+        "minimum_freshness_enforceable": {
+          "type": "boolean"
+        },
+        "read_facade": {
+          "type": "string",
+          "enum": [
+            "qualified_local",
+            "unsupported"
+          ]
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ArtifactRef"
+          },
+          "minItems": 0,
+          "maxItems": 64
+        }
+      },
+      "required": [
+        "source_revision_supported",
+        "index_revision_supported",
+        "minimum_freshness_enforceable",
+        "read_facade",
+        "evidence"
+      ],
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "SerenityBackupProtocol": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": [
+            "qualified_pinned_revision",
+            "unsupported"
+          ]
+        },
+        "protocol_profile": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "immutable_revision_export": {
+          "type": "boolean"
+        },
+        "restore_supported": {
+          "type": "boolean"
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ArtifactRef"
+          },
+          "minItems": 0,
+          "maxItems": 64
+        }
+      },
+      "required": [
+        "mode",
+        "protocol_profile",
+        "immutable_revision_export",
+        "restore_supported",
+        "evidence"
+      ],
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "SerenityProfile": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema": {
+          "const": "zatiti.serenity/v1",
+          "type": "string"
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "commit": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "brain_mappings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SerenityBrainMapping"
+          },
+          "minItems": 0,
+          "maxItems": 4096
+        },
+        "supported_operations": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "recall",
+              "remember",
+              "inspect",
+              "promote",
+              "retract",
+              "export_revision"
+            ]
+          },
+          "minItems": 0,
+          "maxItems": 6
+        },
+        "enforcement": {
+          "$ref": "#/$defs/BoundEnforcement"
+        },
+        "command_status_lookup": {
+          "$ref": "#/$defs/SerenityLookupSemantics"
+        },
+        "freshness": {
+          "$ref": "#/$defs/SerenityFreshnessCapability"
+        },
+        "timeout_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1800
+        },
+        "max_bytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 268435456
+        },
+        "backup_revision_protocol": {
+          "$ref": "#/$defs/SerenityBackupProtocol"
+        },
+        "capability_evidence": {
+          "$ref": "#/$defs/CapabilityEvidence"
+        }
+      },
+      "required": [
+        "schema",
+        "version",
+        "commit",
+        "brain_mappings",
+        "supported_operations",
+        "enforcement",
+        "command_status_lookup",
+        "freshness",
+        "timeout_seconds",
+        "max_bytes",
+        "backup_revision_protocol",
+        "capability_evidence"
+      ],
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "MemoryClaim": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/ID"
+        },
+        "version": {
+          "$ref": "#/$defs/Version"
+        },
+        "brain_id": {
+          "$ref": "#/$defs/ID"
+        },
+        "text": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 262144
+        },
+        "sources": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ArtifactRef"
+          },
+          "minItems": 0,
+          "maxItems": 256
+        },
+        "confidence": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000
+        },
+        "freshness": {
+          "$ref": "#/$defs/UTC"
+        },
+        "active": {
+          "type": "boolean"
+        },
+        "source_brain_id": {
+          "$ref": "#/$defs/ID"
+        },
+        "source_claim": {
+          "$ref": "#/$defs/VersionRef"
+        },
+        "curator_id": {
+          "$ref": "#/$defs/ID"
+        },
+        "redaction": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 8192
+        }
+      },
+      "required": [
+        "id",
+        "version",
+        "brain_id",
+        "text",
+        "sources",
+        "confidence",
+        "freshness",
+        "active"
+      ],
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "BrainRevision": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "brain_id": {
+          "$ref": "#/$defs/ID"
+        },
+        "revision": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "digest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "observed_at": {
+          "$ref": "#/$defs/UTC"
+        },
+        "index_revision": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        }
+      },
+      "required": [
+        "brain_id",
+        "revision",
+        "digest",
+        "observed_at"
+      ],
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "SerenityRecall": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema": {
+          "const": "zatiti.serenity.action/v1",
+          "type": "string"
+        },
+        "brain_id": {
+          "$ref": "#/$defs/ID"
+        },
+        "adapter_command_id": {
+          "$ref": "#/$defs/ID"
+        },
+        "kind": {
+          "const": "recall",
+          "type": "string"
+        },
+        "query": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 8192
+        },
+        "minimum_freshness": {
+          "$ref": "#/$defs/UTC"
+        },
+        "max_claims": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 200
+        },
+        "maximum_cost": {
+          "$ref": "#/$defs/Money"
+        },
+        "allowed_provider_destinations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/HTTPSURL"
+          },
+          "minItems": 0,
+          "maxItems": 64
+        },
+        "classification": {
+          "$ref": "#/$defs/Classification"
+        }
+      },
+      "required": [
+        "schema",
+        "brain_id",
+        "adapter_command_id",
+        "kind",
+        "query",
+        "minimum_freshness",
+        "max_claims",
+        "maximum_cost",
+        "allowed_provider_destinations",
+        "classification"
+      ],
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "SerenityRemember": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema": {
+          "const": "zatiti.serenity.action/v1",
+          "type": "string"
+        },
+        "brain_id": {
+          "$ref": "#/$defs/ID"
+        },
+        "adapter_command_id": {
+          "$ref": "#/$defs/ID"
+        },
+        "kind": {
+          "const": "remember",
+          "type": "string"
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 8192
+        },
+        "sources": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ArtifactRef"
+          },
+          "minItems": 0,
+          "maxItems": 256
+        },
+        "writer_owner": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "maximum_cost": {
+          "$ref": "#/$defs/Money"
+        },
+        "allowed_provider_destinations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/HTTPSURL"
+          },
+          "minItems": 0,
+          "maxItems": 64
+        }
+      },
+      "required": [
+        "schema",
+        "brain_id",
+        "adapter_command_id",
+        "kind",
+        "text",
+        "sources",
+        "writer_owner",
+        "maximum_cost",
+        "allowed_provider_destinations"
+      ],
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "SerenityInspect": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema": {
+          "const": "zatiti.serenity.action/v1",
+          "type": "string"
+        },
+        "brain_id": {
+          "$ref": "#/$defs/ID"
+        },
+        "adapter_command_id": {
+          "$ref": "#/$defs/ID"
+        },
+        "kind": {
+          "const": "inspect",
+          "type": "string"
+        },
+        "claim": {
+          "$ref": "#/$defs/VersionRef"
+        },
+        "minimum_freshness": {
+          "$ref": "#/$defs/UTC"
+        }
+      },
+      "required": [
+        "schema",
+        "brain_id",
+        "adapter_command_id",
+        "kind",
+        "claim",
+        "minimum_freshness"
+      ],
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "SerenityPromote": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema": {
+          "const": "zatiti.serenity.action/v1",
+          "type": "string"
+        },
+        "brain_id": {
+          "$ref": "#/$defs/ID"
+        },
+        "adapter_command_id": {
+          "$ref": "#/$defs/ID"
+        },
+        "kind": {
+          "const": "promote",
+          "type": "string"
+        },
+        "source_brain_id": {
+          "$ref": "#/$defs/ID"
+        },
+        "source_claim": {
+          "$ref": "#/$defs/VersionRef"
+        },
+        "source_disclosure_evidence": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ArtifactRef"
+          },
+          "minItems": 1,
+          "maxItems": 64
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 8192
+        },
+        "sources": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ArtifactRef"
+          },
+          "minItems": 0,
+          "maxItems": 256
+        },
+        "curator_id": {
+          "$ref": "#/$defs/ID"
+        },
+        "writer_owner": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "maximum_cost": {
+          "$ref": "#/$defs/Money"
+        },
+        "allowed_provider_destinations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/HTTPSURL"
+          },
+          "minItems": 0,
+          "maxItems": 64
+        },
+        "redaction": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 8192
+        }
+      },
+      "required": [
+        "schema",
+        "brain_id",
+        "adapter_command_id",
+        "kind",
+        "source_brain_id",
+        "source_claim",
+        "source_disclosure_evidence",
+        "text",
+        "sources",
+        "curator_id",
+        "writer_owner",
+        "maximum_cost",
+        "allowed_provider_destinations"
+      ],
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "SerenityRetract": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema": {
+          "const": "zatiti.serenity.action/v1",
+          "type": "string"
+        },
+        "brain_id": {
+          "$ref": "#/$defs/ID"
+        },
+        "adapter_command_id": {
+          "$ref": "#/$defs/ID"
+        },
+        "kind": {
+          "const": "retract",
+          "type": "string"
+        },
+        "claim": {
+          "$ref": "#/$defs/VersionRef"
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 8192
+        },
+        "writer_owner": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "removal": {
+          "const": "active_recall",
+          "type": "string"
+        }
+      },
+      "required": [
+        "schema",
+        "brain_id",
+        "adapter_command_id",
+        "kind",
+        "claim",
+        "reason",
+        "writer_owner",
+        "removal"
+      ],
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "SerenityExportRevision": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema": {
+          "const": "zatiti.serenity.action/v1",
+          "type": "string"
+        },
+        "brain_id": {
+          "$ref": "#/$defs/ID"
+        },
+        "adapter_command_id": {
+          "$ref": "#/$defs/ID"
+        },
+        "kind": {
+          "const": "export_revision",
+          "type": "string"
+        },
+        "revision": {
+          "$ref": "#/$defs/BrainRevision"
+        }
+      },
+      "required": [
+        "schema",
+        "brain_id",
+        "adapter_command_id",
+        "kind",
+        "revision"
+      ],
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "SerenityParameters": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/SerenityRecall"
+        },
+        {
+          "$ref": "#/$defs/SerenityRemember"
+        },
+        {
+          "$ref": "#/$defs/SerenityInspect"
+        },
+        {
+          "$ref": "#/$defs/SerenityPromote"
+        },
+        {
+          "$ref": "#/$defs/SerenityRetract"
+        },
+        {
+          "$ref": "#/$defs/SerenityExportRevision"
+        }
+      ],
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "SerenityEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema": {
+          "const": "zatiti.serenity.evidence/v1",
+          "type": "string"
+        },
+        "physical_call": {
+          "$ref": "#/$defs/PhysicalCallEvidence"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "recall",
+            "remember",
+            "inspect",
+            "promote",
+            "retract",
+            "export_revision"
+          ]
+        },
+        "brain_id": {
+          "$ref": "#/$defs/ID"
+        },
+        "adapter_command_id": {
+          "$ref": "#/$defs/ID"
+        },
+        "command_status": {
+          "type": "string",
+          "enum": [
+            "not_admitted",
+            "accepted",
+            "completed",
+            "failed",
+            "unknown"
+          ]
+        },
+        "claims": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/MemoryClaim"
+          },
+          "minItems": 0,
+          "maxItems": 200
+        },
+        "brain_revisions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/BrainRevision"
+          },
+          "minItems": 0,
+          "maxItems": 64
+        },
+        "usage": {
+          "$ref": "#/$defs/ProviderUsage"
+        },
+        "staged_outputs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/StagedOutput"
+          },
+          "minItems": 0,
+          "maxItems": 256
+        },
+        "output_artifacts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ArtifactRef"
+          },
+          "minItems": 0,
+          "maxItems": 256
+        },
+        "writer_owner": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "active_recall_removed": {
+          "type": "boolean"
+        },
+        "historical_erasure": {
+          "type": "boolean",
+          "const": false
+        },
+        "selected_context": {
+          "$ref": "#/$defs/ArtifactLocator"
+        },
+        "lookup_authoritative": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "schema",
+        "physical_call",
+        "kind",
+        "brain_id",
+        "adapter_command_id",
+        "command_status",
+        "claims",
+        "brain_revisions",
+        "usage",
+        "staged_outputs",
+        "output_artifacts"
+      ],
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "VerifierOutputRequirement": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "artifact": {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        "media_type": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "json_schema": {
+          "$ref": "#/$defs/InertSchema"
+        }
+      },
+      "required": [
+        "name",
+        "artifact",
+        "media_type"
+      ],
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "ArtifactVerifierProfile": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema": {
+          "const": "zatiti.verifier-profile/v1",
+          "type": "string"
+        },
+        "kind": {
+          "const": "artifact_contract",
+          "type": "string"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "code_digest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "supported_checks": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "presence",
+              "digest",
+              "json_schema"
+            ]
+          },
+          "minItems": 1,
+          "maxItems": 3
+        },
+        "max_bytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 268435456
+        },
+        "timeout_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1800
+        },
+        "capability_evidence": {
+          "$ref": "#/$defs/CapabilityEvidence"
+        }
+      },
+      "required": [
+        "schema",
+        "kind",
+        "id",
+        "version",
+        "code_digest",
+        "supported_checks",
+        "max_bytes",
+        "timeout_seconds",
+        "capability_evidence"
+      ],
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "RepositoryVerifierProfile": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema": {
+          "const": "zatiti.verifier-profile/v1",
+          "type": "string"
+        },
+        "kind": {
+          "const": "repository_patch",
+          "type": "string"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "code_digest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "runner_profile": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "command_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "command_digest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "environment_profile": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "network": {
+          "type": "string",
+          "enum": [
+            "disabled",
+            "qualified_allowlist"
+          ]
+        },
+        "max_output_bytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1048576
+        },
+        "timeout_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1800
+        },
+        "capability_evidence": {
+          "$ref": "#/$defs/CapabilityEvidence"
+        }
+      },
+      "required": [
+        "schema",
+        "kind",
+        "id",
+        "version",
+        "code_digest",
+        "runner_profile",
+        "command_id",
+        "command_digest",
+        "environment_profile",
+        "network",
+        "max_output_bytes",
+        "timeout_seconds",
+        "capability_evidence"
+      ],
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "VerificationProfile": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/ArtifactVerifierProfile"
+        },
+        {
+          "$ref": "#/$defs/RepositoryVerifierProfile"
+        }
+      ],
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "ExpectedVerificationObservation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "check_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "artifact_presence",
+            "artifact_digest",
+            "json_schema",
+            "repository_patch_applies",
+            "repository_command"
+          ]
+        },
+        "expected": {
+          "type": "string",
+          "enum": [
+            "pass",
+            "fail"
+          ]
+        },
+        "artifact_name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "expected_digest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "schema": {
+          "$ref": "#/$defs/InertSchema"
+        },
+        "command_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "expected_exit_code": {
+          "type": "integer",
+          "minimum": -2147483648,
+          "maximum": 2147483647
+        }
+      },
+      "required": [
+        "check_id",
+        "kind",
+        "expected"
+      ],
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "ObservedVerificationCheck": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "check_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "artifact_presence",
+            "artifact_digest",
+            "json_schema",
+            "repository_patch_applies",
+            "repository_command"
+          ]
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "passed",
+            "failed",
+            "unavailable",
+            "tampered"
+          ]
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ArtifactLocator"
+          },
+          "minItems": 0,
+          "maxItems": 128
+        },
+        "explanation": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 8192
+        },
+        "observed_digest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "observed_exit_code": {
+          "type": "integer",
+          "minimum": -2147483648,
+          "maximum": 2147483647
+        }
+      },
+      "required": [
+        "check_id",
+        "kind",
+        "status",
+        "evidence",
+        "explanation"
+      ],
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "VerificationRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema": {
+          "const": "zatiti.verification-request/v1",
+          "type": "string"
+        },
+        "job_id": {
+          "$ref": "#/$defs/ID"
+        },
+        "task_id": {
+          "$ref": "#/$defs/ID"
+        },
+        "attempt_id": {
+          "$ref": "#/$defs/ID"
+        },
+        "scope": {
+          "$ref": "#/$defs/Scope"
+        },
+        "acceptance_digest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "profile": {
+          "$ref": "#/$defs/VerificationProfile"
+        },
+        "sealed_inputs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ArtifactRef"
+          },
+          "minItems": 0,
+          "maxItems": 4096
+        },
+        "outputs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/VerifierOutputRequirement"
+          },
+          "minItems": 0,
+          "maxItems": 4096
+        },
+        "expected_observations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ExpectedVerificationObservation"
+          },
+          "minItems": 1,
+          "maxItems": 512
+        },
+        "deadline": {
+          "$ref": "#/$defs/UTC"
+        },
+        "repository": {
+          "$ref": "#/$defs/Repository"
+        },
+        "base_sha": {
+          "$ref": "#/$defs/GitSHA"
+        },
+        "patch": {
+          "$ref": "#/$defs/ArtifactRef"
+        }
+      },
+      "required": [
+        "schema",
+        "job_id",
+        "task_id",
+        "attempt_id",
+        "scope",
+        "acceptance_digest",
+        "profile",
+        "sealed_inputs",
+        "outputs",
+        "expected_observations",
+        "deadline"
+      ],
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "VerificationResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema": {
+          "const": "zatiti.verification-result/v1",
+          "type": "string"
+        },
+        "job_id": {
+          "$ref": "#/$defs/ID"
+        },
+        "task_id": {
+          "$ref": "#/$defs/ID"
+        },
+        "attempt_id": {
+          "$ref": "#/$defs/ID"
+        },
+        "acceptance_digest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "verifier_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "verifier_version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "verifier_code_digest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "request_artifact": {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "passed",
+            "failed",
+            "prerequisite_missing",
+            "tampered",
+            "interrupted"
+          ]
+        },
+        "observations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ObservedVerificationCheck"
+          },
+          "minItems": 0,
+          "maxItems": 512
+        },
+        "started_at": {
+          "$ref": "#/$defs/UTC"
+        },
+        "finished_at": {
+          "$ref": "#/$defs/UTC"
+        },
+        "staged_outputs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/StagedOutput"
+          },
+          "minItems": 0,
+          "maxItems": 256
+        },
+        "output_artifacts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ArtifactRef"
+          },
+          "minItems": 0,
+          "maxItems": 256
+        },
+        "independent": {
+          "type": "boolean",
+          "const": true
+        }
+      },
+      "required": [
+        "schema",
+        "job_id",
+        "task_id",
+        "attempt_id",
+        "acceptance_digest",
+        "verifier_id",
+        "verifier_version",
+        "verifier_code_digest",
+        "request_artifact",
+        "status",
+        "observations",
+        "started_at",
+        "finished_at",
+        "staged_outputs",
+        "output_artifacts",
+        "independent"
+      ],
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "BackupArtifactEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "artifact": {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 268435456
+        },
+        "media_type": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "classification": {
+          "$ref": "#/$defs/Classification"
+        },
+        "encrypted": {
+          "type": "boolean"
+        },
+        "archive_entry": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "pins": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ID"
+          },
+          "minItems": 0,
+          "maxItems": 4096
+        }
+      },
+      "required": [
+        "artifact",
+        "size",
+        "media_type",
+        "classification",
+        "encrypted",
+        "archive_entry",
+        "pins"
+      ],
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "BackupBrainEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "revision": {
+          "$ref": "#/$defs/BrainRevision"
+        },
+        "export_artifact": {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        "writer_owner": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "adapter_profile_digest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "key_prerequisites": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          },
+          "minItems": 0,
+          "maxItems": 64
+        }
+      },
+      "required": [
+        "revision",
+        "export_artifact",
+        "writer_owner",
+        "adapter_profile_digest",
+        "key_prerequisites"
+      ],
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "RecoveryObligation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/ID"
+        },
+        "owner": {
+          "type": "string",
+          "enum": [
+            "identity",
+            "evidence",
+            "effects",
+            "accounting",
+            "execution",
+            "memory",
+            "installation"
+          ]
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "credential_revocation",
+            "principal_revocation",
+            "command_identity",
+            "claimed_effect",
+            "unknown_effect",
+            "reservation",
+            "lease_conflict",
+            "memory_write",
+            "memory_promotion",
+            "memory_retraction"
+          ]
+        },
+        "resource_id": {
+          "$ref": "#/$defs/ID"
+        },
+        "resource_version": {
+          "$ref": "#/$defs/Version"
+        },
+        "record_artifact": {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        "record_digest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "state": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "recorded_at": {
+          "$ref": "#/$defs/UTC"
+        }
+      },
+      "required": [
+        "id",
+        "owner",
+        "kind",
+        "resource_id",
+        "resource_version",
+        "record_artifact",
+        "record_digest",
+        "state",
+        "recorded_at"
+      ],
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "BackupManifest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema": {
+          "const": "zatiti.backup/v1",
+          "type": "string"
+        },
+        "installation_id": {
+          "$ref": "#/$defs/ID"
+        },
+        "backup_id": {
+          "$ref": "#/$defs/ID"
+        },
+        "generation": {
+          "$ref": "#/$defs/Version"
+        },
+        "created_at": {
+          "$ref": "#/$defs/UTC"
+        },
+        "database_digest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "database_size": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9223372036854775807
+        },
+        "database_archive_entry": {
+          "const": "state.sqlite",
+          "type": "string"
+        },
+        "database_schema_versions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "owner": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "version": {
+                "$ref": "#/$defs/Version"
+              },
+              "migration_digest": {
+                "$ref": "#/$defs/Digest"
+              }
+            },
+            "required": [
+              "owner",
+              "version",
+              "migration_digest"
+            ]
+          },
+          "minItems": 0,
+          "maxItems": 256
+        },
+        "artifacts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/BackupArtifactEntry"
+          },
+          "minItems": 0,
+          "maxItems": 1000000
+        },
+        "brains": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/BackupBrainEntry"
+          },
+          "minItems": 0,
+          "maxItems": 100000
+        },
+        "retained_obligations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RecoveryObligation"
+          },
+          "minItems": 0,
+          "maxItems": 1000000
+        },
+        "key_prerequisites": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          },
+          "minItems": 0,
+          "maxItems": 256
+        },
+        "source_revision": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "controller_version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "required_protocol_profiles": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "minItems": 0,
+          "maxItems": 256
+        },
+        "paused": {
+          "type": "boolean",
+          "const": true
+        },
+        "recovery_overlay": {
+          "$ref": "#/$defs/ArtifactRef"
+        }
+      },
+      "required": [
+        "schema",
+        "installation_id",
+        "backup_id",
+        "generation",
+        "created_at",
+        "database_digest",
+        "database_size",
+        "database_archive_entry",
+        "database_schema_versions",
+        "artifacts",
+        "brains",
+        "retained_obligations",
+        "key_prerequisites",
+        "source_revision",
+        "controller_version",
+        "required_protocol_profiles",
+        "paused"
+      ],
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "RecoveryOverlay": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema": {
+          "const": "zatiti.recovery-overlay/v1",
+          "type": "string"
+        },
+        "installation_id": {
+          "$ref": "#/$defs/ID"
+        },
+        "captured_at": {
+          "$ref": "#/$defs/UTC"
+        },
+        "source_generation": {
+          "$ref": "#/$defs/Version"
+        },
+        "source_database_digest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "obligations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RecoveryObligation"
+          },
+          "minItems": 0,
+          "maxItems": 1000000
+        },
+        "artifact_entries": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/BackupArtifactEntry"
+          },
+          "minItems": 0,
+          "maxItems": 1000000
+        },
+        "key_prerequisites": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          },
+          "minItems": 0,
+          "maxItems": 256
+        }
+      },
+      "required": [
+        "schema",
+        "installation_id",
+        "captured_at",
+        "source_generation",
+        "source_database_digest",
+        "obligations",
+        "artifact_entries",
+        "key_prerequisites"
+      ],
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    }
+  },
+  "adapter_mapping": {
+    "responses": {
+      "profile": "ResponsesProfile",
+      "parameters": "ResponsesParameters",
+      "evidence": "ResponsesEvidence"
+    },
+    "github": {
+      "profile": "GitHubProfile",
+      "parameters": "GitHubParameters",
+      "evidence": "GitHubEvidence"
+    },
+    "httpread": {
+      "profile": "HTTPReadProfile",
+      "parameters": "HTTPReadParameters",
+      "evidence": "HTTPReadEvidence"
+    },
+    "serenity": {
+      "profile": "SerenityProfile",
+      "parameters": "SerenityParameters",
+      "evidence": "SerenityEvidence"
+    }
+  },
+  "notes": [
+    "These are exact Zatiti-side contracts, not representations of upstream APIs. Adapter implementation translates to a pinned, separately qualified public upstream protocol; unsupported semantics fail capability_unsupported or preserve outcome_unknown.",
+    "To validate a named schema, place definitions under the root $defs and reference the selected name. The catalog container uses definitions for packaging only; every embedded #/$defs/Name resolves against that assembled validation document. JSON Schema dialect is 2020-12.",
+    "Validate strict objects, formats, explicit field limits, duplicate-key rejection and exact integer bounds. Runtime must also enforce total JSON/artifact byte limits, at most 64 JSON levels and 100000 schema/input nodes; schema documents and dynamic tool arguments cannot escape the qualified local validation dialect.",
+    "Opaque references, URLs, headers and diagnostics must never contain secret bytes. Profile configuration is trusted local configuration; public operation arguments cannot install profiles, select a more privileged credential, open an arbitrary server path or replace capability evidence.",
+    "Before dispatch, profile capability evidence must match the canonical profile digest computed with the capability_evidence field omitted; self-referential capability evidence and qualification records do not grant authority. The binding/effect owner independently checks current account, scope, destinations, classification, prices and qualified capability.",
+    "PhysicalCallEvidence records exactly one physical network request per claimed attempt. request_context identifies the pre-dispatch persisted request. No adapter adds preflight, redirect, polling, SDK retry or model tool execution inside that request; each such external action requires a separate governed attempt.",
+    "StagedOutput is an IO handoff, not a published ArtifactRef. Adapter stages bytes and returns staging_ref/digest metadata; controller uses the artifacts owner to publish metadata and replace staged locators with real ArtifactRefs before delivering normalized observations to execution/memory/other domains. output_artifacts may be empty at adapter return and contains the resulting published refs in recorded domain evidence. ArtifactLocator staged references must match exactly one StagedOutput in the same observation. Failed publication remains a visible obligation/fault.",
+    "ContextArtifact.messages and each parts array preserve the exact model-visible semantic order. Tool definitions, memory excerpts and injected messages must all appear in the persisted request context before dispatch. Context source artifacts and compaction lineage do not replace retaining the actual selected text. Complete capture is required for owned hosted loops; external capture limitations remain explicit.",
+    "Model tool proposals are observations. tool ID/version must match the pinned context tool closure; operation ID/version must be the qualified mapping for that tool. Validate input against that exact schema and apply current authority/review/budgets before a separate operation. Never execute a model proposal directly in an adapter.",
+    "Responses input_rate.unit must equal input_token and output_rate.unit output_token; profile currencies and all reported/reserved usage must agree. Round admission reservations upward using checked integer rational arithmetic. Missing or unbounded required charges refuse hard-cap mode. A null/absent upstream usage report maps to unknown/advisory billing, never free success.",
+    "GitHubParameters is discriminated by kind. read_repository requires branch for ref, sha for commit/tree/blob, and pull_request_number for pull_request; irrelevant resource selectors are rejected. Relative repository paths and branch syntax receive Git-aware validation. Profile allowed_actions must be separately qualified against real API preconditions and downstream automation.",
+    "GitHub push_commit publishes an already prepared exact commit SHA in one qualified physical request. Creating remote blobs, trees or commits is not hidden inside Invoke: it needs an explicit separately admitted decomposition and qualification before enabling that route. Preflight evidence cannot substitute for atomic provider preconditions where the action requires protection against a race; refuse unsupported guarantees.",
+    "GitHub open_pull_request and merge_pull_request are consequential effects bound to exact account/repository/head/base/content/timing/automation constraints. A successful HTTP response or accepted request is not independently assumed confirmed completion; response interpretation follows the qualified contract. Eventual not-found never proves nonexecution.",
+    "HTTPRead v1 max_redirects is exactly zero. Return redirect_location as evidence/prerequisite and require a separately authorized read for the new URL. Validate DNS results and bind validated dial addresses; reject local/private/link-local/metadata targets unless explicitly permitted by an installation-authorized destination binding. Header values reject controls and duplicate header names; Authorization, Cookie and arbitrary raw credential input are excluded.",
+    "Serenity profile endpoints/root_ref/writer_owner are opaque locally provisioned mappings, not model-selectable arbitrary filesystem locations. They identify real pinned public protocol/read-facade support. Zatiti never imports upstream internal packages or invents public endpoints from these local operation names.",
+    "Serenity recall/remember/promote may incur disclosure or charges. All nested upstream provider destinations and spend must fit enforcement; unsupported enforceable bounds disable the mode or require explicitly permitted advisory use. Promote resolves and authorizes source content before preparing the destination write and retains the source evidence; it does not perform an unaccounted extra source read inside Invoke.",
+    "Serenity adapter_command_id is the durable pre-dispatch command identity. Its existence does not prove upstream idempotency: reconcile through qualified status semantics, retaining unknown after lost acknowledgement if authoritative lookup is unavailable. One writer owner per brain. Retract removes active recall and leaves historical_erasure false; promotion correction lineage remains a durable memory-owner obligation.",
+    "Verification profiles are installation-owned and pinned before task execution. command_id, runner_profile and environment_profile resolve only to prequalified local verifiers; no request supplies executable paths or argv. ArtifactVerifierProfile runs presence/digest/schema checks; RepositoryVerifierProfile runs the pinned controlled patch/check profile outside Unit. A worker cannot alter profile bytes, accepted inputs or result authority.",
+    "VerificationResult.independent=true is necessary structure, not trust evidence: only the trusted runner may submit that result through its internal admission identity. Match task/attempt, acceptance digest, verifier identity/version/digest and request artifact before accepting. Passed requires all sealed expected checks observed as required; unavailable, interrupted, worker assertion and process exit zero alone cannot succeed a task. Manual acceptance uses the separate task operation and never fabricates an independent result.",
+    "BackupManifest is inside an authenticated encrypted bundle; it never includes decrypting master keys. archive_entry values are normalized relative entries with no traversal, absolute paths, symlinks, duplicate/case collisions or devices. Verify database/artifact/brain digests and qualified revision exports before marking backup verified. Large manifests stream through bounded artifact IO, not public JSON request bodies.",
+    "Restore starts paused under exclusive maintenance, validates installation binding and key prerequisites, and retains current recovery overlay before rewinding. Merge revocations, durable command identities, claimed/unknown effects, reservations and memory obligations monotonically via their owners; fail closed on conflict and retain the overlay. Overlay record artifacts must be included/pinned and encrypted. No database/brain rewind is represented as undoing an external effect."
+  ]
+}
