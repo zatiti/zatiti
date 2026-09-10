@@ -1,0 +1,44 @@
+#!/bin/sh
+
+# Fail on unset vars and on errors in simple commands
+set -eu
+
+# Gather staged files that matter
+STAGED_ALL="$(git diff --cached --name-only --diff-filter=ACM || true)"
+STAGED_GO_FILES="$(printf "%s\n" "$STAGED_ALL" | grep '\.go$' || true)"
+STAGED_MOD_FILES="$(printf "%s\n" "$STAGED_ALL" | grep -E '^(go\.mod|go\.sum)$' || true)"
+
+# If no relevant files are staged, exit successfully
+if [ -z "$STAGED_GO_FILES" ] && [ -z "$STAGED_MOD_FILES" ]; then
+  exit 0
+fi
+
+# Lint only when Go source files are staged
+if [ -n "$STAGED_GO_FILES" ]; then
+  echo "Running golangci-lint on staged packages..."
+  # Lint the package directories of staged files, not the files themselves:
+  # file-path mode disables build-tag-aware package loading, which makes
+  # tag-exclusive files (fs_darwin.go / fs_linux.go / fs_other.go) typecheck
+  # together and fail on their redeclarations.
+  STAGED_GO_DIRS="$(printf "%s\n" "$STAGED_GO_FILES" | xargs -n1 dirname | sort -u)"
+  echo "$STAGED_GO_DIRS" | xargs golangci-lint run --fix || {
+    echo "Commit failed: golangci-lint found issues."
+    exit 1
+  }
+
+  # If auto-fixes modified files, require user to re-stage
+  if ! git diff --quiet -- $STAGED_GO_FILES; then
+    echo "Commit failed: golangci-lint auto-fixed files."
+    echo "Please 'git add' the changes and commit again."
+    exit 1
+  fi
+fi
+
+# Always run tests when Go code or module files are staged
+echo "Running tests: go test ./..."
+if ! go test ./... ; then
+  echo "Commit failed: tests did not pass."
+  exit 1
+fi
+
+exit 0
