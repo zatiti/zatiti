@@ -11,12 +11,10 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   module-wide `go test ./...` green at configuration landing).
 - 2026-09-10 — registry re-landed in wave 2 (f5657e8), application
   (ab71c8b), configuration (1488db3), skills (169e5be), tasks (8cda814),
-  reviews (b1516e2). Integration notes: docs/implementation/integration-notes.md.
+  reviews (b1516e2), policy (4051f67). Integration notes:
+  docs/implementation/integration-notes.md.
 
 ## In progress
-
-- 2026-09-10 — policy: resume agent finishing 13 uncommitted files
-  (autonomy.go was the last production file); worktree zatiti-wt-policy.
 - 2026-09-10 — connections: implemented, committed (276f785); race run
   queued behind the machine load window; worktree zatiti-wt-connections.
 - 2026-09-10 — accounting: resume agent running on 23 uncommitted files;

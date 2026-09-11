@@ -19,7 +19,11 @@ that surfaced it.
 - **Z17.inherited_denial ownership.** Inherited deny-wins is a policy-engine
   computation. Configuration covers its own side (authority preview under
   pre-apply state, requirements sealed verbatim); the policy package owns
-  the inherited-deny test surface.
+  the inherited-deny test surface. Discharged on the policy landing:
+  `TestCheckDenyGrantPrecision` covers deny-over-allow (same-scope deny
+  wins, wildcard deny, foreign-scope deny inert); the integration
+  mutation proved the scope-precision fence load-bearing (a foreign-org
+  deny leaked into an unrelated request when `denyApplies` was bypassed).
 
 ## Wave-1 process facts
 
