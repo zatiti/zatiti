@@ -28,15 +28,38 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   load-bearing (a settled reservation with a different usage report would
   otherwise replay as if identical — history rewrite). Module-wide
   16-package verify green post-merge.
+- 2026-09-11 — effects landed (dd200cd), 17 of 37. Both wave-2 tail lanes
+  had stalled silently (agents idle 11h, zero processes, free lease);
+  the lead took over. Gate finding: operation.get's org-dimension fence
+  (handlers.go:1204) had no test coverage — the missing
+  TestOperationGetOrgDimension was added and then proved the fence
+  load-bearing by mutation (neutralized fence lets a foreign-org request
+  read another org's operation: expected not_found, got completed).
+  Module-wide 17-package verify green post-merge.
+- 2026-09-11 — execution landed (c80504d), 18 of 37. The stalled lane's
+  tree did not even vet (undefined f in a collision-reconciled test) and
+  two suite failures surfaced two real production fixes on landing:
+  fenceAttempt now returns a stale-running task to waiting with the fence
+  reason (a fenced lease previously deadlocked generation restart — the
+  task state could never clear), and attempt generations count prior
+  attempts (maxAttemptGeneration) instead of hardcoding 1. Integration
+  mutation proved the checkWorkerCall state fence load-bearing (a
+  cancelled attempt's heartbeat would otherwise extend its lease and
+  revive dead work: expected conflict, got completed); the worker-identity
+  dimension is defense-in-depth (narrowScope + checkWorkerCall both guard
+  it, single-fence mutation is green by design). Independence fence test
+  corrected to the actual layered refusal (bind rejects a
+  non-independent result at /result/independent with invalid_input before
+  the handler's verification_failed fence can fire). Race 221s green;
+  module-wide 18-package verify green post-merge.
 
 ## In progress
-- 2026-09-11 — wave-2 tail (10 packages): execution and effects
-  dispatching now; memory, artifacts, evidence, installation, server,
-  cli, mcp, adapters/github, adapters/httpread staggered behind them.
+- 2026-09-11 — wave-2 tail (9 packages): memory, artifacts, evidence,
+  installation, server, cli, mcp, adapters/github, adapters/httpread
+  dispatching staggered (two-heavy-lane cap).
 
 ## Planned
 
-- Wave 3: controller, desktop, cmd/zatiti, cmd/zatiti-desktop.
 - Wave 3: controller, desktop, cmd/zatiti, cmd/zatiti-desktop.
 - Wave 4: tests/integration, tests/qualification, packaging,
   .github/workflows.

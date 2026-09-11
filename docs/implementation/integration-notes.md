@@ -89,3 +89,47 @@ that surfaced it.
   `connections_applied_plans` table keyed by `plan_id` (store.go:375) —
   an identical re-activate returns the recorded versions instead of
   re-applying.
+
+## Wave-2 process facts (continued)
+
+- **A "dead" lane agent can wake and re-enter its worktree.** The
+  execution lane's original agent died on an upstream timeout, a resume
+  agent was dispatched into the same worktree, and the original then woke
+  from its idle state and wrote the same directory concurrently — the
+  second convergence on one worktree this effort (after configuration in
+  wave 1). Detection: one agent reporting "unidentified session" files in
+  its own worktree. Resolution: stop the original, reconcile to the
+  resume agent's spec-derived versions, preserve any real production
+  fixes the original had already made. Never let two writers share a
+  worktree — the mutation-proof byte-zero check and pre-commit run are
+  both corrupted by concurrent edits.
+
+## internal/execution (wave 2)
+
+- **Fenced leases deadlocked generation restart.** `fenceAttempt` moved
+  the run to waiting but left the task "running" forever (nothing else
+  can clear it), so `run.claim`'s task fence refused every replacement
+  attempt. Fixed on landing: `fenceAttempt` (controller_ops.go) now
+  returns a stale-running task to waiting with the fence reason, mirroring
+  its run transition; a task already moved to verifying or terminal by
+  another path is left alone. Attempt generations count prior attempts
+  (`maxAttemptGeneration`, run_ops.go) instead of hardcoding 1 — a
+  replacement claim is a new generation and cannot revive the old one.
+- **Worker-identity protection is defense-in-depth.** `narrowScope`'s
+  worker dimension (scope.go:31) and `checkWorkerCall`'s bound-worker
+  check (scope.go:107) both refuse a foreign worker on heartbeat/
+  checkpoint/report; mutating either alone is green because the other
+  holds. The load-bearing single fence for the no-revival guarantee is
+  `checkWorkerCall`'s state fence (scope.go:101): neutralizing it let a
+  cancelled attempt's heartbeat extend its lease and revive dead work
+  (`TestAttemptHeartbeatOnStoppedAttempt`: expected conflict, got
+  completed).
+- **The independence fence is layered.** The wire schema pins
+  `independent` as `const: true`, so a non-independent verification result
+  is refused at bind (`invalid_input` naming `/result/independent`) before
+  the handler's `verification_failed` fence can fire. The handler fence
+  stays as defense-in-depth; tests must assert the bind refusal.
+- **Untracked worktrees have no git revert.** A gate mutation in a
+  not-yet-committed tree must be reverted by exact edit — `git checkout
+  --` has nothing to revert to. Revert correctness is then verified by
+  re-running the named test green plus statics, not by a diff count.
