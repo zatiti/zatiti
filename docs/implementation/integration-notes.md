@@ -66,3 +66,26 @@ that surfaced it.
   visible test name; an immediate re-run passed. If it recurs, capture
   the full `go test ./...` output before concluding anything about the
   package under review.
+
+## internal/connections (wave 2)
+
+- **Applied event kind is `connections.connection.applied`**
+  (handlers_internal.go:77), not `connections.applied`: storage's
+  `validateEvent` requires the owner.entity.transition shape. Registry/apply
+  integrations should subscribe to the three-segment kind.
+- **Scope reachability is `scopeCovers`**
+  (handlers_connection.go:448): installation must match, every
+  explicitly-set request dimension (org/project/worker/task) must agree
+  with the row, and unset dimensions constrain nothing. Integration
+  mutation proved the dimension fence load-bearing: neutralizing the
+  org check made `TestConnectionGetScopeRules/
+  unrelated-scope-refuses-not-found` red (`expected not_found fault,
+  got completed`) — a foreign-org request would otherwise read another
+  org's connection. Fence returns not-found, deliberately (existence in
+  a scope you cannot reach is not distinguishable).
+- **Validation-freshness window is 24h** (`validationFreshness`,
+  handlers_internal.go:315): a validation record older than that does not
+  satisfy activation. Activation replay protection lives in the
+  `connections_applied_plans` table keyed by `plan_id` (store.go:375) —
+  an identical re-activate returns the recorded versions instead of
+  re-applying.
