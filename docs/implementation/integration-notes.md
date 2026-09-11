@@ -31,6 +31,11 @@ that surfaced it.
 - The build-lease claim script dedupes by holder; a holder whose session
   re-claims under a fresh token must release with that fresh SHA, or the
   claim expires by TTL only.
+- zsh pipeline gotcha (agent lease scripts): `status` is a read-only
+  special variable — `status=$?` aborts the script right after a lease
+  claim, orphaning it until TTL or manual release. Use `rc=$?`. A lease
+  pipeline must release unconditionally after the run (success or fail),
+  and the claim must sit one step before the command it protects.
 
 ## internal/tasks (wave 2)
 
