@@ -17,10 +17,10 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
 
 - 2026-09-10 — policy: resume agent finishing 13 uncommitted files
   (autonomy.go was the last production file); worktree zatiti-wt-policy.
-- 2026-09-10 — connections: resume agent finishing 20 uncommitted files;
-  worktree zatiti-wt-connections.
-- 2026-09-10 — accounting: 23 uncommitted files, mid-verification; resume
-  agent pending. Worktree zatiti-wt-accounting.
+- 2026-09-10 — connections: implemented, committed (276f785); race run
+  queued behind the machine load window; worktree zatiti-wt-connections.
+- 2026-09-10 — accounting: resume agent running on 23 uncommitted files;
+  worktree zatiti-wt-accounting.
 
 ## Planned
 
