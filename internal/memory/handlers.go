@@ -874,7 +874,7 @@ func (s *Service) handleBootstrap(ctx context.Context, unit contract.Unit, in bo
 
 	ownBinding := &bindingRow{ID: s.newID(), Version: 1, InstallationID: chiefScope.InstallationID,
 		OrganizationID: chiefScope.OrganizationID, WorkerID: chiefScope.WorkerID, BrainID: workerBrain.ID,
-		Permissions: []string{permRead, permWrite, permCurate, permPromote, permRetract},
+		Permissions:    []string{permRead, permWrite, permCurate, permPromote, permRetract},
 		Classification: classificationInternal, State: bindingActive, CreatedAt: now, UpdatedAt: now}
 	if err := insertBinding(ctx, unit, ownBinding); err != nil {
 		return contract.Outcome[bindingsOutput]{}, err

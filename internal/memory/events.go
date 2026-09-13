@@ -20,18 +20,18 @@ import (
 // owner.entity.transition with at least three dot segments.
 
 const (
-	eventBrainCreated            = "memory.brain.created"
-	eventBrainRevised            = "memory.brain.revised"
-	eventBindingStaged           = "memory.binding.staged"
-	eventBindingActivated        = "memory.binding.activated"
-	eventIntentPrepared          = "memory.intent.prepared"
-	eventIntentDispatched        = "memory.intent.dispatched"
-	eventIntentRecorded          = "memory.intent.recorded"
-	eventJobRecorded             = "memory.job.recorded"
-	eventClaimRecorded           = "memory.claim.recorded"
-	eventPromotionRecorded       = "memory.promotion.recorded"
-	eventReconciliationOpened    = "memory.reconciliation.opened"
-	eventReconciliationResolved  = "memory.reconciliation.resolved"
+	eventBrainCreated           = "memory.brain.created"
+	eventBrainRevised           = "memory.brain.revised"
+	eventBindingStaged          = "memory.binding.staged"
+	eventBindingActivated       = "memory.binding.activated"
+	eventIntentPrepared         = "memory.intent.prepared"
+	eventIntentDispatched       = "memory.intent.dispatched"
+	eventIntentRecorded         = "memory.intent.recorded"
+	eventJobRecorded            = "memory.job.recorded"
+	eventClaimRecorded          = "memory.claim.recorded"
+	eventPromotionRecorded      = "memory.promotion.recorded"
+	eventReconciliationOpened   = "memory.reconciliation.opened"
+	eventReconciliationResolved = "memory.reconciliation.resolved"
 )
 
 // emit appends one state-correlated event to the transaction outbox. A

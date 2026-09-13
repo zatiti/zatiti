@@ -91,7 +91,7 @@ const (
 
 // Serenity adapter command statuses and evidence fields this owner acts on.
 const (
-	serenitySchema   = "zatiti.serenity.action/v1"
+	serenitySchema         = "zatiti.serenity.action/v1"
 	serenityEvidenceSchema = "zatiti.serenity.evidence/v1"
 
 	serenityCommandNotAdmitted = "not_admitted"
@@ -171,14 +171,14 @@ type wireAction struct {
 
 // wireOperation mirrors $defs/Operation.
 type wireOperation struct {
-	ID                contract.ID   `json:"id"`
-	Version           int64         `json:"version"`
+	ID                contract.ID     `json:"id"`
+	Version           int64           `json:"version"`
 	Action            json.RawMessage `json:"action"`
-	ActionDigest      string        `json:"action_digest"`
-	State             string        `json:"state"`
-	AttemptIDs        []contract.ID `json:"attempt_ids"`
-	LinkedOperationID *contract.ID  `json:"linked_operation_id,omitempty"`
-	Relationship      *string       `json:"relationship,omitempty"`
+	ActionDigest      string          `json:"action_digest"`
+	State             string          `json:"state"`
+	AttemptIDs        []contract.ID   `json:"attempt_ids"`
+	LinkedOperationID *contract.ID    `json:"linked_operation_id,omitempty"`
+	Relationship      *string         `json:"relationship,omitempty"`
 }
 
 // wireObservation mirrors $defs/Observation.
@@ -223,18 +223,18 @@ type wireDiagnostic struct {
 // wireRequirement, wireDraft and wireValidation support the compiler
 // validate/activate boundary.
 type wireDraft struct {
-	ID           contract.ID      `json:"id"`
-	Version      int64            `json:"version"`
-	BaseRevision int64            `json:"base_revision"`
+	ID           contract.ID       `json:"id"`
+	Version      int64             `json:"version"`
+	BaseRevision int64             `json:"base_revision"`
 	Changes      []json.RawMessage `json:"changes"`
-	Diagnostics  []wireDiagnostic `json:"diagnostics"`
+	Diagnostics  []wireDiagnostic  `json:"diagnostics"`
 }
 
 // wireValidation mirrors $defs/Validation.
 type wireValidation struct {
-	Diagnostics  []wireDiagnostic `json:"diagnostics"`
+	Diagnostics  []wireDiagnostic  `json:"diagnostics"`
 	Requirements []wireRequirement `json:"requirements"`
-	Dependencies []wireRef        `json:"dependencies"`
+	Dependencies []wireRef         `json:"dependencies"`
 }
 
 // wireCandidate mirrors $defs/Candidate.
@@ -275,20 +275,20 @@ type wireClaim struct {
 // wireBinding mirrors the configuration $defs/Binding shape carried in
 // scope snapshots: connections and tools reference writer destinations.
 type wireBinding struct {
-	ID           contract.ID   `json:"id"`
-	Version      int64         `json:"version"`
-	Scope        wireScope     `json:"scope"`
-	Kind         string        `json:"kind"`
-	TargetID     contract.ID   `json:"target_id"`
-	Permissions  []string      `json:"permissions"`
-	SourceScope  *wireScope    `json:"source_scope,omitempty"`
-	Destinations []string      `json:"destinations,omitempty"`
+	ID           contract.ID `json:"id"`
+	Version      int64       `json:"version"`
+	Scope        wireScope   `json:"scope"`
+	Kind         string      `json:"kind"`
+	TargetID     contract.ID `json:"target_id"`
+	Permissions  []string    `json:"permissions"`
+	SourceScope  *wireScope  `json:"source_scope,omitempty"`
+	Destinations []string    `json:"destinations,omitempty"`
 }
 
 // wireOrganization mirrors the snapshot ancestor fields this owner uses.
 type wireOrganization struct {
-	ID       contract.ID `json:"id"`
-	Version  int64       `json:"version"`
+	ID       contract.ID  `json:"id"`
+	Version  int64        `json:"version"`
 	ParentID *contract.ID `json:"parent_id,omitempty"`
 }
 
@@ -329,10 +329,10 @@ type recordInput struct {
 }
 
 type selectInput struct {
-	Scope            wireScope    `json:"scope"`
+	Scope            wireScope     `json:"scope"`
 	BindingIDs       []contract.ID `json:"binding_ids"`
-	Permission       string       `json:"permission"`
-	MinimumFreshness time.Time    `json:"minimum_freshness"`
+	Permission       string        `json:"permission"`
+	MinimumFreshness time.Time     `json:"minimum_freshness"`
 }
 
 type validateInput struct {
@@ -349,24 +349,24 @@ type bindingArchiveInput struct {
 // bindingDefinition is the create/update definition embedded in the input
 // schema: the full MemoryBinding minus server-allocated id/version.
 type bindingDefinition struct {
-	Scope          wireScope `json:"scope"`
+	Scope          wireScope   `json:"scope"`
 	BrainID        contract.ID `json:"brain_id"`
-	Permissions    []string  `json:"permissions"`
-	Classification string    `json:"classification"`
+	Permissions    []string    `json:"permissions"`
+	Classification string      `json:"classification"`
 }
 
 type bindingCreateInput struct {
-	Scope     wireScope         `json:"scope"`
+	Scope      wireScope         `json:"scope"`
 	Definition bindingDefinition `json:"definition"`
-	DraftID   *contract.ID      `json:"draft_id,omitempty"`
+	DraftID    *contract.ID      `json:"draft_id,omitempty"`
 }
 
 type bindingUpdateInput struct {
-	Scope            wireScope         `json:"scope"`
-	ID               contract.ID       `json:"id"`
-	ExpectedVersion  int64             `json:"expected_version"`
-	Definition       bindingDefinition `json:"definition"`
-	DraftID          *contract.ID      `json:"draft_id,omitempty"`
+	Scope           wireScope         `json:"scope"`
+	ID              contract.ID       `json:"id"`
+	ExpectedVersion int64             `json:"expected_version"`
+	Definition      bindingDefinition `json:"definition"`
+	DraftID         *contract.ID      `json:"draft_id,omitempty"`
 }
 
 type bindingGetInput struct {
@@ -375,10 +375,10 @@ type bindingGetInput struct {
 }
 
 type bindingListInput struct {
-	Scope  wireScope       `json:"scope"`
-	Cursor string          `json:"cursor,omitempty"`
-	Limit  *int64          `json:"limit,omitempty"`
-	Filter *bindingFilter  `json:"filter,omitempty"`
+	Scope  wireScope      `json:"scope"`
+	Cursor string         `json:"cursor,omitempty"`
+	Limit  *int64         `json:"limit,omitempty"`
+	Filter *bindingFilter `json:"filter,omitempty"`
 }
 
 // bindingFilter carries the structured filter fields the schema declares.
@@ -407,12 +407,12 @@ type jobGetInput struct {
 }
 
 type promoteInput struct {
-	Scope               wireScope   `json:"scope"`
-	SourceBrainID       contract.ID `json:"source_brain_id"`
-	SourceClaim         wireRef     `json:"source_claim"`
+	Scope                wireScope   `json:"scope"`
+	SourceBrainID        contract.ID `json:"source_brain_id"`
+	SourceClaim          wireRef     `json:"source_claim"`
 	DestinationBindingID contract.ID `json:"destination_binding_id"`
-	Redaction           string      `json:"redaction,omitempty"`
-	Limits              wireLimits  `json:"limits"`
+	Redaction            string      `json:"redaction,omitempty"`
+	Limits               wireLimits  `json:"limits"`
 }
 
 type recallInput struct {
@@ -497,8 +497,8 @@ type policyResultBody struct {
 
 // wirePolicyResult mirrors $defs/PolicyResult.
 type wirePolicyResult struct {
-	Decision     string   `json:"decision"`
-	Reasons      []string `json:"reasons"`
+	Decision     string            `json:"decision"`
+	Reasons      []string          `json:"reasons"`
 	Requirements []json.RawMessage `json:"requirements"`
 }
 
@@ -508,12 +508,12 @@ type configurationSnapshotInput struct {
 
 type snapshotBody struct {
 	Resource struct {
-		Scope     wireScope        `json:"scope"`
-		Revision  int64            `json:"revision"`
+		Scope     wireScope          `json:"scope"`
+		Revision  int64              `json:"revision"`
 		Ancestors []wireOrganization `json:"ancestors"`
-		Bindings  []wireBinding    `json:"bindings"`
-		Worker    *wireWorker      `json:"worker,omitempty"`
-		Project   *wireProject     `json:"project,omitempty"`
+		Bindings  []wireBinding      `json:"bindings"`
+		Worker    *wireWorker        `json:"worker,omitempty"`
+		Project   *wireProject       `json:"project,omitempty"`
 	} `json:"resource"`
 }
 
@@ -534,11 +534,11 @@ type artifactsMetadataInput struct {
 
 type artifactsMetadataBody struct {
 	Artifacts []struct {
-		ID             contract.ID `json:"id"`
-		Version        int64       `json:"version"`
+		ID             contract.ID     `json:"id"`
+		Version        int64           `json:"version"`
 		Digest         contract.Digest `json:"digest"`
-		State          string      `json:"state"`
-		Classification string      `json:"classification"`
+		State          string          `json:"state"`
+		Classification string          `json:"classification"`
 	} `json:"artifacts"`
 }
 
@@ -553,20 +553,20 @@ type operationResourceBody struct {
 }
 
 type executionJobCreateInput struct {
-	Scope    wireScope       `json:"scope"`
-	Owner    string          `json:"owner"`
-	Operation string         `json:"operation"`
-	Input    json.RawMessage `json:"input"`
-	SourceID contract.ID     `json:"source_id"`
+	Scope     wireScope       `json:"scope"`
+	Owner     string          `json:"owner"`
+	Operation string          `json:"operation"`
+	Input     json.RawMessage `json:"input"`
+	SourceID  contract.ID     `json:"source_id"`
 }
 
 type executionJobRecordInput struct {
-	JobID           contract.ID       `json:"job_id"`
-	ExpectedVersion int64             `json:"expected_version"`
-	Generation      int64             `json:"generation"`
-	State           string            `json:"state"`
-	Result          json.RawMessage   `json:"result"`
-	EvidenceIDs     []contract.ID     `json:"evidence_ids"`
+	JobID           contract.ID     `json:"job_id"`
+	ExpectedVersion int64           `json:"expected_version"`
+	Generation      int64           `json:"generation"`
+	State           string          `json:"state"`
+	Result          json.RawMessage `json:"result"`
+	EvidenceIDs     []contract.ID   `json:"evidence_ids"`
 }
 
 type jobResourceBody struct {
@@ -604,16 +604,16 @@ type artifactResourceBody struct {
 // the adapter $defs, embedded as the logical action's inert parameters.
 
 type serenityRecall struct {
-	Schema            string      `json:"schema"`
-	BrainID           contract.ID `json:"brain_id"`
-	AdapterCommandID  contract.ID `json:"adapter_command_id"`
-	Kind              string      `json:"kind"`
-	Query             string      `json:"query"`
-	MinimumFreshness  time.Time   `json:"minimum_freshness"`
-	MaxClaims         int64       `json:"max_claims"`
-	MaximumCost       wireMoney   `json:"maximum_cost"`
-	AllowedDestinations []string  `json:"allowed_provider_destinations"`
-	Classification    string      `json:"classification"`
+	Schema              string      `json:"schema"`
+	BrainID             contract.ID `json:"brain_id"`
+	AdapterCommandID    contract.ID `json:"adapter_command_id"`
+	Kind                string      `json:"kind"`
+	Query               string      `json:"query"`
+	MinimumFreshness    time.Time   `json:"minimum_freshness"`
+	MaxClaims           int64       `json:"max_claims"`
+	MaximumCost         wireMoney   `json:"maximum_cost"`
+	AllowedDestinations []string    `json:"allowed_provider_destinations"`
+	Classification      string      `json:"classification"`
 }
 
 type serenityRemember struct {
@@ -629,79 +629,79 @@ type serenityRemember struct {
 }
 
 type serenityPromote struct {
-	Schema              string            `json:"schema"`
-	BrainID             contract.ID       `json:"brain_id"`
-	AdapterCommandID    contract.ID       `json:"adapter_command_id"`
-	Kind                string            `json:"kind"`
-	SourceBrainID       contract.ID       `json:"source_brain_id"`
-	SourceClaim         wireRef           `json:"source_claim"`
+	Schema                   string            `json:"schema"`
+	BrainID                  contract.ID       `json:"brain_id"`
+	AdapterCommandID         contract.ID       `json:"adapter_command_id"`
+	Kind                     string            `json:"kind"`
+	SourceBrainID            contract.ID       `json:"source_brain_id"`
+	SourceClaim              wireRef           `json:"source_claim"`
 	SourceDisclosureEvidence []wireArtifactRef `json:"source_disclosure_evidence"`
-	Text                string            `json:"text"`
-	Sources             []wireArtifactRef `json:"sources"`
-	CuratorID           contract.ID       `json:"curator_id"`
-	WriterOwner         string            `json:"writer_owner"`
-	MaximumCost         wireMoney         `json:"maximum_cost"`
-	AllowedDestinations []string          `json:"allowed_provider_destinations"`
-	Redaction           string            `json:"redaction,omitempty"`
+	Text                     string            `json:"text"`
+	Sources                  []wireArtifactRef `json:"sources"`
+	CuratorID                contract.ID       `json:"curator_id"`
+	WriterOwner              string            `json:"writer_owner"`
+	MaximumCost              wireMoney         `json:"maximum_cost"`
+	AllowedDestinations      []string          `json:"allowed_provider_destinations"`
+	Redaction                string            `json:"redaction,omitempty"`
 }
 
 type serenityRetract struct {
-	Schema             string      `json:"schema"`
-	BrainID            contract.ID `json:"brain_id"`
-	AdapterCommandID   contract.ID `json:"adapter_command_id"`
-	Kind               string      `json:"kind"`
-	Claim              wireRef     `json:"claim"`
-	Reason             string      `json:"reason"`
-	WriterOwner        string      `json:"writer_owner"`
-	Removal            string      `json:"removal"`
+	Schema           string      `json:"schema"`
+	BrainID          contract.ID `json:"brain_id"`
+	AdapterCommandID contract.ID `json:"adapter_command_id"`
+	Kind             string      `json:"kind"`
+	Claim            wireRef     `json:"claim"`
+	Reason           string      `json:"reason"`
+	WriterOwner      string      `json:"writer_owner"`
+	Removal          string      `json:"removal"`
 }
 
 // serenityEvidence decodes a recorded evidence document after schema
 // validation. Required fields are enforced by the adapter schema; pointers
 // mark optional evidence fields.
 type serenityEvidence struct {
-	Schema             string                  `json:"schema"`
-	PhysicalCall       serenityPhysicalCall    `json:"physical_call"`
-	Kind               string                  `json:"kind"`
-	BrainID            contract.ID             `json:"brain_id"`
-	AdapterCommandID   contract.ID             `json:"adapter_command_id"`
-	CommandStatus      string                  `json:"command_status"`
-	Claims             []serenityMemoryClaim   `json:"claims"`
-	BrainRevisions     []serenityBrainRevision `json:"brain_revisions"`
-	Usage              serenityProviderUsage   `json:"usage"`
-	StagedOutputs      []serenityStagedOutput  `json:"staged_outputs"`
-	OutputArtifacts    []wireArtifactRef       `json:"output_artifacts"`
-	WriterOwner        *string                 `json:"writer_owner,omitempty"`
-	ActiveRecallRemoved *bool                  `json:"active_recall_removed,omitempty"`
-	HistoricalErasure  *bool                   `json:"historical_erasure,omitempty"`
-	SelectedContext    *serenityArtifactLocator `json:"selected_context,omitempty"`
-	LookupAuthoritative *bool                  `json:"lookup_authoritative,omitempty"`
+	Schema              string                   `json:"schema"`
+	PhysicalCall        serenityPhysicalCall     `json:"physical_call"`
+	Kind                string                   `json:"kind"`
+	BrainID             contract.ID              `json:"brain_id"`
+	AdapterCommandID    contract.ID              `json:"adapter_command_id"`
+	CommandStatus       string                   `json:"command_status"`
+	Claims              []serenityMemoryClaim    `json:"claims"`
+	BrainRevisions      []serenityBrainRevision  `json:"brain_revisions"`
+	Usage               serenityProviderUsage    `json:"usage"`
+	StagedOutputs       []serenityStagedOutput   `json:"staged_outputs"`
+	OutputArtifacts     []wireArtifactRef        `json:"output_artifacts"`
+	WriterOwner         *string                  `json:"writer_owner,omitempty"`
+	ActiveRecallRemoved *bool                    `json:"active_recall_removed,omitempty"`
+	HistoricalErasure   *bool                    `json:"historical_erasure,omitempty"`
+	SelectedContext     *serenityArtifactLocator `json:"selected_context,omitempty"`
+	LookupAuthoritative *bool                    `json:"lookup_authoritative,omitempty"`
 }
 
 // serenityPhysicalCall decodes the one-physical-request evidence fields this
 // owner acts on; the full document stays inert JSON in intent detail.
 type serenityPhysicalCall struct {
-	OperationID          contract.ID `json:"operation_id"`
-	AttemptID            contract.ID `json:"attempt_id"`
-	AccountIdentity      string      `json:"account_identity"`
-	RequestedDestination string      `json:"requested_destination"`
-	ResolvedDestination  string      `json:"resolved_destination"`
+	OperationID          contract.ID     `json:"operation_id"`
+	AttemptID            contract.ID     `json:"attempt_id"`
+	AccountIdentity      string          `json:"account_identity"`
+	RequestedDestination string          `json:"requested_destination"`
+	ResolvedDestination  string          `json:"resolved_destination"`
 	ProfileDigest        contract.Digest `json:"profile_digest"`
 	CapabilityEvidence   wireArtifactRef `json:"capability_evidence"`
-	StartedAt            time.Time   `json:"started_at"`
-	FinishedAt           time.Time   `json:"finished_at"`
+	StartedAt            time.Time       `json:"started_at"`
+	FinishedAt           time.Time       `json:"finished_at"`
 	RequestContext       wireArtifactRef `json:"request_context"`
-	RequestSent          string      `json:"request_sent"`
-	Confirmation         string      `json:"confirmation"`
+	RequestSent          string          `json:"request_sent"`
+	Confirmation         string          `json:"confirmation"`
 }
 
 // serenityBrainRevision decodes one brain revision attestation.
 type serenityBrainRevision struct {
-	BrainID       contract.ID `json:"brain_id"`
-	Revision      string      `json:"revision"`
+	BrainID       contract.ID     `json:"brain_id"`
+	Revision      string          `json:"revision"`
 	Digest        contract.Digest `json:"digest"`
-	ObservedAt    time.Time   `json:"observed_at"`
-	IndexRevision *string     `json:"index_revision,omitempty"`
+	ObservedAt    time.Time       `json:"observed_at"`
+	IndexRevision *string         `json:"index_revision,omitempty"`
 }
 
 // serenityMemoryClaim mirrors the adapter MemoryClaim shape.
@@ -730,19 +730,19 @@ type serenityProviderUsage struct {
 // serenityStagedOutput decodes the IO handoff entries; publication replaces
 // them with real artifact references.
 type serenityStagedOutput struct {
-	StagingRef     string  `json:"staging_ref"`
+	StagingRef     string          `json:"staging_ref"`
 	Digest         contract.Digest `json:"digest"`
-	Size           int64   `json:"size"`
-	MediaType      string  `json:"media_type"`
-	Classification string  `json:"classification"`
-	Purpose        string  `json:"purpose"`
+	Size           int64           `json:"size"`
+	MediaType      string          `json:"media_type"`
+	Classification string          `json:"classification"`
+	Purpose        string          `json:"purpose"`
 }
 
 // serenityArtifactLocator is the selected_context locator: either a
 // published artifact or a staged handoff reference.
 type serenityArtifactLocator struct {
-	Kind       string          `json:"kind"`
+	Kind       string           `json:"kind"`
 	Artifact   *wireArtifactRef `json:"artifact,omitempty"`
-	StagingRef string          `json:"staging_ref,omitempty"`
-	Digest     contract.Digest `json:"digest,omitempty"`
+	StagingRef string           `json:"staging_ref,omitempty"`
+	Digest     contract.Digest  `json:"digest,omitempty"`
 }

@@ -26,7 +26,7 @@ func TestSelectUnauthorizedBrainNeverQueried(t *testing.T) {
 	callerWorker := e.ids.New()
 	scope := e.scopeAt(org, callerWorker)
 	payload, err := e.callAs(e.actor, scope, opSelect, selectInput{
-		Scope: wireScope{InstallationID: e.install, OrganizationID: org, WorkerID: callerWorker},
+		Scope:      wireScope{InstallationID: e.install, OrganizationID: org, WorkerID: callerWorker},
 		BindingIDs: []contract.ID{binding.ID}, Permission: permRead, MinimumFreshness: time.Time{},
 	})
 	f := decodeFault(err)
