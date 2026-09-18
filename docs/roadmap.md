@@ -547,6 +547,23 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   tests' skip-with-evidence matching must be updated once the drift
   lands, then the branch lands. main NOT moved; the abort is the script
   doing its job.
+- 2026-09-18 -- defect from the Flutter lane, lead-confirmed:
+  internal/messaging list handlers (handlers_public.go:184, :462) put
+  next_cursor INSIDE data, while the catalog's mailbox.list output schema
+  is additionalProperties:false with only items and every other owner
+  uses the envelope's next_cursor field. Needs a messaging fix lane.
+  Also from the Flutter lane: nine places the public catalog has no
+  operation for something the design shows (conversation history, caller
+  identity, unread/preview, memory claim listing, review labels, artifact
+  names/provenance, responsibility schedule/time zone, task check
+  failures, event tailing cursor) -- recorded in apps/desktop/README.md
+  "Catalog gaps"; the client renders empty or prerequisite states and
+  invents nothing. Product-level input for spec revision 3.
+- 2026-09-18 -- lead process defect, fixed: three of the lead's docs
+  commits landed on lane branches instead of main because the shell's
+  working directory drifted between tool calls (one caused a rebase
+  conflict on wave3/app-seams). All lead git commands now use explicit
+  `git -C <path>`.
 
 ## Planned
 

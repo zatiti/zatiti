@@ -154,7 +154,11 @@ func TestScheduleListPaginationCursorAndFilters(t *testing.T) {
 
 	// A tampered cursor is refused as invalid_input.
 	tampered := []byte(*rebound)
-	tampered[len(tampered)-2] = 'x'
+	if tampered[len(tampered)-2] == 'x' {
+		tampered[len(tampered)-2] = 'y'
+	} else {
+		tampered[len(tampered)-2] = 'x'
+	}
 	bad := string(tampered)
 	_ = e.expectFault(opScheduleList, listInput{Scope: e.scope, Cursor: &bad, Limit: &limit}, contract.CodeInvalidInput)
 
