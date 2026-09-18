@@ -46,14 +46,14 @@ func Bind[I any, O any](descriptor contract.Descriptor, fn func(context.Context,
 	if err != nil {
 		return nil, fmt.Errorf("registry: bind of operation %q: %w", descriptor.ID, err)
 	}
-	mergedInput, err := mergedSchema(cat.defsJSON, descriptor.InputSchema)
+	mergedInput, err := cat.mergedSchema(descriptor.InputSchema)
 	if err != nil {
 		return nil, fmt.Errorf("registry: bind of operation %s: input schema: %w", descriptor.ID, err)
 	}
 	if err := checkSchemaDocument(mergedInput); err != nil {
 		return nil, fmt.Errorf("registry: bind of operation %s: input schema: %w", descriptor.ID, err)
 	}
-	mergedOutput, err := mergedSchema(cat.defsJSON, descriptor.OutputSchema)
+	mergedOutput, err := cat.mergedSchema(descriptor.OutputSchema)
 	if err != nil {
 		return nil, fmt.Errorf("registry: bind of operation %s: output schema: %w", descriptor.ID, err)
 	}

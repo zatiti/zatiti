@@ -223,7 +223,9 @@ func TestNewRejectsInternalShadowingAndMappings(t *testing.T) {
 }
 
 func TestNewRejectsUnknownCallers(t *testing.T) {
-	modules := append(catalogModules(), internalModule("tester", "tester.hidden", "ghost.op"))
+	// Callers name calling owners. An owner no assembled module carries is
+	// unknown; an operation ID is not an owner name at all.
+	modules := append(catalogModules(), internalModule("tester", "tester.hidden", "ghost"))
 	_, err := New(modules)
 	if err == nil {
 		t.Fatal("assembly accepted an unknown internal caller")
@@ -231,10 +233,15 @@ func TestNewRejectsUnknownCallers(t *testing.T) {
 	if !strings.Contains(err.Error(), "unknown caller") {
 		t.Fatalf("error %q does not name the unknown caller", err.Error())
 	}
-	// The same surface with a registered caller assembles cleanly.
 	modules = append(catalogModules(), internalModule("tester", "tester.hidden", "artifact.get"))
+	if _, err := New(modules); err == nil || !strings.Contains(err.Error(), "not a valid owner name") {
+		t.Fatalf("operation ID accepted as a caller: %v", err)
+	}
+	// The same surface with assembled owners and the trusted application and
+	// controller identities assembles cleanly.
+	modules = append(catalogModules(), internalModule("tester", "tester.hidden", "artifacts", "tester", "application", "controller"))
 	if _, err := New(modules); err != nil {
-		t.Fatalf("registered internal caller rejected: %v", err)
+		t.Fatalf("assembled-owner callers rejected: %v", err)
 	}
 }
 
@@ -405,31 +412,34 @@ func TestRegistryHandleRoutesOnlyItsOwnOperations(t *testing.T) {
 
 func TestDispatchRejectsUnitAndVersionViolations(t *testing.T) {
 	reg := mustRegistry(t)
-	// Mutations refuse read-only units.
-	d, handler, err := reg.Lookup("artifact.export", 1)
+	// Mutations refuse read-only units. artifact.upload.begin is a mutation
+	// with an ordinary handler; the local IO mutations have none (see
+	// TestSeamLocalIORouting).
+	d, handler, err := reg.Lookup("artifact.upload.begin", 1)
 	if err != nil {
 		t.Fatalf("lookup failed: %v", err)
 	}
 	if d.Mode != contract.ModeMutation {
-		t.Fatalf("artifact.export mode %q, want mutation", d.Mode)
+		t.Fatalf("artifact.upload.begin mode %q, want mutation", d.Mode)
 	}
 	readOnly := &fakeUnit{ro: true}
-	input := json.RawMessage(`{"scope":{"installation_id":"00000000-0000-4000-8000-000000000001"},"id":"00000000-0000-4000-8000-000000000002"}`)
-	if _, err := handler(context.Background(), readOnly, contract.Invocation{Operation: d.ID, Version: d.Version, Input: input}); faultCodeOf(t, err) != contract.CodeInvalidInput {
+	mutationInput := validInstance(t, d.ID, mustCatalog(t).byID[d.ID].Input)
+	if _, err := handler(context.Background(), readOnly, contract.Invocation{Operation: d.ID, Version: d.Version, Input: mutationInput}); faultCodeOf(t, err) != contract.CodeInvalidInput {
 		t.Fatal("mutation on a read-only unit must be invalid_input")
 	}
 	// The same invocation succeeds on a writable unit and reaches the owner.
 	unit := &fakeUnit{}
-	if _, err := handler(context.Background(), unit, contract.Invocation{Operation: d.ID, Version: d.Version, Input: input}); err != nil {
+	if _, err := handler(context.Background(), unit, contract.Invocation{Operation: d.ID, Version: d.Version, Input: mutationInput}); err != nil {
 		t.Fatalf("mutation on a writable unit failed: %v", err)
 	}
 	if len(unit.events) != 0 {
 		t.Fatalf("unexpected events: %v", unit.events)
 	}
 	// Nil units are an internal defect, not a caller fault.
-	if _, err := handler(context.Background(), nil, contract.Invocation{Operation: d.ID, Version: d.Version, Input: input}); faultCodeOf(t, err) != contract.CodeInternalError {
+	if _, err := handler(context.Background(), nil, contract.Invocation{Operation: d.ID, Version: d.Version, Input: mutationInput}); faultCodeOf(t, err) != contract.CodeInternalError {
 		t.Fatal("nil unit must be an internal fault")
 	}
+	input := json.RawMessage(`{"scope":{"installation_id":"00000000-0000-4000-8000-000000000001"},"id":"00000000-0000-4000-8000-000000000002"}`)
 	// Queries succeed on read-only units.
 	qd, qh, err := reg.Lookup("artifact.get", 1)
 	if err != nil {

@@ -17,6 +17,14 @@ type Registry struct {
 	entries    map[versionKey]*entry
 	registered map[string]bool // operation IDs with at least one version
 
+	// current maps an operation ID to its highest registered version: the
+	// version Lookup resolves when the caller passes version 0.
+	current map[string]int64
+
+	// localIO maps each registered local IO operation to the owning module's
+	// own contract.LocalIO implementation.
+	localIO map[string]contract.LocalIO
+
 	publicList []*entry // public operations, sorted by ID
 
 	capabilityDescriptors []contract.Descriptor
@@ -28,8 +36,18 @@ type versionKey struct {
 	version int64
 }
 
-// entry is one registered operation: its descriptor, the merged schemas
-// used for invocation-time validation and its dispatch handler.
+// trustedCallers are the caller identities that are not domain modules:
+// application's own ports view and the local controller entering through
+// application.Internal. Every other caller in an internal allowlist must be
+// an assembled module name.
+var trustedCallers = map[string]bool{
+	"application": true,
+	"controller":  true,
+}
+
+// entry is one registered operation: its descriptor with bare schema bodies
+// (the published form), the self-contained schema documents used wherever a
+// schema is evaluated, and its dispatch handler.
 type entry struct {
 	descriptor   contract.Descriptor
 	mergedInput  json.RawMessage
@@ -54,9 +72,14 @@ type entry struct {
 //   - every catalog operation is registered by exactly one module,
 //   - internal descriptors declare no CLI/MCP mappings (they never appear
 //     in the generated surface) and never shadow a catalog operation,
-//   - internal caller allowlists reference registered operations,
+//   - internal descriptors never require a submission key, and their
+//     caller allowlists name calling owners: assembled modules or the
+//     trusted application/controller identities,
+//   - schemas arrive bare or self-contained (see catalog.resolveSchema); a
+//     delivered definition never redefines a shared one,
 //   - registered local-IO operations are owned by modules implementing
-//     contract.LocalIO so they route through Prepare/Perform/Finish.
+//     contract.LocalIO; LocalIOFor hands that implementation to the
+//     dispatcher, which sequences Prepare/Perform/Finish itself.
 //
 // The registry's own capabilities operations are registered from the
 // catalog without self-registration; Registry implements contract.Module
@@ -71,6 +94,8 @@ func New(modules []contract.Module) (*Registry, error) {
 		catalog:    cat,
 		entries:    make(map[versionKey]*entry, len(cat.document.Operations)),
 		registered: make(map[string]bool, len(cat.document.Operations)),
+		current:    make(map[string]int64, len(cat.document.Operations)),
+		localIO:    make(map[string]contract.LocalIO, len(localIOOperations)),
 	}
 
 	// Registry-owned capabilities first so module names cannot shadow them.
@@ -107,11 +132,13 @@ func New(modules []contract.Module) (*Registry, error) {
 			return nil, fmt.Errorf("registry: operation %s v%d is not registered by any module", op.ID, op.Version)
 		}
 	}
-	// Internal caller allowlists may only name registered operations.
+	// Internal caller allowlists name calling owners. A name that is neither
+	// an assembled module nor a trusted caller could never be bound by the
+	// port router, so it is a descriptor defect, not a dormant entry.
 	for _, e := range r.entries {
 		for _, caller := range e.descriptor.Callers {
-			if !r.registered[caller] {
-				return nil, fmt.Errorf("registry: operation %s allows unknown caller %q", e.descriptor.ID, caller)
+			if !seen[caller] && !trustedCallers[caller] {
+				return nil, fmt.Errorf("registry: operation %s allows unknown caller %q: not an assembled module, application or controller", e.descriptor.ID, caller)
 			}
 		}
 	}
@@ -142,6 +169,29 @@ func (r *Registry) register(d *contract.Descriptor, ownerName string, module con
 		return fmt.Errorf("registry: operation %s v%d is registered more than once", d.ID, d.Version)
 	}
 
+	inputBody, mergedInput, err := r.catalog.resolveSchema(d.InputSchema)
+	if err != nil {
+		return fmt.Errorf("registry: operation %s: input schema: %w", d.ID, err)
+	}
+	outputBody, mergedOutput, err := r.catalog.resolveSchema(d.OutputSchema)
+	if err != nil {
+		return fmt.Errorf("registry: operation %s: output schema: %w", d.ID, err)
+	}
+	var completionBody, mergedCompletion json.RawMessage
+	if len(d.CompletionSchema) != 0 {
+		completionBody, mergedCompletion, err = r.catalog.resolveSchema(d.CompletionSchema)
+		if err != nil {
+			return fmt.Errorf("registry: operation %s: completion schema: %w", d.ID, err)
+		}
+	}
+	// The registered descriptor carries the bare bodies: the form the frozen
+	// catalog prints and every discovery surface publishes.
+	registered := cloneDescriptor(d)
+	registered.InputSchema = inputBody
+	registered.OutputSchema = outputBody
+	registered.CompletionSchema = completionBody
+	d = &registered
+
 	frozen, inCatalog := r.catalog.byID[d.ID]
 	switch d.Visibility {
 	case contract.VisibilityPublic:
@@ -162,26 +212,13 @@ func (r *Registry) register(d *contract.Descriptor, ownerName string, module con
 		return fmt.Errorf("registry: operation %q has unsupported visibility %q", d.ID, d.Visibility)
 	}
 
-	mergedInput, err := mergedSchema(r.catalog.defsJSON, d.InputSchema)
-	if err != nil {
-		return fmt.Errorf("registry: operation %s: input schema: %w", d.ID, err)
-	}
 	if err := checkSchemaDocument(mergedInput); err != nil {
 		return fmt.Errorf("registry: operation %s: input schema: %w", d.ID, err)
-	}
-	mergedOutput, err := mergedSchema(r.catalog.defsJSON, d.OutputSchema)
-	if err != nil {
-		return fmt.Errorf("registry: operation %s: output schema: %w", d.ID, err)
 	}
 	if err := checkSchemaDocument(mergedOutput); err != nil {
 		return fmt.Errorf("registry: operation %s: output schema: %w", d.ID, err)
 	}
-	var mergedCompletion json.RawMessage
-	if len(d.CompletionSchema) != 0 {
-		mergedCompletion, err = mergedSchema(r.catalog.defsJSON, d.CompletionSchema)
-		if err != nil {
-			return fmt.Errorf("registry: operation %s: completion schema: %w", d.ID, err)
-		}
+	if len(mergedCompletion) != 0 {
 		if err := checkSchemaDocument(mergedCompletion); err != nil {
 			return fmt.Errorf("registry: operation %s: completion schema: %w", d.ID, err)
 		}
@@ -204,27 +241,58 @@ func (r *Registry) register(d *contract.Descriptor, ownerName string, module con
 		owner:        ownerName,
 	}
 	if localIOOperations[d.ID] {
-		e.handler = wrapLocalIO(e.descriptor, e.mergedInput, local)
+		e.handler = wrapLocalIO(e.descriptor, e.mergedInput)
+		r.localIO[d.ID] = local
 	} else {
 		e.handler = wrapModule(e.descriptor, e.mergedInput, module)
 	}
 	r.entries[key] = e
 	r.registered[d.ID] = true
+	if d.Version > r.current[d.ID] {
+		r.current[d.ID] = d.Version
+	}
 	return nil
 }
 
-// Lookup returns the descriptor and handler for one operation at one exact
-// version. Unknown operations, unknown versions and internal operations
-// reached with a version that is not registered return a not_found fault;
-// internal operations are resolvable for internal callers through the same
-// typed boundary and are never accepted from public routing.
+// Lookup returns the descriptor and handler for one operation.
+//
+// Version 0 means the current version: the highest version registered for
+// the ID. The returned descriptor reports the resolved version, and the
+// handler executes only that version, so the dispatcher stamps
+// Descriptor.Version on the invocation before calling it. Any other version
+// is matched exactly. Unknown operations, unregistered versions and negative
+// versions return a not_found fault.
+//
+// The descriptor's schemas are the self-contained documents (bare body plus
+// the definitions it reaches), so a caller can evaluate them exactly as
+// delivered; Public returns the bare published bodies. Internal operations
+// are resolvable for internal callers through the same typed boundary;
+// keeping them away from public routing is the dispatcher's decision.
 func (r *Registry) Lookup(id string, version int64) (contract.Descriptor, contract.Handler, error) {
+	if version == 0 {
+		version = r.current[id]
+	}
 	e, ok := r.entries[versionKey{id, version}]
-	if !ok {
+	if !ok || version < 1 {
 		return contract.Descriptor{}, nil, fault(contract.CodeNotFound,
 			"operation %s version %d is not registered", id, version)
 	}
-	return cloneDescriptor(&e.descriptor), e.handler, nil
+	d := cloneDescriptor(&e.descriptor)
+	d.InputSchema = append(json.RawMessage(nil), e.mergedInput...)
+	d.OutputSchema = append(json.RawMessage(nil), e.mergedOutput...)
+	d.CompletionSchema = append(json.RawMessage(nil), e.mergedCompl...)
+	return d, e.handler, nil
+}
+
+// LocalIOFor returns the owning module's own contract.LocalIO for a
+// registered local IO operation. The dispatcher runs Prepare inside its
+// admission transaction, Perform outside any transaction and Finish inside
+// the completion transaction; the registry only routes. Every other
+// operation, including the other operations of the same owners, reports
+// false.
+func (r *Registry) LocalIOFor(operation string) (contract.LocalIO, bool) {
+	local, ok := r.localIO[operation]
+	return local, ok
 }
 
 // Public returns the public descriptors sorted by ID. Internal operations
@@ -276,21 +344,16 @@ func wrapModule(d contract.Descriptor, mergedInput json.RawMessage, module contr
 	return wrapHandler(d, mergedInput, module.Handle)
 }
 
-// wrapLocalIO builds the dispatch wrapper for a registered local-IO
-// operation: after the common checks, the invocation routes through the
-// owning module's LocalIO seam — Prepare inside the transaction, Perform
-// outside it, Finish back inside to commit result and evidence.
-func wrapLocalIO(d contract.Descriptor, mergedInput json.RawMessage, io contract.LocalIO) contract.Handler {
-	return wrapHandler(d, mergedInput, func(ctx context.Context, unit contract.Unit, invocation contract.Invocation) (contract.Payload, error) {
-		plan, err := io.Prepare(ctx, unit, invocation)
-		if err != nil {
-			return contract.Payload{}, err
-		}
-		result, err := io.Perform(ctx, plan)
-		if err != nil {
-			return contract.Payload{}, err
-		}
-		return io.Finish(ctx, unit, plan, result)
+// wrapLocalIO builds the handler of a registered local-IO operation. A
+// Handler runs inside one Unit, and Perform must never run inside a Unit, so
+// no single handler can execute the Prepare/Perform/Finish seam: after the
+// common checks it fails closed and names the route the dispatcher must
+// take instead.
+func wrapLocalIO(d contract.Descriptor, mergedInput json.RawMessage) contract.Handler {
+	id := d.ID
+	return wrapHandler(d, mergedInput, func(context.Context, contract.Unit, contract.Invocation) (contract.Payload, error) {
+		return contract.Payload{}, fault(contract.CodeInternalError,
+			"local IO operation %s executes through LocalIOFor as Prepare, Perform outside the unit, then Finish; it has no single-unit handler", id)
 	})
 }
 

@@ -39,8 +39,10 @@ func validOwnerName(name string) bool {
 // validateDescriptorShape checks the structural invariants every descriptor
 // must hold regardless of visibility: well-formed ID, version >= 1, known
 // visibility, mode and effect values, non-empty schemas and the
-// mode/submission-key semantics (queries never require a submission key;
-// mutations do, except the one-time init).
+// mode/submission-key semantics: queries and internal operations never
+// require a submission key (an internal call joins its caller's unit and
+// command, and no internal caller can supply one); public mutations do,
+// except the one-time init. Caller allowlists name owners.
 func validateDescriptorShape(d *contract.Descriptor) error {
 	if !validOperationID(d.ID) {
 		return fmt.Errorf("operation ID %q is not a dot-separated lowercase token sequence", d.ID)
@@ -76,14 +78,17 @@ func validateDescriptorShape(d *contract.Descriptor) error {
 	switch {
 	case d.Mode == contract.ModeQuery && d.SubmissionKey:
 		return fmt.Errorf("query operation must not require a submission key")
+	case d.Visibility == contract.VisibilityInternal && d.SubmissionKey:
+		return fmt.Errorf("internal operation never requires a submission key")
+	case d.Visibility == contract.VisibilityInternal:
 	case d.Mode == contract.ModeMutation && d.SubmissionKey && d.ID == "installation.init":
 		return fmt.Errorf("one-time init never requires a submission key")
 	case d.Mode == contract.ModeMutation && !d.SubmissionKey && d.ID != "installation.init":
 		return fmt.Errorf("mutation operation requires a submission key")
 	}
 	for _, caller := range d.Callers {
-		if !validOperationID(caller) {
-			return fmt.Errorf("operation %s: caller %q is not a valid operation ID", d.ID, caller)
+		if !validOwnerName(caller) {
+			return fmt.Errorf("operation %s: caller %q is not a valid owner name", d.ID, caller)
 		}
 	}
 	return nil

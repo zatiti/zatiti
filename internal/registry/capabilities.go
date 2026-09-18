@@ -73,14 +73,14 @@ func (r *Registry) registerCapabilities() error {
 		if localIOOperations[d.ID] {
 			return fmt.Errorf("registry: capabilities operation %s cannot be a local IO operation", d.ID)
 		}
-		mergedInput, err := mergedSchema(r.catalog.defsJSON, d.InputSchema)
+		mergedInput, err := r.catalog.mergedSchema(d.InputSchema)
 		if err != nil {
 			return fmt.Errorf("registry: capabilities operation %s: input schema: %w", d.ID, err)
 		}
 		if err := checkSchemaDocument(mergedInput); err != nil {
 			return fmt.Errorf("registry: capabilities operation %s: input schema: %w", d.ID, err)
 		}
-		mergedOutput, err := mergedSchema(r.catalog.defsJSON, d.OutputSchema)
+		mergedOutput, err := r.catalog.mergedSchema(d.OutputSchema)
 		if err != nil {
 			return fmt.Errorf("registry: capabilities operation %s: output schema: %w", d.ID, err)
 		}
@@ -110,6 +110,9 @@ func (r *Registry) registerCapabilities() error {
 			self:         true,
 		}
 		r.registered[d.ID] = true
+		if d.Version > r.current[d.ID] {
+			r.current[d.ID] = d.Version
+		}
 		r.capabilityDescriptors = append(r.capabilityDescriptors, cloneDescriptor(&d))
 	}
 	if len(r.capabilityDescriptors) == 0 {

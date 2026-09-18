@@ -54,12 +54,18 @@ type catalog struct {
 	byID     map[string]*catalogOperation
 
 	// defsJSON holds the shared definition schemas themselves — the object
-	// the document's "defs" field wraps under its "$defs" key. mergedSchema
-	// injects exactly these bytes so "#/$defs/Name" references resolve at
-	// the merged document's root.
+	// the document's "defs" field wraps under its "$defs" key.
 	defsJSON json.RawMessage
 
 	sharedDefs map[string]any // decoded $defs name -> schema
+
+	// sharedRaw and sharedCanonical hold every shared definition as embedded
+	// and in canonical form; resolveSchema compares module-delivered
+	// definitions against them. verified remembers the delivered spellings
+	// already proven equal.
+	sharedRaw       map[string]json.RawMessage
+	sharedCanonical map[string]string
+	verified        sync.Map
 }
 
 var (
@@ -97,11 +103,25 @@ func parseCatalog(data []byte) (*catalog, error) {
 	if err := contract.DecodeStrict(inner, &defs); err != nil {
 		return nil, fmt.Errorf("shared definitions are not strict JSON: %w", err)
 	}
+	var sharedRaw map[string]json.RawMessage
+	if err := contract.DecodeStrict(inner, &sharedRaw); err != nil {
+		return nil, fmt.Errorf("shared definitions are not strict JSON: %w", err)
+	}
+	sharedCanonical := make(map[string]string, len(sharedRaw))
+	for name, def := range sharedRaw {
+		canonical, err := contract.Canonicalize(def)
+		if err != nil {
+			return nil, fmt.Errorf("shared definition %s: %w", name, err)
+		}
+		sharedCanonical[name] = string(canonical)
+	}
 	c := &catalog{
-		document:   doc,
-		byID:       make(map[string]*catalogOperation, len(doc.Operations)),
-		defsJSON:   append(json.RawMessage(nil), inner...),
-		sharedDefs: defs,
+		document:        doc,
+		byID:            make(map[string]*catalogOperation, len(doc.Operations)),
+		defsJSON:        append(json.RawMessage(nil), inner...),
+		sharedDefs:      defs,
+		sharedRaw:       sharedRaw,
+		sharedCanonical: sharedCanonical,
 	}
 	for i := range c.document.Operations {
 		op := &c.document.Operations[i]
@@ -183,20 +203,151 @@ var localIOOperations = map[string]bool{
 	"installation.restore":      true,
 }
 
-// mergedSchema returns the operation schema extended with the shared $defs
-// object so document-local $refs resolve. Operation schemas never carry
-// their own $defs (checked here) and never use root pointers.
-func mergedSchema(shared json.RawMessage, opSchema json.RawMessage) (json.RawMessage, error) {
+// resolveSchema accepts an operation schema in either delivered form and
+// returns its bare body plus the self-contained document used wherever the
+// schema is evaluated.
+//
+// Domain modules deliver either the bare operation body, exactly as the
+// frozen catalog prints it, or a self-contained document: the body plus a
+// root $defs member. A delivered definition that shares a name with a shared
+// catalog definition must be canonically equal to it, so no module can
+// redefine the frozen wire types; any other name is an owner-private
+// definition (internal operations reference those).
+//
+// body is the schema without $defs: the form compared against the frozen
+// catalog and published through Public, capabilities and OpenAPI. document
+// is the body plus exactly the definitions reachable from it, shared or
+// owner-private, so "#/$defs/Name" references resolve at its root and
+// unreachable definitions are never carried along.
+func (c *catalog) resolveSchema(opSchema json.RawMessage) (body, document json.RawMessage, err error) {
 	if len(opSchema) == 0 {
-		return nil, fmt.Errorf("operation schema is empty")
+		return nil, nil, fmt.Errorf("operation schema is empty")
 	}
 	var opRoot map[string]json.RawMessage
 	if err := contract.DecodeStrict(opSchema, &opRoot); err != nil {
-		return nil, fmt.Errorf("operation schema is not a strict JSON object: %w", err)
+		return nil, nil, fmt.Errorf("operation schema is not a strict JSON object: %w", err)
 	}
-	if _, exists := opRoot["$defs"]; exists {
-		return nil, fmt.Errorf("operation schema must not declare its own $defs; the shared definitions are merged in")
+	private := map[string]json.RawMessage{}
+	if rawDefs, ok := opRoot["$defs"]; ok {
+		var own map[string]json.RawMessage
+		if err := contract.DecodeStrict(rawDefs, &own); err != nil {
+			return nil, nil, fmt.Errorf("operation schema $defs is not a strict JSON object: %w", err)
+		}
+		for name, def := range own {
+			if _, shared := c.sharedRaw[name]; !shared {
+				private[name] = def
+				continue
+			}
+			if err := c.sameAsShared(name, def); err != nil {
+				return nil, nil, err
+			}
+		}
+		delete(opRoot, "$defs")
 	}
-	opRoot["$defs"] = json.RawMessage(shared)
-	return json.Marshal(opRoot)
+	body, err = json.Marshal(opRoot)
+	if err != nil {
+		return nil, nil, fmt.Errorf("operation schema does not marshal: %w", err)
+	}
+
+	// Transitive closure of the definitions the body reaches.
+	reachable := map[string]json.RawMessage{}
+	pending, err := definitionRefs(body)
+	if err != nil {
+		return nil, nil, err
+	}
+	for len(pending) > 0 {
+		name := pending[len(pending)-1]
+		pending = pending[:len(pending)-1]
+		if _, done := reachable[name]; done {
+			continue
+		}
+		def, ok := private[name]
+		if !ok {
+			def, ok = c.sharedRaw[name]
+		}
+		if !ok {
+			// Left unresolved: checkSchemaDocument names the dangling $ref.
+			continue
+		}
+		reachable[name] = def
+		next, err := definitionRefs(def)
+		if err != nil {
+			return nil, nil, err
+		}
+		pending = append(pending, next...)
+	}
+	if len(reachable) != 0 {
+		rawDefs, err := json.Marshal(reachable)
+		if err != nil {
+			return nil, nil, fmt.Errorf("definitions do not marshal: %w", err)
+		}
+		opRoot["$defs"] = rawDefs
+	}
+	document, err = json.Marshal(opRoot)
+	if err != nil {
+		return nil, nil, fmt.Errorf("operation schema does not marshal: %w", err)
+	}
+	return body, document, nil
+}
+
+// mergedSchema returns only the self-contained document of resolveSchema.
+func (c *catalog) mergedSchema(opSchema json.RawMessage) (json.RawMessage, error) {
+	_, document, err := c.resolveSchema(opSchema)
+	return document, err
+}
+
+// sameAsShared verifies that a module-delivered definition equals the shared
+// catalog definition of the same name. Byte-equal definitions, the common
+// case, skip canonicalization; verified spellings are remembered because
+// every schema of a module repeats the same $defs document.
+func (c *catalog) sameAsShared(name string, def json.RawMessage) error {
+	if string(def) == string(c.sharedRaw[name]) {
+		return nil
+	}
+	key := name + "\x00" + string(def)
+	if _, ok := c.verified.Load(key); ok {
+		return nil
+	}
+	canonical, err := contract.Canonicalize(def)
+	if err != nil {
+		return fmt.Errorf("definition %s: %w", name, err)
+	}
+	if string(canonical) != c.sharedCanonical[name] {
+		return fmt.Errorf("operation schema redefines the shared definition %s", name)
+	}
+	c.verified.Store(key, struct{}{})
+	return nil
+}
+
+// definitionRefs lists the "#/$defs/Name" definitions a schema fragment
+// references. Every "$ref" string is followed wherever it appears: following
+// one from a data position only carries an unused definition along.
+func definitionRefs(fragment json.RawMessage) ([]string, error) {
+	var root any
+	dec := json.NewDecoder(strings.NewReader(string(fragment)))
+	dec.UseNumber()
+	if err := dec.Decode(&root); err != nil {
+		return nil, fmt.Errorf("not a strict JSON document: %w", err)
+	}
+	var names []string
+	var walk func(node any)
+	walk = func(node any) {
+		switch n := node.(type) {
+		case map[string]any:
+			if ref, ok := n["$ref"].(string); ok && strings.HasPrefix(ref, "#/$defs/") {
+				name, _, _ := strings.Cut(strings.TrimPrefix(ref, "#/$defs/"), "/")
+				name = strings.ReplaceAll(strings.ReplaceAll(name, "~1", "/"), "~0", "~")
+				names = append(names, name)
+			}
+			for _, child := range n {
+				walk(child)
+			}
+		case []any:
+			for _, child := range n {
+				walk(child)
+			}
+		}
+	}
+	walk(root)
+	return names, nil
 }

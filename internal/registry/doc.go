@@ -10,12 +10,15 @@
 // collisions are rejected. Internal descriptors are validated structurally
 // and never appear in Public, OpenAPI, CLI, MCP or accepted public routing.
 //
-// Lookup returns the descriptor and handler for one operation/version. The
-// returned handler validates the invocation against the operation's merged
-// input schema (shared $defs plus the operation schema) before executing,
-// rejects mutations on read-only units and routes registered local-IO
-// operations through the owning module's LocalIO Prepare/Perform/Finish
-// seam. Bind binds a typed Go function to a descriptor: strict decode,
+// Lookup returns the descriptor and handler for one operation/version;
+// version 0 resolves the current (highest registered) version. Modules
+// deliver schemas bare or self-contained, and Lookup returns self-contained
+// documents a caller can evaluate as delivered. The returned handler
+// validates the invocation against that input document before executing and
+// rejects mutations on read-only units. Registered local-IO operations have
+// no single-unit handler: LocalIOFor hands the dispatcher the owning
+// module's own LocalIO so it runs Prepare, Perform outside transactions and
+// Finish itself. Internal caller allowlists name calling owners. Bind binds a typed Go function to a descriptor: strict decode,
 // schema validation before execution, output marshaled and validated
 // against the output schema.
 //

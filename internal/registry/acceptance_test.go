@@ -203,7 +203,7 @@ func numberCandidates(n map[string]any) []any {
 func validInstance(t *testing.T, opID string, schema json.RawMessage) json.RawMessage {
 	t.Helper()
 	cat := mustCatalog(t)
-	merged, err := mergedSchema(cat.defsJSON, schema)
+	merged, err := cat.mergedSchema(schema)
 	if err != nil {
 		t.Fatalf("operation %s: input schema: %v", opID, err)
 	}
@@ -314,8 +314,8 @@ func TestAcceptanceZ02RegistrySurface(t *testing.T) {
 
 // TestAcceptanceZ02LifecycleParityRegistrySide: every operation of the
 // frozen surface is executable through its registered handler with a
-// schema-valid input, lookup paths agree, and the local-IO seam runs
-// Prepare, Perform and Finish in order. Cross-transport parity (real CLI
+// schema-valid input, lookup paths agree, and the local-IO operations route
+// to their owner's Prepare, Perform and Finish phases through LocalIOFor. Cross-transport parity (real CLI
 // subprocesses and MCP clients) is proven in the client/application lanes.
 func TestAcceptanceZ02LifecycleParityRegistrySide(t *testing.T) {
 	reg := mustRegistry(t)
@@ -324,6 +324,20 @@ func TestAcceptanceZ02LifecycleParityRegistrySide(t *testing.T) {
 		looked, handler, err := reg.Lookup(d.ID, d.Version)
 		if err != nil {
 			t.Fatalf("lookup of %s failed: %v", d.ID, err)
+		}
+		// Lookup delivers self-contained documents; their bare bodies are
+		// the published schemas.
+		cat := mustCatalog(t)
+		if looked.InputSchema, _, err = cat.resolveSchema(looked.InputSchema); err != nil {
+			t.Fatalf("operation %s: %v", d.ID, err)
+		}
+		if looked.OutputSchema, _, err = cat.resolveSchema(looked.OutputSchema); err != nil {
+			t.Fatalf("operation %s: %v", d.ID, err)
+		}
+		if len(looked.CompletionSchema) != 0 {
+			if looked.CompletionSchema, _, err = cat.resolveSchema(looked.CompletionSchema); err != nil {
+				t.Fatalf("operation %s: %v", d.ID, err)
+			}
 		}
 		descriptorAgreesWith(t, looked, d)
 		input := validInstance(t, d.ID, d.InputSchema)
@@ -335,11 +349,23 @@ func TestAcceptanceZ02LifecycleParityRegistrySide(t *testing.T) {
 				t.Fatalf("capabilities.schema probe input does not marshal: %v", err)
 			}
 		}
-		payload, err := handler(context.Background(), &fakeUnit{}, contract.Invocation{
-			Operation: d.ID,
-			Version:   d.Version,
-			Input:     input,
-		})
+		invocation := contract.Invocation{Operation: d.ID, Version: d.Version, Input: input}
+		var payload contract.Payload
+		if phases, ok := reg.LocalIOFor(d.ID); ok {
+			// A local IO operation executes as the dispatcher runs it:
+			// Prepare inside a unit, Perform outside, Finish inside.
+			plan, pErr := phases.Prepare(context.Background(), &fakeUnit{}, invocation)
+			if pErr != nil {
+				t.Fatalf("operation %s: Prepare rejected a schema-valid input: %v", d.ID, pErr)
+			}
+			result, pErr := phases.Perform(context.Background(), plan)
+			if pErr != nil {
+				t.Fatalf("operation %s: Perform failed: %v", d.ID, pErr)
+			}
+			payload, err = phases.Finish(context.Background(), &fakeUnit{}, plan, result)
+		} else {
+			payload, err = handler(context.Background(), &fakeUnit{}, invocation)
+		}
 		if err != nil {
 			t.Fatalf("operation %s rejected a schema-valid input: %v", d.ID, err)
 		}
@@ -348,8 +374,8 @@ func TestAcceptanceZ02LifecycleParityRegistrySide(t *testing.T) {
 		}
 	}
 
-	// The local-IO seam routes the frozen operations through
-	// Prepare → Perform → Finish, in that order.
+	// The local-IO route hands out the owning module itself, so the phases
+	// the dispatcher sequences are the module's real ones, in order.
 	modules := catalogModules()
 	var artifacts *fakeOwnerIO
 	for _, m := range modules {
@@ -364,17 +390,25 @@ func TestAcceptanceZ02LifecycleParityRegistrySide(t *testing.T) {
 	if err != nil {
 		t.Fatalf("assembly failed: %v", err)
 	}
-	_, handler, err := reg2.Lookup("artifact.upload.chunk", 1)
-	if err != nil {
-		t.Fatalf("lookup failed: %v", err)
+	phases, ok := reg2.LocalIOFor("artifact.upload.chunk")
+	if !ok || phases != contract.LocalIO(artifacts) {
+		t.Fatal("artifact.upload.chunk does not route to the artifacts module's own LocalIO")
 	}
 	input := validInstance(t, "artifact.upload.chunk", mustCatalog(t).byID["artifact.upload.chunk"].Input)
-	if _, err := handler(context.Background(), &fakeUnit{}, contract.Invocation{
+	plan, err := phases.Prepare(context.Background(), &fakeUnit{}, contract.Invocation{
 		Operation: "artifact.upload.chunk",
 		Version:   1,
 		Input:     input,
-	}); err != nil {
-		t.Fatalf("artifact.upload.chunk invocation failed: %v", err)
+	})
+	if err != nil {
+		t.Fatalf("artifact.upload.chunk Prepare failed: %v", err)
+	}
+	result, err := phases.Perform(context.Background(), plan)
+	if err != nil {
+		t.Fatalf("artifact.upload.chunk Perform failed: %v", err)
+	}
+	if _, err := phases.Finish(context.Background(), &fakeUnit{}, plan, result); err != nil {
+		t.Fatalf("artifact.upload.chunk Finish failed: %v", err)
 	}
 	if len(artifacts.io.prepared) != 1 || len(artifacts.io.performed) != 1 || len(artifacts.io.finished) != 1 {
 		t.Fatalf("LocalIO seam stages misordered: prepared=%d performed=%d finished=%d",
