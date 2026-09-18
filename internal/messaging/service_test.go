@@ -1,6 +1,7 @@
 package messaging
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -155,8 +156,8 @@ func TestDescriptorEffectsAndBindings(t *testing.T) {
 		if len(d.Callers) != 0 {
 			t.Fatalf("%s public operation carries callers %v", d.ID, d.Callers)
 		}
-		if len(d.CLI) == 0 || !strings.HasPrefix(strings.Join(d.CLI, " "), "zatiti ") {
-			t.Fatalf("%s public operation misses the CLI path %v", d.ID, d.CLI)
+		if !slices.Equal(d.CLI, strings.Split(d.ID, ".")) {
+			t.Fatalf("%s public operation carries CLI tokens %v", d.ID, d.CLI)
 		}
 		want := "zatiti_" + strings.ReplaceAll(d.ID, ".", "_")
 		if d.MCP != want {

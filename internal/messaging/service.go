@@ -17,7 +17,7 @@ type opMeta struct {
 	submission      bool
 	expectedVersion bool
 	callers         []string
-	cli             string // "zatiti ..." CLI path; empty for internal operations
+	cli             string // CLI tokens below the root command, space separated; empty for internal operations
 }
 
 // opMetas lists every owned operation: the three internal peer operations
@@ -33,23 +33,23 @@ var opMetas = []opMeta{
 
 	// conversation.*
 	{id: "conversation.create", visibility: "public", mode: "mutation", effect: "local", submission: true,
-		cli: "zatiti conversation create"},
+		cli: "conversation create"},
 	{id: "conversation.get", visibility: "public", mode: "query", effect: "local",
-		cli: "zatiti conversation get"},
+		cli: "conversation get"},
 	{id: "conversation.list", visibility: "public", mode: "query", effect: "local",
-		cli: "zatiti conversation list"},
+		cli: "conversation list"},
 	{id: "conversation.message.send", visibility: "public", mode: "mutation", effect: "disclosure",
-		submission: true, cli: "zatiti conversation message send"},
+		submission: true, cli: "conversation message send"},
 	{id: "conversation.update", visibility: "public", mode: "mutation", effect: "local",
-		submission: true, expectedVersion: true, cli: "zatiti conversation update"},
+		submission: true, expectedVersion: true, cli: "conversation update"},
 
 	// mailbox.*
 	{id: "mailbox.ack", visibility: "public", mode: "mutation", effect: "local",
-		submission: true, expectedVersion: true, cli: "zatiti mailbox ack"},
+		submission: true, expectedVersion: true, cli: "mailbox ack"},
 	{id: "mailbox.list", visibility: "public", mode: "query", effect: "local",
-		cli: "zatiti mailbox list"},
+		cli: "mailbox list"},
 	{id: "mailbox.send", visibility: "public", mode: "mutation", effect: "disclosure",
-		submission: true, cli: "zatiti mailbox send"},
+		submission: true, cli: "mailbox send"},
 }
 
 // Service is the messaging domain owner: durable conversations and mailboxes
