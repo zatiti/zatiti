@@ -481,6 +481,27 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   package-level race/lint runs while R-build-lease carries commits and
   module-wide runs; wrapper polling is age-aware so the oldest waiter
   wins. One-shot resume scheduled for 16:03 PT.
+- 2026-09-18 -- controller lane done (35830e2 + 5f11fe0): 10
+  self-mutation checks each red against a named test; write-ahead
+  dispatch journal; never resends a claimed effect; Stop drains or returns
+  outcome_unknown, never invents cancellation. It reports EIGHT more
+  landed defects / contract gaps, two lead-verified in code: (1) no
+  service identity exists for the controller; (2) _effects.pending hides
+  ready/executing operations; (3) _execution.observation looks up
+  execution's OWN record id while the controller only has the effects
+  operation id (controller_ops.go:132); (4) _execution.fence compares a
+  per-run attempt counter, not the controller generation; (5) context
+  pinning, verification and messaging admission are unreachable through
+  the allowed calls; (6) the controller cannot enqueue ready tasks; (7)
+  memory records its execution job with the creation version while
+  claiming bumps it, and never sets Job.operation_id (memory/
+  handlers.go:1118, execution/store.go:713); (8) restore expects a
+  controller-side database file swap the contract does not provide.
+  Lane wave3/exec-seams dispatched for 2, 3, 4, 7; 1 and 6 go to the
+  cmd/zatiti assembly brief; 5 and 8 to spec revision 3.
+- 2026-09-18 -- execution $ref port landed (b10d4a6 accounting, 7a4d2b3
+  execution); serenity revision-2 conversion landed (23f6205): main is
+  GREEN again.
 
 ## Planned
 
