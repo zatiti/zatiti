@@ -742,6 +742,22 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   so B and cmd land together: cmd rebases onto wave3/drift-batchB
   (ff37ea7 = main + B) and commits there; lead lands that tip. Drift lane
   done; worktree retired after the combined landing.
+- 2026-09-18 -- integration lane reports (commit queued on the build
+  lease, unverified by the lead): two obsolete step-past tests deleted,
+  exact principal-set assertion (owner + controller service principal),
+  TestTransportParity list steps compare transports on one instance (the
+  cross-installation tie is principal.list's random-id tiebreak, an
+  observation not a defect), a raw HTTP wire driver added as a fifth
+  parity transport (what apps/desktop consumes), five previously skipped
+  tests now pass on main. Remaining skips name three open seams, all
+  routed: (1) owner cannot activate configuration or create grants
+  because nothing creates the review that authority.go:336-338 demands
+  (`_reviews.ensure` at plan time), (2) bootstrap emits no configuration
+  evidence (handlers.go ~979), (3) DatabaseBackup Go seam. edge-seams
+  resumed with (1)-(2) and the ordering question; responses resumed to
+  finish its revision-2 conversion and convert github. Lanes live: cmd,
+  exec-seams, integration, edge-seams, responses. packaging, ci and
+  serenity wait for the 16:03 PT resume to keep the lease queue short.
 
 ## Planned
 
