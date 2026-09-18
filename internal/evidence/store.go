@@ -30,13 +30,6 @@ func parseStamp(s string) (time.Time, error) {
 	return time.Parse(time.RFC3339Nano, s)
 }
 
-func boolToInt(b bool) int64 {
-	if b {
-		return 1
-	}
-	return 0
-}
-
 // nullableStamp renders a zero time as SQL NULL and a set time as its UTC
 // RFC3339Nano string.
 func nullableStamp(t time.Time) any {
@@ -48,10 +41,16 @@ func nullableStamp(t time.Time) any {
 
 // commandRow is one durable command identity. A fresh row is inserted
 // unfinished (finished=0, status/data_json/result_json placeholders) by
-// begin() and updated exactly once, under the finished=0 fence, by finish().
-// An unfinished row is a private in-transaction detail: if the enclosing
-// write transaction never reaches finish(), the whole insert rolls back with
-// it and no other transaction ever observes it.
+// begin() and finished, under the finished=0 fence, by finish(). An
+// unfinished row is a private in-transaction detail: if the enclosing write
+// transaction never reaches finish(), the whole insert rolls back with it and
+// no other transaction ever observes it.
+//
+// The finished column counts dispositions. 1 is the first disposition; an
+// accepted first disposition is the pending disposition of a synchronous
+// local IO mutation, which the Finish transaction replaces exactly once
+// (finished=2). Nothing replaces a completed or failed disposition, and
+// nothing replaces a replacement.
 type commandRow struct {
 	ID               contract.ID
 	InstallationID   contract.ID
@@ -65,6 +64,7 @@ type commandRow struct {
 	ErrorCode        string
 	ResultJSON       string
 	Finished         bool
+	Dispositions     int64
 	CreatedAt        time.Time
 	FinishedAt       time.Time
 }
@@ -84,6 +84,7 @@ func scanCommand(scan func(dest ...any) error) (*commandRow, error) {
 		return nil, err
 	}
 	c.Finished = finished != 0
+	c.Dispositions = finished
 	var perr error
 	c.CreatedAt, perr = parseStamp(created)
 	if perr != nil {
@@ -104,7 +105,7 @@ func insertCommand(ctx context.Context, unit contract.Unit, c *commandRow) error
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		string(c.ID), string(c.InstallationID), string(c.PrincipalID), c.Operation, c.OperationVersion,
 		c.SubmissionKey, string(c.RequestDigest), c.Status, c.DataJSON, c.ErrorCode, c.ResultJSON,
-		boolToInt(c.Finished), formatStamp(c.CreatedAt), nullableStamp(c.FinishedAt))
+		c.Dispositions, formatStamp(c.CreatedAt), nullableStamp(c.FinishedAt))
 	return err
 }
 
@@ -140,7 +141,7 @@ func loadCommandByIdentity(ctx context.Context, unit contract.Unit, install, pri
 // lookup itself rather than a post-hoc filter.
 func loadFinishedCommandByIdentity(ctx context.Context, unit contract.Unit, install, principal contract.ID, operation string, version int64, submissionKey string) (*commandRow, error) {
 	row := unit.QueryRowContext(ctx, `SELECT `+commandColumns+` FROM evidence_commands
-		WHERE installation_id = ? AND principal_id = ? AND operation = ? AND operation_version = ? AND submission_key = ? AND finished = 1`,
+		WHERE installation_id = ? AND principal_id = ? AND operation = ? AND operation_version = ? AND submission_key = ? AND finished >= 1`,
 		string(install), string(principal), operation, version, submissionKey)
 	c, err := scanCommand(row.Scan)
 	if isNoRows(err) {
@@ -149,9 +150,9 @@ func loadFinishedCommandByIdentity(ctx context.Context, unit contract.Unit, inst
 	return c, err
 }
 
-// finishCommand persists the terminal disposition of one reserved command,
-// fenced on its still-unfinished state so a command can never be finished
-// twice.
+// finishCommand persists the first disposition of one reserved command,
+// fenced on its still-unfinished state so two first dispositions can never
+// both land.
 func finishCommand(ctx context.Context, unit contract.Unit, c *commandRow, status, dataJSON, errorCode, resultJSON string, now time.Time) error {
 	res, err := unit.ExecContext(ctx, `UPDATE evidence_commands
 		SET status = ?, data_json = ?, error_code = ?, result_json = ?, finished = 1, finished_at = ?
@@ -160,6 +161,31 @@ func finishCommand(ctx context.Context, unit contract.Unit, c *commandRow, statu
 	if err != nil {
 		return err
 	}
+	return c.dispositionWritten(res, 1, status, dataJSON, errorCode, resultJSON, now)
+}
+
+// replaceable reports whether the row holds a pending disposition: an
+// accepted first disposition that has not been replaced yet.
+func (c *commandRow) replaceable() bool {
+	return c.Dispositions == 1 && c.Status == contract.StatusAccepted
+}
+
+// replacePendingCommand replaces the accepted pending disposition of one
+// command, fenced on exactly that state so the replacement happens once.
+func replacePendingCommand(ctx context.Context, unit contract.Unit, c *commandRow, status, dataJSON, errorCode, resultJSON string, now time.Time) error {
+	res, err := unit.ExecContext(ctx, `UPDATE evidence_commands
+		SET status = ?, data_json = ?, error_code = ?, result_json = ?, finished = 2, finished_at = ?
+		WHERE id = ? AND finished = 1 AND status = ?`,
+		status, dataJSON, errorCode, resultJSON, formatStamp(now), string(c.ID), contract.StatusAccepted)
+	if err != nil {
+		return err
+	}
+	return c.dispositionWritten(res, 2, status, dataJSON, errorCode, resultJSON, now)
+}
+
+// dispositionWritten confirms the fenced update changed exactly this row and
+// mirrors the persisted disposition onto c.
+func (c *commandRow) dispositionWritten(res sql.Result, dispositions int64, status, dataJSON, errorCode, resultJSON string, now time.Time) error {
 	n, err := res.RowsAffected()
 	if err != nil {
 		return err
@@ -172,6 +198,7 @@ func finishCommand(ctx context.Context, unit contract.Unit, c *commandRow, statu
 	c.ErrorCode = errorCode
 	c.ResultJSON = resultJSON
 	c.Finished = true
+	c.Dispositions = dispositions
 	c.FinishedAt = now
 	return nil
 }

@@ -93,7 +93,11 @@ func (s *Service) handleCommandBegin(ctx context.Context, unit contract.Unit, in
 
 // _evidence.command.finish persists the handler's complete disposition in
 // the same transaction as its state changes and events, and emits a
-// transition event for the command's own terminal state. It retains the
+// transition event for the command's own state. A synchronous local IO
+// mutation finishes twice: accepted with its Prepare transaction (the pending
+// disposition a concurrent same-key call joins and a crash leaves behind),
+// then once more with its Finish transaction, replacing that pending
+// disposition. No other second finish is admitted. It retains the
 // exact original result envelope — fault message, details, retryability and
 // cursor included — never redacted: only the command's own principal ever
 // replays it back through command.get, so this record is exact evidence of
@@ -123,7 +127,7 @@ func (s *Service) handleCommandFinish(ctx context.Context, unit contract.Unit, i
 		return contract.Outcome[commandResourceBody]{}, permissionDenied(
 			"command %s belongs to another installation", in.CommandID)
 	}
-	if row.Finished {
+	if row.Finished && !row.replaceable() {
 		return contract.Outcome[commandResourceBody]{}, internalFault("command %s is already finished", in.CommandID)
 	}
 	data := in.Result.Data
@@ -139,13 +143,17 @@ func (s *Service) handleCommandFinish(ctx context.Context, unit contract.Unit, i
 		return contract.Outcome[commandResourceBody]{}, internalFault("command %s result could not be encoded: %v", in.CommandID, merr)
 	}
 	now := s.now()
-	if err := finishCommand(ctx, unit, row, in.Result.Status, string(data), errorCode, string(resultJSON), now); err != nil {
+	persist := finishCommand
+	if row.Finished {
+		persist = replacePendingCommand
+	}
+	if err := persist(ctx, unit, row, in.Result.Status, string(data), errorCode, string(resultJSON), now); err != nil {
 		return contract.Outcome[commandResourceBody]{}, err
 	}
 	if err := unit.Emit(ctx, contract.Event{
 		Kind:            commandEventKind(in.Result.Status),
 		ResourceID:      row.ID,
-		ResourceVersion: 1,
+		ResourceVersion: contract.Version(row.Dispositions),
 	}); err != nil {
 		return contract.Outcome[commandResourceBody]{}, internalFault("command %s: emit transition event: %v", in.CommandID, err)
 	}
