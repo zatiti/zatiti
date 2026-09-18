@@ -46,7 +46,7 @@ type opMeta struct {
 	submission bool
 	expected   bool // descriptor advertises optimistic version fencing
 	callers    []string
-	cli        string // "zatiti ..." CLI path; empty for internal operations
+	cli        string // CLI tokens below the root command, space separated; empty for internal operations
 	completion bool   // declares the eventual result schema of an asynchronous operation
 }
 
@@ -60,18 +60,18 @@ var opMetas = []opMeta{
 		callers: []string{"controller", "execution", "memory", "skills", "installation"}},
 
 	{id: opArtifactExport, visibility: "public", mode: "mutation", submission: true,
-		completion: true, cli: "zatiti artifact export"},
-	{id: opArtifactGet, visibility: "public", mode: "query", cli: "zatiti artifact get"},
-	{id: opArtifactList, visibility: "public", mode: "query", cli: "zatiti artifact list"},
-	{id: opArtifactRead, visibility: "public", mode: "query", cli: "zatiti artifact read"},
+		completion: true, cli: "artifact export"},
+	{id: opArtifactGet, visibility: "public", mode: "query", cli: "artifact get"},
+	{id: opArtifactList, visibility: "public", mode: "query", cli: "artifact list"},
+	{id: opArtifactRead, visibility: "public", mode: "query", cli: "artifact read"},
 	{id: opUploadBegin, visibility: "public", mode: "mutation", submission: true,
-		cli: "zatiti artifact upload begin"},
+		cli: "artifact upload begin"},
 	{id: opUploadCancel, visibility: "public", mode: "mutation", submission: true,
-		expected: true, completion: true, cli: "zatiti artifact upload cancel"},
+		expected: true, completion: true, cli: "artifact upload cancel"},
 	{id: opUploadChunk, visibility: "public", mode: "mutation", submission: true,
-		completion: true, cli: "zatiti artifact upload chunk"},
+		completion: true, cli: "artifact upload chunk"},
 	{id: opUploadFinish, visibility: "public", mode: "mutation", submission: true,
-		expected: true, completion: true, cli: "zatiti artifact upload finish"},
+		expected: true, completion: true, cli: "artifact upload finish"},
 }
 
 // Service is the artifacts domain owner: immutable artifact metadata,
