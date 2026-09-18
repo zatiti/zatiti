@@ -680,6 +680,11 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   the descriptor batch lands (next in the lease queue), after which the
   lane deletes the skips, switches controller-identity provisioning to
   identity.ControllerPrincipal, and the end-to-end journey runs for real.
+- 2026-09-18 -- identity-service LANDED (656527a). Lead mutation check:
+  adding one extra capability to the controller principal's grant made
+  TestControllerPrincipalHoldsNothingElse fail on principal.create;
+  restored. cmd/zatiti switches to identity.ControllerPrincipal on its
+  next rebase. Worktree removed.
 
 ## Planned
 
