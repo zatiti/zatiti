@@ -117,6 +117,14 @@ func (s *Service) assemble() error {
 		if !ok {
 			return fmt.Errorf("evidence: operation %s has no wire schemas", m.id)
 		}
+		inputSchema, err := mergeSchema(schemas.Input)
+		if err != nil {
+			return fmt.Errorf("evidence: operation %s input schema: %w", m.id, err)
+		}
+		outputSchema, err := mergeSchema(schemas.Output)
+		if err != nil {
+			return fmt.Errorf("evidence: operation %s output schema: %w", m.id, err)
+		}
 		d := contract.Descriptor{
 			ID:            m.id,
 			Version:       1,
@@ -124,9 +132,9 @@ func (s *Service) assemble() error {
 			Visibility:    m.visibility,
 			Mode:          m.mode,
 			Effect:        contract.EffectLocal,
-			InputSchema:   json.RawMessage(schemas.Input),
-			OutputSchema:  json.RawMessage(schemas.Output),
-			ScopeRequired: scopeRequirement(json.RawMessage(schemas.Input)),
+			InputSchema:   inputSchema,
+			OutputSchema:  outputSchema,
+			ScopeRequired: scopeRequirement(inputSchema),
 			Callers:       m.callers,
 		}
 		if m.cli != "" {
@@ -217,17 +225,11 @@ func bind[I, O any](d contract.Descriptor, fn func(context.Context, contract.Uni
 	if err := validateDescriptorShape(&d); err != nil {
 		return nil, err
 	}
-	mergedInput, err := mergeSchema(string(d.InputSchema))
-	if err != nil {
-		return nil, fmt.Errorf("input schema: %w", err)
-	}
+	mergedInput := d.InputSchema
 	if err := checkSchemaDocument(mergedInput); err != nil {
 		return nil, fmt.Errorf("input schema: %w", err)
 	}
-	mergedOutput, err := mergeSchema(string(d.OutputSchema))
-	if err != nil {
-		return nil, fmt.Errorf("output schema: %w", err)
-	}
+	mergedOutput := d.OutputSchema
 	if err := checkSchemaDocument(mergedOutput); err != nil {
 		return nil, fmt.Errorf("output schema: %w", err)
 	}
