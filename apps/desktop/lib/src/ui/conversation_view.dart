@@ -114,6 +114,7 @@ class _Header extends StatelessWidget {
       ConnectionPhase.connecting => 'Connecting…',
       ConnectionPhase.reconnecting => 'Reconnecting…',
       ConnectionPhase.offline => 'Saved view',
+      ConnectionPhase.unsupported => 'Unsupported controller',
     };
     return Container(
       constraints: const BoxConstraints(minHeight: 76),
@@ -227,6 +228,7 @@ class _OfflineBanner extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final reconnecting = controller.connection == ConnectionPhase.reconnecting;
+    final unsupported = controller.connection == ConnectionPhase.unsupported;
     return Padding(
       padding: const EdgeInsets.fromLTRB(Space.xl, Space.md, Space.xl, 0),
       child: Row(
@@ -234,7 +236,10 @@ class _OfflineBanner extends StatelessWidget {
           Expanded(
             child: Notice(
               key: const ValueKey('offline-banner'),
-              reconnecting
+              unsupported
+                  ? controller.connectionMessage ??
+                        'This controller does not serve what this app needs.'
+                  : reconnecting
                   ? 'Reconnecting. This is a saved view. Unsent messages stay '
                         'unsent until you send them.'
                   : 'Offline. This is a saved view and may be out of date. '

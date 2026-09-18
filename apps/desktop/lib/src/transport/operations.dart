@@ -27,6 +27,9 @@ class OperationDescriptor {
 }
 
 abstract final class Operations {
+  static const capabilitiesList = OperationDescriptor.query(
+    'capabilities.list',
+  );
   static const installationStatus = OperationDescriptor.query(
     'installation.status',
   );
@@ -70,6 +73,7 @@ abstract final class Operations {
 
   /// Every operation the client may call.
   static const List<OperationDescriptor> all = [
+    capabilitiesList,
     installationStatus,
     commandGet,
     eventList,

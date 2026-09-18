@@ -31,6 +31,15 @@ class AcknowledgmentUnknown implements Exception {
   String toString() => 'AcknowledgmentUnknown: $message';
 }
 
+/// The controller does not serve an operation this client needs, at the
+/// version it needs. A named state, never a guessed call.
+class SourceUnsupported implements Exception {
+  const SourceUnsupported(this.message);
+  final String message;
+  @override
+  String toString() => 'SourceUnsupported: $message';
+}
+
 enum RefusalKind {
   /// The review changed since this preview was fetched.
   stale,

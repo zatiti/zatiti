@@ -217,8 +217,36 @@ class LiveWorkspaceSource implements WorkspaceSource {
     return _reviewEntry(review, operations, const {});
   });
 
+  /// Confirms every operation this client calls exists at the version it was
+  /// written against. A missing or mismatched operation is a named
+  /// unsupported state.
+  Future<void> _confirmCapabilities() async {
+    final served = {for (final c in await api.capabilities()) c.id: c};
+    final problems = <String>[];
+    for (final op in Operations.all) {
+      final c = served[op.id];
+      if (c == null) {
+        problems.add('${op.id} is not offered');
+      } else if (c.version != op.version) {
+        problems.add(
+          '${op.id} is version ${c.version}; this app needs ${op.version}',
+        );
+      } else if (c.submissionKey != op.isMutation ||
+          c.expectedVersion != op.expectedVersion) {
+        problems.add('${op.id} has a different request shape');
+      }
+    }
+    if (problems.isNotEmpty) {
+      throw SourceUnsupported(
+        'This controller does not serve what this version of the app '
+        'needs: ${problems.join('; ')}.',
+      );
+    }
+  }
+
   @override
   Future<WorkspaceSnapshot> loadSnapshot() => _guard(() async {
+    await _confirmCapabilities();
     final status = await api.installationStatus();
     final organizations = await api.listAll(
       Operations.organizationList,

@@ -42,7 +42,8 @@ class WorkspaceController extends ChangeNotifier {
   /// True while the view may be out of date and must say so.
   bool get showsSavedView =>
       connection == ConnectionPhase.offline ||
-      connection == ConnectionPhase.reconnecting;
+      connection == ConnectionPhase.reconnecting ||
+      connection == ConnectionPhase.unsupported;
 
   // ---- interface state, each independent of the others --------------------
 
@@ -92,6 +93,10 @@ class WorkspaceController extends ChangeNotifier {
       _goOffline(e.message);
     } on AcknowledgmentUnknown {
       // A lost answer to a query changes nothing; the next poll asks again.
+    } on SourceUnsupported catch (e) {
+      connection = ConnectionPhase.unsupported;
+      connectionMessage = e.message;
+      _changed();
     }
   }
 
@@ -109,6 +114,9 @@ class WorkspaceController extends ChangeNotifier {
     } on AcknowledgmentUnknown catch (e) {
       _goOffline(e.message);
       return;
+    } on SourceUnsupported catch (e) {
+      connection = ConnectionPhase.unsupported;
+      connectionMessage = e.message;
     } on SourceRefusal catch (e) {
       connection = ConnectionPhase.offline;
       connectionMessage = e.message;

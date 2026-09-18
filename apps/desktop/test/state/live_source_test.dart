@@ -11,6 +11,7 @@ import 'package:zatiti_desktop/src/state/workspace_controller.dart';
 import 'package:zatiti_desktop/src/state/workspace_source.dart';
 import 'package:zatiti_desktop/src/transport/controller_client.dart';
 import 'package:zatiti_desktop/src/transport/endpoint.dart';
+import 'package:zatiti_desktop/src/transport/operations.dart';
 
 import '../support/fake_controller.dart';
 
@@ -84,6 +85,8 @@ Map<String, Object?> _reviewJson({int version = 3, String state = 'pending'}) =>
     };
 
 class _World {
+  /// Operations the fake controller claims to serve; defaults to all.
+  List<OperationDescriptor> served = Operations.all;
   String reviewState = 'pending';
   int reviewVersion = 3;
   String artifactDigest = _contentDigest;
@@ -94,6 +97,23 @@ class _World {
     final op = r.path.substring('/v1/operations/'.length);
     Reply items(List<Object?> list) => completed(jsonEncode({'items': list}));
     switch (op) {
+      case 'capabilities.list':
+        return items([
+          for (final o in served)
+            {
+              'id': o.id,
+              'version': o.version,
+              'owner': 'fixture',
+              'input_schema': <String, Object?>{},
+              'output_schema': <String, Object?>{},
+              'effect': 'local',
+              'scope_requirements': ['installation_id'],
+              'cli': <Object?>[],
+              'mcp': '',
+              'submission_key': o.isMutation,
+              'expected_version': o.expectedVersion,
+            },
+        ]);
       case 'installation.status':
         return completed(
           jsonEncode({
@@ -361,6 +381,24 @@ void main() {
     final called = fake.requests.map((r) => r.path.split('/').last).toSet();
     expect(called.any((op) => op.startsWith('memory.')), isFalse);
   });
+
+  test(
+    'confirms the catalog at connect and names what is unsupported',
+    () async {
+      expect(fake.requestsFor('capabilities.list'), isNotEmpty);
+      world.served = [
+        for (final o in Operations.all)
+          if (o.id != 'review.decide') o,
+      ];
+      await c.reconnect();
+      expect(c.connection, ConnectionPhase.unsupported);
+      expect(c.connectionMessage, contains('review.decide is not offered'));
+      expect(c.showsSavedView, isTrue);
+      expect(c.decision(ReviewId(_reviewId))!.canDecide, isFalse);
+      await approve();
+      expect(fake.requestsFor('review.decide'), isEmpty);
+    },
+  );
 
   test('a fixture with a field the client does not know is refused', () async {
     fake.script = (r) => r.path.endsWith('installation.status')

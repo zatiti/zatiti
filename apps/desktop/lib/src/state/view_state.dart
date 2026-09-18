@@ -14,6 +14,10 @@ enum ConnectionPhase {
 
   /// Fetching a fresh snapshot, then events. Drafts stay unsent.
   reconnecting,
+
+  /// The controller answered but does not serve an operation this client
+  /// needs. Nothing is guessed; the message names what is missing.
+  unsupported,
 }
 
 /// Where one review stands, combining the controller's record with what this

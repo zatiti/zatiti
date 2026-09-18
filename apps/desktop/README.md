@@ -73,6 +73,9 @@ demo's pending decision is a repository action.
 - An unknown acknowledgment means bytes may have been sent. The submission
   locks until `command.get` resolves it. Only a `not_found` lookup unlocks an
   explicit retry.
+- At connect the client reads `capabilities.list` and confirms every
+  operation it calls exists at the version and request shape it was written
+  against. A mismatch is a named unsupported state, never a guessed call.
 - Decoding is strict: duplicate keys, unknown fields, trailing data, integers
   outside int64 and malformed UTF-8 are refused. An envelope must agree with
   its HTTP status.

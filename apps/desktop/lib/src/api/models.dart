@@ -837,6 +837,41 @@ class ArtifactRead {
   final int totalSize;
 }
 
+/// One public operation as the controller publishes it.
+class Capability {
+  const Capability({
+    required this.id,
+    required this.version,
+    required this.submissionKey,
+    required this.expectedVersion,
+  });
+
+  factory Capability.fromJson(Object? json) {
+    final o = StrictObject(json, 'descriptor');
+    final c = Capability(
+      id: o.string('id'),
+      version: o.integer('version'),
+      submissionKey: o.boolean('submission_key'),
+      expectedVersion: o.boolean('expected_version'),
+    );
+    o.string('owner');
+    o.object('input_schema');
+    o.object('output_schema');
+    o.string('effect');
+    o.stringList('scope_requirements');
+    o.stringList('cli');
+    o.string('mcp');
+    o.optionalObject('completion_schema');
+    o.finish();
+    return c;
+  }
+
+  final String id;
+  final int version;
+  final bool submissionKey;
+  final bool expectedVersion;
+}
+
 /// One page of a list operation.
 class Page<T> {
   const Page(this.items, this.nextCursor);

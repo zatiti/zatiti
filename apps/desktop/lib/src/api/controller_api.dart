@@ -15,6 +15,21 @@ class ControllerApi {
 
   final ControllerClient client;
 
+  /// The public operation catalog the controller serves.
+  Future<List<Capability>> capabilities() async {
+    final r = await client.query(Operations.capabilitiesList, {
+      'scope': client.scope(),
+    });
+    final data = StrictObject(
+      r.requireData('capabilities.list'),
+      'capabilities',
+    );
+    final items = data.list('items').map(Capability.fromJson).toList();
+    data.optionalString('next_cursor');
+    data.finish();
+    return items;
+  }
+
   Future<InstallationStatus> installationStatus() async {
     final r = await client.query(Operations.installationStatus, {
       'scope': client.scope(),
