@@ -356,6 +356,31 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   labeled test-local catalog built from the real modules, with the
   real-registry test skipped-with-evidence until the fix lands. Blocks
   cmd/zatiti. Eleven lanes in flight.
+- 2026-09-18 -- two self-inflicted limits from lifting the lane cap, both
+  recovered with no work lost: (1) ten lanes on this 4-core laptop drove
+  load to ~130 (memory fine) because package-level -race runs were not
+  under the lease; fixed by a THROTTLE rule (every -race / flutter
+  test / flutter build under R-build-lease, -p 2 everywhere). David
+  waived his load>10 hold for this push on the laptop: the lease is the
+  throttle. (2) Ten lanes exhausted the account-wide session limit in
+  ~25 minutes at 09:40 PT; every lane stopped mid-work, all work intact
+  and uncommitted on disk, lease found free. At 11:15 PT eight lanes
+  resumed via message (registry-seam, controller, integration, serenity,
+  schemaref-port, spec, responses, flutter); packaging (25 files on
+  disk) and ci (4 files on disk) are HELD, not on the critical path,
+  resume into the same worktrees when a slot frees. Lanes now commit
+  early slices so another limit costs less.
+- 2026-09-18 -- serenity lane finding (uncommitted at time of writing):
+  Serenity is pinnable (github.com/sirerun/serenity @ f5a5154, protocol
+  MEMORY_VERBS v1 over MCP 2025-11-25) but NO adapter operation is
+  dispatchable at that pin: a tool call needs a three-request MCP
+  handshake while one Invoke is one physical request; fact ids are
+  SHA-256 not UUID; no command identity or status lookup, so writes
+  cannot be reconciled; no cost bound, revision report, or build that
+  reports its commit. The adapter is therefore an honest refuser
+  (capability report: all six kinds unsupported). Memory stays
+  effectively offline in v1 until Serenity ships those capabilities --
+  a product-level consequence for David, not a lane bug.
 
 ## Planned
 
