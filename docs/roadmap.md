@@ -536,6 +536,17 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   configuration candidate digest + bootstrap event, header-legal owner
   credential) builds, vets, and passes all four package race suites;
   one lint issue outstanding; _reviews.ensure at plan time not started.
+- 2026-09-18 -- integration slice 1 committed (c135a9a on
+  wave3/integration) but its landing correctly ABORTED: the landing
+  script's module-wide run found its real-registry tests failing "in an
+  unrecorded way" because the registry fix is now on main and the
+  failure text changed. Two facts fell out: (a) internal/identity
+  declares SubmissionKey=true on `_identity.activate`, which the fixed
+  registry rejects (catalog: all 43 internal mutations are keyless) --
+  routed to descriptor-drift as one more drift class; (b) the integration
+  tests' skip-with-evidence matching must be updated once the drift
+  lands, then the branch lands. main NOT moved; the abort is the script
+  doing its job.
 
 ## Planned
 
