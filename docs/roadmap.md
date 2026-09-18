@@ -694,6 +694,19 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   memory, effects, execution (batch 2, same lane), plus the internal
   ExpectedVersion/ScopeRequired classes. cmd/zatiti signalled to rebase,
   drop its drift skips and run the end-to-end journey for real.
+- 2026-09-18 -- descriptor batch A committed (b126eba, landing): the
+  per-package pin test now covers every descriptor, public and internal,
+  field by field. It found 47 internal descriptors declaring
+  ScopeRequired=[installation_id] where the catalog says [] (the catalog
+  rule "installation_id exactly when the input schema requires scope"
+  holds for all 262 domain ops, so packages now derive it from the input
+  schema) plus the 8 ExpectedVersion flags; all 8 handlers already
+  enforced the version (audited with file:line), so the flag was the
+  only drift. Confirms zero internal SubmissionKey drift anywhere.
+  Catalog defect for spec revision 3: task.assign is public but the
+  catalog gives it callers ["messaging"]; the registry rejects any
+  public descriptor with callers. Batch B (self-contained internal
+  schemas) in progress: the last blocker for unpatched assembly.
 
 ## Planned
 
