@@ -20,7 +20,7 @@ type opMeta struct {
 	submission      bool
 	expectedVersion bool
 	callers         []string
-	cli             string // "zatiti ..." CLI path; empty for internal operations
+	cli             string // CLI tokens below the root command, space separated; empty for internal operations
 	completion      bool   // declares the eventual job result schema
 }
 
@@ -40,41 +40,41 @@ var opMetas = []opMeta{
 
 	// connection.*
 	{id: "connection.archive", visibility: "public", mode: "mutation", effect: "local",
-		submission: true, expectedVersion: true, cli: "zatiti connection archive"},
+		submission: true, expectedVersion: true, cli: "connection archive"},
 	{id: "connection.create", visibility: "public", mode: "mutation", effect: "local",
-		submission: true, cli: "zatiti connection create"},
+		submission: true, cli: "connection create"},
 	{id: "connection.get", visibility: "public", mode: "query", effect: "local",
-		cli: "zatiti connection get"},
+		cli: "connection get"},
 	{id: "connection.list", visibility: "public", mode: "query", effect: "local",
-		cli: "zatiti connection list"},
+		cli: "connection list"},
 	{id: "connection.revoke", visibility: "public", mode: "mutation", effect: "local",
-		submission: true, expectedVersion: true, cli: "zatiti connection revoke"},
+		submission: true, expectedVersion: true, cli: "connection revoke"},
 	{id: "connection.rotate", visibility: "public", mode: "mutation", effect: "external_read",
-		submission: true, expectedVersion: true, completion: true, cli: "zatiti connection rotate"},
+		submission: true, expectedVersion: true, completion: true, cli: "connection rotate"},
 	{id: "connection.setup.begin", visibility: "public", mode: "mutation", effect: "local",
-		submission: true, expectedVersion: true, completion: true, cli: "zatiti connection setup begin"},
+		submission: true, expectedVersion: true, completion: true, cli: "connection setup begin"},
 	{id: "connection.setup.cancel", visibility: "public", mode: "mutation", effect: "local",
-		submission: true, expectedVersion: true, completion: true, cli: "zatiti connection setup cancel"},
+		submission: true, expectedVersion: true, completion: true, cli: "connection setup cancel"},
 	{id: "connection.setup.complete", visibility: "public", mode: "mutation", effect: "local",
-		submission: true, expectedVersion: true, completion: true, cli: "zatiti connection setup complete"},
+		submission: true, expectedVersion: true, completion: true, cli: "connection setup complete"},
 	{id: "connection.setup.status", visibility: "public", mode: "query", effect: "local",
-		cli: "zatiti connection setup status"},
+		cli: "connection setup status"},
 	{id: "connection.update", visibility: "public", mode: "mutation", effect: "local",
-		submission: true, expectedVersion: true, cli: "zatiti connection update"},
+		submission: true, expectedVersion: true, cli: "connection update"},
 	{id: "connection.validate", visibility: "public", mode: "mutation", effect: "external_read",
-		submission: true, expectedVersion: true, completion: true, cli: "zatiti connection validate"},
+		submission: true, expectedVersion: true, completion: true, cli: "connection validate"},
 
 	// tool.*
 	{id: "tool.bind", visibility: "public", mode: "mutation", effect: "local",
-		submission: true, cli: "zatiti tool bind"},
+		submission: true, cli: "tool bind"},
 	{id: "tool.get", visibility: "public", mode: "query", effect: "local",
-		cli: "zatiti tool get"},
+		cli: "tool get"},
 	{id: "tool.list", visibility: "public", mode: "query", effect: "local",
-		cli: "zatiti tool list"},
+		cli: "tool list"},
 	{id: "tool.schema", visibility: "public", mode: "query", effect: "local",
-		cli: "zatiti tool schema"},
+		cli: "tool schema"},
 	{id: "tool.unbind", visibility: "public", mode: "mutation", effect: "local",
-		submission: true, cli: "zatiti tool unbind"},
+		submission: true, cli: "tool unbind"},
 }
 
 // Service is the connections domain owner: trusted tool contracts,

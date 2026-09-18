@@ -2,6 +2,7 @@ package connections
 
 import (
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 
@@ -115,8 +116,8 @@ func TestDescriptorsCoverEveryOperation(t *testing.T) {
 			if !strings.HasPrefix(d.MCP, "zatiti_") {
 				t.Fatalf("public operation %s carries MCP name %q", m.id, d.MCP)
 			}
-			if len(d.CLI) == 0 || d.CLI[0] != "zatiti" {
-				t.Fatalf("public operation %s carries CLI path %v", m.id, d.CLI)
+			if !slices.Equal(d.CLI, strings.Split(m.id, ".")) {
+				t.Fatalf("public operation %s carries CLI tokens %v", m.id, d.CLI)
 			}
 			if len(d.Callers) != 0 {
 				t.Fatalf("public operation %s declares callers %v", m.id, d.Callers)
