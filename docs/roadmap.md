@@ -288,10 +288,21 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   the inspected Serenity commit first; may legitimately stop at
   PROTOCOL.md), and the internal/effects $ref-resolution fix. Shared
   lane rules: foreground-only module-wide verification, lease held for
-  minutes. Still waiting: cmd/zatiti (needs controller + both
-  adapters), desktop + cmd/zatiti-desktop + tests/qualification (need
-  the Flutter placement/contract decision), and the spec-maintenance
-  lane (request_context retype, Dependencies database seam, Flutter).
+  minutes.
+- 2026-09-18 -- David decided Flutter placement and transport, recorded
+  as docs/adr/002-flutter-desktop-client.md (86d3519): the client lives
+  at apps/desktop/ in this repo and talks directly to internal/server's
+  Unix socket / mutual-TLS listener; internal/desktop and
+  cmd/zatiti-desktop are retired as Go roots. Two more lanes dispatched:
+  spec maintenance (wave3/spec: Flutter root, request_context retyped to
+  ArtifactLocator, installation database-backup seam; spec inputs and
+  rendered files only, three separate commits) and the Flutter client's
+  first increment (wave3/flutter-desktop: transport, typed view state,
+  UI per the adopted design). Nine lanes in flight. Still waiting:
+  cmd/zatiti (needs controller + both adapters), tests/qualification
+  (needs the regenerated brief, the Flutter client and both adapters),
+  and the Go follow-ups the spec change will create (adapters'
+  request_context, contract.Dependencies seam + installation wiring).
 - 2026-09-15 -- David: design the desktop app first, before any
   implementation lane, and plan to use Flutter instead of Fyne v2. This
   reverses the frozen shared contract's stated desktop library choice
