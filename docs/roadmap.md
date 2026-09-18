@@ -607,6 +607,24 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   strict JSON, submission-key discipline, 21 operations) with the full
   UI from the design; never run against the real controller yet. Lane
   stopped; next increment brief to be written after cmd/zatiti exists.
+- 2026-09-18 -- MILESTONE, one step early: the cmd/zatiti lane reports
+  serve + init + generated CLI + MCP-over-stdio passing END TO END
+  against a real assembled controller, using a throwaway descriptor
+  patch identical to the one the registry-seam assembly test uses (the
+  descriptor drift is the last thing between the real modules and
+  registry.New). Not yet committed: its drift-dependent tests are being
+  converted to skip-with-evidence so slices can commit; the patch itself
+  is never committed. Two gaps it hit: (1) the raw-bytes owner
+  credential -- fixed on wave3/edge-seams, landing; (2) NEW, confirmed
+  against the brief: no sanctioned authority for the controller's
+  service principal. identity's brief (AGENTS.md:483) assigns "one
+  initial human owner and scoped service identities" to the bootstrap
+  transaction, but landed identity bootstrap creates only the owner, and
+  grant.create is a review class with no public review path, so an
+  ungranted service principal fails every application.Internal call.
+  Lane wave3/identity-service dispatched. Follow-up noted: registry.New
+  over 16 modules costs ~2s per CLI invocation (catalog build); fetch
+  capabilities from the controller later.
 
 ## Planned
 
