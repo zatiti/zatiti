@@ -67,7 +67,7 @@ type opMeta struct {
 	submission bool
 	expected   bool
 	callers    []string
-	cli        string // "zatiti ..." CLI path; empty for internal operations
+	cli        string // CLI tokens below the root command, space separated; empty for internal operations
 }
 
 // opMetas lists every owned operation: internal first, then the public
@@ -88,27 +88,27 @@ var opMetas = []opMeta{
 		callers: []string{"configuration", "application"}},
 
 	{id: opBindingArchive, visibility: "public", mode: "mutation", submission: true, expected: true,
-		cli: "zatiti memory binding archive"},
+		cli: "memory binding archive"},
 	{id: opBindingCreate, visibility: "public", mode: "mutation", submission: true,
-		cli: "zatiti memory binding create"},
+		cli: "memory binding create"},
 	{id: opBindingGet, visibility: "public", mode: "query",
-		cli: "zatiti memory binding get"},
+		cli: "memory binding get"},
 	{id: opBindingList, visibility: "public", mode: "query",
-		cli: "zatiti memory binding list"},
+		cli: "memory binding list"},
 	{id: opBindingUpdate, visibility: "public", mode: "mutation", submission: true, expected: true,
-		cli: "zatiti memory binding update"},
+		cli: "memory binding update"},
 	{id: opInspect, visibility: "public", mode: "query",
-		cli: "zatiti memory inspect"},
+		cli: "memory inspect"},
 	{id: opJobGet, visibility: "public", mode: "query",
-		cli: "zatiti memory job get"},
+		cli: "memory job get"},
 	{id: opPromote, visibility: "public", mode: "mutation", submission: true,
-		effect: contract.EffectExternalMutation, cli: "zatiti memory promote"},
+		effect: contract.EffectExternalMutation, cli: "memory promote"},
 	{id: opRecall, visibility: "public", mode: "mutation", submission: true,
-		effect: contract.EffectDisclosure, cli: "zatiti memory recall"},
+		effect: contract.EffectDisclosure, cli: "memory recall"},
 	{id: opRemember, visibility: "public", mode: "mutation", submission: true,
-		effect: contract.EffectExternalMutation, cli: "zatiti memory remember"},
+		effect: contract.EffectExternalMutation, cli: "memory remember"},
 	{id: opRetract, visibility: "public", mode: "mutation", submission: true,
-		effect: contract.EffectExternalMutation, cli: "zatiti memory retract"},
+		effect: contract.EffectExternalMutation, cli: "memory retract"},
 }
 
 // opSchemas carries the input and output schema body of one operation.
