@@ -637,6 +637,16 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   package race suites and lint; one unchecked-error lint finding in a
   new test fixed by the lead. Still open on this lane: configuration's
   _reviews.ensure at plan time (lane resumes 16:00).
+- 2026-09-18 -- CORRECTION: the "identity declares SubmissionKey=true on
+  _identity.activate" item recorded earlier is retracted. The
+  descriptor-drift lane's per-field probe shows zero submission_key
+  drift in any module; the lead's count of 30 came from public
+  mutations, which legitimately require keys. The integration suite's
+  failure text on that point will be re-examined against its own patched
+  catalog when that lane resumes. The confirmed remaining assembly
+  blocker is owner-private $defs referenced by internal operations in
+  accounting, memory, effects and execution (bare schema bodies); in the
+  drift lane's scope as the second batch.
 
 ## Planned
 
