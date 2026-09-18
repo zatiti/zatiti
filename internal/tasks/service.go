@@ -16,7 +16,7 @@ type opMeta struct {
 	submission      bool
 	expectedVersion bool
 	callers         []string
-	cli             string // "zatiti ..." CLI path; empty for internal operations
+	cli             string // CLI tokens below the root command, space separated; empty for internal operations
 }
 
 // opMetas lists every owned operation: the four internal peer operations
@@ -33,16 +33,16 @@ var opMetas = []opMeta{
 		callers: []string{"execution", "scheduling", "installation"}},
 
 	// task.*
-	{id: "task.accept", visibility: "public", mode: "mutation", submission: true, expectedVersion: true, cli: "zatiti task accept"},
-	{id: "task.assign", visibility: "public", mode: "mutation", submission: true, expectedVersion: true, cli: "zatiti task assign"},
-	{id: "task.cancel", visibility: "public", mode: "mutation", submission: true, expectedVersion: true, cli: "zatiti task cancel"},
-	{id: "task.create", visibility: "public", mode: "mutation", submission: true, cli: "zatiti task create"},
-	{id: "task.delegate", visibility: "public", mode: "mutation", submission: true, expectedVersion: true, cli: "zatiti task delegate"},
-	{id: "task.dependencies", visibility: "public", mode: "query", cli: "zatiti task dependencies"},
-	{id: "task.get", visibility: "public", mode: "query", cli: "zatiti task get"},
-	{id: "task.list", visibility: "public", mode: "query", cli: "zatiti task list"},
-	{id: "task.retry", visibility: "public", mode: "mutation", submission: true, expectedVersion: true, cli: "zatiti task retry"},
-	{id: "task.update", visibility: "public", mode: "mutation", submission: true, expectedVersion: true, cli: "zatiti task update"},
+	{id: "task.accept", visibility: "public", mode: "mutation", submission: true, expectedVersion: true, cli: "task accept"},
+	{id: "task.assign", visibility: "public", mode: "mutation", submission: true, expectedVersion: true, cli: "task assign"},
+	{id: "task.cancel", visibility: "public", mode: "mutation", submission: true, expectedVersion: true, cli: "task cancel"},
+	{id: "task.create", visibility: "public", mode: "mutation", submission: true, cli: "task create"},
+	{id: "task.delegate", visibility: "public", mode: "mutation", submission: true, expectedVersion: true, cli: "task delegate"},
+	{id: "task.dependencies", visibility: "public", mode: "query", cli: "task dependencies"},
+	{id: "task.get", visibility: "public", mode: "query", cli: "task get"},
+	{id: "task.list", visibility: "public", mode: "query", cli: "task list"},
+	{id: "task.retry", visibility: "public", mode: "mutation", submission: true, expectedVersion: true, cli: "task retry"},
+	{id: "task.update", visibility: "public", mode: "mutation", submission: true, expectedVersion: true, cli: "task update"},
 }
 
 // Service is the tasks domain owner: durable bounded tasks with pinned
