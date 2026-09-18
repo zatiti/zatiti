@@ -2,7 +2,6 @@ package installation
 
 import (
 	"context"
-	"crypto/rand"
 	"encoding/json"
 	"fmt"
 
@@ -115,9 +114,10 @@ func (s *Service) prepareInit(ctx context.Context, unit contract.Unit, inv contr
 }
 
 // performInit is the trusted helper: it mints a fresh high-entropy owner
-// secret and custodies it in the secret store outside any transaction. It
-// never returns the secret bytes; only the opaque store reference crosses
-// back into Finish.
+// credential in its header-legal custodied form (see mintOwnerCredential)
+// and custodies it in the secret store outside any transaction. It never
+// returns the secret bytes; only the opaque store reference crosses back
+// into Finish.
 func (s *Service) performInit(ctx context.Context, plan contract.IOPlan) (contract.IOResult, error) {
 	var p bootstrapPlan
 	if err := json.Unmarshal(plan.Prepared, &p); err != nil {
@@ -127,8 +127,8 @@ func (s *Service) performInit(ctx context.Context, plan contract.IOPlan) (contra
 		return contract.IOResult{Fault: faultOf(prerequisiteMissing(
 			"no secret store is configured; the owner credential cannot be custodied"))}, nil
 	}
-	secret := make([]byte, 32)
-	if _, err := rand.Read(secret); err != nil {
+	secret, err := mintOwnerCredential()
+	if err != nil {
 		return contract.IOResult{Fault: faultOf(internalError("owner credential entropy source unavailable"))}, nil
 	}
 	key := p.HeadlessKeyRef
@@ -140,7 +140,10 @@ func (s *Service) performInit(ctx context.Context, plan contract.IOPlan) (contra
 		secret[i] = 0
 	}
 	if err != nil {
-		return contract.IOResult{Fault: faultOf(prerequisiteMissing("owner credential could not be custodied: %v", err))}, nil
+		// The store's own error text is withheld: a helper failure may echo
+		// the material it was given.
+		return contract.IOResult{Fault: faultOf(prerequisiteMissing(
+			"the owner credential could not be custodied in the selected secure store"))}, nil
 	}
 	raw, err := json.Marshal(bootstrapResult{StoreRef: storeRef})
 	if err != nil {
@@ -218,7 +221,7 @@ func (s *Service) finishInit(ctx context.Context, unit contract.Unit, plan contr
 	if err := insertState(ctx, unit, state); err != nil {
 		return contract.Payload{}, err
 	}
-	if err := markBootstrapIntent(ctx, unit, p.IntentID, "completed", now); err != nil {
+	if err := completeBootstrapIntent(ctx, unit, p.IntentID, perf.StoreRef, now); err != nil {
 		return contract.Payload{}, err
 	}
 	if err := emitTransition(ctx, unit, eventInitialized, state.ID, contract.Version(state.Version)); err != nil {

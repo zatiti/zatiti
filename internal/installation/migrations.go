@@ -84,7 +84,16 @@ CREATE INDEX installation_recovery_obligations_job_idx
 	ON installation_recovery_obligations (restore_job_id);
 `
 
-// migrations returns the installation-owned migration set. The body is
+// schemaV2 records, on the completed bootstrap intent, the opaque
+// secret-store reference the owner credential is custodied under. The
+// reference is not secret (identity keeps the same value); it lets local
+// entrypoint assembly provision the operator's credential profile through
+// Service.OwnerCredential. Intents of other states keep the empty default.
+const schemaV2 = `
+ALTER TABLE installation_bootstrap_intents ADD COLUMN store_ref TEXT NOT NULL DEFAULT '';
+`
+
+// migrations returns the installation-owned migration set. Each body is
 // pinned by SHA-256 so storage can detect any drift from the reviewed
 // schema.
 func migrations() []contract.Migration {
@@ -93,5 +102,10 @@ func migrations() []contract.Migration {
 		Version: 1,
 		SQL:     schemaV1,
 		SHA256:  contract.Hash([]byte(schemaV1)),
+	}, {
+		Owner:   owner,
+		Version: 2,
+		SQL:     schemaV2,
+		SHA256:  contract.Hash([]byte(schemaV2)),
 	}}
 }
