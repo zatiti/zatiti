@@ -456,6 +456,31 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   to every _<owner>.validate; configuration bootstrap emits no event;
   the owner credential is 32 raw bytes, not a legal Authorization value,
   with no exported way to obtain it.
+- 2026-09-18 -- registry seam LANDED (3926941 fix(registry), d98ab05
+  test(application)). Lead mutation check: neutralizing the
+  unknown-caller fence let assembly accept an unknown internal caller
+  (TestNewRejectsUnknownCallers red), restored. The registry was the
+  wrong side on all four points; application production code untouched.
+  Two rules the contract never states are now implemented as application
+  assumed them and need spec revision 3: Lookup version 0 = highest
+  registered version; registry accepts bare or self-contained schemas and
+  Lookup returns self-contained documents pruned to reachable defs. The
+  new internal/application/assembly_test.go drives the REAL registry +
+  16 real modules + real application over temp storage through
+  installation.init, principal.create with replay, and internal calls.
+  Unedited modules still fail registry.New until descriptor-drift lands.
+- 2026-09-18 12:17 PT -- SECOND session-limit stop, resets 16:00 PT; all
+  eleven lanes down. Lead landing on-disk work meanwhile: serenity
+  revision-2 conversion (verified race/lint green, committed and landing,
+  turns main green); execution $ref port (race 473s green, lint 0,
+  committed with the earlier accounting commit, landing); app-seams'
+  three fixes (application/evidence/policy; build/vet/gofmt clean, race
+  queued); Flutter increment (8 commits, 15k lines, one third-party
+  package flutter_secure_storage; format/analyze/test running). Lease
+  queue had reached an hour, so a second lease (R-race-lease) now carries
+  package-level race/lint runs while R-build-lease carries commits and
+  module-wide runs; wrapper polling is age-aware so the oldest waiter
+  wins. One-shot resume scheduled for 16:03 PT.
 
 ## Planned
 
