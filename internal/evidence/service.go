@@ -38,7 +38,7 @@ type opMeta struct {
 	visibility string
 	mode       string
 	callers    []string
-	cli        string // "zatiti ..." CLI path; empty for internal operations
+	cli        string // CLI tokens below the root command, space separated; empty for internal operations
 }
 
 // opMetas lists every owned operation: internal first, then the public
@@ -52,11 +52,11 @@ var opMetas = []opMeta{
 	{id: opSnapshot, visibility: contract.VisibilityInternal, mode: contract.ModeQuery,
 		callers: []string{"application", "installation", "messaging"}},
 	{id: opCommandGet, visibility: contract.VisibilityPublic, mode: contract.ModeQuery,
-		cli: "zatiti command get"},
+		cli: "command get"},
 	{id: opEventGet, visibility: contract.VisibilityPublic, mode: contract.ModeQuery,
-		cli: "zatiti event get"},
+		cli: "event get"},
 	{id: opEventList, visibility: contract.VisibilityPublic, mode: contract.ModeQuery,
-		cli: "zatiti event list"},
+		cli: "event list"},
 }
 
 // Service is the evidence domain owner: durable command replay, authorized
