@@ -73,7 +73,7 @@ func TestDescriptorsExactness(t *testing.T) {
 		if d.Effect != "local" {
 			t.Fatalf("%s effect %q, want local", d.ID, d.Effect)
 		}
-		if len(d.ScopeRequired) != 1 || d.ScopeRequired[0] != "installation_id" {
+		if d.Visibility == "public" && (len(d.ScopeRequired) != 1 || d.ScopeRequired[0] != "installation_id") {
 			t.Fatalf("%s scope_required %v, want [installation_id]", d.ID, d.ScopeRequired)
 		}
 		if len(d.InputSchema) == 0 || len(d.OutputSchema) == 0 {
@@ -131,7 +131,7 @@ func TestDescriptorsExactness(t *testing.T) {
 		{"_tasks.create", "mutation", false, false},
 		{"_tasks.ready", "query", false, false},
 		{"_tasks.snapshot", "query", false, false},
-		{"_tasks.transition", "mutation", false, false},
+		{"_tasks.transition", "mutation", false, true},
 		{"task.create", "mutation", true, false},
 		{"task.delegate", "mutation", true, true},
 		{"task.accept", "mutation", true, true},

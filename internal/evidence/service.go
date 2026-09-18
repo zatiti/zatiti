@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -125,7 +126,7 @@ func (s *Service) assemble() error {
 			Effect:        contract.EffectLocal,
 			InputSchema:   json.RawMessage(schemas.Input),
 			OutputSchema:  json.RawMessage(schemas.Output),
-			ScopeRequired: []string{"installation_id"},
+			ScopeRequired: scopeRequirement(json.RawMessage(schemas.Input)),
 			Callers:       m.callers,
 		}
 		if m.cli != "" {
@@ -141,6 +142,19 @@ func (s *Service) assemble() error {
 		s.catalog[m.id] = d
 		s.handlers[m.id] = h
 		s.descriptors = append(s.descriptors, d)
+	}
+	return nil
+}
+
+// scopeRequirement derives the frozen catalog's scope requirement for an
+// operation: "installation_id" exactly when the input schema requires a
+// scope field, nothing otherwise.
+func scopeRequirement(input json.RawMessage) []string {
+	var probe struct {
+		Required []string `json:"required"`
+	}
+	if err := json.Unmarshal(input, &probe); err == nil && slices.Contains(probe.Required, "scope") {
+		return []string{"installation_id"}
 	}
 	return nil
 }

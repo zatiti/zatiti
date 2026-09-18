@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -82,21 +83,21 @@ var opMetas = []opMeta{
 		callers: []string{"tasks", "scheduling", "application"}},
 	{id: opFence, visibility: "internal", mode: "mutation",
 		callers: []string{"controller", "installation"}},
-	{id: opJobClaim, visibility: "internal", mode: "mutation",
+	{id: opJobClaim, visibility: "internal", mode: "mutation", expected: true,
 		callers: []string{"controller", "application"}},
 	{id: opJobCreate, visibility: "internal", mode: "mutation",
 		callers: []string{"configuration", "skills", "connections", "memory",
 			"artifacts", "installation", "execution", "effects", "application"}},
 	{id: opJobPending, visibility: "internal", mode: "query",
 		callers: []string{"controller"}},
-	{id: opJobRecord, visibility: "internal", mode: "mutation",
+	{id: opJobRecord, visibility: "internal", mode: "mutation", expected: true,
 		callers: []string{"controller", "application", "effects", "memory",
 			"skills", "connections", "installation"}},
 	{id: opObservation, visibility: "internal", mode: "mutation",
 		callers: []string{"controller"}},
 	{id: opTick, visibility: "internal", mode: "mutation",
 		callers: []string{"controller"}},
-	{id: opVerificationRec, visibility: "internal", mode: "mutation",
+	{id: opVerificationRec, visibility: "internal", mode: "mutation", expected: true,
 		callers: []string{"controller"}},
 
 	{id: opAttemptCancel, visibility: "public", mode: "mutation", submission: true,
@@ -197,7 +198,7 @@ func (s *Service) assemble() error {
 			Effect:          contract.EffectLocal,
 			InputSchema:     json.RawMessage(schemas[0]),
 			OutputSchema:    json.RawMessage(schemas[1]),
-			ScopeRequired:   []string{"installation_id"},
+			ScopeRequired:   scopeRequirement(json.RawMessage(schemas[0])),
 			Callers:         m.callers,
 			ExpectedVersion: m.expected,
 			SubmissionKey:   m.submission,
@@ -218,6 +219,19 @@ func (s *Service) assemble() error {
 		s.catalog[m.id] = d
 		s.handlers[m.id] = h
 		s.descriptors = append(s.descriptors, d)
+	}
+	return nil
+}
+
+// scopeRequirement derives the frozen catalog's scope requirement for an
+// operation: "installation_id" exactly when the input schema requires a
+// scope field, nothing otherwise.
+func scopeRequirement(input json.RawMessage) []string {
+	var probe struct {
+		Required []string `json:"required"`
+	}
+	if err := json.Unmarshal(input, &probe); err == nil && slices.Contains(probe.Required, "scope") {
+		return []string{"installation_id"}
 	}
 	return nil
 }

@@ -110,8 +110,7 @@ func (s *Service) assemble() error {
 		{
 			ID: opActivate, Version: descriptorVersion, Owner: owner,
 			Visibility: contract.VisibilityInternal, Mode: contract.ModeMutation, Effect: contract.EffectLocal,
-			ScopeRequired: []string{"installation_id"},
-			Callers:       []string{"configuration", "application"},
+			Callers: []string{"configuration", "application"},
 		},
 		{
 			ID: opAuthority, Version: descriptorVersion, Owner: owner,
@@ -122,26 +121,22 @@ func (s *Service) assemble() error {
 		{
 			ID: opBootstrap, Version: descriptorVersion, Owner: owner,
 			Visibility: contract.VisibilityInternal, Mode: contract.ModeMutation, Effect: contract.EffectLocal,
-			ScopeRequired: []string{"installation_id"},
-			Callers:       []string{"installation"},
+			Callers: []string{"installation"},
 		},
 		{
 			ID: opPromote, Version: descriptorVersion, Owner: owner,
 			Visibility: contract.VisibilityInternal, Mode: contract.ModeMutation, Effect: contract.EffectLocal,
-			ScopeRequired: []string{"installation_id"},
-			Callers:       []string{"policy"},
+			Callers: []string{"policy"},
 		},
 		{
 			ID: opRestrict, Version: descriptorVersion, Owner: owner,
 			Visibility: contract.VisibilityInternal, Mode: contract.ModeMutation, Effect: contract.EffectLocal,
-			ScopeRequired: []string{"installation_id"},
-			Callers:       []string{"policy", "installation"},
+			Callers: []string{"policy", "installation"},
 		},
 		{
 			ID: opValidate, Version: descriptorVersion, Owner: owner,
 			Visibility: contract.VisibilityInternal, Mode: contract.ModeQuery, Effect: contract.EffectLocal,
-			ScopeRequired: []string{"installation_id"},
-			Callers:       []string{"configuration", "application"},
+			Callers: []string{"configuration", "application"},
 		},
 		{
 			ID: opCredProvision, Version: descriptorVersion, Owner: owner,

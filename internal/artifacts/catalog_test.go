@@ -6,8 +6,6 @@ import (
 	"reflect"
 	"slices"
 	"testing"
-
-	"github.com/zatiti/zatiti/internal/contract"
 )
 
 // frozenOperation is one entry of the frozen operation catalog of record,
@@ -27,10 +25,11 @@ type frozenOperation struct {
 	SubmissionKey    bool            `json:"submission_key"`
 	ExpectedVersion  bool            `json:"expected_version"`
 	ScopeRequired    []string        `json:"scope_required"`
+	Callers          []string        `json:"callers"`
 }
 
-// frozenPublicOperations loads the public catalog entries this owner serves.
-func frozenPublicOperations(t *testing.T, owner string) map[string]frozenOperation {
+// frozenOperations loads every catalog entry this owner serves.
+func frozenOperations(t *testing.T, owner string) map[string]frozenOperation {
 	t.Helper()
 	raw, err := os.ReadFile("../../docs/implementation/operations.json")
 	if err != nil {
@@ -44,12 +43,12 @@ func frozenPublicOperations(t *testing.T, owner string) map[string]frozenOperati
 	}
 	out := map[string]frozenOperation{}
 	for _, op := range doc.Operations {
-		if op.Owner == owner && op.Visibility == contract.VisibilityPublic {
+		if op.Owner == owner {
 			out[op.ID] = op
 		}
 	}
 	if len(out) == 0 {
-		t.Fatalf("the frozen catalog holds no public %s operations", owner)
+		t.Fatalf("the frozen catalog holds no %s operations", owner)
 	}
 	return out
 }
@@ -71,23 +70,23 @@ func schemaBody(t *testing.T, raw json.RawMessage) any {
 	return body
 }
 
-// TestPublicDescriptorsMatchFrozenCatalog pins every public descriptor to its
-// frozen catalog entry field by field: the registry refuses to assemble a
-// module whose public surface drifts from the catalog.
-func TestPublicDescriptorsMatchFrozenCatalog(t *testing.T) {
+// TestDescriptorsMatchFrozenCatalog pins every descriptor, public and
+// internal, to its frozen catalog entry field by field: the registry refuses
+// to assemble a module whose surface drifts from the catalog.
+func TestDescriptorsMatchFrozenCatalog(t *testing.T) {
 	svc := newEnv(t).svc
-	frozen := frozenPublicOperations(t, svc.Name())
+	frozen := frozenOperations(t, svc.Name())
 	seen := map[string]bool{}
 	for _, d := range svc.Descriptors() {
-		if d.Visibility != contract.VisibilityPublic {
-			continue
-		}
 		want, ok := frozen[d.ID]
 		if !ok {
-			t.Errorf("%s: public descriptor is not in the frozen catalog", d.ID)
+			t.Errorf("%s: descriptor is not in the frozen catalog", d.ID)
 			continue
 		}
 		seen[d.ID] = true
+		if d.Visibility != want.Visibility {
+			t.Errorf("%s: visibility %q, want %q", d.ID, d.Visibility, want.Visibility)
+		}
 		if d.Version != want.Version {
 			t.Errorf("%s: version %d, want %d", d.ID, d.Version, want.Version)
 		}
@@ -115,8 +114,18 @@ func TestPublicDescriptorsMatchFrozenCatalog(t *testing.T) {
 		if !slices.Equal(d.ScopeRequired, want.ScopeRequired) {
 			t.Errorf("%s: scope requirements %v, want %v", d.ID, d.ScopeRequired, want.ScopeRequired)
 		}
-		if len(d.Callers) != 0 {
-			t.Errorf("%s: public descriptor declares callers %v", d.ID, d.Callers)
+		if d.Visibility == "public" {
+			// The registry refuses a public operation with a caller allowlist.
+			if len(d.Callers) != 0 {
+				t.Errorf("%s: public descriptor declares callers %v", d.ID, d.Callers)
+			}
+		} else {
+			gotCallers, wantCallers := slices.Clone(d.Callers), slices.Clone(want.Callers)
+			slices.Sort(gotCallers)
+			slices.Sort(wantCallers)
+			if !slices.Equal(gotCallers, wantCallers) {
+				t.Errorf("%s: callers %v, want %v", d.ID, d.Callers, want.Callers)
+			}
 		}
 		if !reflect.DeepEqual(schemaBody(t, d.InputSchema), schemaBody(t, want.InputSchema)) {
 			t.Errorf("%s: input schema differs from the frozen catalog", d.ID)
@@ -130,7 +139,7 @@ func TestPublicDescriptorsMatchFrozenCatalog(t *testing.T) {
 	}
 	for id := range frozen {
 		if !seen[id] {
-			t.Errorf("%s: frozen public operation has no descriptor", id)
+			t.Errorf("%s: frozen operation has no descriptor", id)
 		}
 	}
 }

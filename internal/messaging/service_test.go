@@ -95,7 +95,7 @@ func TestDescriptorsExactness(t *testing.T) {
 		if d.Owner != "messaging" || d.Version != 1 {
 			t.Fatalf("%s owner/version %s/%d, want messaging/1", d.ID, d.Owner, d.Version)
 		}
-		if len(d.ScopeRequired) != 1 || d.ScopeRequired[0] != "installation_id" {
+		if d.Visibility == "public" && (len(d.ScopeRequired) != 1 || d.ScopeRequired[0] != "installation_id") {
 			t.Fatalf("%s scope_required %v, want [installation_id]", d.ID, d.ScopeRequired)
 		}
 		if len(d.InputSchema) == 0 || len(d.OutputSchema) == 0 {

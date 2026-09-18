@@ -3,6 +3,7 @@ package tasks
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"strings"
 
 	"github.com/zatiti/zatiti/internal/contract"
@@ -29,7 +30,7 @@ var opMetas = []opMeta{
 		callers: []string{"execution", "controller"}},
 	{id: "_tasks.snapshot", visibility: "internal", mode: "query", submission: false,
 		callers: []string{"execution", "effects", "scheduling", "memory", "reviews", "policy"}},
-	{id: "_tasks.transition", visibility: "internal", mode: "mutation", submission: false,
+	{id: "_tasks.transition", visibility: "internal", mode: "mutation", submission: false, expectedVersion: true,
 		callers: []string{"execution", "scheduling", "installation"}},
 
 	// task.*
@@ -108,7 +109,7 @@ func buildDescriptors(catalog map[string]contract.Descriptor) []contract.Descrip
 			Effect:          "local",
 			InputSchema:     inputSchema(m.id),
 			OutputSchema:    outputSchema(m.id),
-			ScopeRequired:   []string{"installation_id"},
+			ScopeRequired:   scopeRequirement(inputSchema(m.id)),
 			Callers:         m.callers,
 			ExpectedVersion: m.expectedVersion,
 			SubmissionKey:   m.submission,
@@ -123,6 +124,19 @@ func buildDescriptors(catalog map[string]contract.Descriptor) []contract.Descrip
 		out = append(out, d)
 	}
 	return out
+}
+
+// scopeRequirement derives the frozen catalog's scope requirement for an
+// operation: "installation_id" exactly when the input schema requires a
+// scope field, nothing otherwise.
+func scopeRequirement(input json.RawMessage) []string {
+	var probe struct {
+		Required []string `json:"required"`
+	}
+	if err := json.Unmarshal(input, &probe); err == nil && slices.Contains(probe.Required, "scope") {
+		return []string{"installation_id"}
+	}
+	return nil
 }
 
 // handlerFunc executes one operation inside the caller's unit.

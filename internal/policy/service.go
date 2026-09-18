@@ -118,8 +118,7 @@ func (s *Service) assemble() error {
 		{
 			ID: opActivate, Version: descriptorVersion, Owner: owner,
 			Visibility: contract.VisibilityInternal, Mode: contract.ModeMutation, Effect: contract.EffectLocal,
-			ScopeRequired: []string{"installation_id"},
-			Callers:       []string{"configuration", "application"},
+			Callers: []string{"configuration", "application"},
 		},
 		{
 			ID: opCheck, Version: descriptorVersion, Owner: owner,
@@ -133,14 +132,12 @@ func (s *Service) assemble() error {
 		{
 			ID: opInvalidate, Version: descriptorVersion, Owner: owner,
 			Visibility: contract.VisibilityInternal, Mode: contract.ModeMutation, Effect: contract.EffectLocal,
-			ScopeRequired: []string{"installation_id"},
-			Callers:       []string{"configuration", "skills", "connections", "execution", "tasks"},
+			Callers: []string{"configuration", "skills", "connections", "execution", "tasks"},
 		},
 		{
 			ID: opValidate, Version: descriptorVersion, Owner: owner,
 			Visibility: contract.VisibilityInternal, Mode: contract.ModeQuery, Effect: contract.EffectLocal,
-			ScopeRequired: []string{"installation_id"},
-			Callers:       []string{"configuration", "application"},
+			Callers: []string{"configuration", "application"},
 		},
 		{
 			ID: opAutonomyDemote, Version: descriptorVersion, Owner: owner,

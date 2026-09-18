@@ -100,7 +100,7 @@ func TestDescriptorsCoverEveryOperation(t *testing.T) {
 		if d.Effect != m.effect {
 			t.Fatalf("operation %s effect %q, want %q", m.id, d.Effect, m.effect)
 		}
-		if len(d.ScopeRequired) != 1 || d.ScopeRequired[0] != "installation_id" {
+		if m.visibility == "public" && (len(d.ScopeRequired) != 1 || d.ScopeRequired[0] != "installation_id") {
 			t.Fatalf("operation %s scope requirement is not installation_id", m.id)
 		}
 		if len(d.InputSchema) == 0 {

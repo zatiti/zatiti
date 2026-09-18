@@ -117,32 +117,28 @@ func (s *Service) assemble() error {
 		{
 			ID: opActivate, Version: descriptorVersion, Owner: owner,
 			Visibility: contract.VisibilityInternal, Mode: contract.ModeMutation, Effect: contract.EffectLocal,
-			ScopeRequired: []string{"installation_id"},
-			Callers:       []string{"configuration", "application"},
+			Callers: []string{"configuration", "application"},
 		},
 		{
 			ID: opValidate, Version: descriptorVersion, Owner: owner,
 			Visibility: contract.VisibilityInternal, Mode: contract.ModeQuery, Effect: contract.EffectLocal,
-			ScopeRequired: []string{"installation_id"},
-			Callers:       []string{"configuration", "application"},
+			Callers: []string{"configuration", "application"},
 		},
 		{
 			ID: opCycleRecord, Version: descriptorVersion, Owner: owner,
 			Visibility: contract.VisibilityInternal, Mode: contract.ModeMutation, Effect: contract.EffectLocal,
-			ScopeRequired: []string{"installation_id"},
-			Callers:       []string{"execution"},
+			ExpectedVersion: true,
+			Callers:         []string{"execution"},
 		},
 		{
 			ID: opWakeAdmit, Version: descriptorVersion, Owner: owner,
 			Visibility: contract.VisibilityInternal, Mode: contract.ModeMutation, Effect: contract.EffectLocal,
-			ScopeRequired: []string{"installation_id"},
-			Callers:       []string{"controller"},
+			Callers: []string{"controller"},
 		},
 		{
 			ID: opWakeDue, Version: descriptorVersion, Owner: owner,
 			Visibility: contract.VisibilityInternal, Mode: contract.ModeQuery, Effect: contract.EffectLocal,
-			ScopeRequired: []string{"installation_id"},
-			Callers:       []string{"controller"},
+			Callers: []string{"controller"},
 		},
 		{
 			ID: opResponsibilityCreate, Version: descriptorVersion, Owner: owner,

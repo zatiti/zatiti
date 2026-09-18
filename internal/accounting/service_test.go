@@ -112,7 +112,7 @@ func TestDescriptors(t *testing.T) {
 		if len(d.InputSchema) == 0 || len(d.OutputSchema) == 0 {
 			t.Fatalf("%s: missing merged schemas", id)
 		}
-		if len(d.ScopeRequired) != 1 || d.ScopeRequired[0] != "installation_id" {
+		if w.cli && (len(d.ScopeRequired) != 1 || d.ScopeRequired[0] != "installation_id") {
 			t.Fatalf("%s: scope requirement %v, want [installation_id]", id, d.ScopeRequired)
 		}
 	}
