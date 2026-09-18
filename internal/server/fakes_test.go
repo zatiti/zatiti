@@ -338,6 +338,11 @@ func (d delayedInstallationIO) Finish(ctx context.Context, u contract.Unit, plan
 // (internal/server/AGENTS.md, "installation.init v1").
 const installationInitInputSchema = `{"type":"object","additionalProperties":false,"properties":{"credential_store":{"type":"string","enum":["os","headless"]},"owner_name":{"type":"string","maxLength":8192},"headless_key_ref":{"type":"string","maxLength":8192}},"required":["credential_store","owner_name"]}`
 
+// commandGetInputSchema is the frozen command.get input with the shared
+// Scope definition inlined: scope, submission_key, operation and
+// operation_version are all required.
+const commandGetInputSchema = `{"type":"object","additionalProperties":false,"properties":{"scope":{"type":"object","additionalProperties":false,"properties":{"installation_id":{"type":"string","format":"uuid"},"organization_id":{"type":"string","format":"uuid"},"project_id":{"type":"string","format":"uuid"},"worker_id":{"type":"string","format":"uuid"},"task_id":{"type":"string","format":"uuid"}},"required":["installation_id"]},"submission_key":{"type":"string","maxLength":8192},"operation":{"type":"string","maxLength":8192},"operation_version":{"type":"integer","minimum":1,"maximum":9223372036854775807}},"required":["scope","submission_key","operation","operation_version"]}`
+
 // pingInputSchema/pingOutputSchema back the "capabilities.list"-shaped test
 // query operation: public, policy-exempt (see application.policyExempt),
 // and free of any scope requirement so tests can exercise ordinary
@@ -353,6 +358,10 @@ type testEnv struct {
 	auth *fakeAuthenticator
 	db   *fakeDB
 	cat  *fakeCatalog
+
+	// installation is the minted installation identity once bootstrap ran;
+	// scoped inputs such as command.get name it.
+	installation contract.ID
 }
 
 // newTestEnv builds an application wired to this package's fakes, with the
@@ -392,12 +401,16 @@ func newTestEnvWithIO(t *testing.T, installIO contract.LocalIO) *testEnv {
 	cat.descriptors["command.get"] = contract.Descriptor{
 		ID: "command.get", Version: 1, Owner: "evidence",
 		Visibility: contract.VisibilityPublic, Mode: contract.ModeQuery,
-		InputSchema:   []byte(`{"type":"object","additionalProperties":false,"properties":{"submission_key":{"type":"string","maxLength":8192}},"required":["submission_key"]}`),
+		InputSchema:   []byte(commandGetInputSchema),
 		SubmissionKey: false,
+		ScopeRequired: []string{"installation_id"},
 	}
 	cat.handlers["command.get"] = func(_ context.Context, _ contract.Unit, inv contract.Invocation) (contract.Payload, error) {
 		var in struct {
-			SubmissionKey string `json:"submission_key"`
+			Scope            contract.Scope `json:"scope"`
+			SubmissionKey    string         `json:"submission_key"`
+			Operation        string         `json:"operation"`
+			OperationVersion int64          `json:"operation_version"`
 		}
 		if err := contract.DecodeStrict(inv.Input, &in); err != nil {
 			return contract.Payload{}, &contract.Fault{Code: contract.CodeInvalidInput, Message: err.Error()}
@@ -466,6 +479,15 @@ func (e *testEnv) bootstrap(t *testing.T) {
 	if res.Status != contract.StatusCompleted {
 		t.Fatalf("bootstrap installation.init status = %q, want completed", res.Status)
 	}
+	var data struct {
+		Resource struct {
+			InstallationID contract.ID `json:"installation_id"`
+		} `json:"resource"`
+	}
+	if err := json.Unmarshal(res.Data, &data); err != nil || data.Resource.InstallationID == "" {
+		t.Fatalf("bootstrap installation.init data %s: %v", res.Data, err)
+	}
+	e.installation = data.Resource.InstallationID
 }
 
 // newBootstrappedEnv is newTestEnv plus a completed bootstrap: the common

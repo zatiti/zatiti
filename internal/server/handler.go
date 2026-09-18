@@ -49,18 +49,7 @@ func (h *operationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	operation := r.PathValue("operation_id")
 
-	result, fault := h.handle(r, operation)
-
-	httpStatus := http.StatusOK
-	if fault != nil {
-		httpStatus = contract.HTTPStatus(fault)
-		writeFault(w, fault)
-	} else {
-		if result.Status == contract.StatusAccepted {
-			httpStatus = http.StatusAccepted
-		}
-		writeResult(w, result)
-	}
+	httpStatus := writeEnvelope(w, h.handle(r, operation))
 
 	slog.InfoContext(r.Context(), "server.operation",
 		"operation", operation,
@@ -72,27 +61,28 @@ func (h *operationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // handle runs the authenticated dispatch for one request: content type and
 // body-size enforcement, strict envelope decoding, transport-appropriate
-// authentication and the call into application.Application. The dispatch
-// context is detached from the request's own cancellation: a caller that
-// disconnects mid-request never causes the server to assume an in-flight or
-// already-committed command rolled back.
-func (h *operationHandler) handle(r *http.Request, operation string) (contract.Result, *contract.Fault) {
+// authentication and the call into application.Application. It always
+// returns one well-formed envelope; the HTTP status is derived from that
+// envelope alone. The dispatch context is detached from the request's own
+// cancellation: a caller that disconnects mid-request never causes the
+// server to assume an in-flight or already-committed command rolled back.
+func (h *operationHandler) handle(r *http.Request, operation string) contract.Result {
 	if fault := checkContentType(r); fault != nil {
-		return contract.Result{}, fault
+		return faultEnvelope(fault)
 	}
 	req, fault := decodeRequest(r, h.maxBodyBytes)
 	if fault != nil {
-		return contract.Result{}, fault
+		return faultEnvelope(fault)
 	}
 
 	ctx := context.WithoutCancel(r.Context())
 
 	if operation == bootstrapOperation {
 		if h.origin == originRemote {
-			return contract.Result{}, &contract.Fault{
+			return faultEnvelope(&contract.Fault{
 				Code:    contract.CodePermissionDenied,
 				Message: "installation bootstrap is local-only",
-			}
+			})
 		}
 		// One-time local bootstrap grants its own capability by being local
 		// and by the installer lock/state application.Invoke itself enforces
@@ -106,7 +96,7 @@ func (h *operationHandler) handle(r *http.Request, operation string) (contract.R
 
 	actor, authFault := h.authenticate(ctx, r)
 	if authFault != nil {
-		return contract.Result{}, authFault
+		return faultEnvelope(authFault)
 	}
 	return invoke(ctx, h.app, actor, operation, req)
 }
@@ -152,12 +142,8 @@ func (h *operationHandler) authenticate(ctx context.Context, r *http.Request) (c
 	return actor, nil
 }
 
-// invoke calls application.Application.Invoke and classifies its outcome
-// into the wire result or fault this transport renders.
-func invoke(ctx context.Context, app *application.Application, actor contract.Actor, operation string, req contract.Request) (contract.Result, *contract.Fault) {
-	result, err := app.Invoke(ctx, actor, operation, req)
-	if err != nil {
-		return contract.Result{}, faultFromError(err)
-	}
-	return result, nil
+// invoke calls application.Application.Invoke and reconciles its result and
+// error into the one envelope this transport renders.
+func invoke(ctx context.Context, app *application.Application, actor contract.Actor, operation string, req contract.Request) contract.Result {
+	return resultEnvelope(app.Invoke(ctx, actor, operation, req))
 }

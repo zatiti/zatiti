@@ -207,9 +207,11 @@ func TestUnknownOperationIsNotFound(t *testing.T) {
 
 // TestCommandGetRecoversByKey proves the transport serves the recovery
 // lookup a disconnected client uses (internal/client's resolveByLookup) the
-// same way as any other authenticated query: a key bound to a previously
-// recorded disposition returns that disposition, and an unbound key is a
-// plain not_found rather than a different shape of failure.
+// same way as any other authenticated query, with the frozen command.get
+// input (scope, submission_key, operation, operation_version): a key bound
+// to a previously recorded disposition returns that disposition, an unbound
+// key is a plain not_found rather than a different shape of failure, and the
+// key alone is refused invalid_input.
 func TestCommandGetRecoversByKey(t *testing.T) {
 	env := newBootstrappedEnv(t)
 	actor := contract.Actor{PrincipalID: contract.NewID(), Kind: contract.KindHuman}
@@ -221,9 +223,17 @@ func TestCommandGetRecoversByKey(t *testing.T) {
 	}
 	env.cat.commands.record("widget-create-key-1", recorded)
 	_, client := newLocalServer(t, env)
+	lookup := func(key string) map[string]any {
+		return map[string]any{
+			"scope":             map[string]any{"installation_id": env.installation},
+			"submission_key":    key,
+			"operation":         "widget.create",
+			"operation_version": 1,
+		}
+	}
 
 	resp, result := postOperation(t, client, "http://unix", "command.get", "Bearer good-token",
-		mustMarshal(t, map[string]any{"schema": contract.SchemaRequest, "input": map[string]any{"submission_key": "widget-create-key-1"}}))
+		mustMarshal(t, map[string]any{"schema": contract.SchemaRequest, "input": lookup("widget-create-key-1")}))
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200; result = %+v", resp.StatusCode, result)
 	}
@@ -232,12 +242,18 @@ func TestCommandGetRecoversByKey(t *testing.T) {
 	}
 
 	resp, result = postOperation(t, client, "http://unix", "command.get", "Bearer good-token",
-		mustMarshal(t, map[string]any{"schema": contract.SchemaRequest, "input": map[string]any{"submission_key": "never-submitted"}}))
+		mustMarshal(t, map[string]any{"schema": contract.SchemaRequest, "input": lookup("never-submitted")}))
 	if resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404; result = %+v", resp.StatusCode, result)
 	}
 	if result.Error == nil || result.Error.Code != contract.CodeNotFound {
 		t.Fatalf("result = %+v, want not_found", result)
+	}
+
+	resp, result = postOperation(t, client, "http://unix", "command.get", "Bearer good-token",
+		mustMarshal(t, map[string]any{"schema": contract.SchemaRequest, "input": map[string]any{"submission_key": "widget-create-key-1"}}))
+	if resp.StatusCode != http.StatusBadRequest || result.Error == nil || result.Error.Code != contract.CodeInvalidInput {
+		t.Fatalf("status = %d result = %+v, want 400 invalid_input for a key-only lookup", resp.StatusCode, result)
 	}
 }
 
