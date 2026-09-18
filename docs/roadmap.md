@@ -625,6 +625,18 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   Lane wave3/identity-service dispatched. Follow-up noted: registry.New
   over 16 modules costs ~2s per CLI invocation (catalog build); fetch
   capabilities from the controller later.
+- 2026-09-18 -- edge-seams LANDED (client 59a2ed6, server 0c93821,
+  configuration c1 + installation 626d6b1; see git log). Client's
+  post-unknown-ack command.get now sends the frozen input (scope,
+  submission_key, operation, operation_version) and a failed lookup
+  keeps the outcome unknown; server maps HTTP status from the Result via
+  contract.HTTPStatus, not from the Go error; configuration computes the
+  candidate digest for owner validation and emits its bootstrap event;
+  installation mints the owner credential as the complete "Bearer
+  <base64url>" header value and custodies it. Lead verified all four
+  package race suites and lint; one unchecked-error lint finding in a
+  new test fixed by the lead. Still open on this lane: configuration's
+  _reviews.ensure at plan time (lane resumes 16:00).
 
 ## Planned
 
