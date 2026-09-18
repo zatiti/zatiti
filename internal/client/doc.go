@@ -35,9 +35,12 @@
 //     exact same bytes are replayed under the same key, which the controller
 //     deduplicates,
 //   - an unresolvable unknown acknowledgement of a keyed submission is
-//     resolved through CommandGetOperation (command.get) looked up by the
-//     original submission key; a not_found lookup proves the command never
-//     committed and licenses one final identical replay.
+//     resolved through CommandGetOperation (command.get) with the frozen
+//     lookup input: the original input's scope, the original submission key,
+//     the operation and its version. The retained original envelope is read
+//     from the lookup's data.resource.result; a not_found lookup licenses one
+//     final identical replay; any other lookup failure leaves the outcome
+//     unknown and is never reported as the command's own result.
 //
 // A cancellation or timeout of the local wait is not a cancellation of an
 // accepted command: once bytes were sent the disposition is unknown, and the

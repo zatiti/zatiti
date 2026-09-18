@@ -24,12 +24,20 @@ import (
 const AuthHeader = "Authorization"
 
 // CommandGetOperation resolves an unresolvable unknown acknowledgement of a
-// keyed submission: the client posts {"submission_key": "<key>"} to this
-// operation and treats the returned envelope as the command's original
-// disposition. A not_found lookup proves the command never committed. The
-// found envelope is the complete original result retained by evidence,
-// including a refused command's fault.
+// keyed submission. The client posts the frozen command.get input
+// {scope, submission_key, operation, operation_version} and reads the
+// command's original disposition from data.resource.result of the completed
+// lookup envelope: the complete original result retained by evidence,
+// including a refused command's fault. A not_found lookup means no finished
+// command holds that identity. Any other lookup failure is a failure of the
+// lookup, never the command's disposition: the outcome stays unknown.
 const CommandGetOperation = "command.get"
+
+// lookupOperationVersion is the operation version the lookup names. The wire
+// request carries no operation version (the controller resolves the current
+// one) and the frozen catalog pins every operation at version 1, so that is
+// the version a command identity is bound to.
+const lookupOperationVersion = 1
 
 // operationsPathPrefix is the frozen HTTP route prefix for operation calls.
 const operationsPathPrefix = "/v1/operations/"
@@ -196,19 +204,29 @@ func (c *Client) Call(ctx context.Context, operation string, req contract.Reques
 	}
 	defer zeroBuffer(cred)
 
-	return c.dispatch(ctx, operation, req.SubmissionKey, body, cred)
+	return c.dispatch(ctx, submission{operation: operation, key: req.SubmissionKey, input: req.Input, body: body}, cred)
+}
+
+// submission is one validated call: the operation, its submission key (empty
+// for a query), the original input the recovery lookup takes its scope from,
+// and the exact request bytes every replay resends.
+type submission struct {
+	operation string
+	key       string
+	input     json.RawMessage
+	body      []byte
 }
 
 // dispatch runs the transport with the frozen retry policy: bounded
 // connection-establishment attempts, then — only for keyed submissions —
 // identical replay of a lost exchange and command.get resolution.
-func (c *Client) dispatch(ctx context.Context, operation, key string, body, cred []byte) (contract.Result, error) {
+func (c *Client) dispatch(ctx context.Context, sub submission, cred []byte) (contract.Result, error) {
 	var lastErr error
 	for attempt := 1; attempt <= c.connectAttempts; attempt++ {
 		if err := ctx.Err(); err != nil {
 			return contract.Result{}, fmt.Errorf("%w: %v", ErrControllerUnavailable, err)
 		}
-		result, err := c.attempt(ctx, operation, body, cred)
+		result, err := c.attempt(ctx, sub.operation, sub.body, cred)
 		if err == nil {
 			return result, nil
 		}
@@ -229,7 +247,7 @@ func (c *Client) dispatch(ctx context.Context, operation, key string, body, cred
 				return contract.Result{}, fmt.Errorf("%w: %v", ErrControllerUnavailable, err)
 			}
 		default:
-			return c.resolveUnknown(ctx, operation, key, body, cred, err)
+			return c.resolveUnknown(ctx, sub, cred, err)
 		}
 	}
 	return contract.Result{}, fmt.Errorf("%w: %v", ErrControllerUnavailable, lastErr)
@@ -242,12 +260,12 @@ func (c *Client) dispatch(ctx context.Context, operation, key string, body, cred
 // A dead caller context ends resolution immediately: cancelling the local
 // wait is not a cancellation of an accepted command, and no network work
 // runs on a cancelled context.
-func (c *Client) resolveUnknown(ctx context.Context, operation, key string, body, cred []byte, cause error) (contract.Result, error) {
-	if key == "" {
-		return contract.Result{}, &UnknownAckError{Operation: operation, Err: cause}
+func (c *Client) resolveUnknown(ctx context.Context, sub submission, cred []byte, cause error) (contract.Result, error) {
+	if sub.key == "" {
+		return contract.Result{}, &UnknownAckError{Operation: sub.operation, Err: cause}
 	}
 	unknown := func(err error) (contract.Result, error) {
-		return contract.Result{}, &UnknownAckError{Operation: operation, SubmissionKey: key, Err: err}
+		return contract.Result{}, &UnknownAckError{Operation: sub.operation, SubmissionKey: sub.key, Err: err}
 	}
 	// Identical submission with the same key: the controller binds the key to
 	// principal, operation and input hash, so identical bytes return the
@@ -256,7 +274,7 @@ func (c *Client) resolveUnknown(ctx context.Context, operation, key string, body
 		if err := ctx.Err(); err != nil {
 			return unknown(err)
 		}
-		result, err := c.attempt(ctx, operation, body, cred)
+		result, err := c.attempt(ctx, sub.operation, sub.body, cred)
 		if err == nil {
 			return result, nil
 		}
@@ -269,24 +287,27 @@ func (c *Client) resolveUnknown(ctx context.Context, operation, key string, body
 		case failureNotSent:
 			// Replaying into a dead connection is not progress; go straight
 			// to command lookup.
-			return c.resolveByLookup(ctx, operation, key, body, cred)
+			return c.resolveByLookup(ctx, sub, cred)
 		default:
 			// The replay itself failed unknown; keep replaying. The last
 			// attempt error is superseded by the lookup's own outcome below.
 		}
 	}
-	return c.resolveByLookup(ctx, operation, key, body, cred)
+	return c.resolveByLookup(ctx, sub, cred)
 }
 
-// resolveByLookup looks the command up by its original submission key. A
-// not_found lookup proves the command never committed and licenses one final
-// identical submission; any other found envelope is the command's original
-// retained disposition.
-func (c *Client) resolveByLookup(ctx context.Context, operation, key string, body, cred []byte) (contract.Result, error) {
+// resolveByLookup looks the command up by its original identity. A not_found
+// lookup means no finished command holds that identity and licenses one
+// final identical submission; a found command's retained envelope is the
+// original disposition. A lookup that cannot be formed, fails, or answers
+// with anything but the requested command proves nothing about the original
+// command: the outcome stays unknown and the lookup's own fault is never
+// reported as the command's result.
+func (c *Client) resolveByLookup(ctx context.Context, sub submission, cred []byte) (contract.Result, error) {
 	unknown := func(err error) (contract.Result, error) {
-		return contract.Result{}, &UnknownAckError{Operation: operation, SubmissionKey: key, Err: err}
+		return contract.Result{}, &UnknownAckError{Operation: sub.operation, SubmissionKey: sub.key, Err: err}
 	}
-	result, found, err := c.lookupCommand(ctx, key)
+	result, found, err := c.lookupCommand(ctx, sub)
 	if err != nil {
 		if cerr := ctx.Err(); cerr != nil {
 			return unknown(cerr)
@@ -297,7 +318,7 @@ func (c *Client) resolveByLookup(ctx context.Context, operation, key string, bod
 		if err := ctx.Err(); err != nil {
 			return unknown(err)
 		}
-		result, err := c.attempt(ctx, operation, body, cred)
+		result, err := c.attempt(ctx, sub.operation, sub.body, cred)
 		if err == nil {
 			return result, nil
 		}
@@ -312,18 +333,19 @@ func (c *Client) resolveByLookup(ctx context.Context, operation, key string, bod
 		}
 	}
 	if result.Status == contract.StatusFailed {
-		return result, result.Error
+		return result, cursorExpired(result.Error)
 	}
 	return result, nil
 }
 
-// lookupCommand posts {"submission_key": key} to CommandGetOperation and
-// reports whether the command was found. It is a query: no submission key
-// and no replay of its own, so resolution terminates. A well-formed failed
-// envelope other than not_found is the command's retained original
-// disposition, not a lookup failure.
-func (c *Client) lookupCommand(ctx context.Context, key string) (contract.Result, bool, error) {
-	input, err := json.Marshal(map[string]string{"submission_key": key})
+// lookupCommand posts the frozen command.get input and reports whether a
+// finished command holds the submission's identity, returning its retained
+// original envelope. It is a query: no submission key and no replay of its
+// own, so resolution terminates. Only a not_found fault means "absent";
+// every other failure is returned as an error that carries no
+// *contract.Fault, so a caller cannot mistake it for the command's fault.
+func (c *Client) lookupCommand(ctx context.Context, sub submission) (contract.Result, bool, error) {
+	input, err := lookupInput(sub)
 	if err != nil {
 		return contract.Result{}, false, err
 	}
@@ -340,18 +362,22 @@ func (c *Client) lookupCommand(ctx context.Context, key string) (contract.Result
 	}
 	defer zeroBuffer(cred)
 
-	result, err := c.attempt(ctx, CommandGetOperation, body, cred)
-	if err == nil {
-		return result, true, nil
-	}
-	var fault *contract.Fault
-	if errors.As(err, &fault) {
+	found, err := c.attempt(ctx, CommandGetOperation, body, cred)
+	if err != nil {
+		var fault *contract.Fault
+		if !errors.As(err, &fault) {
+			return contract.Result{}, false, fmt.Errorf("command lookup: %w", err)
+		}
 		if fault.Code == contract.CodeNotFound {
 			return contract.Result{}, false, nil
 		}
-		return result, true, nil
+		return contract.Result{}, false, fmt.Errorf("command lookup failed with %s: %s", fault.Code, fault.Message)
 	}
-	return contract.Result{}, false, err
+	retained, err := retainedResult(sub, found)
+	if err != nil {
+		return contract.Result{}, false, fmt.Errorf("command lookup: %w", err)
+	}
+	return retained, true, nil
 }
 
 // attempt performs exactly one HTTP exchange. A failed envelope with a

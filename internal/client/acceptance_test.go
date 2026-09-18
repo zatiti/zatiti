@@ -20,14 +20,32 @@ import (
 	"github.com/zatiti/zatiti/internal/contract"
 )
 
-// lookupRequest builds the command.get query for an original submission
-// key. It is a query: no submission key of its own, so resolution
-// terminates and no new durable identity is minted.
-func lookupRequest(key string) contract.Request {
+// lookupRequest builds the frozen command.get query for an original
+// submission: scope, submission key, operation and operation version. It is
+// a query: no submission key of its own, so resolution terminates and no new
+// durable identity is minted.
+func lookupRequest(operation, key string) contract.Request {
 	return contract.Request{
 		Schema: contract.SchemaRequest,
-		Input:  json.RawMessage(`{"submission_key":"` + key + `"}`),
+		Input: json.RawMessage(`{"scope":{"installation_id":"` + testInstallation + `"},"submission_key":"` + key +
+			`","operation":"` + operation + `","operation_version":1}`),
 	}
+}
+
+// retainedEnvelope extracts the original disposition an explicit command.get
+// call returns: the completed lookup's data.resource.result.
+func retainedEnvelope(t *testing.T, lookup contract.Result) *contract.Result {
+	t.Helper()
+	if lookup.Status != contract.StatusCompleted {
+		t.Fatalf("lookup status = %q, want completed", lookup.Status)
+	}
+	var data struct {
+		Resource fakeCommand `json:"resource"`
+	}
+	if err := contract.DecodeStrict(lookup.Data, &data); err != nil {
+		t.Fatalf("lookup data %s: %v", lookup.Data, err)
+	}
+	return &data.Resource.Result
 }
 
 // assertFault asserts err carries exactly the named fault.
@@ -168,11 +186,11 @@ func TestZ16CliToMcpContinuesDurableWork(t *testing.T) {
 	// same controller: command lookup by the original submission key first,
 	// then a review decision on the same task.
 	mcp := newLocalClient(t, fc, creds)
-	lookup, err := mcp.Call(ctx, CommandGetOperation, lookupRequest("cli-mcp-task-1"))
+	lookup, err := mcp.Call(ctx, CommandGetOperation, lookupRequest("task.create", "cli-mcp-task-1"))
 	if err != nil {
 		t.Fatalf("mcp lookup: %v", err)
 	}
-	assertEnvelopeEqual(t, &lookup, accepted)
+	assertEnvelopeEqual(t, retainedEnvelope(t, lookup), accepted)
 
 	fc.script("review.decide", commitAndRespond("cli-mcp-approve-1",
 		completedResult("00000000-0000-4000-8000-000000000004", `{"approved":true}`)))
@@ -236,11 +254,11 @@ func TestZ16McpToCliContinuesDurableWork(t *testing.T) {
 	// command lookup by the original key, then the continuation. No
 	// re-authentication handshake, no transport-specific bootstrap.
 	cli := newLocalClient(t, fc, creds)
-	lookup, err := cli.Call(ctx, CommandGetOperation, lookupRequest("mcp-cli-task-1"))
+	lookup, err := cli.Call(ctx, CommandGetOperation, lookupRequest("task.create", "mcp-cli-task-1"))
 	if err != nil {
 		t.Fatalf("cli lookup: %v", err)
 	}
-	assertEnvelopeEqual(t, &lookup, accepted)
+	assertEnvelopeEqual(t, retainedEnvelope(t, lookup), accepted)
 
 	fc.script("task.update", commitAndRespond("mcp-cli-update-1",
 		completedResult("00000000-0000-4000-8000-000000000005", `{"status":"in_progress"}`)))
@@ -307,11 +325,11 @@ func TestZ16DisconnectCommandLookup(t *testing.T) {
 
 	// An explicit reconnect-and-lookup with the original key returns the
 	// same retained disposition without another mutation.
-	looked, err := newLocalClient(t, fc, creds).Call(ctx, CommandGetOperation, lookupRequest(key))
+	looked, err := newLocalClient(t, fc, creds).Call(ctx, CommandGetOperation, lookupRequest(testOperation, key))
 	if err != nil {
 		t.Fatalf("lookup: %v", err)
 	}
-	assertEnvelopeEqual(t, &looked, completedResult(testCommandID, data))
+	assertEnvelopeEqual(t, retainedEnvelope(t, looked), completedResult(testCommandID, data))
 	if fc.eventCount() != 1 {
 		t.Fatalf("events = %d after lookup, want 1", fc.eventCount())
 	}
@@ -584,7 +602,7 @@ func TestZ21ReconnectNoDuplicate(t *testing.T) {
 	ctx := context.Background()
 	const key = "desktop-draft-77"
 	const op = "conversation.send"
-	const input = `{"conversation_id":"00000000-0000-4000-8000-000000000020","text":"hello"}`
+	const input = `{"scope":{"installation_id":"` + testInstallation + `"},"conversation_id":"00000000-0000-4000-8000-000000000020","text":"hello"}`
 
 	// The send receives no acknowledgement and, so far, committed nothing.
 	fc.script(op, dropResponse(), dropResponse())
@@ -613,7 +631,7 @@ func TestZ21ReconnectNoDuplicate(t *testing.T) {
 	// identical draft under the SAME key.
 	fc.ListenUnix()
 	reconnected := newLocalClient(t, fc, creds)
-	_, lookupErr := reconnected.Call(ctx, CommandGetOperation, lookupRequest(key))
+	_, lookupErr := reconnected.Call(ctx, CommandGetOperation, lookupRequest(op, key))
 	_ = assertFault(t, lookupErr, contract.CodeNotFound)
 
 	fc.script(op, commitAndRespond(key,
@@ -708,13 +726,14 @@ func matrixAcknowledgementLost(t *testing.T, start *Client, cont clientCtor, fc 
 	if err != nil {
 		t.Fatalf("starting transport: %v", err)
 	}
-	looked, err := cont(t, fc, creds).Call(context.Background(), CommandGetOperation, lookupRequest(matrixKey))
+	looked, err := cont(t, fc, creds).Call(context.Background(), CommandGetOperation, lookupRequest(testOperation, matrixKey))
 	if err != nil {
 		t.Fatalf("continuing transport lookup: %v", err)
 	}
-	assertEnvelopeEqual(t, &looked, completedResult(testCommandID, data))
-	if looked.CommandID != res.CommandID || looked.Status != res.Status {
-		t.Fatalf("dispositions disagree across transports: %+v vs %+v", res.Payload, looked.Payload)
+	retained := retainedEnvelope(t, looked)
+	assertEnvelopeEqual(t, retained, completedResult(testCommandID, data))
+	if retained.CommandID != res.CommandID || retained.Status != res.Status {
+		t.Fatalf("dispositions disagree across transports: %+v vs %+v", res.Payload, retained.Payload)
 	}
 	allKeysEqual(t, fc, testOperation, matrixKey)
 }
@@ -811,7 +830,7 @@ func matrixEffectUnknown(t *testing.T, start *Client, cont clientCtor, fc *fakeC
 	// lookup refuses with not_found, and one identical resubmission under
 	// the original key commits exactly once.
 	contd := cont(t, fc, creds)
-	_, lookupErr := contd.Call(ctx, CommandGetOperation, lookupRequest(matrixKey))
+	_, lookupErr := contd.Call(ctx, CommandGetOperation, lookupRequest(testOperation, matrixKey))
 	_ = assertFault(t, lookupErr, contract.CodeNotFound)
 	fc.script(testOperation, commitAndRespond(matrixKey,
 		completedResult(testCommandID, `{"draft_id":"00000000-0000-4000-8000-000000000002"}`)))
@@ -843,13 +862,14 @@ func matrixControllerRestart(t *testing.T, start *Client, cont clientCtor, fc *f
 	// The controller's local endpoint restarts; durable state is retained.
 	fc.StopUnix()
 	fc.ListenUnix()
-	looked, err := cont(t, fc, creds).Call(context.Background(), CommandGetOperation, lookupRequest(matrixKey))
+	looked, err := cont(t, fc, creds).Call(context.Background(), CommandGetOperation, lookupRequest(testOperation, matrixKey))
 	if err != nil {
 		t.Fatalf("continuing transport after restart: %v", err)
 	}
-	assertEnvelopeEqual(t, &looked, completedResult(testCommandID, data))
-	if looked.CommandID != res.CommandID {
-		t.Fatalf("command identity changed across restart: %q vs %q", res.CommandID, looked.CommandID)
+	retained := retainedEnvelope(t, looked)
+	assertEnvelopeEqual(t, retained, completedResult(testCommandID, data))
+	if retained.CommandID != res.CommandID {
+		t.Fatalf("command identity changed across restart: %q vs %q", res.CommandID, retained.CommandID)
 	}
 }
 

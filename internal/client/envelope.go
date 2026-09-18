@@ -93,6 +93,71 @@ func validateSubmissionKey(key string) error {
 	return nil
 }
 
+// lookupInput renders the frozen command.get input for a keyed submission:
+// {scope, submission_key, operation, operation_version}. The scope is the
+// one the original input named, passed through verbatim; every keyed
+// operation in the frozen catalog requires one. An input that names no scope
+// object cannot be looked up, and the caller keeps the outcome unknown.
+func lookupInput(sub submission) (json.RawMessage, error) {
+	var original struct {
+		Scope json.RawMessage `json:"scope"`
+	}
+	if err := json.Unmarshal(sub.input, &original); err != nil {
+		return nil, fmt.Errorf("command lookup needs the original input's scope: input is not a JSON object")
+	}
+	if scope := strings.TrimSpace(string(original.Scope)); !strings.HasPrefix(scope, "{") {
+		return nil, fmt.Errorf("command lookup needs the original input's scope: input names no scope object")
+	}
+	return json.Marshal(struct {
+		Scope            json.RawMessage `json:"scope"`
+		SubmissionKey    string          `json:"submission_key"`
+		Operation        string          `json:"operation"`
+		OperationVersion int64           `json:"operation_version"`
+	}{original.Scope, sub.key, sub.operation, lookupOperationVersion})
+}
+
+// retainedCommand mirrors $defs/Command, the command.get output resource.
+type retainedCommand struct {
+	ID               contract.ID     `json:"id"`
+	PrincipalID      contract.ID     `json:"principal_id"`
+	Operation        string          `json:"operation"`
+	OperationVersion int64           `json:"operation_version"`
+	SubmissionKey    string          `json:"submission_key"`
+	RequestDigest    contract.Digest `json:"request_digest"`
+	Status           string          `json:"status"`
+	Data             json.RawMessage `json:"data"`
+	ErrorCode        string          `json:"error_code,omitempty"`
+	Result           contract.Result `json:"result"`
+}
+
+// retainedResult extracts the original disposition from a completed
+// command.get envelope. The resource must be the command that was asked for
+// (same key, operation and version) and its retained envelope must be
+// well formed and carry the command's own identity; anything else proves
+// nothing about the original command.
+func retainedResult(sub submission, lookup contract.Result) (contract.Result, error) {
+	var data struct {
+		Resource *retainedCommand `json:"resource"`
+	}
+	if err := contract.DecodeStrict(lookup.Data, &data); err != nil {
+		return contract.Result{}, fmt.Errorf("malformed command resource: %w", err)
+	}
+	cmd := data.Resource
+	if cmd == nil {
+		return contract.Result{}, fmt.Errorf("malformed command resource: no resource")
+	}
+	if cmd.SubmissionKey != sub.key || cmd.Operation != sub.operation || cmd.OperationVersion != lookupOperationVersion {
+		return contract.Result{}, fmt.Errorf("command resource names %s v%d, not the submitted command", cmd.Operation, cmd.OperationVersion)
+	}
+	if err := validateEnvelope(&cmd.Result); err != nil {
+		return contract.Result{}, fmt.Errorf("retained %w", err)
+	}
+	if cmd.Result.CommandID != cmd.ID || cmd.Result.Status != cmd.Status {
+		return contract.Result{}, fmt.Errorf("retained result envelope disagrees with its command record")
+	}
+	return cmd.Result, nil
+}
+
 // envelopeStatusByHTTP pins the frozen mapping from HTTP status to the
 // result envelope status it may carry: 200 completed, 202 accepted, and the
 // documented domain-failure statuses failed. Any other HTTP status is a
@@ -115,6 +180,23 @@ var envelopeStatusByHTTP = map[int]string{
 // the HTTP status: the frozen schema string, a durable command identity, an
 // exactly-allowed status, error/status consistency, and the HTTP mapping.
 func validateResult(httpStatus int, r *contract.Result) error {
+	if err := validateEnvelope(r); err != nil {
+		return err
+	}
+	want, ok := envelopeStatusByHTTP[httpStatus]
+	if !ok {
+		return fmt.Errorf("unexpected HTTP status %d for an operation result", httpStatus)
+	}
+	if want != r.Status {
+		return fmt.Errorf("HTTP status %d disagrees with envelope status %q", httpStatus, r.Status)
+	}
+	return nil
+}
+
+// validateEnvelope enforces the envelope structure that holds with or
+// without an HTTP status: the retained envelope inside a command resource
+// is checked with it too.
+func validateEnvelope(r *contract.Result) error {
 	if r.Schema != contract.SchemaResult {
 		return fmt.Errorf("result envelope schema %q, want %q", r.Schema, contract.SchemaResult)
 	}
@@ -132,13 +214,6 @@ func validateResult(httpStatus int, r *contract.Result) error {
 		}
 	default:
 		return fmt.Errorf("result envelope status %q is not completed, accepted or failed", r.Status)
-	}
-	want, ok := envelopeStatusByHTTP[httpStatus]
-	if !ok {
-		return fmt.Errorf("unexpected HTTP status %d for an operation result", httpStatus)
-	}
-	if want != r.Status {
-		return fmt.Errorf("HTTP status %d disagrees with envelope status %q", httpStatus, r.Status)
 	}
 	return nil
 }

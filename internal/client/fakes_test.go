@@ -28,8 +28,11 @@ import (
 // HTTP seams the client proves against: POST /v1/operations/{id}, the
 // request/result envelopes, and submission-key deduplication (identical
 // keyed bytes return the original disposition; changed input refuses with
-// submission_conflict). command.get is built in: it resolves the store by
-// submission key, or not_found when absent.
+// submission_conflict). command.get is built in with the frozen evidence
+// shape: it strictly decodes {scope, submission_key, operation,
+// operation_version}, refuses anything else with invalid_input, answers
+// not_found for an absent identity, and otherwise completes with
+// data.resource = $defs/Command whose result is the retained envelope.
 type fakeController struct {
 	t *testing.T
 
@@ -65,8 +68,86 @@ type capturedRequest struct {
 }
 
 type storedCommand struct {
-	body     []byte
-	envelope contract.Result
+	operation string
+	body      []byte
+	envelope  contract.Result
+}
+
+// fakeCommandVersion is the operation version the fake binds every command
+// identity to; the frozen catalog pins every operation at version 1.
+const fakeCommandVersion = 1
+
+// fakeLookupInput mirrors the frozen command.get input schema. Strict
+// decoding refuses unknown fields; lookupFault enforces the required ones.
+type fakeLookupInput struct {
+	Scope *struct {
+		InstallationID contract.ID `json:"installation_id"`
+		OrganizationID contract.ID `json:"organization_id,omitempty"`
+		ProjectID      contract.ID `json:"project_id,omitempty"`
+		WorkerID       contract.ID `json:"worker_id,omitempty"`
+		TaskID         contract.ID `json:"task_id,omitempty"`
+	} `json:"scope"`
+	SubmissionKey    *string `json:"submission_key"`
+	Operation        *string `json:"operation"`
+	OperationVersion *int64  `json:"operation_version"`
+}
+
+// fakeCommand mirrors $defs/Command, the command.get output resource.
+type fakeCommand struct {
+	ID               contract.ID     `json:"id"`
+	PrincipalID      contract.ID     `json:"principal_id"`
+	Operation        string          `json:"operation"`
+	OperationVersion int64           `json:"operation_version"`
+	SubmissionKey    string          `json:"submission_key"`
+	RequestDigest    contract.Digest `json:"request_digest"`
+	Status           string          `json:"status"`
+	Data             json.RawMessage `json:"data"`
+	ErrorCode        string          `json:"error_code,omitempty"`
+	Result           contract.Result `json:"result"`
+}
+
+// decodeLookup validates one command.get input the way the real dispatcher
+// does before evidence ever runs: schema-invalid input is invalid_input.
+func decodeLookup(input json.RawMessage) (fakeLookupInput, *contract.Fault) {
+	var in fakeLookupInput
+	if err := contract.DecodeStrict(input, &in); err != nil {
+		return in, &contract.Fault{Code: contract.CodeInvalidInput, Message: "command.get input: " + err.Error()}
+	}
+	switch {
+	case in.Scope == nil || in.Scope.InstallationID == "":
+		return in, &contract.Fault{Code: contract.CodeInvalidInput, Message: "command.get input: scope.installation_id is required"}
+	case in.SubmissionKey == nil:
+		return in, &contract.Fault{Code: contract.CodeInvalidInput, Message: "command.get input: submission_key is required"}
+	case in.Operation == nil:
+		return in, &contract.Fault{Code: contract.CodeInvalidInput, Message: "command.get input: operation is required"}
+	case in.OperationVersion == nil || *in.OperationVersion < 1:
+		return in, &contract.Fault{Code: contract.CodeInvalidInput, Message: "command.get input: operation_version is required"}
+	}
+	return in, nil
+}
+
+// commandResource renders the completed command.get envelope for a stored
+// command: the retained original envelope travels in data.resource.result.
+func commandResource(key string, stored storedCommand) *contract.Result {
+	data := stored.envelope.Data
+	if len(data) == 0 || string(data) == "null" {
+		data = json.RawMessage(`{}`)
+	}
+	cmd := fakeCommand{
+		ID:               stored.envelope.CommandID,
+		PrincipalID:      "00000000-0000-4000-8000-0000000000f1",
+		Operation:        stored.operation,
+		OperationVersion: fakeCommandVersion,
+		SubmissionKey:    key,
+		RequestDigest:    contract.Hash(stored.body),
+		Status:           stored.envelope.Status,
+		Data:             data,
+		Result:           stored.envelope,
+	}
+	if stored.envelope.Error != nil {
+		cmd.ErrorCode = stored.envelope.Error.Code
+	}
+	return completedResult("cmd-lookup", mustJSON(map[string]any{"resource": cmd}))
 }
 
 // responder produces the scripted outcome for one request.
@@ -235,7 +316,7 @@ func (fc *fakeController) commit(op, key string, body []byte, envelope contract.
 	fc.mu.Lock()
 	defer fc.mu.Unlock()
 	fc.events = append(fc.events, op+"#"+key)
-	fc.store[key] = storedCommand{body: append([]byte(nil), body...), envelope: envelope}
+	fc.store[key] = storedCommand{operation: op, body: append([]byte(nil), body...), envelope: envelope}
 }
 
 // requestCount reports how many requests reached the controller, filtered by
@@ -318,20 +399,21 @@ func (fc *fakeController) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if rsp == nil && decodeOK && op == CommandGetOperation && req.SubmissionKey == "" {
-		// Built-in command lookup by submission key.
-		var lookup struct {
-			SubmissionKey string `json:"submission_key"`
+		// Built-in command lookup over the frozen command.get contract.
+		lookup, fault := decodeLookup(req.Input)
+		if fault != nil {
+			fc.mu.Unlock()
+			writeEnvelope(w, failedResult("cmd-lookup", fault))
+			return
 		}
-		_ = json.Unmarshal(req.Input, &lookup)
-		stored, ok := fc.store[lookup.SubmissionKey]
+		stored, ok := fc.store[*lookup.SubmissionKey]
 		fc.mu.Unlock()
-		if ok {
-			env := stored.envelope
-			writeEnvelope(w, &env)
+		if ok && stored.operation == *lookup.Operation && *lookup.OperationVersion == fakeCommandVersion {
+			writeEnvelope(w, commandResource(*lookup.SubmissionKey, stored))
 		} else {
 			writeEnvelope(w, failedResult("cmd-lookup", &contract.Fault{
 				Code:    contract.CodeNotFound,
-				Message: "no command with that submission key",
+				Message: "command not found",
 			}))
 		}
 		return

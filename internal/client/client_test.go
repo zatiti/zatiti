@@ -18,8 +18,11 @@ import (
 
 const (
 	testOperation = "organization.create"
-	testInput     = `{"key":"demo","name":"Demo organization"}`
-	testCred      = "Bearer test-credential-material"
+	// testInstallation scopes every keyed test submission: the frozen
+	// command.get lookup reuses the original input's scope.
+	testInstallation = "00000000-0000-4000-8000-0000000000aa"
+	testInput        = `{"scope":{"installation_id":"` + testInstallation + `"},"key":"demo","name":"Demo organization"}`
+	testCred         = "Bearer test-credential-material"
 )
 
 // dropAndCommit builds a responder that records the durable mutation and its
@@ -706,13 +709,11 @@ func TestCancellationAfterSendIsNotCommandCancellation(t *testing.T) {
 		t.Fatalf("lookups on dead context = %d, want 0", got)
 	}
 	// The command committed server-side; the caller recovers it by key.
-	res, err := c.Call(context.Background(), CommandGetOperation, contract.Request{
-		Schema: contract.SchemaRequest,
-		Input:  json.RawMessage(`{"submission_key":"` + key + `"}`),
-	})
+	looked, err := c.Call(context.Background(), CommandGetOperation, lookupRequest(testOperation, key))
 	if err != nil {
 		t.Fatalf("lookup after cancellation: %v", err)
 	}
+	res := retainedEnvelope(t, looked)
 	if res.CommandID != contract.ID(committed) || res.Status != contract.StatusCompleted {
 		t.Fatalf("command was not durably accepted before cancellation: %+v", res.Payload)
 	}
