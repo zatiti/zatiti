@@ -69,7 +69,7 @@ type opMeta struct {
 	submission bool
 	expected   bool // descriptor advertises optimistic version fencing
 	callers    []string
-	cli        string // "zatiti ..." CLI path; empty for internal operations
+	cli        string // CLI tokens below the root command, space separated; empty for internal operations
 }
 
 // opMetas lists every owned operation: internal first, then the public
@@ -100,30 +100,30 @@ var opMetas = []opMeta{
 		callers: []string{"controller"}},
 
 	{id: opAttemptCancel, visibility: "public", mode: "mutation", submission: true,
-		expected: true, cli: "zatiti attempt cancel"},
+		expected: true, cli: "attempt cancel"},
 	{id: opAttemptCheckpoint, visibility: "public", mode: "mutation", submission: true,
-		expected: true, cli: "zatiti attempt checkpoint"},
-	{id: opAttemptGet, visibility: "public", mode: "query", cli: "zatiti attempt get"},
+		expected: true, cli: "attempt checkpoint"},
+	{id: opAttemptGet, visibility: "public", mode: "query", cli: "attempt get"},
 	{id: opAttemptHeartbeat, visibility: "public", mode: "mutation", submission: true,
-		expected: true, cli: "zatiti attempt heartbeat"},
-	{id: opAttemptList, visibility: "public", mode: "query", cli: "zatiti attempt list"},
-	{id: opAttemptRecovery, visibility: "public", mode: "query", cli: "zatiti attempt recovery"},
+		expected: true, cli: "attempt heartbeat"},
+	{id: opAttemptList, visibility: "public", mode: "query", cli: "attempt list"},
+	{id: opAttemptRecovery, visibility: "public", mode: "query", cli: "attempt recovery"},
 	{id: opAttemptReport, visibility: "public", mode: "mutation", submission: true,
-		expected: true, cli: "zatiti attempt report"},
-	{id: opJobGet, visibility: "public", mode: "query", cli: "zatiti job get"},
+		expected: true, cli: "attempt report"},
+	{id: opJobGet, visibility: "public", mode: "query", cli: "job get"},
 	{id: opRunCancel, visibility: "public", mode: "mutation", submission: true,
-		expected: true, cli: "zatiti run cancel"},
+		expected: true, cli: "run cancel"},
 	{id: opRunClaim, visibility: "public", mode: "mutation", submission: true,
-		expected: true, cli: "zatiti run claim"},
+		expected: true, cli: "run claim"},
 	{id: opRunExport, visibility: "public", mode: "mutation", submission: true,
-		cli: "zatiti run export"},
-	{id: opRunGet, visibility: "public", mode: "query", cli: "zatiti run get"},
-	{id: opRunList, visibility: "public", mode: "query", cli: "zatiti run list"},
-	{id: opRunRecovery, visibility: "public", mode: "query", cli: "zatiti run recovery"},
+		cli: "run export"},
+	{id: opRunGet, visibility: "public", mode: "query", cli: "run get"},
+	{id: opRunList, visibility: "public", mode: "query", cli: "run list"},
+	{id: opRunRecovery, visibility: "public", mode: "query", cli: "run recovery"},
 	{id: opWorkerPause, visibility: "public", mode: "mutation", submission: true,
-		expected: true, cli: "zatiti worker pause"},
+		expected: true, cli: "worker pause"},
 	{id: opWorkerResume, visibility: "public", mode: "mutation", submission: true,
-		expected: true, cli: "zatiti worker resume"},
+		expected: true, cli: "worker resume"},
 }
 
 // Service is the execution domain owner: runs pinning ready task/version
@@ -204,6 +204,9 @@ func (s *Service) assemble() error {
 		}
 		if m.cli != "" {
 			d.CLI = strings.Split(m.cli, " ")
+		}
+		if m.id == opRunExport {
+			d.CompletionSchema = json.RawMessage(schemaExportResult)
 		}
 		if m.visibility == "public" {
 			d.MCP = "zatiti_" + strings.ReplaceAll(m.id, ".", "_")
