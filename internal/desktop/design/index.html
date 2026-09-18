@@ -1,0 +1,47 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark light">
+  <title>Zatiti · Desktop design</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar" aria-label="Conversations">
+      <div class="brand"><span class="logo">z<span>·</span></span><span>Zatiti</span><button class="icon-button" data-action="new" aria-label="Create new" title="New worker, organization, or group" data-icon="plus"></button></div>
+      <button class="search-launch" data-action="search"><span data-icon="search"></span><span>Search anything</span><kbd>⌘ K</kbd></button>
+      <button class="nav-row needs" data-action="needs"><span data-icon="inbox"></span><span>Needs you</span><span class="count" id="needs-count">1</span></button>
+      <div class="sidebar-label"><button data-action="org" id="org-label">All chats <span data-icon="chevron"></span></button><span class="quiet" data-icon="chat"></span></div>
+      <nav id="chats" aria-label="All chats"></nav>
+      <div class="sidebar-bottom">
+        <button class="nav-row" data-action="connections"><span data-icon="plug"></span>Connections & skills</button>
+        <button class="profile" data-action="settings"><span class="avatar person">AL</span><span>Alex Morgan<small>Personal workspace</small></span><span data-icon="settings"></span></button>
+      </div>
+    </aside>
+    <main class="workspace">
+      <header class="conversation-header">
+        <button class="icon-button mobile-nav" data-action="sidebar" aria-label="Toggle conversations" data-icon="menu"></button>
+        <span id="header-avatar" class="avatar mint">W</span>
+        <div class="header-name"><strong id="header-name">Wren</strong><button id="breadcrumb" data-action="org">Personal <span>›</span> Your chief</button></div>
+        <div class="header-actions"><span class="online-label" id="online-label"><i></i>Available</span><button class="button quiet-button" data-action="panel" id="details-button" aria-expanded="false"><span data-icon="panel"></span>Details</button></div>
+      </header>
+      <div class="offline-banner" id="offline-banner" hidden><span data-icon="offline"></span>Offline · showing saved information. Messages stay as unsent drafts.<button data-action="reconnect">Reconnect</button></div>
+      <section class="conversation" id="conversation" aria-label="Conversation with Wren"><div class="thread" id="thread"></div></section>
+      <footer class="composer-area">
+        <div id="suggestions" class="suggestions"></div>
+        <form class="composer" id="composer"><textarea rows="1" id="message" aria-label="Message Wren" placeholder="Ask Wren to take something off your plate…"></textarea><div class="composer-tools"><button type="button" class="icon-button" data-action="attach" aria-label="Attach a file" data-icon="plus"></button><span id="composer-context">Wren will coordinate the right people.</span><button type="submit" class="send" aria-label="Send message" data-icon="arrow"></button></div></form>
+        <div class="composer-note">A little less to do. A little more room to think.</div>
+      </footer>
+    </main>
+    <aside class="details" id="details" hidden aria-label="Conversation details"></aside>
+  </div>
+  <div class="prototype-bar"><span><i></i>Interactive design · sample data</span><div><button data-action="onboarding">First-time setup</button><button data-action="offline" id="offline-toggle">Try offline</button><button data-action="theme" id="theme-toggle">Light appearance</button><button data-action="reset">Reset demo</button></div></div>
+  <dialog id="modal" aria-labelledby="modal-title"><div id="modal-content"></div></dialog>
+  <div class="toast" id="toast" role="status" hidden></div>
+  <input type="file" id="file-input" hidden>
+  <script src="app.js"></script>
+</body>
+</html>
