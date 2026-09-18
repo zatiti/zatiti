@@ -707,6 +707,12 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   catalog gives it callers ["messaging"]; the registry rejects any
   public descriptor with callers. Batch B (self-contained internal
   schemas) in progress: the last blocker for unpatched assembly.
+- 2026-09-18 -- descriptor batch A LANDED (255f0dd). Lead mutation check:
+  flipping `_tasks.transition` ExpectedVersion made
+  TestDescriptorsMatchFrozenCatalog fail at catalog_test.go:112, restored
+  byte-identical; module-wide suite green on the rebased tip. Throwaway
+  worktree and branch wave3/drift-batchA removed. cmd/zatiti told to
+  rebase onto 255f0dd; drift lane continues batch B unrebased.
 
 ## Planned
 
