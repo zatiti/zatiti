@@ -320,7 +320,10 @@ func isNotFound(err error) bool {
 // credential-account substitution and permission expansion require an
 // eligible owner's decision unless a narrower standing policy already
 // governs the class. The families are fixed capability-name conventions of
-// the frozen contract.
+// the frozen contract. Permission expansion is creating or widening a grant
+// and activating configuration; grant.revoke is restrictive state that
+// commits immediately under authorized access, and grant reads expand
+// nothing, so neither waits for a decision.
 func defaultReviewRequired(capability string) bool {
 	switch {
 	case strings.HasPrefix(capability, "publication."),
@@ -330,7 +333,8 @@ func defaultReviewRequired(capability string) bool {
 		strings.HasPrefix(capability, "deploy"),
 		strings.HasPrefix(capability, "credential.substitute"),
 		strings.HasPrefix(capability, "account.substitute"),
-		strings.HasPrefix(capability, "grant."),
+		capability == "grant.create",
+		capability == "grant.update",
 		capability == "configuration.apply":
 		return true
 	}
