@@ -335,6 +335,27 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   foundation, desktop integration and platform qualification. Formalize
   the contract change and placement before any desktop implementation
   lane starts.
+- 2026-09-18 -- effects $ref fix landed (8df2dfe): lead reproduced the
+  red by restoring main's service.go against the new test, then green;
+  module-wide green post-merge. The lane's sweep found the identical
+  fail-open bug in internal/accounting/service.go:347-360 and
+  internal/execution/service.go:443-456; port lane dispatched
+  (wave3/schemaref-port). memory, evidence, registry, contract, cli are
+  not affected.
+- 2026-09-18 -- FIRST REAL ASSEMBLY DEFECT, found by tests/integration
+  and confirmed by the lead: internal/registry cannot assemble the real
+  modules and internal/application cannot dispatch through it. Four
+  mismatches, all at the registry seam: internal mutations rejected for
+  lacking a submission key (validate.go:81-82); Callers validated as
+  operation IDs while every module and application use owner names
+  (validate.go:84-88, registry.go:110-116); Lookup is exact-version while
+  application calls Lookup(id, 0) for "current"; *Registry has no
+  LocalIOFor, which application requires for all local-IO operations
+  including installation.init. Every package had landed against fakes.
+  Fix lane dispatched (wave3/registry-seam); integration continues over a
+  labeled test-local catalog built from the real modules, with the
+  real-registry test skipped-with-evidence until the fix lands. Blocks
+  cmd/zatiti. Eleven lanes in flight.
 
 ## Planned
 
@@ -346,7 +367,7 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   can complete backup/restore for real (see Shipped, 2026-09-12) --
   requires a coordinated contract change via tools/specgen, not a plain
   Go edit, since contract.Dependencies is frozen/generated (ADR 001).
-- Not yet scheduled, no lane assigned: fix internal/effects's
+- DONE 2026-09-18 (8df2dfe), port to accounting/execution in flight: fix internal/effects's
   checkSchemaDocument/resolveRefs type-mismatch (service.go:389-432) so
   $ref resolution actually runs instead of silently no-oping; found
   2026-09-12 during the evidence landing (see Shipped). Needs its own
