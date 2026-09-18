@@ -47,6 +47,9 @@ class _RootState extends State<_Root> {
   }
 
   Future<void> _open() async {
+    // Never call setState from inside initState's own frame.
+    await Future<void>.value();
+    if (!mounted) return;
     final plan = _plan;
     WorkspaceSource? source;
     switch (plan) {
@@ -70,9 +73,10 @@ class _RootState extends State<_Root> {
                 : 'Your controller at ${profile.remoteUrl!.host}',
           );
         } on InvalidRequestException catch (e) {
-          setState(() => _startupError = e.message);
+          if (mounted) setState(() => _startupError = e.message);
           return;
         }
+        if (!mounted) return;
     }
     final controller = WorkspaceController(source);
     setState(() => _controller = controller);
