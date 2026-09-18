@@ -657,6 +657,23 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   the lead re-verifies (a lead mutation of the ownership-loss case was
   inconclusive for exactly this reason). The throwaway descriptor patch
   was verified never committed.
+- 2026-09-18 -- identity-service lane done (2b56a67 on
+  wave3/identity-service, landing): identity bootstrap now creates the
+  controller's scoped service principal (kind=service, name
+  "controller", installation-wide) in the same transaction as the owner,
+  with exactly one unbounded grant, _identity.authority -- the single
+  capability the application.Internal dispatch path actually checks
+  (dispatch.go:148-176 gates operations by descriptor caller allowlist +
+  KindService; revalidateAuthority only asks _identity.authority). New
+  API identity.Service.ControllerPrincipal(ctx, reader) hands the Actor
+  to the entrypoint; prerequisite_missing before bootstrap,
+  permission_denied once revoked; revocation denies the very next call
+  and survives reopen. Bootstrap refuses an owner named "controller".
+  Schema gap for revision 3: the frozen _identity.bootstrap input has no
+  field for a service credential, so the principal has no credential;
+  fine for the in-process seam (explicit Actor), not for an
+  out-of-process controller. cmd/zatiti's provisional
+  principal.create/grant.create path is superseded on its rebase.
 
 ## Planned
 
