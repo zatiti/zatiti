@@ -357,7 +357,14 @@ func checkSchemaDocument(doc json.RawMessage) error {
 	if err := contract.DecodeStrict(rawDefs, &defs); err != nil {
 		return fmt.Errorf("schema $defs do not parse: %w", err)
 	}
-	return resolveRefs(parsed, defs)
+	// The walk matches on the dynamic map[string]any / []any shape, so the
+	// document decodes a second time into that shape; the typed map above
+	// would never match and the walk would pass every document.
+	var node any
+	if err := contract.DecodeStrict(doc, &node); err != nil {
+		return fmt.Errorf("schema document does not parse: %w", err)
+	}
+	return resolveRefs(node, defs)
 }
 
 // resolveRefs walks one decoded schema node checking every local $ref.
