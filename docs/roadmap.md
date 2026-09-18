@@ -277,8 +277,21 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   pipeline itself. mcp, server, adapters/github and adapters/httpread
   all landed clean with no stall -- the back half of the wave went
   smoothly once the two incidents were behind it.
-- Nothing currently dispatched. Wave 3 (controller, desktop, the two
-  cmd/ entrypoints) is next; none of its packages have a lane yet.
+- 2026-09-18 -- David: implement the rest of the plan at maximum
+  parallelization; the two-heavy-lane cap is lifted for this push (the
+  R-build-lease still serializes module-wide runs). Seven lanes
+  dispatched on wave3/* branches, disjoint write roots: controller
+  (critical path), tests/integration first increment (landed packages
+  only), packaging, .github/workflows, responses adapter (nothing
+  guessed: endpoint/model/prices come from the profile; real-endpoint
+  qualification stays blocked), serenity adapter (research phase pins
+  the inspected Serenity commit first; may legitimately stop at
+  PROTOCOL.md), and the internal/effects $ref-resolution fix. Shared
+  lane rules: foreground-only module-wide verification, lease held for
+  minutes. Still waiting: cmd/zatiti (needs controller + both
+  adapters), desktop + cmd/zatiti-desktop + tests/qualification (need
+  the Flutter placement/contract decision), and the spec-maintenance
+  lane (request_context retype, Dependencies database seam, Flutter).
 - 2026-09-15 -- David: design the desktop app first, before any
   implementation lane, and plan to use Flutter instead of Fyne v2. This
   reverses the frozen shared contract's stated desktop library choice
