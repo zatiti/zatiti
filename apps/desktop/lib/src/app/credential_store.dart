@@ -28,7 +28,14 @@ class CredentialKeys {
 class SecureCredentialStore implements CredentialStore {
   SecureCredentialStore(String profile, {FlutterSecureStorage? storage})
     : _keys = CredentialKeys(profile),
-      _storage = storage ?? const FlutterSecureStorage();
+      _storage =
+          storage ??
+          const FlutterSecureStorage(
+            // The data-protection keychain needs a Keychain Sharing
+            // entitlement tied to a signing team. This build is not signed
+            // with one, so it uses the login keychain. See the README.
+            mOptions: MacOsOptions(usesDataProtectionKeychain: false),
+          );
 
   final CredentialKeys _keys;
   final FlutterSecureStorage _storage;
