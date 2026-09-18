@@ -418,6 +418,44 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   (19d4fdf), execution fix written. responses: committing. serenity:
   committed f1cdfbf, lead-verified (pin facts checked against the real
   source; overclaim fence proven load-bearing), merge queued on the lease.
+- 2026-09-18 -- LEAD ERROR, main red on one test: serenity landed
+  (3f80a17) through a one-liner that merged before testing and whose
+  pipes swallowed the failure. The red test is legitimate:
+  TestEmbeddedSchemasMatchFrozenCatalog pins serenity's embedded
+  PhysicalCallEvidence to the catalog, and spec revision 2 (landed
+  minutes earlier) retyped request_context. Fixes: scratch land.sh now
+  rebases and verifies IN THE WORKTREE (pipefail) and fast-forwards main
+  only on full green; the two idle adapter agents are converting all
+  four adapters to revision 2 (wave3/reqctx: serenity first to unblock
+  main, then httpread; wave3/responses: responses before it lands, then
+  github). memory/execution acceptance of kind=artifact still to do.
+- 2026-09-18 -- responses committed 2706675 (not landed; converting to
+  revision 2 first). Nothing provider-specific hardcoded; AGENTS.md
+  specifies NO upstream wire shape, so the real protocol sits behind an
+  unexported seam with an empty qualified-protocol registry and every
+  production Invoke refuses capability_unsupported after doing all local
+  checks; tests use a synthetic protocol resembling no vendor API. With
+  serenity also an honest refuser, v1 currently has NO working hosted
+  model and NO working memory service until a wire protocol is pinned
+  and Serenity ships the missing capabilities. Revision-3 gaps: tool to
+  operation mapping absent from ContextToolDefinition;
+  BoundEnforcement.evidence.profile_digest circular (found by both
+  adapters); no reconciliation fields in ResponsesProfile.
+- 2026-09-18 -- integration slice 1 (ready, waiting on lease) found six
+  more real seam defects, each with a skipped test; lead confirmed two in
+  code. Two fix lanes dispatched. wave3/app-seams: local-IO commands
+  finished twice while evidence allows one finish (every synchronous
+  local-IO mutation fails internal_error); grant.* and
+  configuration.apply are default review classes but application never
+  passes a candidate digest, so not even the bootstrap owner can apply
+  configuration; a replayed refusal returns a failed Result with nil
+  error. wave3/edge-seams: client's post-unknown-ack command.get sends
+  only submission_key (frozen input needs scope, operation, version) and
+  reports the lookup's fault as the command's; server maps status from
+  the Go error not the Result; configuration sends candidate_digest ""
+  to every _<owner>.validate; configuration bootstrap emits no event;
+  the owner credential is 32 raw bytes, not a legal Authorization value,
+  with no exported way to obtain it.
 
 ## Planned
 
