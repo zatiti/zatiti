@@ -647,6 +647,16 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   blocker is owner-private $defs referenced by internal operations in
   accounting, memory, effects and execution (bare schema bodies); in the
   drift lane's scope as the second batch.
+- 2026-09-18 -- cmd/zatiti committed on wave3/cmd (8170620 assembly +
+  serve + CLI/MCP wiring, f7f01b6 command-tree/exit/bootstrap tests,
+  6a2b239 end-to-end binary journey), landing. On the current tree 17
+  tests pass and 7 skip-on-known-drift (the end-to-end journey, serve
+  lifecycle incl. ownership loss, catalog pin, open-installation lock):
+  those seven are the milestone tests and stay skipped until the
+  descriptor batch lands, after which the lane deletes the skips and
+  the lead re-verifies (a lead mutation of the ownership-loss case was
+  inconclusive for exactly this reason). The throwaway descriptor patch
+  was verified never committed.
 
 ## Planned
 
