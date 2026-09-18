@@ -43,7 +43,7 @@ type opMeta struct {
 	mode       string
 	submission bool
 	callers    []string
-	cli        string // "zatiti ..." CLI path; empty for internal operations
+	cli        string // CLI tokens below the root command, space separated; empty for internal operations
 }
 
 // opMetas lists every owned operation: internal first, then the public
@@ -60,9 +60,9 @@ var opMetas = []opMeta{
 		callers: []string{"effects", "execution", "installation"}},
 	{id: opValidate, visibility: "internal", mode: "query",
 		callers: []string{"configuration", "application"}},
-	{id: opBudgetGet, visibility: "public", mode: "query", cli: "zatiti budget get"},
-	{id: opBudgetPropose, visibility: "public", mode: "mutation", submission: true, cli: "zatiti budget propose"},
-	{id: opUsageGet, visibility: "public", mode: "query", cli: "zatiti usage get"},
+	{id: opBudgetGet, visibility: "public", mode: "query", cli: "budget get"},
+	{id: opBudgetPropose, visibility: "public", mode: "mutation", submission: true, cli: "budget propose"},
+	{id: opUsageGet, visibility: "public", mode: "query", cli: "usage get"},
 }
 
 // Service is the accounting domain owner: budget definitions, atomic

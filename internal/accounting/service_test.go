@@ -119,8 +119,8 @@ func TestDescriptors(t *testing.T) {
 	if got[opBudgetPropose].MCP != "zatiti_budget_propose" {
 		t.Fatalf("budget.propose MCP name %q, want zatiti_budget_propose", got[opBudgetPropose].MCP)
 	}
-	if len(got[opBudgetGet].CLI) != 3 {
-		t.Fatalf("budget.get CLI path %v, want three segments", got[opBudgetGet].CLI)
+	if cli := got[opBudgetGet].CLI; len(cli) != 2 || cli[0] != "budget" || cli[1] != "get" {
+		t.Fatalf("budget.get CLI tokens %v, want [budget get]", cli)
 	}
 }
 
