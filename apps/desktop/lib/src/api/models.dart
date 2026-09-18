@@ -726,6 +726,117 @@ class PauseDisposition {
   final String state;
 }
 
+/// A governed external operation. Its state says what is known about the
+/// effect after approval.
+class ExternalOperation {
+  const ExternalOperation({
+    required this.id,
+    required this.version,
+    required this.actionDigest,
+    required this.state,
+  });
+
+  factory ExternalOperation.fromJson(Object? json) {
+    final o = StrictObject(json, 'operation');
+    final op = ExternalOperation(
+      id: o.string('id'),
+      version: o.integer('version'),
+      actionDigest: o.string('action_digest'),
+      state: o.string('state'),
+    );
+    ActionPreview.fromJson(o.object('action'));
+    o.stringList('attempt_ids');
+    o.optionalString('linked_operation_id');
+    o.optionalString('relationship');
+    o.finish();
+    return op;
+  }
+
+  final String id;
+  final int version;
+  final String actionDigest;
+  final String state;
+}
+
+class Usage {
+  const Usage({
+    required this.currency,
+    required this.spent,
+    required this.reserved,
+    required this.estimated,
+    required this.unknown,
+    required this.advisory,
+  });
+
+  factory Usage.fromJson(Object? json) {
+    final o = StrictObject(json, 'usage');
+    final u = Usage(
+      currency: o.string('currency'),
+      spent: o.integer('spent'),
+      reserved: o.integer('reserved'),
+      estimated: o.integer('estimated'),
+      unknown: o.integer('unknown'),
+      advisory: o.boolean('advisory'),
+    );
+    o.finish();
+    return u;
+  }
+
+  final String currency;
+  final int spent;
+  final int reserved;
+  final int estimated;
+  final int unknown;
+  final bool advisory;
+}
+
+class WireEvent {
+  const WireEvent({required this.id, required this.sequence});
+
+  factory WireEvent.fromJson(Object? json) {
+    final o = StrictObject(json, 'event');
+    final e = WireEvent(id: o.string('id'), sequence: o.integer('sequence'));
+    o.dateTime('at');
+    Scope.fromJson(o.object('scope'));
+    o.string('kind');
+    o.string('resource_id');
+    o.integer('resource_version');
+    o.object('data');
+    o.finish();
+    return e;
+  }
+
+  final String id;
+  final int sequence;
+}
+
+/// One bounded read of an artifact's bytes.
+class ArtifactRead {
+  const ArtifactRead({
+    required this.bytesBase64,
+    required this.digest,
+    required this.offset,
+    required this.totalSize,
+  });
+
+  factory ArtifactRead.fromJson(Object? json) {
+    final o = StrictObject(json, 'artifact read');
+    final r = ArtifactRead(
+      bytesBase64: o.string('bytes_base64'),
+      digest: o.string('digest'),
+      offset: o.integer('offset'),
+      totalSize: o.integer('total_size'),
+    );
+    o.finish();
+    return r;
+  }
+
+  final String bytesBase64;
+  final String digest;
+  final int offset;
+  final int totalSize;
+}
+
 /// One page of a list operation.
 class Page<T> {
   const Page(this.items, this.nextCursor);

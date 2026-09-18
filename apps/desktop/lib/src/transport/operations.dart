@@ -63,6 +63,10 @@ abstract final class Operations {
   static const artifactList = OperationDescriptor.query('artifact.list');
   static const artifactRead = OperationDescriptor.query('artifact.read');
   static const grantList = OperationDescriptor.query('grant.list');
+  static const operationList = OperationDescriptor.query('operation.list');
+  static const toolGet = OperationDescriptor.query('tool.get');
+  static const usageGet = OperationDescriptor.query('usage.get');
+  static const mailboxList = OperationDescriptor.query('mailbox.list');
 
   /// Every operation the client may call.
   static const List<OperationDescriptor> all = [
@@ -82,5 +86,9 @@ abstract final class Operations {
     artifactList,
     artifactRead,
     grantList,
+    operationList,
+    toolGet,
+    usageGet,
+    mailboxList,
   ];
 }
