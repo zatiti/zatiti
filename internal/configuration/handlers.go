@@ -1014,6 +1014,15 @@ func handleBootstrap(ctx context.Context, s *Service, unit contract.Unit, inv co
 	if err := bumpHead(ctx, unit, 1); err != nil {
 		return contract.Payload{}, err
 	}
+	// The root organization and its chief are created outside the compiler,
+	// so their state transitions are emitted here, in the same transaction
+	// and under the same kinds an applied create carries.
+	if err := emitObjectChange(ctx, unit, kindOrganization, actionCreate, org.ID, org.Version); err != nil {
+		return contract.Payload{}, err
+	}
+	if err := emitObjectChange(ctx, unit, kindWorker, actionCreate, chief.ID, chief.Version); err != nil {
+		return contract.Payload{}, err
+	}
 	return s.completed(map[string]any{"organization": orgDef(org), "chief": workerDef(chief)})
 }
 

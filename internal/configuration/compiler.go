@@ -332,8 +332,15 @@ func (s *Service) sealPlan(ctx context.Context, unit contract.Unit, scope wireSc
 	if err != nil {
 		return nil, faultOf(err)
 	}
+	// The digest of the complete candidate is fixed before any owner sees
+	// the candidate: every peer validates under the same digest the plan
+	// seals, apply binds and activation delivers.
+	digest, err := computeCandidateDigest(changes)
+	if err != nil {
+		return nil, err
+	}
 	planID := s.ids.New()
-	validation, err := s.validateCandidate(ctx, unit, scope, planID, head, changes)
+	validation, err := s.validateCandidate(ctx, unit, scope, planID, head, digest, changes)
 	if err != nil {
 		return nil, err
 	}
@@ -342,10 +349,6 @@ func (s *Service) sealPlan(ctx context.Context, unit contract.Unit, scope wireSc
 	// decision requirements policy demands are sealed into the plan so apply
 	// can verify them verbatim.
 	authority, decisionReqs, err := s.authorityCheck(ctx, unit, scope, "")
-	if err != nil {
-		return nil, err
-	}
-	digest, err := computeCandidateDigest(changes)
 	if err != nil {
 		return nil, err
 	}
@@ -477,7 +480,16 @@ func (s *Service) recheckCandidate(ctx context.Context, unit contract.Unit, scop
 	if err != nil {
 		return faultOf(err)
 	}
-	validation, err := s.validateCandidate(ctx, unit, scope, plan.ID, plan.BaseRevision, changes)
+	// The sealed changes must still hash to the sealed digest: the recheck
+	// and the activation that follows run under exactly what was reviewed.
+	digest, err := computeCandidateDigest(changes)
+	if err != nil {
+		return err
+	}
+	if digest != plan.CandidateDigest {
+		return internalError("plan %s changes no longer match its sealed candidate digest", plan.ID)
+	}
+	validation, err := s.validateCandidate(ctx, unit, scope, plan.ID, plan.BaseRevision, plan.CandidateDigest, changes)
 	if err != nil {
 		return err
 	}
@@ -717,8 +729,11 @@ func handleValidate(ctx context.Context, s *Service, unit contract.Unit, inv con
 
 // validateCandidate runs the owned-slice validation and every peer
 // _<owner>.validate call for the non-owned kinds, merging diagnostics,
-// requirements and dependencies.
-func (s *Service) validateCandidate(ctx context.Context, unit contract.Unit, scope wireScope, planID contract.ID, baseRevision int64, changes []wireChange) (wireValidation, error) {
+// requirements and dependencies. candidateDigest is the digest of the
+// complete candidate (computeCandidateDigest over every change), not of one
+// owner's slice: each peer receives its slice under the whole-plan digest,
+// the same value activateSlice delivers.
+func (s *Service) validateCandidate(ctx context.Context, unit contract.Unit, scope wireScope, planID contract.ID, baseRevision int64, candidateDigest string, changes []wireChange) (wireValidation, error) {
 	merged := wireValidation{
 		Diagnostics:  []wireDiagnostic{},
 		Requirements: []wireRequirement{},
@@ -739,7 +754,7 @@ func (s *Service) validateCandidate(ctx context.Context, unit contract.Unit, sco
 		raw, err := s.callOwner(ctx, unit, "_"+owner+".validate", candidateEnvelope{Candidate: candidate{
 			PlanID:          planID,
 			BaseRevision:    baseRevision,
-			CandidateDigest: "",
+			CandidateDigest: candidateDigest,
 			Changes:         slice,
 			Dependencies:    merged.Dependencies,
 		}})
@@ -814,19 +829,24 @@ func (s *Service) emitRevision(ctx context.Context, unit contract.Unit, plan *pl
 		if ownerForKind[c.Kind] != "configuration" {
 			continue
 		}
-		edata := marshalJSON(map[string]any{
-			"type": "configuration." + c.Kind + "." + c.Action, "kind": c.Kind, "action": c.Action,
-		})
-		if err := unit.Emit(ctx, contract.Event{
-			Kind:            "configuration." + c.Kind + "." + c.Action,
-			ResourceID:      c.ID,
-			ResourceVersion: contract.Version(objectVersionOrOne(c)),
-			Data:            json.RawMessage(edata),
-		}); err != nil {
+		if err := emitObjectChange(ctx, unit, c.Kind, c.Action, c.ID, objectVersionOrOne(c)); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// emitObjectChange appends one owned object's state transition,
+// configuration.<kind>.<action>, to the outbox in the caller's transaction.
+func emitObjectChange(ctx context.Context, unit contract.Unit, kind, action string, id contract.ID, version int64) error {
+	eventKind := "configuration." + kind + "." + action
+	data := marshalJSON(map[string]any{"type": eventKind, "kind": kind, "action": action})
+	return unit.Emit(ctx, contract.Event{
+		Kind:            eventKind,
+		ResourceID:      id,
+		ResourceVersion: contract.Version(version),
+		Data:            json.RawMessage(data),
+	})
 }
 
 func changeSummaries(changes []wireChange) []map[string]string {

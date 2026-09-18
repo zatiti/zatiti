@@ -72,6 +72,20 @@ func (p *fakePorts) Call(ctx context.Context, unit contract.Unit, inv contract.I
 	if injected != nil {
 		return contract.Payload{}, injected
 	}
+	if strings.HasSuffix(inv.Operation, ".validate") || strings.HasSuffix(inv.Operation, ".activate") {
+		// Real peers schema-validate $defs/Candidate before their handler
+		// runs; candidate_digest must be 64 lowercase hex.
+		var in candidateEnvelope
+		if err := contract.DecodeStrict(inv.Input, &in); err != nil {
+			return contract.Payload{}, &contract.Fault{Code: contract.CodeInvalidInput, Message: inv.Operation + ": " + err.Error()}
+		}
+		if !candidateDigestPattern.MatchString(in.Candidate.CandidateDigest) {
+			return contract.Payload{}, &contract.Fault{
+				Code:    contract.CodeInvalidInput,
+				Message: inv.Operation + ": candidate_digest does not match ^[0-9a-f]{64}$",
+			}
+		}
+	}
 	var body any
 	switch {
 	case strings.HasSuffix(inv.Operation, ".validate"):
