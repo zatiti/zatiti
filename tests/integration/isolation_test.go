@@ -1,0 +1,206 @@
+package integration_test
+
+import (
+	"context"
+	"testing"
+
+	"github.com/zatiti/zatiti/internal/contract"
+)
+
+// agent is a second authenticated principal with its own custodied
+// credential.
+type agent struct {
+	id      contract.ID
+	version int64
+	actor   contract.Actor
+	token   string
+}
+
+// newAgent creates a client_agent principal scoped as given and provisions a
+// synthetic credential the fixture custodies as the local trusted helper.
+func (f *fixture) newAgent(name string, scope contract.Scope) agent {
+	f.t.Helper()
+	created := f.must(f.owner, "principal.create", "agent-"+name, map[string]any{
+		"scope": f.scope(), "definition": map[string]any{
+			"kind": "client_agent", "name": name, "scope": scope, "revoked": false},
+	})
+	var out struct {
+		Resource struct {
+			ID      contract.ID `json:"id"`
+			Version int64       `json:"version"`
+		} `json:"resource"`
+	}
+	decode(f.t, created.Data, &out)
+	token := "zat_synthetic_agent_credential_" + name
+	ref, err := f.secrets.Put(context.Background(), "integration/agent/"+name, []byte(token))
+	if err != nil {
+		f.t.Fatalf("custody agent credential: %v", err)
+	}
+	f.must(f.owner, "credential.provision", "agent-credential-"+name, map[string]any{
+		"scope": f.scope(), "principal_id": out.Resource.ID, "store_ref": ref,
+	})
+	return agent{id: out.Resource.ID, version: out.Resource.Version, actor: f.authenticate([]byte(token)), token: token}
+}
+
+// seedOrganizationState creates one task in the root organization and
+// returns the identities a foreign caller will probe.
+func (f *fixture) seedOrganizationState() (scope contract.Scope, task, event contract.ID, binding memoryBinding) {
+	f.t.Helper()
+	org, chief := f.rootOrganization()
+	scope = contract.Scope{InstallationID: f.installationID, OrganizationID: org}
+	created := f.must(f.owner, "task.create", "seed-task", map[string]any{
+		"scope": scope, "definition": taskDefinition(scope, f.owner.PrincipalID, chief, unconfiguredCurrency),
+	})
+	var t struct {
+		Resource struct {
+			ID contract.ID `json:"id"`
+		} `json:"resource"`
+	}
+	decode(f.t, created.Data, &t)
+
+	// Events of the organization scope: the task admission just emitted them.
+	events := f.must(f.owner, "event.list", "", map[string]any{"scope": scope, "limit": 500})
+	var el struct {
+		Items []struct {
+			ID contract.ID `json:"id"`
+		} `json:"items"`
+	}
+	decode(f.t, events.Data, &el)
+	bindings := f.must(f.owner, "memory.binding.list", "", map[string]any{"scope": f.scope()})
+	var bl struct {
+		Items []memoryBinding `json:"items"`
+	}
+	decode(f.t, bindings.Data, &bl)
+	if len(el.Items) == 0 || len(bl.Items) == 0 {
+		f.t.Fatalf("seed state is incomplete: %d events, %d memory bindings", len(el.Items), len(bl.Items))
+	}
+	return scope, t.Resource.ID, el.Items[len(el.Items)-1].ID, bl.Items[0]
+}
+
+// memoryBinding is a binding and the scope it lives in.
+type memoryBinding struct {
+	ID    contract.ID    `json:"id"`
+	Scope contract.Scope `json:"scope"`
+}
+
+// probes are the reads a foreign caller attempts against another
+// organization's task, event, artifact listing and memory binding.
+func probes(scope contract.Scope, task, event contract.ID, binding memoryBinding) []call {
+	return []call{
+		{name: "task.get", op: "task.get", input: map[string]any{"scope": scope, "id": task}},
+		{name: "task.list", op: "task.list", input: map[string]any{"scope": scope}},
+		{name: "event.get", op: "event.get", input: map[string]any{"scope": scope, "id": event}},
+		{name: "event.list", op: "event.list", input: map[string]any{"scope": scope}},
+		{name: "artifact.list", op: "artifact.list", input: map[string]any{"scope": scope}},
+		{name: "memory.binding.get", op: "memory.binding.get", input: map[string]any{"scope": binding.Scope, "id": binding.ID}},
+		{name: "memory.binding.list", op: "memory.binding.list", input: map[string]any{"scope": scope}},
+	}
+}
+
+// refusedWithoutData asserts a probe disclosed nothing: a permission or
+// not-found refusal and no data.
+func refusedWithoutData(t *testing.T, who, name string, res contract.Result, err error) {
+	t.Helper()
+	code := faultCode(err)
+	if code != contract.CodePermissionDenied && code != contract.CodeNotFound {
+		t.Errorf("%s: %s returned code %q data %s, want a permission or not-found refusal", who, name, code, res.Data)
+	}
+	if len(res.Data) != 0 && string(res.Data) != "null" {
+		t.Errorf("%s: %s disclosed data with its refusal: %s", who, name, res.Data)
+	}
+}
+
+// TestPrincipalWithoutGrantsReadsNothing (Z01 scoped identities, Z05 empty
+// bindings): an authenticated principal scoped to a different organization,
+// holding no grant, cannot read the root organization's task, events,
+// artifacts or memory bindings through the real application, under the
+// owning scope, the installation scope or its own scope. The owner reads
+// every one of them, so the refusals are authorization, not absence.
+func TestPrincipalWithoutGrantsReadsNothing(t *testing.T) {
+	t.Parallel()
+	f := newBootstrappedFixture(t)
+	scope, task, event, binding := f.seedOrganizationState()
+	for _, c := range probes(scope, task, event, binding) {
+		if _, err := f.invoke(f.owner, c.op, "", c.input); err != nil {
+			t.Fatalf("owner %s: %v", c.name, err)
+		}
+	}
+
+	foreignScope := contract.Scope{InstallationID: f.installationID, OrganizationID: "00000000-0000-4000-8000-0000000000f0"}
+	foreign := f.newAgent("foreign", foreignScope)
+	if foreign.actor.Kind != contract.KindClientAgent || foreign.actor.PrincipalID != foreign.id {
+		t.Fatalf("foreign agent authenticated as %+v", foreign.actor)
+	}
+	for _, s := range []contract.Scope{scope, f.scope(), foreignScope} {
+		for _, c := range probes(s, task, event, binding) {
+			res, err := f.invoke(foreign.actor, c.op, "", c.input)
+			refusedWithoutData(t, "foreign agent", c.name, res, err)
+		}
+	}
+	// A refused caller also cannot mutate: no task appears in either scope.
+	_, err := f.invoke(foreign.actor, "task.create", "foreign-task", map[string]any{
+		"scope": scope, "definition": taskDefinition(scope, foreign.id, task, unconfiguredCurrency),
+	})
+	if faultCode(err) != contract.CodePermissionDenied {
+		t.Errorf("foreign task.create: %v, want permission_denied", err)
+	}
+	if n := f.count("task.list", map[string]any{"scope": f.scope()}); n != 1 {
+		t.Errorf("task count %d after the refused foreign mutation, want 1", n)
+	}
+}
+
+// TestForeignOrganizationGrantDoesNotReachPeerOrganization (Z01
+// cross-organization reference): a principal granted read capabilities in
+// organization B cannot read organization A. Reaching it needs a second
+// organization and a grant, both of which the fresh installation refuses.
+func TestForeignOrganizationGrantDoesNotReachPeerOrganization(t *testing.T) {
+	t.Parallel()
+	f := newBootstrappedFixture(t)
+	foreignScope := contract.Scope{InstallationID: f.installationID, OrganizationID: "00000000-0000-4000-8000-0000000000f0"}
+	foreign := f.newAgent("granted", foreignScope)
+	_, err := f.invoke(f.owner, "grant.create", "foreign-grant", map[string]any{
+		"scope": f.scope(), "definition": map[string]any{
+			"principal_id": foreign.id, "scope": foreignScope, "capabilities": []string{"task.get", "task.list"},
+			"destinations": []string{}, "denied": false},
+	})
+	if err == nil {
+		t.Fatal("grant.create succeeded; extend this case: create organization B, grant there, and probe organization A")
+	}
+	if faultCode(err) == contract.CodeReviewRequired {
+		skipKnownDefect(t, reviewDeadlockCause, err.Error())
+	}
+	t.Fatalf("grant.create failed in an unrecorded way: %v", err)
+}
+
+// TestRevokedPrincipalIsDeniedImmediately (Z01 revoked principal): after
+// principal.revoke the credential stops authenticating and an actor that
+// authenticated earlier is refused on its very next operation.
+func TestRevokedPrincipalIsDeniedImmediately(t *testing.T) {
+	t.Parallel()
+	f := newBootstrappedFixture(t)
+	a := f.newAgent("revoked", f.scope())
+	f.must(f.owner, "principal.revoke", "revoke-1", map[string]any{
+		"scope": f.scope(), "id": a.id, "expected_version": a.version,
+	})
+	if _, err := f.app.Authenticate(context.Background(), []byte(a.token)); err == nil {
+		t.Error("a revoked principal's credential still authenticates")
+	}
+	res, err := f.invoke(a.actor, "installation.status", "", map[string]any{"scope": f.scope()})
+	refusedWithoutData(t, "revoked agent", "installation.status", res, err)
+}
+
+// TestUnknownCredentialIsRefusedGenerically (Z01 unauthorized credential
+// access): an unknown credential and an empty one fail the same generic way
+// and never resolve an actor.
+func TestUnknownCredentialIsRefusedGenerically(t *testing.T) {
+	t.Parallel()
+	f := newBootstrappedFixture(t)
+	_, unknown := f.app.Authenticate(context.Background(), []byte("zat_synthetic_unknown_credential"))
+	_, empty := f.app.Authenticate(context.Background(), nil)
+	if unknown == nil || empty == nil {
+		t.Fatalf("authentication accepted an unknown (%v) or empty (%v) credential", unknown, empty)
+	}
+	if faultCode(unknown) != faultCode(empty) || errAs(unknown) == nil || errAs(unknown).Message != errAs(empty).Message {
+		t.Fatalf("authentication failures are distinguishable: %v vs %v", unknown, empty)
+	}
+}
