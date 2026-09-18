@@ -564,6 +564,23 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   working directory drifted between tool calls (one caused a rebase
   conflict on wave3/app-seams). All lead git commands now use explicit
   `git -C <path>`.
+- 2026-09-18 -- lead process notes: (1) stopping a background job that
+  had already won R-build-lease orphaned the lease for ~5 minutes (the
+  stop is a SIGKILL, so the wrapper's release trap never ran); released
+  by hand after confirming no live holder. Rule: never stop a wrapped
+  job; let it fail and release itself. (2) A flaky test found by a
+  landing run: scheduling's cursor-tamper test overwrote one base64 byte
+  with 'x', a no-op 1 run in 64; fixed (guaranteed-different byte,
+  proven 20/20) and landed in e100870. (3) Two seam lanes' branches were
+  cut before the serenity conversion, so their commit hooks hit the
+  then-red serenity test; both branches rebased onto current main via
+  tagged stash before committing.
+- 2026-09-18 -- descriptor-drift: 14 of 16 public-descriptor commits on
+  the branch, hook green each time; accounting and execution staged,
+  waiting for a rebase past the landed $ref fixes; internal-descriptor
+  classes (ExpectedVersion, SubmissionKey, ScopeRequired) and the
+  self-contained internal schemas still to do on the same branch. Lead
+  lands the public batch first so cmd/zatiti and integration can move.
 
 ## Planned
 
