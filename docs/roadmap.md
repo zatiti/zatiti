@@ -599,6 +599,14 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   configuration never calls _reviews.ensure at plan time (edge-seams
   lane, resumes 16:00); grant.create/update have no digest to bind a
   review to (spec revision 3).
+- 2026-09-18 -- FLUTTER DESKTOP FIRST INCREMENT LANDED (9 commits,
+  tip bdabcbc), 30 of 36 roots on main. Lead-verified: format 0 changes,
+  analyze 0 issues, 150 tests pass, module-wide Go verify green (the
+  first landing attempt exposed the flaky scheduling cursor test, since
+  fixed). apps/desktop is a real wire client (Unix socket + mutual TLS,
+  strict JSON, submission-key discipline, 21 operations) with the full
+  UI from the design; never run against the real controller yet. Lane
+  stopped; next increment brief to be written after cmd/zatiti exists.
 
 ## Planned
 
