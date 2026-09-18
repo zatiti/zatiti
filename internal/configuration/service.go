@@ -19,7 +19,7 @@ type opMeta struct {
 	submission      bool
 	expectedVersion bool
 	callers         []string
-	cli             string // "zatiti ..." CLI path; empty for internal operations
+	cli             string // CLI tokens below the root command, space separated; empty for internal operations
 	completion      bool   // declares the eventual export artifact result schema
 }
 
@@ -44,69 +44,69 @@ var opMetas = []opMeta{
 		callers: []string{"configuration", "application"}},
 
 	// binding.*
-	{id: "binding.archive", visibility: "public", mode: "mutation", submission: true, expectedVersion: true, cli: "zatiti binding archive"},
-	{id: "binding.create", visibility: "public", mode: "mutation", submission: true, cli: "zatiti binding create"},
-	{id: "binding.get", visibility: "public", mode: "query", cli: "zatiti binding get"},
-	{id: "binding.list", visibility: "public", mode: "query", cli: "zatiti binding list"},
-	{id: "binding.update", visibility: "public", mode: "mutation", submission: true, expectedVersion: true, cli: "zatiti binding update"},
+	{id: "binding.archive", visibility: "public", mode: "mutation", submission: true, expectedVersion: true, cli: "binding archive"},
+	{id: "binding.create", visibility: "public", mode: "mutation", submission: true, cli: "binding create"},
+	{id: "binding.get", visibility: "public", mode: "query", cli: "binding get"},
+	{id: "binding.list", visibility: "public", mode: "query", cli: "binding list"},
+	{id: "binding.update", visibility: "public", mode: "mutation", submission: true, expectedVersion: true, cli: "binding update"},
 
 	// configuration.*
-	{id: "configuration.apply", visibility: "public", mode: "mutation", submission: true, cli: "zatiti configuration apply"},
-	{id: "configuration.draft.create", visibility: "public", mode: "mutation", submission: true, cli: "zatiti configuration draft create"},
-	{id: "configuration.draft.discard", visibility: "public", mode: "mutation", submission: true, expectedVersion: true, cli: "zatiti configuration draft discard"},
-	{id: "configuration.draft.get", visibility: "public", mode: "query", cli: "zatiti configuration draft get"},
-	{id: "configuration.draft.list", visibility: "public", mode: "query", cli: "zatiti configuration draft list"},
-	{id: "configuration.draft.update", visibility: "public", mode: "mutation", submission: true, expectedVersion: true, cli: "zatiti configuration draft update"},
-	{id: "configuration.plan", visibility: "public", mode: "mutation", submission: true, expectedVersion: true, cli: "zatiti configuration plan"},
-	{id: "configuration.plan.get", visibility: "public", mode: "query", cli: "zatiti configuration plan get"},
-	{id: "configuration.plan.list", visibility: "public", mode: "query", cli: "zatiti configuration plan list"},
-	{id: "configuration.revision.get", visibility: "public", mode: "query", cli: "zatiti configuration revision get"},
-	{id: "configuration.revision.list", visibility: "public", mode: "query", cli: "zatiti configuration revision list"},
-	{id: "configuration.rollback.plan", visibility: "public", mode: "mutation", submission: true, cli: "zatiti configuration rollback plan"},
+	{id: "configuration.apply", visibility: "public", mode: "mutation", submission: true, cli: "configuration apply"},
+	{id: "configuration.draft.create", visibility: "public", mode: "mutation", submission: true, cli: "configuration draft create"},
+	{id: "configuration.draft.discard", visibility: "public", mode: "mutation", submission: true, expectedVersion: true, cli: "configuration draft discard"},
+	{id: "configuration.draft.get", visibility: "public", mode: "query", cli: "configuration draft get"},
+	{id: "configuration.draft.list", visibility: "public", mode: "query", cli: "configuration draft list"},
+	{id: "configuration.draft.update", visibility: "public", mode: "mutation", submission: true, expectedVersion: true, cli: "configuration draft update"},
+	{id: "configuration.plan", visibility: "public", mode: "mutation", submission: true, expectedVersion: true, cli: "configuration plan"},
+	{id: "configuration.plan.get", visibility: "public", mode: "query", cli: "configuration plan get"},
+	{id: "configuration.plan.list", visibility: "public", mode: "query", cli: "configuration plan list"},
+	{id: "configuration.revision.get", visibility: "public", mode: "query", cli: "configuration revision get"},
+	{id: "configuration.revision.list", visibility: "public", mode: "query", cli: "configuration revision list"},
+	{id: "configuration.rollback.plan", visibility: "public", mode: "mutation", submission: true, cli: "configuration rollback plan"},
 
 	// execution_profile.*
-	{id: "execution_profile.archive", visibility: "public", mode: "mutation", submission: true, expectedVersion: true, cli: "zatiti execution_profile archive"},
-	{id: "execution_profile.create", visibility: "public", mode: "mutation", submission: true, cli: "zatiti execution_profile create"},
-	{id: "execution_profile.get", visibility: "public", mode: "query", cli: "zatiti execution_profile get"},
-	{id: "execution_profile.list", visibility: "public", mode: "query", cli: "zatiti execution_profile list"},
-	{id: "execution_profile.update", visibility: "public", mode: "mutation", submission: true, expectedVersion: true, cli: "zatiti execution_profile update"},
+	{id: "execution_profile.archive", visibility: "public", mode: "mutation", submission: true, expectedVersion: true, cli: "execution_profile archive"},
+	{id: "execution_profile.create", visibility: "public", mode: "mutation", submission: true, cli: "execution_profile create"},
+	{id: "execution_profile.get", visibility: "public", mode: "query", cli: "execution_profile get"},
+	{id: "execution_profile.list", visibility: "public", mode: "query", cli: "execution_profile list"},
+	{id: "execution_profile.update", visibility: "public", mode: "mutation", submission: true, expectedVersion: true, cli: "execution_profile update"},
 
 	// organization.*
-	{id: "organization.archive", visibility: "public", mode: "mutation", submission: true, expectedVersion: true, cli: "zatiti organization archive"},
-	{id: "organization.chief.replace", visibility: "public", mode: "mutation", submission: true, expectedVersion: true, cli: "zatiti organization chief replace"},
-	{id: "organization.create", visibility: "public", mode: "mutation", submission: true, cli: "zatiti organization create"},
-	{id: "organization.export", visibility: "public", mode: "mutation", submission: true, completion: true, cli: "zatiti organization export"},
-	{id: "organization.get", visibility: "public", mode: "query", cli: "zatiti organization get"},
-	{id: "organization.import", visibility: "public", mode: "mutation", submission: true, cli: "zatiti organization import"},
-	{id: "organization.list", visibility: "public", mode: "query", cli: "zatiti organization list"},
-	{id: "organization.move", visibility: "public", mode: "mutation", submission: true, expectedVersion: true, cli: "zatiti organization move"},
-	{id: "organization.update", visibility: "public", mode: "mutation", submission: true, expectedVersion: true, cli: "zatiti organization update"},
+	{id: "organization.archive", visibility: "public", mode: "mutation", submission: true, expectedVersion: true, cli: "organization archive"},
+	{id: "organization.chief.replace", visibility: "public", mode: "mutation", submission: true, expectedVersion: true, cli: "organization chief replace"},
+	{id: "organization.create", visibility: "public", mode: "mutation", submission: true, cli: "organization create"},
+	{id: "organization.export", visibility: "public", mode: "mutation", submission: true, completion: true, cli: "organization export"},
+	{id: "organization.get", visibility: "public", mode: "query", cli: "organization get"},
+	{id: "organization.import", visibility: "public", mode: "mutation", submission: true, cli: "organization import"},
+	{id: "organization.list", visibility: "public", mode: "query", cli: "organization list"},
+	{id: "organization.move", visibility: "public", mode: "mutation", submission: true, expectedVersion: true, cli: "organization move"},
+	{id: "organization.update", visibility: "public", mode: "mutation", submission: true, expectedVersion: true, cli: "organization update"},
 
 	// project.*
-	{id: "project.archive", visibility: "public", mode: "mutation", submission: true, expectedVersion: true, cli: "zatiti project archive"},
-	{id: "project.create", visibility: "public", mode: "mutation", submission: true, cli: "zatiti project create"},
-	{id: "project.export", visibility: "public", mode: "mutation", submission: true, completion: true, cli: "zatiti project export"},
-	{id: "project.get", visibility: "public", mode: "query", cli: "zatiti project get"},
-	{id: "project.import", visibility: "public", mode: "mutation", submission: true, cli: "zatiti project import"},
-	{id: "project.list", visibility: "public", mode: "query", cli: "zatiti project list"},
-	{id: "project.update", visibility: "public", mode: "mutation", submission: true, expectedVersion: true, cli: "zatiti project update"},
+	{id: "project.archive", visibility: "public", mode: "mutation", submission: true, expectedVersion: true, cli: "project archive"},
+	{id: "project.create", visibility: "public", mode: "mutation", submission: true, cli: "project create"},
+	{id: "project.export", visibility: "public", mode: "mutation", submission: true, completion: true, cli: "project export"},
+	{id: "project.get", visibility: "public", mode: "query", cli: "project get"},
+	{id: "project.import", visibility: "public", mode: "mutation", submission: true, cli: "project import"},
+	{id: "project.list", visibility: "public", mode: "query", cli: "project list"},
+	{id: "project.update", visibility: "public", mode: "mutation", submission: true, expectedVersion: true, cli: "project update"},
 
 	// team.*
-	{id: "team.archive", visibility: "public", mode: "mutation", submission: true, expectedVersion: true, cli: "zatiti team archive"},
-	{id: "team.create", visibility: "public", mode: "mutation", submission: true, cli: "zatiti team create"},
-	{id: "team.export", visibility: "public", mode: "mutation", submission: true, completion: true, cli: "zatiti team export"},
-	{id: "team.get", visibility: "public", mode: "query", cli: "zatiti team get"},
-	{id: "team.import", visibility: "public", mode: "mutation", submission: true, cli: "zatiti team import"},
-	{id: "team.list", visibility: "public", mode: "query", cli: "zatiti team list"},
-	{id: "team.update", visibility: "public", mode: "mutation", submission: true, expectedVersion: true, cli: "zatiti team update"},
+	{id: "team.archive", visibility: "public", mode: "mutation", submission: true, expectedVersion: true, cli: "team archive"},
+	{id: "team.create", visibility: "public", mode: "mutation", submission: true, cli: "team create"},
+	{id: "team.export", visibility: "public", mode: "mutation", submission: true, completion: true, cli: "team export"},
+	{id: "team.get", visibility: "public", mode: "query", cli: "team get"},
+	{id: "team.import", visibility: "public", mode: "mutation", submission: true, cli: "team import"},
+	{id: "team.list", visibility: "public", mode: "query", cli: "team list"},
+	{id: "team.update", visibility: "public", mode: "mutation", submission: true, expectedVersion: true, cli: "team update"},
 
 	// worker.*
-	{id: "worker.archive", visibility: "public", mode: "mutation", submission: true, expectedVersion: true, cli: "zatiti worker archive"},
-	{id: "worker.create", visibility: "public", mode: "mutation", submission: true, cli: "zatiti worker create"},
-	{id: "worker.get", visibility: "public", mode: "query", cli: "zatiti worker get"},
-	{id: "worker.list", visibility: "public", mode: "query", cli: "zatiti worker list"},
-	{id: "worker.move", visibility: "public", mode: "mutation", submission: true, expectedVersion: true, cli: "zatiti worker move"},
-	{id: "worker.update", visibility: "public", mode: "mutation", submission: true, expectedVersion: true, cli: "zatiti worker update"},
+	{id: "worker.archive", visibility: "public", mode: "mutation", submission: true, expectedVersion: true, cli: "worker archive"},
+	{id: "worker.create", visibility: "public", mode: "mutation", submission: true, cli: "worker create"},
+	{id: "worker.get", visibility: "public", mode: "query", cli: "worker get"},
+	{id: "worker.list", visibility: "public", mode: "query", cli: "worker list"},
+	{id: "worker.move", visibility: "public", mode: "mutation", submission: true, expectedVersion: true, cli: "worker move"},
+	{id: "worker.update", visibility: "public", mode: "mutation", submission: true, expectedVersion: true, cli: "worker update"},
 }
 
 // Service is the configuration domain owner: organizations, chiefs, teams,
