@@ -674,6 +674,12 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   fine for the in-process seam (explicit Actor), not for an
   out-of-process controller. cmd/zatiti's provisional
   principal.create/grant.create path is superseded on its rebase.
+- 2026-09-18 -- cmd/zatiti LANDED (e3ab03c assembly/serve/CLI/MCP,
+  fb8fb6e tests, 72c0e3e end-to-end binary journey), 31 of 36 roots on
+  main. Seven milestone tests still skip on known descriptor drift until
+  the descriptor batch lands (next in the lease queue), after which the
+  lane deletes the skips, switches controller-identity provisioning to
+  identity.ControllerPrincipal, and the end-to-end journey runs for real.
 
 ## Planned
 
