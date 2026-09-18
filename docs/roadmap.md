@@ -685,6 +685,15 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   TestControllerPrincipalHoldsNothingElse fail on principal.create;
   restored. cmd/zatiti switches to identity.ControllerPrincipal on its
   next rebase. Worktree removed.
+- 2026-09-18 -- DESCRIPTOR BATCH 1 LANDED: 16 per-package commits (tip
+  c7f9cf3) plus a permanent per-package catalog pin test in every
+  module; lead mutation check (re-introducing the binary-name CLI token
+  turned artifacts' pin test red) and module-wide green. Every public
+  descriptor now matches the frozen catalog. Remaining assembly blocker:
+  bare internal schemas referencing owner-private $defs in accounting,
+  memory, effects, execution (batch 2, same lane), plus the internal
+  ExpectedVersion/ScopeRequired classes. cmd/zatiti signalled to rebase,
+  drop its drift skips and run the end-to-end journey for real.
 
 ## Planned
 
