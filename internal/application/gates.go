@@ -16,6 +16,47 @@ var policyExempt = map[string]bool{
 	"capabilities.schema": true,
 }
 
+// sealedCandidateField names, per exact-review operation, the input field
+// that seals the candidate the operation activates. The gate hands that
+// digest to _policy.check so policy consults the exact review over it; the
+// owner still proves the digest is the one its work carries. The shared
+// contract seals exactly one public candidate ("apply requires base_revision
+// and plan digest"). An operation absent here binds nothing, so a review
+// decision on it refuses: no caller-chosen digest ever stands in for one.
+var sealedCandidateField = map[string]string{
+	"configuration.apply": "candidate_digest",
+}
+
+// sealedCandidate extracts the sealed candidate digest from a validated
+// input. A declared field that is absent or not a digest fails closed.
+func sealedCandidate(capability string, input []byte) (contract.Digest, error) {
+	field, ok := sealedCandidateField[capability]
+	if !ok {
+		return "", nil
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(input, &fields); err != nil {
+		return "", invalidFault("input of %s is not an object", capability)
+	}
+	var digest string
+	if err := json.Unmarshal(fields[field], &digest); err != nil || !isDigest(digest) {
+		return "", invalidFault("%s of %s must be a lowercase SHA-256 hex digest", field, capability)
+	}
+	return contract.Digest(digest), nil
+}
+
+func isDigest(s string) bool {
+	if len(s) != 64 {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		if c := s[i]; (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return false
+		}
+	}
+	return true
+}
+
 // identityAuthority is the _identity.authority output data.
 type identityAuthority struct {
 	Resource storedAuthority `json:"resource"`
@@ -104,15 +145,23 @@ type storedRequirementItem struct {
 
 // policyGate runs the current policy decision for one public capability
 // under the transaction's authority. Deny wins, review demands its
-// requirement, and an unknown decision fails closed.
-func (a *Application) policyGate(ctx context.Context, u contract.Unit, scope contract.Scope, capability string) error {
+// requirement, and an unknown decision fails closed. An exact-review
+// operation's sealed candidate digest travels with the check, so an eligible
+// approved decision over exactly that candidate satisfies the review and
+// nothing else does.
+func (a *Application) policyGate(ctx context.Context, u contract.Unit, scope contract.Scope, capability string, operationInput []byte) error {
 	if policyExempt[capability] {
 		return nil
 	}
+	candidate, err := sealedCandidate(capability, operationInput)
+	if err != nil {
+		return err
+	}
 	input, err := json.Marshal(struct {
-		Scope      contract.Scope `json:"scope"`
-		Capability string         `json:"capability"`
-	}{Scope: scope, Capability: capability})
+		Scope           contract.Scope  `json:"scope"`
+		Capability      string          `json:"capability"`
+		CandidateDigest contract.Digest `json:"candidate_digest,omitempty"`
+	}{Scope: scope, Capability: capability, CandidateDigest: candidate})
 	if err != nil {
 		return internalFault("policy check request could not be encoded")
 	}

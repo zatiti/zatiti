@@ -30,7 +30,7 @@ func (a *Application) invokeMutation(
 		if err := a.revalidateAuthority(wctx, u, actor, scope); err != nil {
 			return err
 		}
-		if err := a.policyGate(wctx, u, scope, desc.ID); err != nil {
+		if err := a.policyGate(wctx, u, scope, desc.ID, invocation.Input); err != nil {
 			return err
 		}
 
@@ -63,16 +63,50 @@ func (a *Application) invokeMutation(
 		return nil
 	})
 	if err == nil {
-		return delivered, nil
+		return disposition(delivered)
 	}
 
 	// The transaction rolled back. Persist a known refusal in a separate
 	// short transaction so an identical retry replays the same disposition;
 	// concurrent duplicates keep serializing on the same command identity.
-	if refusalErr := a.recordRefusal(ctx, actor, desc, submissionKey, digest, scope, err); refusalErr != nil {
-		_ = refusalErr // refusal persistence is best-effort; the primary fault stands
+	return a.refused(ctx, actor, desc, submissionKey, digest, scope, err)
+}
+
+// disposition pairs a result with its error the one way every path returns
+// it: a failed result travels with its fault as the error, first time and on
+// every replay, so a transport never renders a failure as a success.
+func disposition(res contract.Result) (contract.Result, error) {
+	if res.Status != contract.StatusFailed {
+		return res, nil
 	}
-	return contract.Result{}, err
+	if res.Error == nil {
+		return contract.Result{}, internalFault("command %s failed without a fault", res.CommandID)
+	}
+	return res, faultErr(res.Error)
+}
+
+// refused returns a rolled-back mutation's refusal. A deterministic refusal
+// is retained first, and the caller receives the retained failed envelope
+// with its fault: exactly what an identical retry replays, including a retry
+// the gates refuse again before command replay is reached. A refusal nothing
+// retains (a transient fault, review_required, an identity whose retained
+// disposition is a different one) has no durable command to name and returns
+// the fault alone.
+func (a *Application) refused(
+	ctx context.Context,
+	actor contract.Actor,
+	desc contract.Descriptor,
+	submissionKey string,
+	digest contract.Digest,
+	scope contract.Scope,
+	primary error,
+) (contract.Result, error) {
+	retained, err := a.recordRefusal(ctx, actor, desc, submissionKey, digest, scope, primary)
+	if err != nil || retained == nil {
+		// Refusal persistence is best-effort; the primary fault stands.
+		return contract.Result{}, primary
+	}
+	return disposition(*retained)
 }
 
 // invokeQuery runs one public query inside a consistent read snapshot.
@@ -92,7 +126,7 @@ func (a *Application) invokeQuery(
 		if err := a.revalidateAuthority(wctx, u, actor, scope); err != nil {
 			return err
 		}
-		if err := a.policyGate(wctx, u, scope, desc.ID); err != nil {
+		if err := a.policyGate(wctx, u, scope, desc.ID, invocation.Input); err != nil {
 			return err
 		}
 		payload, hErr := handler(wctx, u, invocation)
@@ -170,9 +204,12 @@ func (a *Application) rememberInstallation(id contract.ID) {
 }
 
 // recordRefusal persists a deterministic mutation refusal after its
-// transaction rolled back, in a separate short write. The command identity
-// serializes concurrent duplicates: if a concurrent identical call already
-// created the command, its disposition stands and this refusal is dropped.
+// transaction rolled back, in a separate short write, and returns the
+// retained envelope. The command identity serializes concurrent duplicates:
+// if an identical call already created the command, its disposition stands
+// and this refusal is dropped. That retained disposition is returned only
+// when it is this very refusal; a current refusal never discloses or
+// overrides a different retained disposition.
 func (a *Application) recordRefusal(
 	ctx context.Context,
 	actor contract.Actor,
@@ -181,10 +218,10 @@ func (a *Application) recordRefusal(
 	digest contract.Digest,
 	scope contract.Scope,
 	primary error,
-) error {
+) (*contract.Result, error) {
 	fault := faultOf(primary)
 	if !deterministicRefusal(fault) {
-		return nil
+		return nil, nil
 	}
 	refusal := contract.Result{
 		Schema: contract.SchemaResult,
@@ -193,18 +230,36 @@ func (a *Application) recordRefusal(
 			Error:  fault,
 		},
 	}
-	return a.db.Write(ctx, actor, scope, func(u contract.Unit) error {
+	var retained *contract.Result
+	err := a.db.Write(ctx, actor, scope, func(u contract.Unit) error {
 		wctx := withState(ctx, &dispatchState{chain: []string{desc.ID}, unit: u})
 		commandID, replay, err := a.commandBegin(wctx, u, actor, desc, submissionKey, digest)
 		if err != nil {
 			return err
 		}
 		if replay != nil {
-			// A concurrent duplicate owns this command identity; its own
-			// disposition stands. Dedupe concurrency is not lost.
+			// A duplicate owns this command identity; its own disposition
+			// stands. Dedupe concurrency is not lost.
+			if sameRefusal(replay, fault) {
+				retained = replay
+			}
 			return nil
 		}
 		refusal.CommandID = commandID
-		return a.commandFinish(wctx, u, commandID, refusal)
+		if err := a.commandFinish(wctx, u, commandID, refusal); err != nil {
+			return err
+		}
+		retained = &refusal
+		return nil
 	})
+	if err != nil {
+		return nil, err
+	}
+	return retained, nil
+}
+
+// sameRefusal reports whether a retained disposition is the refusal fault.
+func sameRefusal(retained *contract.Result, fault *contract.Fault) bool {
+	return retained.Status == contract.StatusFailed && retained.Error != nil &&
+		retained.Error.Code == fault.Code && retained.Error.Message == fault.Message
 }

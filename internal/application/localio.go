@@ -17,8 +17,14 @@ func isLocalIOOperation(operation string) bool {
 // invokeIOMutation runs one synchronous local IO mutation. Prepare records
 // the replayable intent and the accepted pending disposition inside the
 // admission transaction; Perform runs outside transactions; Finish rechecks
-// authority and commits the final disposition. Concurrent same-key calls
-// join the accepted command instead of duplicating Perform.
+// authority and replaces the pending disposition, once, with the final one.
+// Concurrent same-key calls join the accepted command instead of duplicating
+// Perform. The evidence owner admits exactly that second finish and no other.
+//
+// The accepted disposition is the durable record of everything between the
+// two transactions: a crash or a transient fault after Prepare leaves the
+// command accepted, a same-key retry joins it without a second Perform, and
+// the owner's recorded intent is what local recovery works from.
 func (a *Application) invokeIOMutation(
 	ctx context.Context,
 	actor contract.Actor,
@@ -46,7 +52,7 @@ func (a *Application) invokeIOMutation(
 		if err := a.revalidateAuthority(wctx, u, actor, scope); err != nil {
 			return err
 		}
-		if err := a.policyGate(wctx, u, scope, desc.ID); err != nil {
+		if err := a.policyGate(wctx, u, scope, desc.ID, invocation.Input); err != nil {
 			return err
 		}
 
@@ -83,14 +89,12 @@ func (a *Application) invokeIOMutation(
 		return nil
 	})
 	if err != nil {
-		if refusalErr := a.recordRefusal(ctx, actor, desc, submissionKey, digest, scope, err); refusalErr != nil {
-			_ = refusalErr
-		}
-		return contract.Result{}, err
+		return a.refused(ctx, actor, desc, submissionKey, digest, scope, err)
 	}
 	if st.plan.ID == "" {
-		// Joined an in-progress command: the accepted disposition stands.
-		return delivered, nil
+		// Joined an in-progress command or replayed a finished one: the
+		// retained disposition stands.
+		return disposition(delivered)
 	}
 
 	ioResult := a.performIO(ctx, phases, st.plan)
@@ -101,7 +105,7 @@ func (a *Application) invokeIOMutation(
 		if err := a.revalidateAuthority(wctx, u, actor, scope); err != nil {
 			return err
 		}
-		if err := a.policyGate(wctx, u, scope, desc.ID); err != nil {
+		if err := a.policyGate(wctx, u, scope, desc.ID, invocation.Input); err != nil {
 			return err
 		}
 		payload, fErr := phases.Finish(wctx, u, st.plan, ioResult)
@@ -127,9 +131,42 @@ func (a *Application) invokeIOMutation(
 		return a.commandFinish(wctx, u, st.commandID, final)
 	})
 	if err != nil {
-		return contract.Result{}, err
+		return a.refusedFinish(ctx, actor, desc, scope, st.commandID, err)
 	}
-	return final, nil
+	return disposition(final)
+}
+
+// refusedFinish handles a rolled-back Finish transaction. The caller is about
+// to see this fault, so a deterministic refusal replaces the pending
+// disposition in a separate short write and an identical retry replays it
+// rather than reporting the command accepted. A transient fault retains
+// nothing: the accepted disposition stays the honest record.
+func (a *Application) refusedFinish(
+	ctx context.Context,
+	actor contract.Actor,
+	desc contract.Descriptor,
+	scope contract.Scope,
+	commandID contract.ID,
+	primary error,
+) (contract.Result, error) {
+	fault := faultOf(primary)
+	if !deterministicRefusal(fault) {
+		return contract.Result{}, primary
+	}
+	refusal := contract.Result{
+		Schema:    contract.SchemaResult,
+		CommandID: commandID,
+		Payload:   contract.Payload{Status: contract.StatusFailed, Error: fault},
+	}
+	err := a.db.Write(ctx, actor, scope, func(u contract.Unit) error {
+		wctx := withState(ctx, &dispatchState{chain: []string{desc.ID}, unit: u})
+		return a.commandFinish(wctx, u, commandID, refusal)
+	})
+	if err != nil {
+		// Replacement is best-effort; the primary fault stands.
+		return contract.Result{}, primary
+	}
+	return disposition(refusal)
 }
 
 // planState carries the prepared plan across the transaction boundary into
@@ -163,7 +200,7 @@ func (a *Application) invokeIOQuery(
 		if err := a.revalidateAuthority(wctx, u, actor, scope); err != nil {
 			return err
 		}
-		if err := a.policyGate(wctx, u, scope, desc.ID); err != nil {
+		if err := a.policyGate(wctx, u, scope, desc.ID, invocation.Input); err != nil {
 			return err
 		}
 		p, pErr := phases.Prepare(wctx, u, invocation)
@@ -185,7 +222,7 @@ func (a *Application) invokeIOQuery(
 		if err := a.revalidateAuthority(wctx, u, actor, scope); err != nil {
 			return err
 		}
-		if err := a.policyGate(wctx, u, scope, desc.ID); err != nil {
+		if err := a.policyGate(wctx, u, scope, desc.ID, invocation.Input); err != nil {
 			return err
 		}
 		payload, fErr := phases.Finish(wctx, u, plan, ioResult)
@@ -194,7 +231,8 @@ func (a *Application) invokeIOQuery(
 		}
 		if ioResult.Fault != nil {
 			delivered = contract.Result{
-				Schema: contract.SchemaResult,
+				Schema:    contract.SchemaResult,
+				CommandID: a.ids.New(),
 				Payload: contract.Payload{
 					Status: contract.StatusFailed,
 					Data:   ioResult.Data,
@@ -216,7 +254,7 @@ func (a *Application) invokeIOQuery(
 	if err != nil {
 		return contract.Result{}, err
 	}
-	return delivered, nil
+	return disposition(delivered)
 }
 
 // performIO runs the local performance phase outside transactions. A panic

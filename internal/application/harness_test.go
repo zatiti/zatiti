@@ -110,8 +110,10 @@ type fakeFault struct {
 	Details   json.RawMessage `json:"details,omitempty"`
 }
 
-// fakeCommand mirrors $defs/Command as the evidence owner stores it.
+// fakeCommand mirrors $defs/Command as the evidence owner stores it. The
+// unexported finished count is the owner's private disposition fence.
 type fakeCommand struct {
+	finished         int64
 	ID               string      `json:"id"`
 	PrincipalID      string      `json:"principal_id"`
 	Operation        string      `json:"operation"`
@@ -249,6 +251,7 @@ CREATE TABLE evidence_commands (
 	data              BLOB,
 	error_code        TEXT NOT NULL DEFAULT '',
 	result            BLOB,
+	finished          INTEGER NOT NULL DEFAULT 0,
 	UNIQUE (principal_id, operation, operation_version, submission_key)
 );
 `),
@@ -265,6 +268,10 @@ CREATE TABLE policy_rules (
 	capability TEXT PRIMARY KEY,
 	decision   TEXT NOT NULL,
 	reasons    TEXT NOT NULL DEFAULT '[]'
+);
+CREATE TABLE policy_reviews (
+	action_digest TEXT PRIMARY KEY,
+	decision      TEXT NOT NULL
 );
 `),
 		mig("business", 1, `
@@ -372,13 +379,19 @@ func (m *evidenceModule) begin(ctx context.Context, u contract.Unit, inv contrac
 		return p, nil
 	}
 	if row := m.byKey(ctx, u, in.PrincipalID, in.Operation, in.OperationVersion, in.SubmissionKey); row != nil {
+		if row.finished == 0 {
+			// As the real owner: a reservation is visible only inside its own
+			// transaction, so meeting one is a dispatcher defect.
+			return contract.Payload{}, &contract.Fault{Code: contract.CodeInternalError,
+				Message: "command " + row.ID + " identity is already reserved by an in-flight attempt"}
+		}
 		return payloadJSON(fakeBeginOut{CommandID: row.ID, Existing: row})
 	}
 	id := string(m.ids.New())
 	if _, err := u.ExecContext(ctx, `INSERT INTO evidence_commands
 		(id, principal_id, operation, operation_version, submission_key, request_digest, status)
 		VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		id, in.PrincipalID, in.Operation, in.OperationVersion, in.SubmissionKey, in.RequestDigest, contract.StatusAccepted); err != nil {
+		id, in.PrincipalID, in.Operation, in.OperationVersion, in.SubmissionKey, in.RequestDigest, ""); err != nil {
 		return contract.Payload{}, &contract.Fault{Code: contract.CodeInternalError, Message: err.Error()}
 	}
 	return payloadJSON(fakeBeginOut{CommandID: id})
@@ -393,15 +406,23 @@ func (m *evidenceModule) finish(ctx context.Context, u contract.Unit, inv contra
 	if row == nil {
 		return failPayload(&fakeFault{Code: contract.CodeNotFound, Message: "command not found"}), nil
 	}
+	// As the real owner: the first finish is the disposition; one more finish
+	// is admitted only to replace an accepted pending disposition, once.
+	if row.finished >= 2 || (row.finished == 1 && row.Status != contract.StatusAccepted) {
+		return contract.Payload{}, &contract.Fault{Code: contract.CodeInternalError,
+			Message: "command " + row.ID + " is already finished"}
+	}
+	row.finished++
 	row.Status = in.Result.Status
 	row.Data = in.Result.Data
+	row.ErrorCode = ""
 	if in.Result.Error != nil {
 		row.ErrorCode = in.Result.Error.Code
 	}
 	row.Result = in.Result
 	if _, err := u.ExecContext(ctx, `UPDATE evidence_commands
-		SET status = ?, data = ?, error_code = ?, result = ? WHERE id = ?`,
-		row.Status, row.Data, row.ErrorCode, mustMarshal(row.Result), row.ID); err != nil {
+		SET status = ?, data = ?, error_code = ?, result = ?, finished = ? WHERE id = ?`,
+		row.Status, row.Data, row.ErrorCode, mustMarshal(row.Result), row.finished, row.ID); err != nil {
 		return contract.Payload{}, &contract.Fault{Code: contract.CodeInternalError, Message: err.Error()}
 	}
 	return payloadJSON(struct {
@@ -410,7 +431,7 @@ func (m *evidenceModule) finish(ctx context.Context, u contract.Unit, inv contra
 }
 
 const commandColumns = `id, principal_id, operation, operation_version, submission_key,
-	request_digest, status, data, error_code, result`
+	request_digest, status, data, error_code, result, finished`
 
 func (m *evidenceModule) scanRow(row interface{ Scan(...any) error }) *fakeCommand {
 	var (
@@ -420,7 +441,7 @@ func (m *evidenceModule) scanRow(row interface{ Scan(...any) error }) *fakeComma
 		result []byte
 	)
 	err := row.Scan(&c.ID, &c.PrincipalID, &c.Operation, &opVer, &c.SubmissionKey,
-		&c.RequestDigest, &c.Status, &data, &c.ErrorCode, &result)
+		&c.RequestDigest, &c.Status, &data, &c.ErrorCode, &result, &c.finished)
 	if err != nil {
 		return nil
 	}
@@ -516,6 +537,7 @@ func (m *identityModule) setRevoked(ctx context.Context, db contract.Database, i
 
 type policyModule struct {
 	fakeModule
+	candidates []string
 }
 
 func (m *policyModule) Descriptors() []contract.Descriptor {
@@ -530,12 +552,17 @@ func (m *policyModule) Handle(ctx context.Context, u contract.Unit, inv contract
 		return contract.Payload{}, &contract.Fault{Code: contract.CodeNotFound, Message: "unknown policy operation"}
 	}
 	var in struct {
-		Scope      fakeScope `json:"scope"`
-		Capability string    `json:"capability"`
+		Scope           fakeScope       `json:"scope"`
+		Capability      string          `json:"capability"`
+		Action          json.RawMessage `json:"action,omitempty"`
+		CandidateDigest string          `json:"candidate_digest,omitempty"`
 	}
 	if p, ok := decodeIn(inv, &in); !ok {
 		return p, nil
 	}
+	m.mu.Lock()
+	m.candidates = append(m.candidates, in.Capability+"="+in.CandidateDigest)
+	m.mu.Unlock()
 	out := fakePolicyOut{}
 	out.Resource.Decision = "allow"
 	out.Resource.Reasons = []string{}
@@ -549,7 +576,52 @@ func (m *policyModule) Handle(ctx context.Context, u contract.Unit, inv contract
 			out.Resource.Reasons = []string{}
 		}
 	}
+	if out.Resource.Decision == "review" {
+		// As the real owner: a review names its exact digest, and only a
+		// sealed candidate digest consults the exact review state. Without
+		// one the digest covers capability and scope and nothing satisfies it.
+		digest := in.CandidateDigest
+		if digest == "" {
+			digest = string(contract.Hash(mustMarshal(map[string]any{"capability": in.Capability, "scope": in.Scope})))
+		}
+		expires := "2026-01-02T00:00:00Z"
+		out.Resource.Requirements = []fakeRequirement{{
+			ActionDigest: digest, HumanRequired: true, EligiblePrincipals: []string{testPrincipal}, ExpiresAt: &expires,
+		}}
+		var reviewed string
+		if in.CandidateDigest != "" {
+			_ = u.QueryRowContext(ctx, "SELECT decision FROM policy_reviews WHERE action_digest = ?", in.CandidateDigest).Scan(&reviewed)
+		}
+		switch reviewed {
+		case "approve":
+			out.Resource.Decision = "allow"
+			out.Resource.Reasons = []string{"exact review " + in.CandidateDigest + " is approved"}
+			out.Resource.Requirements = []fakeRequirement{}
+		case "reject":
+			out.Resource.Decision = "deny"
+			out.Resource.Reasons = []string{"exact review " + in.CandidateDigest + " is rejected"}
+			out.Resource.Requirements = []fakeRequirement{}
+		}
+	}
 	return payloadJSON(out)
+}
+
+// decideReview records the eligible decision over one exact digest, the way
+// review.decide would through the reviews owner.
+func (m *policyModule) decideReview(ctx context.Context, db contract.Database, installation contract.ID, digest, decision string) {
+	_ = db.Write(ctx, contract.Actor{PrincipalID: "seeder", Kind: contract.KindService},
+		contract.Scope{InstallationID: installation}, func(u contract.Unit) error {
+			_, err := u.ExecContext(ctx, `INSERT INTO policy_reviews (action_digest, decision) VALUES (?, ?)
+				ON CONFLICT(action_digest) DO UPDATE SET decision = excluded.decision`, digest, decision)
+			return err
+		})
+}
+
+// seenCandidates lists "capability=candidate_digest" for every check so far.
+func (m *policyModule) seenCandidates() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]string(nil), m.candidates...)
 }
 
 func (m *policyModule) setRule(ctx context.Context, db contract.Database, installation contract.ID, capability, decision string, reasons []string) {
@@ -958,7 +1030,7 @@ func (m *businessModule) commandGet(ctx context.Context, u contract.Unit, inv co
 		data, result                             []byte
 	)
 	err := u.QueryRowContext(ctx, `SELECT id, principal_id, operation_version, request_digest, status, data, error_code, result
-		FROM evidence_commands WHERE operation = ? AND submission_key = ?`, in.Operation, in.SubmissionKey).
+		FROM evidence_commands WHERE operation = ? AND submission_key = ? AND finished >= 1`, in.Operation, in.SubmissionKey).
 		Scan(&id, &principal, &opVer, &digest, &status, &data, &errorCode, &result)
 	if err != nil {
 		return failPayload(&fakeFault{Code: contract.CodeNotFound, Message: "command not found"}), nil
@@ -994,6 +1066,8 @@ type fakeLocalIO struct {
 	gate    chan struct{}
 	// failPerform makes Perform return an inspectable artifact fault.
 	failPerform bool
+	// finishFault makes Finish refuse, rolling the Finish transaction back.
+	finishFault *contract.Fault
 	sawOpenTx   atomic.Bool
 	panicMask   atomic.Bool
 }
@@ -1047,6 +1121,9 @@ func (f *fakeLocalIO) Finish(ctx context.Context, u contract.Unit, plan contract
 	f.mu.Unlock()
 	if result.Fault != nil {
 		return contract.Payload{Status: contract.StatusFailed, Data: result.Data, Error: result.Fault}, nil
+	}
+	if f.finishFault != nil {
+		return contract.Payload{}, f.finishFault
 	}
 	if plan.Invocation.Operation == "installation.init" {
 		// The bootstrap transaction must emit at least one scoped event: it

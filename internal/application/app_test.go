@@ -407,9 +407,9 @@ func TestZ14AtomicStateEvent(t *testing.T) {
 				replay, rErr := e.invoke(t, e.actor(), "business.failing", "z14-"+tc.stage, map[string]any{
 					"stage": tc.stage,
 				})
-				if rErr != nil {
-					t.Fatalf("refusal replay: %v", rErr)
-				}
+				// A retained refusal replays exactly as it was first returned:
+				// the failed envelope together with its fault as the error.
+				_ = requireFault(t, rErr, tc.wantCode)
 				if replay.Error == nil || replay.Error.Code != tc.wantCode {
 					t.Fatalf("replayed refusal lost its fault: %+v", replay.Payload)
 				}
@@ -720,21 +720,19 @@ func TestLocalIOMutationLifecycle(t *testing.T) {
 		}
 	})
 
+	// A failed disposition reaches the caller as the failed envelope and its
+	// fault as the error, so a transport maps it to the failure status.
 	t.Run("perform fault finishes as a failed result", func(t *testing.T) {
 		e := newTestEnv(t)
 		e.io.failPerform = true
 		res, err := e.invoke(t, e.actor(), "artifact.upload.finish", "io-fault", map[string]any{})
-		if err != nil {
-			t.Fatalf("io fault must finish as a failed result, got error: %v", err)
-		}
+		_ = requireFault(t, err, contract.CodeArtifactFault)
 		if res.Status != contract.StatusFailed || res.Error.Code != contract.CodeArtifactFault {
 			t.Fatalf("io fault envelope %+v, want failed artifact_fault", res.Payload)
 		}
 		e.io.failPerform = false
 		replay, err := e.invoke(t, e.actor(), "artifact.upload.finish", "io-fault", map[string]any{})
-		if err != nil {
-			t.Fatalf("faulted replay: %v", err)
-		}
+		_ = requireFault(t, err, contract.CodeArtifactFault)
 		if replay.Status != contract.StatusFailed || replay.CommandID != res.CommandID {
 			t.Fatalf("faulted replay envelope %+v, want retained %+v", replay.Payload, res.Payload)
 		}
@@ -744,9 +742,7 @@ func TestLocalIOMutationLifecycle(t *testing.T) {
 		e := newTestEnv(t)
 		e.io.panicMask.Store(true)
 		res, err := e.invoke(t, e.actor(), "artifact.upload.finish", "io-panic", map[string]any{})
-		if err != nil {
-			t.Fatalf("io panic must become a failed result, got error: %v", err)
-		}
+		_ = requireFault(t, err, contract.CodeInternalError)
 		if res.Status != contract.StatusFailed || res.Error.Code != contract.CodeInternalError {
 			t.Fatalf("io panic envelope %+v, want failed internal_error", res.Payload)
 		}
