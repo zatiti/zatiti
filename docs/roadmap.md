@@ -729,6 +729,19 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   lease and was stopped; the leased retry was refused by the hook because
   tests/integration is red on the branch, as designed. The change stays
   uncommitted in the lane's worktree.
+- 2026-09-18 -- descriptor batch B (3657aaf, self-contained internal
+  schemas; registry.New over all 16 real modules returns nil) verified by
+  the lead: race+lint green on accounting/effects/evidence/execution/
+  memory; mutation (accounting delivering a bare input schema again) made
+  TestRealRegistryDrivesApplication fail at bind, restored. Landing
+  ABORTED by design: on main+B, cmd/zatiti goes red because B unmasks the
+  e2e path its landed tests skipped on drift (helpers_test.go:140), and
+  landed bootstrap.go:182 provisions its own controller principal, which
+  conflicts with identity's bootstrap-provisioned one (656527a). The fix
+  (switch to identity.ControllerPrincipal) is uncommitted on wave3/cmd,
+  so B and cmd land together: cmd rebases onto wave3/drift-batchB
+  (ff37ea7 = main + B) and commits there; lead lands that tip. Drift lane
+  done; worktree retired after the combined landing.
 
 ## Planned
 
