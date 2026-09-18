@@ -50,6 +50,9 @@ func (s *Service) bootstrap(ctx context.Context, unit contract.Unit, in bootstra
 	if existing > 0 {
 		return contract.Payload{}, conflict("this installation is already bootstrapped; bootstrap runs exactly once")
 	}
+	if in.Name == ControllerPrincipalName {
+		return contract.Payload{}, invalidInput("the owner cannot take the reserved controller principal name %q", ControllerPrincipalName)
+	}
 	if err := s.assertNameUnique(ctx, unit, in.Name); err != nil {
 		return contract.Payload{}, err
 	}
@@ -100,7 +103,8 @@ func (s *Service) bootstrap(ctx context.Context, unit contract.Unit, in bootstra
 	// installation access: bootstrap grants it the installation-wide wildcard
 	// in the same exclusive transaction, so the human owner can administer
 	// the installation from here on. Every later grant is bounded by current
-	// authority; this is the only grant created outside authorize.
+	// authority; only this grant and the controller's standing grant below
+	// are created outside authorize.
 	root := grantRow{
 		ID:            contract.ID(s.deps.IDs.New()),
 		Version:       1,
@@ -125,6 +129,12 @@ func (s *Service) bootstrap(ctx context.Context, unit contract.Unit, in bootstra
 		return contract.Payload{}, err
 	}
 	if err := emitTransition(ctx, unit, eventCredProvisioned, cred.ID, 1); err != nil {
+		return contract.Payload{}, err
+	}
+	// The scoped service identity the brief assigns to the same exclusive
+	// transaction: the controller's principal and its standing authority
+	// (see service_principal.go).
+	if err := s.createControllerPrincipal(ctx, unit, in.InstallationID, now); err != nil {
 		return contract.Payload{}, err
 	}
 	if err := emitTransition(ctx, unit, eventBootstrap, owner.ID, 1); err != nil {

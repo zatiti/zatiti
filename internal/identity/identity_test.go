@@ -237,12 +237,16 @@ func TestBootstrapRunsOnce(t *testing.T) {
 		InstallationID: env.inst,
 	}, contract.CodeConflict)
 
-	// Metadata only: exactly one principal and one credential exist after the
-	// refused replay.
-	var principals, credentials int64
+	// Metadata only: exactly one human owner, one controller service
+	// principal and one credential exist after the refused replay.
+	var humans, services, credentials int64
 	err := env.db.Read(context.Background(), bootActor, contract.Scope{InstallationID: env.inst}, func(unit contract.Unit) error {
 		if err := unit.QueryRowContext(context.Background(),
-			`SELECT COUNT(*) FROM identity_principals WHERE installation_id = ?`, string(env.inst)).Scan(&principals); err != nil {
+			`SELECT COUNT(*) FROM identity_principals WHERE installation_id = ? AND kind = 'human'`, string(env.inst)).Scan(&humans); err != nil {
+			return err
+		}
+		if err := unit.QueryRowContext(context.Background(),
+			`SELECT COUNT(*) FROM identity_principals WHERE installation_id = ? AND kind = 'service'`, string(env.inst)).Scan(&services); err != nil {
 			return err
 		}
 		return unit.QueryRowContext(context.Background(),
@@ -251,8 +255,8 @@ func TestBootstrapRunsOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if principals != 1 || credentials != 1 {
-		t.Fatalf("bootstrap replay changed state: %d principals, %d credentials", principals, credentials)
+	if humans != 1 || services != 1 || credentials != 1 {
+		t.Fatalf("bootstrap replay changed state: %d humans, %d service principals, %d credentials", humans, services, credentials)
 	}
 }
 

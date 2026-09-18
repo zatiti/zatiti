@@ -281,9 +281,10 @@ func TestGrantListPagination(t *testing.T) {
 	env := newTestEnv(t)
 	install := contract.Scope{InstallationID: env.inst}
 	target := env.mustCreatePrincipal("Paged", contract.KindService)
-	// Five grants plus the owner's bootstrap root grant make six rows: three
-	// full pages of two.
-	for i := 0; i < 5; i++ {
+	// Four grants plus the two bootstrap grants (the owner's root grant and
+	// the controller's standing grant) make six rows: three full pages of
+	// two.
+	for i := 0; i < 4; i++ {
 		env.mustGrant(target.ID, install, []string{"principal.get"}, []string{})
 	}
 	payload := env.mustCall(env.owner, opGrantList, listInput{

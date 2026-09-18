@@ -19,4 +19,13 @@
 // of an older database backup cannot resurrect authority the installation
 // revoked. Authentication rechecks revocation and expiry on every request;
 // principal kind is immutable and revoked entities cannot be un-revoked.
+//
+// Bootstrap creates the human owner and, in the same exclusive transaction,
+// the controller's scoped service principal (ControllerPrincipalName) with
+// the one standing grant the internal dispatch path checks, so the trusted
+// local controller can run application.Internal calls from the first tick.
+// Local entrypoint assembly resolves that actor through
+// Service.ControllerPrincipal, the way it resolves the owner credential
+// through the installation module; the actor has no credential and no
+// operation exposes it as such.
 package identity
