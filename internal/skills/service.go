@@ -20,7 +20,7 @@ type opMeta struct {
 	submission      bool
 	expectedVersion bool
 	callers         []string
-	cli             string // "zatiti ..." CLI path; empty for internal operations
+	cli             string // CLI tokens below the root command, space separated; empty for internal operations
 	completion      bool   // declares the eventual result schema of an asynchronous operation
 }
 
@@ -34,12 +34,12 @@ var opMetas = []opMeta{
 		callers: []string{"configuration", "application"}},
 
 	// skill.*
-	{id: "skill.archive", visibility: "public", mode: "mutation", submission: true, expectedVersion: true, cli: "zatiti skill archive"},
-	{id: "skill.evaluate", visibility: "public", mode: "mutation", submission: true, completion: true, cli: "zatiti skill evaluate"},
-	{id: "skill.evaluation.status", visibility: "public", mode: "query", cli: "zatiti skill evaluation status"},
-	{id: "skill.get", visibility: "public", mode: "query", cli: "zatiti skill get"},
-	{id: "skill.import", visibility: "public", mode: "mutation", submission: true, completion: true, cli: "zatiti skill import"},
-	{id: "skill.list", visibility: "public", mode: "query", cli: "zatiti skill list"},
+	{id: "skill.archive", visibility: "public", mode: "mutation", submission: true, expectedVersion: true, cli: "skill archive"},
+	{id: "skill.evaluate", visibility: "public", mode: "mutation", submission: true, completion: true, cli: "skill evaluate"},
+	{id: "skill.evaluation.status", visibility: "public", mode: "query", cli: "skill evaluation status"},
+	{id: "skill.get", visibility: "public", mode: "query", cli: "skill get"},
+	{id: "skill.import", visibility: "public", mode: "mutation", submission: true, completion: true, cli: "skill import"},
+	{id: "skill.list", visibility: "public", mode: "query", cli: "skill list"},
 }
 
 // Service is the skills domain owner: immutable skill versions, safe import
