@@ -127,3 +127,53 @@ func (f *fixture) command(op, key string) (retainedCommand, error) {
 	decode(f.t, res.Data, &out)
 	return out.Resource, nil
 }
+
+// principalRow is the public projection of a principal.
+type principalRow struct {
+	ID    contract.ID    `json:"id"`
+	Kind  string         `json:"kind"`
+	Name  string         `json:"name"`
+	Scope contract.Scope `json:"scope"`
+}
+
+// principals lists every principal of the installation.
+func (f *fixture) principals() []principalRow {
+	f.t.Helper()
+	res := f.must(f.owner, "principal.list", "", map[string]any{"scope": f.scope(), "limit": 200})
+	var out struct {
+		Items []principalRow `json:"items"`
+	}
+	decode(f.t, res.Data, &out)
+	return out.Items
+}
+
+// expectPrincipals asserts the installation holds exactly the bootstrap
+// pair, the human owner and the controller's scoped service principal
+// (internal/identity/service_principal.go), plus the named client agents.
+func (f *fixture) expectPrincipals(agents ...string) {
+	f.t.Helper()
+	want := map[string]string{"Integration Owner": contract.KindHuman, "controller": contract.KindService}
+	for _, a := range agents {
+		want[a] = contract.KindClientAgent
+	}
+	rows := f.principals()
+	got := map[string]string{}
+	for _, r := range rows {
+		if r.Scope.InstallationID != f.installationID {
+			f.t.Errorf("principal %s %q is scoped to installation %s", r.Kind, r.Name, r.Scope.InstallationID)
+		}
+		if _, dup := got[r.Name]; dup {
+			f.t.Errorf("principal name %q appears twice", r.Name)
+		}
+		got[r.Name] = r.Kind
+	}
+	if len(got) != len(want) {
+		f.t.Errorf("principals %v, want exactly %v", got, want)
+		return
+	}
+	for name, kind := range want {
+		if got[name] != kind {
+			f.t.Errorf("principal %q kind %q, want %q (all: %v)", name, got[name], kind, got)
+		}
+	}
+}

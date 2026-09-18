@@ -265,7 +265,5 @@ func TestConcurrentDuplicateSubmissionsSerialize(t *testing.T) {
 	if len(commands) != 1 {
 		t.Fatalf("concurrent duplicates resolved to %d commands, want one: %v", len(commands), commands)
 	}
-	if n := f.count("principal.list", map[string]any{"scope": f.scope()}); n != 2 {
-		t.Fatalf("concurrent duplicates left %d principals, want the owner and one agent", n)
-	}
+	f.expectPrincipals("concurrent-agent")
 }

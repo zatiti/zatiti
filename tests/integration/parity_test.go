@@ -21,7 +21,7 @@ func parityScript(f *fixture) []call {
 		{name: "mutation", op: "principal.create", key: "parity-1", input: principal("parity-agent")},
 		{name: "identical replay", op: "principal.create", key: "parity-1", input: principal("parity-agent")},
 		{name: "changed input under the same key", op: "principal.create", key: "parity-1", input: principal("parity-other")},
-		{name: "list after mutation", op: "principal.list", input: map[string]any{"scope": f.scope()}},
+		{name: "list after mutation", op: "principal.list", input: map[string]any{"scope": f.scope()}, instanceOnly: true},
 		{name: "missing resource", op: "principal.get", input: map[string]any{"scope": f.scope(), "id": "00000000-0000-4000-8000-00000000dead"}},
 		{name: "stale version", op: "installation.pause", key: "parity-2", input: map[string]any{"scope": f.scope(), "expected_version": 41}},
 		{name: "schema violation", op: "principal.get", input: map[string]any{"scope": f.scope()}},
@@ -50,6 +50,10 @@ type parityRun struct {
 	codes     []string
 	commands  []contract.ID
 	signals   []string
+	// sameInstance holds, per step, the in-process application's envelope
+	// for the same query on the same instance, taken right after the
+	// transport's own call.
+	sameInstance []string
 }
 
 // runParity prepares one isolated fixture, serves it, and runs the script
@@ -62,11 +66,33 @@ func runParity(t *testing.T, build func(t *testing.T, f *fixture) transport) par
 	norm := newNormalizer()
 	// Seed the explicit mapping with the identities every fixture generates
 	// before the script starts, so first-seen order matches across fixtures.
+	// The owner and the controller service principal are seeded in the order
+	// this instance lists them: bootstrap inserts both in one transaction, so
+	// they share a created_at tick and principal.list (internal/identity/
+	// principal_ops.go:183, ORDER BY created_at, id) breaks the tie on the
+	// random id, an order that is stable per installation but differs across
+	// installations. A list step therefore compares against the in-process
+	// application on the same instance (instanceOnly), which is the parity
+	// claim itself: the same state through different transports.
 	norm.value(string(f.installationID))
-	norm.value(string(f.owner.PrincipalID))
+	for _, p := range f.principals() {
+		norm.value(string(p.ID))
+	}
 	run := parityRun{transport: tr.name()}
+	app := applicationTransport{f: f}
 	for _, c := range parityScript(f) {
 		out := tr.run(t, c)
+		same := ""
+		if c.instanceOnly {
+			// A query mints a fresh, non-durable command identity per call
+			// (frozen contract: "Query command IDs need not be durable"), so
+			// the two calls compare without it.
+			out.envelope.CommandID = ""
+			twin := app.run(t, c).envelope
+			twin.CommandID = ""
+			same = norm.envelope(t, twin)
+		}
+		run.sameInstance = append(run.sameInstance, same)
 		if out.envelope.CommandID == "" && out.code != "" {
 			// A transport renders a refusal as a failed envelope with its own
 			// command identity (internal/server writeFault); the in-process
@@ -103,14 +129,16 @@ func servedOperator(t *testing.T, f *fixture) contract.Operator {
 
 // TestTransportParity (Z02, R12-004): the same operations through the
 // in-process application, internal/client over internal/server's Unix
-// socket, internal/cli over that client, and internal/mcp with a real go-sdk
-// client over that client produce equivalent result envelopes, error codes
-// and submission-key semantics on isolated matching fixtures.
+// socket, the desktop-side raw wire driver over that socket, internal/cli
+// over the client, and internal/mcp with a real go-sdk client over the
+// client produce equivalent result envelopes, error codes and
+// submission-key semantics on isolated matching fixtures.
 func TestTransportParity(t *testing.T) {
 	t.Parallel()
 	builders := []func(t *testing.T, f *fixture) transport{
 		func(t *testing.T, f *fixture) transport { return applicationTransport{f: f} },
 		func(t *testing.T, f *fixture) transport { return clientTransport{op: servedOperator(t, f)} },
+		func(t *testing.T, f *fixture) transport { return wireTransport{sock: f.serve(), token: transportToken} },
 		func(t *testing.T, f *fixture) transport {
 			return cliTransport{op: servedOperator(t, f), descs: f.catalog.Public()}
 		},
@@ -145,6 +173,13 @@ func TestTransportParity(t *testing.T) {
 	for _, run := range runs {
 		for i, c := range script {
 			if run.transport == "application" && run.codes[i] != "" {
+				continue
+			}
+			if c.instanceOnly {
+				if run.envelopes[i] != run.sameInstance[i] {
+					t.Errorf("%s: %s: envelope differs from the application on the same instance\n  application: %s\n  %s: %s",
+						run.transport, c.name, run.sameInstance[i], run.transport, run.envelopes[i])
+				}
 				continue
 			}
 			if run.envelopes[i] != base.envelopes[i] {

@@ -173,9 +173,7 @@ func TestBootstrapRunsExactlyOnce(t *testing.T) {
 	if after := f.eventCount(); after != before {
 		t.Fatalf("refused bootstrap changed the event log from %d to %d events", before, after)
 	}
-	if n := f.count("principal.list", map[string]any{"scope": f.scope()}); n != 1 {
-		t.Fatalf("refused bootstrap left %d principals, want the single owner", n)
-	}
+	f.expectPrincipals()
 	// The application still resolves the original installation.
 	f.must(f.owner, "installation.status", "", map[string]any{"scope": f.scope()})
 }
@@ -232,7 +230,5 @@ func TestRestartKeepsStateAndAdvancesGeneration(t *testing.T) {
 	if replay.CommandID != created.CommandID {
 		t.Fatalf("replay after restart returned command %s, the original was %s", replay.CommandID, created.CommandID)
 	}
-	if n := g.count("principal.list", map[string]any{"scope": g.scope()}); n != 2 {
-		t.Fatalf("restart left %d principals, want the owner and one agent", n)
-	}
+	g.expectPrincipals("restart-agent")
 }

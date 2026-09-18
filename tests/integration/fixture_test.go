@@ -69,10 +69,10 @@ func (uuidSource) New() contract.ID { return contract.NewID() }
 
 // recordingSecrets decorates the real platform secret store. It changes no
 // behavior: it only remembers which opaque reference each key was custodied
-// under, because no exported production API returns the bootstrap owner
-// credential reference to the local operator: installation.init returns
-// metadata only, contract.SecretStore has no lookup by key, and the platform
-// key index is unexported.
+// under, so the fixture can read the owner credential back the way the
+// local trusted helper does. installation.Service.OwnerCredential is the
+// production seam for the same lookup; switching the fixture to it is a
+// slice-2 change.
 type recordingSecrets struct {
 	inner contract.SecretStore
 	mu    sync.Mutex

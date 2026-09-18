@@ -96,6 +96,11 @@ type call struct {
 	op    string
 	key   string
 	input any
+	// instanceOnly marks a step whose envelope is compared against the
+	// in-process application on the same instance instead of across
+	// instances: its content depends on an order the product does not fix
+	// across installations (see runParity).
+	instanceOnly bool
 }
 
 // outcome is what one transport delivered for one call: the result envelope

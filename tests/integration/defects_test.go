@@ -238,7 +238,6 @@ func TestBootstrapOwnerCredentialCrossesSocket(t *testing.T) {
 		Schema: contract.SchemaRequest, Input: mustJSON(map[string]any{"scope": f.scope()}),
 	})
 	if err == nil {
-		t.Log("this run's random owner credential happened to be a valid header value; the defect is probabilistic (about 1 run in 80 passes)")
 		return
 	}
 	skipKnownDefect(t,
@@ -341,4 +340,17 @@ func TestLandedDescriptorsDeliverOneSchemaForm(t *testing.T) {
 			"returns them unmerged from Lookup, internal/application/dispatch.go:91 validates the delivered schema as-is, eleven domains "+
 			"deliver self-contained documents and five deliver bare ones whose $refs cannot resolve at the dispatcher",
 		fmt.Sprintf("bare descriptors by owner %v; self-contained by owner %v. moduleCatalog merges the frozen shared $defs for the bare ones", bare, selfContained))
+}
+
+// TestBackupRestoresActualBytes (Z14 paused clean restore; R2.3-002 step 6):
+// installation.backup through the real application produces a verified
+// bundle whose database bytes come from the real storage backup, and a
+// restore of that bundle starts paused with the same state. The assembly
+// must bind installation.WithDatabaseBackup to a backup-only wrapper over
+// the opened Database exactly as cmd/zatiti does.
+func TestBackupRestoresActualBytes(t *testing.T) {
+	t.Parallel()
+	t.Skip("PLANNED (not a pass): installation.WithDatabaseBackup and contract.DatabaseBackup are specified in the revision-2 " +
+		"contract but not landed in Go (cmd/zatiti/assembly.go:67-77 carries the same pending binding); the fixture cannot bind a " +
+		"backup capability without inventing the option, so installation.backup fails prerequisite_missing today")
 }
