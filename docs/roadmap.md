@@ -713,6 +713,22 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   byte-identical; module-wide suite green on the rebased tip. Throwaway
   worktree and branch wave3/drift-batchA removed. cmd/zatiti told to
   rebase onto 255f0dd; drift lane continues batch B unrebased.
+- 2026-09-18 -- integration slice 1 re-verified on main 9e1c302 (branch
+  rebased to cebf802): 6 FAIL, 21 PASS, 5 SKIP. All six are the suite
+  lagging landed fixes, not new product defects: two "step past" tests
+  add SubmissionKey to internal mutations, which validate.go:82 now
+  rejects (obsolete since 3926941); three assert one bootstrap principal
+  where 656527a now provisions the controller service principal too; and
+  TestTransportParity finds principal.list ordering (created_at, id)
+  ties between the owner and the controller principal created in one
+  tick, broken by random id per instance. Lane resumed with the
+  diagnosis (scratchpad brief-integration-resume.md); it decides whether
+  the parity harness or identity's ordering changes and reports any
+  identity fix as a seam defect. Lead process note: the lead's first
+  commit of the matcher change ran the pre-commit hook without the build
+  lease and was stopped; the leased retry was refused by the hook because
+  tests/integration is red on the branch, as designed. The change stays
+  uncommitted in the lane's worktree.
 
 ## Planned
 
