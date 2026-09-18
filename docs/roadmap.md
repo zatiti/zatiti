@@ -6,26 +6,30 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
 
 ## Parallel dispatch protocol
 
-- At most two heavy lanes (isolated worktree + implementing agent) run
-  concurrently against this repo at a time; a third package waits in queue
-  until one of the two lands or is explicitly dropped.
-- Any module-wide build/vet/test/race run (including the pre-commit hook's
-  `go test ./...`) is claimed under `R-build-lease` (the `/claim` skill)
-  before it runs and released unconditionally after, success or fail.
-- A lane's worktree and branch (`wave2/<package>`) are not deleted while
-  the lane is open. If a dispatched lane goes quiet (no live process
-  against its worktree, no active `kazi status` run) for longer than
-  roughly 2 hours, the integration lead treats it as stalled per the
-  effects/execution precedent below: it re-dispatches into the SAME
-  worktree and branch, briefing the new agent with the exact file
-  inventory already on disk, and requires that agent to read and build on
-  those files rather than discard or rewrite them from scratch. A
-  restart-from-scratch is only acceptable if the existing files
-  contradict the package's committed AGENTS.md.
-- Queue order for the current wave-2 tail (9 packages) is fixed:
-  memory, artifacts (dispatched) then evidence, installation, server, cli,
-  mcp, adapters/github, adapters/httpread, in that order, each entering
-  the two-lane cap as a slot frees.
+- Lanes run in isolated worktrees with disjoint write roots. The lane cap
+  is a budget decision, not a fixed two: ten concurrent lanes on this
+  4-core laptop exhausted the account session limit in ~25 minutes and
+  drove load past 130 (2026-09-18). Eight is the practical ceiling;
+  critical-path lanes first.
+- One heavy run machine-wide at a time. Every module-wide command, every
+  `go test -race` (package-level included), every `flutter test` /
+  `flutter build`, and every `git commit` (the hook runs module-wide
+  tests) goes through the lease wrapper as ONE foreground command:
+  `with-lease.sh "<lane>: <what>" <command>`. It claims `R-build-lease`,
+  runs, and always releases. Never call claim.sh directly and never claim
+  from a monitor or background task: a lane's monitor once held the lease
+  idle for 21 minutes while everything queued behind it. `-p 2` on every
+  go invocation.
+- The "hold when 1-minute load > 10" rule in the founder's global
+  instructions is written for the Mac mini. On the laptop the lease is the
+  throttle (founder-confirmed for the wave-3 push, 2026-09-18). Agents
+  will not accept a relayed waiver, correctly; point them at the rule's
+  own scope and `hostname`.
+- Lanes commit early slices. A stalled or limit-killed lane is resumed by
+  message into the SAME worktree with its on-disk inventory; never
+  restarted from scratch unless the files contradict the brief.
+- The lead lands every lane: independent build/vet/gofmt/lint/race, its
+  own mutation red->green, rebase, ff-merge, module-wide verify.
 
 ## Shipped
 
@@ -381,6 +385,39 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   (capability report: all six kinds unsupported). Memory stays
   effectively offline in v1 until Serenity ships those capabilities --
   a product-level consequence for David, not a lane bug.
+- 2026-09-18 -- SPEC REVISION 2 LANDED (731a3bd, cdffb45, 1b9534c): 36
+  roots (apps/desktop Flutter client replaces internal/desktop and
+  cmd/zatiti-desktop; all 9 owned requirements, 27 participant blocks and
+  16 named cases carried over, nothing orphaned), request_context retyped
+  to ArtifactLocator (adapters stage the request record; the controller
+  publishes and substitutes), and the installation database seam as a
+  one-method contract.DatabaseBackup supplied only through
+  installation.WithDatabaseBackup. Lead verified: zero Go touched, nothing
+  outside the spec write scope, render --check green, 13 renderer tests
+  pass. Renderer gained a RETIRED-roots deletion path. Go follow-ups NOT
+  yet dispatched: (a) internal/contract DatabaseBackup + installation
+  option and real streamed-hash backup path + cmd/zatiti wrapper; (b)
+  request_context in github, httpread, responses, serenity, memory,
+  execution (controller lane already briefed); (c) remove the Fyne pins
+  from go.mod/go.sum/tools_deps.go and the lock report, record
+  Flutter/Dart/plugin pins. Open ruling: nothing in the contract names
+  who swaps the database file during a restore. Spec nit to fix in
+  revision 3: every AGENTS.md prints CLI paths with the binary name
+  (`zatiti artifact export`), which is where 11 modules got the wrong
+  descriptor token shape.
+- 2026-09-18 -- registry-seam: fix written and green on named tests
+  (internal mutations keyless, Callers = owner names, Lookup(id,0) =
+  highest version, LocalIOFor, both schema forms accepted), real registry
+  + 16 real modules + real application drive installation.init and public
+  mutations in its assembly test; waiting on the lease to commit.
+  descriptor-drift: 143 public drift errors fixed in tree with a permanent
+  per-package catalog pin test; scope extended to 8 internal
+  ExpectedVersion flags and to five modules (accounting, memory, effects,
+  execution, evidence) shipping bare internal schemas whose owner-private
+  $defs nothing can resolve. schemaref-port: accounting committed
+  (19d4fdf), execution fix written. responses: committing. serenity:
+  committed f1cdfbf, lead-verified (pin facts checked against the real
+  source; overclaim fence proven load-bearing), merge queued on the lease.
 
 ## Planned
 
