@@ -65,6 +65,15 @@ class SpecificationIntegrity(unittest.TestCase):
         with patch.object(render,'P',packages), self.assertRaises(AssertionError):
             render.validate(self.requirements,self.acceptance,self.adapters)
 
+    def test_constructor_override_must_extend_domain_constructor(self):
+        packages=copy.deepcopy(render.P)
+        next(p for p in packages if p['kind']=='domain')['constructor']='New(contract.Database) (*Service,error)'
+        with patch.object(render,'P',packages), self.assertRaisesRegex(AssertionError,'constructor override'):
+            render.validate(self.requirements,self.acceptance,self.adapters)
+        for p in render.P:
+            if p.get('constructor'):
+                self.assertIn('Expose `'+p['constructor']+'`',(render.ROOT/p['path']/'AGENTS.md').read_text())
+
     def test_live_root_overlapping_retired_root_refuses_render(self):
         self.assertTrue(render.RETIRED)
         for path in (render.RETIRED[0],render.RETIRED[0]+'/child'):
