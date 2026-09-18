@@ -502,6 +502,40 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
 - 2026-09-18 -- execution $ref port landed (b10d4a6 accounting, 7a4d2b3
   execution); serenity revision-2 conversion landed (23f6205): main is
   GREEN again.
+- 2026-09-18 -- CONTROLLER LANDED (c7d32c7 core, 9d1afcd revision-2
+  request-context publication), 29 of 36. Lead mutation check: without
+  the write-ahead "claimed" journal marker, crash recovery recorded a
+  possibly-sent effect as not_sent (TestCrashAtEveryBoundaryNeverResends
+  red), restored. Landing script verified race (67s), lint 0, module-wide
+  green. cmd/zatiti lane dispatched (wave3/cmd) with the assembly brief:
+  the end-to-end test (build the binary, serve on a temp socket, init,
+  principal.create + replay, list, MCP over stdio) is the milestone.
+- 2026-09-18 -- Flutter first increment complete on wave3/flutter-desktop
+  (9 commits, tip 1ac1e3c; landing queued). Lane-verified and
+  lead-verified: format 0 changes, analyze 0 issues, 150 tests pass,
+  `flutter build macos --debug` builds (sandbox off, documented
+  unqualified). Real: strict-JSON transport over Unix socket and mutual
+  TLS, one submission key per mutation reused on explicit retry, never
+  auto-resends, unknown acknowledgment locks until command.get; typed
+  models for 17 resources; live source over 21 operations with a
+  capabilities.list check at connect; full UI per the design with dark/
+  light, scaling, keyboard, semantics. Demo-only: the labeled in-memory
+  source. NOT proven: any exchange with the real Go controller, mutual
+  TLS against internal/server, Linux/Windows builds, secure storage at
+  run time, assistive technology. Brief conflicts deferred to the next
+  increment (brief wins): generated bindings + catalog digest check,
+  secure-storage drafts, restored selection on relaunch, named
+  prerequisite when secure storage is unavailable. Covers parts of
+  Z21.exact_decision, Z21.reconnect_no_duplicate,
+  Z21.hierarchy_navigation, Z21.capability_and_pause_cards; not
+  Z21.first_conversation, two_child_chiefs, delegate_work, close_client,
+  JOURNEY.desktop_daily_work.
+- 2026-09-18 -- integration slice 1 lead-verified (16 pass, 16 skipped
+  with evidence, lint clean), committed on the lane's behalf, landing
+  queued. edge-seams on-disk work (client lookup, server status mapping,
+  configuration candidate digest + bootstrap event, header-legal owner
+  credential) builds, vets, and passes all four package race suites;
+  one lint issue outstanding; _reviews.ensure at plan time not started.
 
 ## Planned
 
