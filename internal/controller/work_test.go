@@ -444,6 +444,158 @@ func TestOutcomeDeliveryToOwners(t *testing.T) {
 	})
 }
 
+const contextDigest = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+
+// revision2Evidence is the adapter handoff of specification revision 2: the
+// exact request record staged before sending, named by
+// physical_call.request_context as a staged locator with one matching
+// StagedOutput of purpose context, plus an optional response body.
+func revision2Evidence(withResponse bool) map[string]any {
+	context := map[string]any{"kind": "staged", "staging_ref": "staged:request", "digest": contextDigest}
+	staged := []any{map[string]any{
+		"staging_ref": "staged:request", "digest": contextDigest, "size": 512,
+		"media_type": "application/json", "classification": "internal", "purpose": "context",
+	}}
+	evidence := map[string]any{
+		"schema": "zatiti.synthetic.evidence/v1",
+		"physical_call": map[string]any{
+			"request_context": context, "request_sent": "yes", "confirmation": "authoritative_success",
+		},
+		"output":           map[string]any{"request_context": context, "text_outputs": []any{}},
+		"output_artifacts": []any{},
+	}
+	if withResponse {
+		staged = append(staged, map[string]any{
+			"staging_ref": "staged:response", "digest": stagedDigest, "size": 42,
+			"media_type": "text/plain", "classification": "internal", "purpose": "provider_response",
+		})
+		evidence["output"].(map[string]any)["text_outputs"] = []any{
+			map[string]any{"kind": "staged", "staging_ref": "staged:response", "digest": stagedDigest},
+		}
+	}
+	evidence["staged_outputs"] = staged
+	return evidence
+}
+
+// Revision 2 request context: the staged request record is published with
+// every other staged output for every disposition, the delivered evidence
+// carries the artifact variant everywhere the staged locator appeared, and
+// the raw recorded observation is untouched.
+func TestRequestContextIsPublishedForEveryDisposition(t *testing.T) {
+	for _, disposition := range []string{contract.DispositionSucceeded, contract.DispositionNotSent, contract.DispositionUnknown} {
+		t.Run(disposition, func(t *testing.T) {
+			f := newFx(t)
+			blobs := newFakeBlobs()
+			f.blobs = blobs
+			provider := f.adapter("synthetic")
+			provider.reply = func(context.Context, contract.Dispatch) (contract.Observation, error) {
+				obs := succeeded(revision2Evidence(disposition == contract.DispositionSucceeded))
+				obs.Disposition = disposition
+				return obs, nil
+			}
+			attempt := contract.NewID()
+			op := f.prepare("synthetic", map[string]any{"attempt_id": attempt})
+			c, sess := f.started()
+			for i := 0; i < 2; i++ {
+				if err := f.pass(c, sess); err != nil {
+					t.Fatalf("tick: %v", err)
+				}
+			}
+			wantPublished := 1
+			if disposition == contract.DispositionSucceeded {
+				wantPublished = 2
+			}
+			if blobs.count() != wantPublished || f.called("_artifacts.publish") != wantPublished {
+				t.Fatalf("published %d blobs and %d metadata rows, want %d", blobs.count(), f.called("_artifacts.publish"), wantPublished)
+			}
+			contextArtifact := f.queryString(`SELECT id FROM artifacts_items WHERE digest = ?`, contextDigest)
+			raw := f.queryString(`SELECT evidence FROM effects_observations WHERE operation_id = ?`, string(op))
+			if !containsAny(raw, `"staging_ref":"staged:request"`) || containsAny(raw, contextArtifact) {
+				t.Fatalf("raw recorded observation was rewritten: %s", raw)
+			}
+			delivered := f.queryString(`SELECT evidence FROM execution_observations WHERE operation_id = ?`, string(op))
+			var got struct {
+				PhysicalCall struct {
+					RequestContext map[string]any `json:"request_context"`
+				} `json:"physical_call"`
+				Output struct {
+					RequestContext map[string]any `json:"request_context"`
+				} `json:"output"`
+				Staged []any `json:"staged_outputs"`
+			}
+			if err := json.Unmarshal([]byte(delivered), &got); err != nil {
+				t.Fatalf("delivered evidence %s: %v", delivered, err)
+			}
+			for name, locator := range map[string]map[string]any{"physical_call": got.PhysicalCall.RequestContext, "output": got.Output.RequestContext} {
+				artifact, _ := locator["artifact"].(map[string]any)
+				if locator["kind"] != "artifact" || artifact["id"] != contextArtifact || artifact["digest"] != contextDigest {
+					t.Fatalf("%s.request_context was not substituted: %v", name, locator)
+				}
+			}
+			if len(got.Staged) != 0 || containsAny(delivered, `"kind":"staged"`) {
+				t.Fatalf("delivered evidence still names staged bytes: %s", delivered)
+			}
+			if f.queryString(`SELECT disposition FROM execution_observations WHERE operation_id = ?`, string(op)) != disposition {
+				t.Fatal("delivered disposition changed")
+			}
+		})
+	}
+}
+
+// A staged locator that names no staged output, or a staged output declared
+// twice, refuses publication: nothing is published, nothing is delivered,
+// and the raw observation stays recorded as the provider's evidence.
+func TestUnresolvableStagedLocatorIsRefused(t *testing.T) {
+	cases := []struct {
+		name  string
+		shape func() map[string]any
+	}{
+		{"locator without a staged output", func() map[string]any {
+			e := revision2Evidence(false)
+			e["staged_outputs"] = []any{}
+			return e
+		}},
+		{"locator digest differs from the staged output", func() map[string]any {
+			e := revision2Evidence(false)
+			e["physical_call"].(map[string]any)["request_context"].(map[string]any)["digest"] = stagedDigest
+			return e
+		}},
+		{"staged output declared twice", func() map[string]any {
+			e := revision2Evidence(false)
+			s := e["staged_outputs"].([]any)
+			e["staged_outputs"] = append(s, s[0])
+			return e
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFx(t)
+			blobs := newFakeBlobs()
+			f.blobs = blobs
+			provider := f.adapter("synthetic")
+			provider.reply = func(context.Context, contract.Dispatch) (contract.Observation, error) {
+				return succeeded(tc.shape()), nil
+			}
+			op := f.prepare("synthetic", map[string]any{"attempt_id": contract.NewID()})
+			c, sess := f.started()
+			for i := 0; i < 3; i++ {
+				if err := f.pass(c, sess); err != nil {
+					t.Fatalf("tick: %v", err)
+				}
+			}
+			if f.opState(op) != "succeeded" || provider.calls() != 1 {
+				t.Fatalf("raw record must stand: state %s calls %d", f.opState(op), provider.calls())
+			}
+			if blobs.count() != 0 || f.called("_artifacts.publish") != 0 || f.called("_execution.observation") != 0 {
+				t.Fatalf("published %d, metadata %d, delivered %d; all must be 0", blobs.count(), f.called("_artifacts.publish"), f.called("_execution.observation"))
+			}
+			if got := obligationKinds(c.Status()); !reflect.DeepEqual(got, []string{"publication:invalid_input"}) {
+				t.Fatalf("obligations %v", got)
+			}
+		})
+	}
+}
+
 func TestJournalDurability(t *testing.T) {
 	dir := t.TempDir()
 	if resolved, err := filepath.EvalSymlinks(dir); err == nil {

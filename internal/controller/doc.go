@@ -21,11 +21,24 @@
 // awaiting confirmation or outcome_unknown are left to a separately admitted
 // reconciliation.
 //
-// After the record, staged adapter outputs are published outside any
-// transaction and committed through _artifacts.publish, and the normalized
-// observation is delivered to the waiting owner (_execution.observation,
-// _memory.record, _connections.validation.record). The journal is the
-// deduplicated outbox for those callbacks.
+// After the record, every staged adapter output — the staged request context
+// named by physical_call.request_context included, whatever the disposition
+// — is published outside any transaction and committed through
+// _artifacts.publish; each staged locator becomes the published artifact
+// reference in the normalized observation delivered to the waiting owner
+// (_execution.observation, _memory.record, _connections.validation.record).
+// A staged locator that names no staged output, or more than one, refuses
+// publication as an obligation; the raw recorded observation is never
+// rewritten. The journal is the deduplicated outbox for those callbacks.
+//
+// # Database
+//
+// The controller never hands its contract.Database, or any capability over
+// it, to a module. A backup or restore job is only the invocation of the
+// installation owner's own plan through an attached JobRunner; a plan that
+// reports prerequisite_missing for the database backup capability is
+// recorded as a failed job with that requirement, never substituted by a
+// controller-side file copy.
 //
 // # Shutdown
 //

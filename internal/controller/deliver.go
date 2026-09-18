@@ -49,10 +49,12 @@ func routeFor(operation contract.ID, action wireAction, jobs map[contract.ID]wir
 	return &route{}
 }
 
-// deliver finishes a recorded effect: publish the staged outputs, then hand
-// the normalized observation to the waiting owner. The raw observation is
-// already durable with the effects owner, so nothing here can erase it and a
-// failure here never authorizes another provider call.
+// deliver finishes a recorded effect: publish the staged outputs — the
+// adapter's staged request context among them, for every disposition
+// including not_sent and unknown — then hand the normalized observation to
+// the waiting owner. The raw observation is already durable with the effects
+// owner and is never rewritten, so nothing here can erase it and a failure
+// here never authorizes another provider call.
 func (c *Controller) deliver(ctx context.Context, sess *session, e *entry) {
 	normalized, ok := c.publish(ctx, sess, e)
 	if !ok {
@@ -137,6 +139,12 @@ func (c *Controller) publish(ctx context.Context, sess *session, e *entry) (cont
 	staged, err := stagedOutputs(obs.Evidence)
 	if err != nil {
 		c.refuse(sess, e, obligationPublication, invalidInput("observation evidence declares malformed staged outputs"))
+		return obs, false
+	}
+	if err := checkLocators(obs.Evidence, staged); err != nil {
+		// The raw observation stands as recorded; evidence whose locators
+		// cannot be resolved is never delivered as if it were published.
+		c.refuse(sess, e, obligationPublication, err)
 		return obs, false
 	}
 	if len(staged) == 0 {
@@ -230,6 +238,66 @@ func stagedOutputs(evidence json.RawMessage) ([]stagedOutput, error) {
 		}
 	}
 	return probe.Staged, nil
+}
+
+// checkLocators requires every staged ArtifactLocator in the evidence —
+// physical_call.request_context and ModelOutput.request_context included —
+// to name exactly one StagedOutput of the same observation, and no
+// StagedOutput to be declared twice. Anything else cannot be published
+// faithfully and is refused before any bytes move.
+func checkLocators(evidence json.RawMessage, staged []stagedOutput) *contract.Fault {
+	if len(evidence) == 0 {
+		return nil
+	}
+	matches := make(map[string]int, len(staged))
+	for _, s := range staged {
+		key := s.StagingRef + "\x00" + string(s.Digest)
+		matches[key]++
+		if matches[key] > 1 {
+			return invalidInput("staged output %q is declared more than once", s.StagingRef)
+		}
+	}
+	dec := json.NewDecoder(bytes.NewReader(evidence))
+	dec.UseNumber()
+	var root map[string]any
+	if err := dec.Decode(&root); err != nil {
+		return invalidInput("observation evidence is not a JSON object")
+	}
+	for key, value := range root {
+		if key == "staged_outputs" {
+			continue
+		}
+		if f := walkLocators(value, matches); f != nil {
+			return f
+		}
+	}
+	return nil
+}
+
+func walkLocators(value any, matches map[string]int) *contract.Fault {
+	switch v := value.(type) {
+	case map[string]any:
+		if kind, _ := v["kind"].(string); kind == "staged" {
+			ref, _ := v["staging_ref"].(string)
+			digest, _ := v["digest"].(string)
+			if matches[ref+"\x00"+digest] != 1 {
+				return invalidInput("staged locator %q matches no staged output of the observation", ref)
+			}
+			return nil
+		}
+		for _, inner := range v {
+			if f := walkLocators(inner, matches); f != nil {
+				return f
+			}
+		}
+	case []any:
+		for _, inner := range v {
+			if f := walkLocators(inner, matches); f != nil {
+				return f
+			}
+		}
+	}
+	return nil
 }
 
 // normalizeEvidence rewrites evidence for owners: every staged locator that
