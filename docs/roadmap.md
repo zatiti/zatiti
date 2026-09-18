@@ -581,6 +581,24 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   classes (ExpectedVersion, SubmissionKey, ScopeRequired) and the
   self-contained internal schemas still to do on the same branch. Lead
   lands the public batch first so cmd/zatiti and integration can move.
+- 2026-09-18 -- app-seams LANDED (dd43cf7 evidence, 0a4828f application,
+  44582a0 policy). Contract quote decided the double-finish case
+  ("persist command identity plus accepted internal pending disposition
+  at Prepare, then replace pending disposition once at Finish"), so
+  evidence now admits exactly one replacement of an accepted disposition
+  and no other second finish (SQL-fenced as well as handler-checked;
+  lead's single-fence mutation stayed green because of the second guard,
+  defense in depth). Application binds configuration.apply's sealed
+  candidate_digest to _policy.check from a closed per-operation map
+  (nothing else may supply a digest), and a failed disposition always
+  returns with its fault as the error, first time and on replay; one
+  existing Z14 test that encoded the old nil-error replay was updated
+  by the lead. Policy's default review class narrowed from every
+  `grant.*` to grant.create and grant.update (R5-010: revoke commits
+  restrictive state immediately; reads expand nothing). Still open:
+  configuration never calls _reviews.ensure at plan time (edge-seams
+  lane, resumes 16:00); grant.create/update have no digest to bind a
+  review to (spec revision 3).
 
 ## Planned
 
