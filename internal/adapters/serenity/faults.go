@@ -41,6 +41,9 @@ type unsupportedDetails struct {
 	UpstreamModule string   `json:"upstream_module"`
 	UpstreamCommit string   `json:"upstream_commit"`
 	Missing        []string `json:"missing"`
+	// OriginalOutcome is set only by a Reconcile refusal: what the refusal
+	// leaves true of the effect being reconciled.
+	OriginalOutcome string `json:"original_outcome,omitempty"`
 }
 
 // operationUnsupported is the refusal every action kind ends in at this pin:
@@ -52,6 +55,24 @@ func operationUnsupported(op operationCapability) *contract.Fault {
 		op.Kind, pinnedModule, pinnedCommit[:12], op.Missing)
 	details, err := json.Marshal(unsupportedDetails{
 		Kind: op.Kind, UpstreamModule: pinnedModule, UpstreamCommit: pinnedCommit, Missing: op.Missing,
+	})
+	if err == nil {
+		f.Details = details
+	}
+	return f
+}
+
+// lookupUnsupported is the refusal every Reconcile ends in at this pin. No
+// request was built or sent, so the original effect's outcome is unchanged:
+// it stays unknown until explicit reconciliation outside this adapter.
+func lookupUnsupported(kind string) *contract.Fault {
+	missing := []string{gapCommandStatusLookup, gapCommandIdentity}
+	f := capabilityUnsupported(
+		"serenity reconcile of %s is unavailable: the pinned upstream %s@%s does not provide %v; nothing was sent or repeated and the original outcome stays unknown; see PROTOCOL.md",
+		kind, pinnedModule, pinnedCommit[:12], missing)
+	details, err := json.Marshal(unsupportedDetails{
+		Kind: kind, UpstreamModule: pinnedModule, UpstreamCommit: pinnedCommit, Missing: missing,
+		OriginalOutcome: "retained_unknown",
 	})
 	if err == nil {
 		f.Details = details

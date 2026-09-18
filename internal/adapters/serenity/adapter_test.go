@@ -251,79 +251,32 @@ func TestInvalidDispatchRefused(t *testing.T) {
 }
 
 // TestReconcileRetainsUnknown covers the adapter half of
-// Z18.memory_write_unknown: with no upstream command lookup, Reconcile sends
-// nothing, repeats nothing, and reports the outcome as still unknown.
+// Z18.memory_write_unknown: with no upstream command lookup, Reconcile
+// builds nothing, sends nothing, repeats nothing, stages nothing, and says
+// the original outcome stays unknown. It returns no Observation, so it makes
+// no PhysicalCallEvidence and no request context for a request it never built.
 func TestReconcileRetainsUnknown(t *testing.T) {
 	a, p := newTestAdapter(t, profileJSON(t, nil))
-	schema, err := evidenceSchema()
-	if err != nil {
-		t.Fatal(err)
-	}
 	for kind, act := range allKinds(testBrainID) {
 		t.Run(kind, func(t *testing.T) {
-			d := testDispatch(t, act)
-			obs, err := a.Reconcile(context.Background(), d)
-			if err != nil {
-				t.Fatalf("Reconcile: %v", err)
+			obs, err := a.Reconcile(context.Background(), testDispatch(t, act))
+			f := mustFault(t, err, contract.CodeCapabilityUnsupported)
+			if f.Retryable {
+				t.Fatal("a missing upstream lookup is not retryable")
 			}
-			if obs.Disposition != contract.DispositionUnknown {
-				t.Fatalf("disposition = %q, want unknown", obs.Disposition)
+			if !emptyObservation(obs) {
+				t.Fatalf("a reconcile that built no request must not carry an observation: %+v", obs)
 			}
-			if obs.ConfirmedAt != nil || obs.ProviderReference != "" {
-				t.Fatalf("an unknown outcome has no confirmation or provider reference: %+v", obs)
+			var details unsupportedDetails
+			if err := json.Unmarshal(f.Details, &details); err != nil {
+				t.Fatalf("fault details: %v", err)
 			}
-			if err := contract.ValidateSchema(schema, obs.Evidence); err != nil {
-				t.Fatalf("evidence violates the frozen schema: %v", err)
+			if details.Kind != kind || details.UpstreamCommit != pinnedCommit || details.OriginalOutcome != "retained_unknown" ||
+				!slices.Equal(details.Missing, []string{gapCommandStatusLookup, gapCommandIdentity}) {
+				t.Fatalf("fault details = %+v", details)
 			}
-
-			var ev wireSerenityEvidence
-			if err := contract.DecodeStrict(obs.Evidence, &ev); err != nil {
-				t.Fatalf("evidence decode: %v", err)
-			}
-			if ev.Kind != kind || ev.BrainID != testBrainID || ev.AdapterCommandID != testCommandID {
-				t.Fatalf("evidence identity = %s/%s/%s", ev.Kind, ev.BrainID, ev.AdapterCommandID)
-			}
-			if ev.CommandStatus != "unknown" || ev.LookupAuthoritative == nil || *ev.LookupAuthoritative {
-				t.Fatalf("command_status = %q lookup_authoritative = %v", ev.CommandStatus, ev.LookupAuthoritative)
-			}
-			if len(ev.Claims)+len(ev.BrainRevisions)+len(ev.StagedOutputs)+len(ev.OutputArtifacts) != 0 {
-				t.Fatalf("evidence carries results the adapter never observed: %s", obs.Evidence)
-			}
-			pc := ev.PhysicalCall
-			if pc.RequestSent != "no" || pc.Confirmation != "unknown" || pc.ErrorCode != gapCommandStatusLookup {
-				t.Fatalf("physical call = %+v", pc)
-			}
-			if pc.OperationID != d.OperationID || pc.AttemptID != d.AttemptID {
-				t.Fatalf("physical call does not echo the attempt identity: %+v", pc)
-			}
-			if pc.RequestedDestination != testEndpoint || pc.ResolvedDestination != testEndpoint {
-				t.Fatalf("destination = %q / %q", pc.RequestedDestination, pc.ResolvedDestination)
-			}
-			if pc.AccountIdentity != "credential:"+testCredentialRef {
-				t.Fatalf("account identity = %q", pc.AccountIdentity)
-			}
-			loaded, _ := loadProfile(profileJSON(t, nil))
-			if pc.ProfileDigest != loaded.Digest || pc.CapabilityEvidence != testCapabilityArtifact() || pc.RequestContext != testCapabilityArtifact() {
-				t.Fatalf("physical call is not bound to the profile: %+v", pc)
-			}
-			want := newFakeClock().Now().UTC()
-			if !pc.StartedAt.Equal(want) || !pc.FinishedAt.Equal(want) || pc.StartedAt.Location().String() != "UTC" {
-				t.Fatalf("timestamps = %v / %v", pc.StartedAt, pc.FinishedAt)
-			}
-			wantOwner := ""
-			if kind == kindRemember || kind == kindPromote || kind == kindRetract {
-				wantOwner = testWriterOwner
-			}
-			if ev.WriterOwner != wantOwner {
-				t.Fatalf("writer_owner = %q, want %q", ev.WriterOwner, wantOwner)
-			}
-
-			var usage wireProviderUsage
-			if err := contract.DecodeStrict(obs.Usage, &usage); err != nil {
-				t.Fatalf("usage decode: %v", err)
-			}
-			if usage != (wireProviderUsage{Accounting: wireUsage{Currency: "USD"}, Billing: "no_charge"}) || usage != ev.Usage {
-				t.Fatalf("usage = %+v, evidence usage = %+v", usage, ev.Usage)
+			if !strings.Contains(f.Message, "stays unknown") || !strings.Contains(f.Message, gapCommandStatusLookup) {
+				t.Fatalf("fault does not state the retained outcome and the gap: %s", f.Message)
 			}
 		})
 	}
@@ -331,12 +284,26 @@ func TestReconcileRetainsUnknown(t *testing.T) {
 	// Reconciling again is still not a repeat of anything.
 	d := testDispatch(t, rememberAction(testBrainID))
 	for range 3 {
-		if _, err := a.Reconcile(context.Background(), d); err != nil {
-			t.Fatal(err)
-		}
+		_, err := a.Reconcile(context.Background(), d)
+		requireFault(t, err, contract.CodeCapabilityUnsupported)
 	}
 	if n := p.total(); n != 0 {
 		t.Fatalf("Reconcile reached outside the adapter %d times (http=%d secrets=%d blobs=%d)", n, p.http, p.secrets, p.blobs)
+	}
+}
+
+// TestInvokeRefusalIsNotAReconcileRefusal keeps the two refusals distinct:
+// only Reconcile speaks about an original outcome.
+func TestInvokeRefusalIsNotAReconcileRefusal(t *testing.T) {
+	a, _ := newTestAdapter(t, profileJSON(t, nil))
+	_, err := a.Invoke(context.Background(), testDispatch(t, rememberAction(testBrainID)))
+	f := mustFault(t, err, contract.CodeCapabilityUnsupported)
+	var details unsupportedDetails
+	if err := json.Unmarshal(f.Details, &details); err != nil {
+		t.Fatal(err)
+	}
+	if details.OriginalOutcome != "" {
+		t.Fatalf("an Invoke refusal has no original outcome to retain: %+v", details)
 	}
 }
 
@@ -383,5 +350,37 @@ func TestEmbeddedSchemasMatchFrozenCatalog(t *testing.T) {
 		if !reflect.DeepEqual(def, want) {
 			t.Fatalf("embedded definition %s differs from the frozen catalog", name)
 		}
+	}
+}
+
+// TestPublishedEvidenceSchemaIsRevision2 proves the evidence schema this
+// adapter publishes types physical_call.request_context as an
+// ArtifactLocator: a staged locator validates and a bare ArtifactRef, the
+// revision 1 shape, does not.
+func TestPublishedEvidenceSchemaIsRevision2(t *testing.T) {
+	schema, err := evidenceSchema()
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest := string(contract.Hash([]byte("request-record")))
+	evidence := func(requestContext string) json.RawMessage {
+		return json.RawMessage(`{"schema":"zatiti.serenity.evidence/v1","kind":"recall",` +
+			`"brain_id":"` + string(testBrainID) + `","adapter_command_id":"` + string(testCommandID) + `",` +
+			`"command_status":"unknown","claims":[],"brain_revisions":[],"output_artifacts":[],` +
+			`"usage":{"accounting":{"currency":"USD","spent":0,"reserved":0,"estimated":0,"unknown":0,"advisory":false},"billing":"unknown"},` +
+			`"staged_outputs":[{"staging_ref":"stage-1","digest":"` + digest + `","size":1,"media_type":"application/json","classification":"internal","purpose":"context"}],` +
+			`"physical_call":{"operation_id":"` + string(testCommandID) + `","attempt_id":"` + string(testCommandID) + `",` +
+			`"account_identity":"credential:x","requested_destination":"d","resolved_destination":"d",` +
+			`"profile_digest":"` + digest + `","capability_evidence":{"id":"` + string(testCommandID) + `","digest":"` + digest + `"},` +
+			`"started_at":"2026-01-01T00:00:00Z","finished_at":"2026-01-01T00:00:00Z",` +
+			`"request_sent":"unknown","confirmation":"unknown","request_context":` + requestContext + `}}`)
+	}
+	staged := `{"kind":"staged","staging_ref":"stage-1","digest":"` + digest + `"}`
+	if err := contract.ValidateSchema(schema, evidence(staged)); err != nil {
+		t.Fatalf("a staged request context must validate: %v", err)
+	}
+	bare := `{"id":"` + string(testCommandID) + `","digest":"` + digest + `"}`
+	if err := contract.ValidateSchema(schema, evidence(bare)); err == nil {
+		t.Fatal("a bare ArtifactRef request context is the revision 1 shape and must not validate")
 	}
 }

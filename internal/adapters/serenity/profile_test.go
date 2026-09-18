@@ -2,8 +2,8 @@ package serenity
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
-	"net/http"
 	"strings"
 	"testing"
 
@@ -11,7 +11,7 @@ import (
 )
 
 func newFromProfile(raw json.RawMessage) error {
-	_, err := New(contract.AdapterDependencies{HTTP: &http.Client{}, Clock: newFakeClock()}, raw)
+	_, err := New(contract.AdapterDependencies{}, raw)
 	return err
 }
 
@@ -56,9 +56,18 @@ func TestAdvisoryEnforcementIsNotAnOverclaim(t *testing.T) {
 	}
 }
 
-func TestNewRequiresClock(t *testing.T) {
-	_, err := New(contract.AdapterDependencies{}, profileJSON(t, nil))
-	requireFault(t, err, contract.CodeInvalidInput)
+// TestNewNeedsNoDependency proves the adapter reaches nothing outside
+// itself: it constructs and serves with every dependency absent.
+func TestNewNeedsNoDependency(t *testing.T) {
+	a, err := New(contract.AdapterDependencies{}, profileJSON(t, nil))
+	if err != nil {
+		t.Fatalf("New with no dependencies: %v", err)
+	}
+	d := testDispatch(t, rememberAction(testBrainID))
+	_, err = a.Invoke(context.Background(), d)
+	requireFault(t, err, contract.CodeCapabilityUnsupported)
+	_, err = a.Reconcile(context.Background(), d)
+	requireFault(t, err, contract.CodeCapabilityUnsupported)
 }
 
 func TestProfileSchemaViolationsRejected(t *testing.T) {

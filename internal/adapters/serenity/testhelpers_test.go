@@ -15,16 +15,6 @@ import (
 
 // ---------- fakes ----------
 
-// fakeClock is a deterministic contract.Clock in a non-UTC zone, so tests
-// also prove evidence timestamps are normalized to UTC.
-type fakeClock struct{ now time.Time }
-
-func newFakeClock() *fakeClock {
-	return &fakeClock{now: time.Date(2026, 1, 1, 3, 0, 0, 0, time.FixedZone("EAT", 3*60*60))}
-}
-
-func (c *fakeClock) Now() time.Time { return c.now }
-
 // probes counts every way the adapter could reach outside itself: HTTP
 // round trips, secret reads and blob store calls. The adapter must leave all
 // of them at zero.
@@ -200,7 +190,6 @@ func newTestAdapter(t *testing.T, profile json.RawMessage) (contract.Adapter, *p
 	deps := contract.AdapterDependencies{
 		HTTP:    &http.Client{Transport: probeTransport{p}},
 		Secrets: probeSecrets{p},
-		Clock:   newFakeClock(),
 		Blobs:   probeBlobs{p},
 	}
 	a, err := New(deps, profile)

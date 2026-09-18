@@ -27,8 +27,13 @@
 //     writer owner, spend and disclosure bounds no wider than the profile)
 //     and then refuses with capability_unsupported. It never simulates an
 //     upstream result.
-//   - Reconcile sends nothing and reports the original outcome as still
-//     unknown with a non-authoritative lookup. It never repeats a write.
+//   - Reconcile builds no request and refuses with capability_unsupported
+//     naming the missing command lookup, so the original outcome stays
+//     unknown. It never repeats a write.
+//
+// Neither path returns an Observation, so neither produces
+// PhysicalCallEvidence or a request context: no request is ever built, and a
+// staged record of a request that was never built would be fabricated.
 //
 // The adapter holds no HTTP client, so it cannot make a physical call. The
 // only allowed production import is internal/contract; upstream's exported

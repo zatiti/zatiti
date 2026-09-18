@@ -128,7 +128,8 @@ type capabilityReport struct {
 	// PhysicalCalls states what this build can send: "none". The adapter
 	// holds no HTTP client, so the statement is structural, not a promise.
 	PhysicalCalls string `json:"physical_calls"`
-	// CommandLookup and LostAcknowledgement state the Reconcile semantics.
+	// CommandLookup and LostAcknowledgement state the Reconcile semantics:
+	// no lookup exists, so Reconcile refuses and the outcome stays unknown.
 	CommandLookup       string `json:"command_lookup"`
 	LostAcknowledgement string `json:"lost_acknowledgement"`
 }

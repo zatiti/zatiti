@@ -1,7 +1,6 @@
 package serenity
 
 import (
-	"encoding/json"
 	"time"
 
 	"github.com/zatiti/zatiti/internal/contract"
@@ -183,59 +182,4 @@ type wireExportRevision struct {
 	AdapterCommandID contract.ID       `json:"adapter_command_id"`
 	Kind             string            `json:"kind"`
 	Revision         wireBrainRevision `json:"revision"`
-}
-
-// ---------- evidence ----------
-
-// wirePhysicalCallEvidence is the shared PhysicalCallEvidence shape. This
-// adapter only ever emits it with request_sent "no": it holds no HTTP client.
-type wirePhysicalCallEvidence struct {
-	OperationID          contract.ID     `json:"operation_id"`
-	AttemptID            contract.ID     `json:"attempt_id"`
-	AccountIdentity      string          `json:"account_identity"`
-	RequestedDestination string          `json:"requested_destination"`
-	ResolvedDestination  string          `json:"resolved_destination"`
-	ProfileDigest        contract.Digest `json:"profile_digest"`
-	CapabilityEvidence   wireArtifactRef `json:"capability_evidence"`
-	StartedAt            time.Time       `json:"started_at"`
-	FinishedAt           time.Time       `json:"finished_at"`
-	RequestContext       wireArtifactRef `json:"request_context"`
-	RequestSent          string          `json:"request_sent"`
-	Confirmation         string          `json:"confirmation"`
-	ErrorCode            string          `json:"error_code,omitempty"`
-	ErrorMessage         string          `json:"error_message,omitempty"`
-}
-
-type wireUsage struct {
-	Currency  string `json:"currency"`
-	Spent     int64  `json:"spent"`
-	Reserved  int64  `json:"reserved"`
-	Estimated int64  `json:"estimated"`
-	Unknown   int64  `json:"unknown"`
-	Advisory  bool   `json:"advisory"`
-}
-
-type wireProviderUsage struct {
-	Accounting wireUsage `json:"accounting"`
-	Billing    string    `json:"billing"`
-}
-
-// wireSerenityEvidence is the zatiti.serenity.evidence/v1 document. Claims,
-// brain revisions and staged outputs are always empty here: the pinned
-// upstream returns nothing this adapter can truthfully place in them (see
-// PROTOCOL.md), and the adapter never fabricates an entry.
-type wireSerenityEvidence struct {
-	Schema              string                   `json:"schema"`
-	PhysicalCall        wirePhysicalCallEvidence `json:"physical_call"`
-	Kind                string                   `json:"kind"`
-	BrainID             contract.ID              `json:"brain_id"`
-	AdapterCommandID    contract.ID              `json:"adapter_command_id"`
-	CommandStatus       string                   `json:"command_status"`
-	Claims              []json.RawMessage        `json:"claims"`
-	BrainRevisions      []json.RawMessage        `json:"brain_revisions"`
-	Usage               wireProviderUsage        `json:"usage"`
-	StagedOutputs       []json.RawMessage        `json:"staged_outputs"`
-	OutputArtifacts     []wireArtifactRef        `json:"output_artifacts"`
-	WriterOwner         string                   `json:"writer_owner,omitempty"`
-	LookupAuthoritative *bool                    `json:"lookup_authoritative,omitempty"`
 }
