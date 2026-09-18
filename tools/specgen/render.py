@@ -9,11 +9,13 @@ import hashlib
 import json
 from pathlib import Path
 import sys
-from model import D, OPS, DEFINITION_TYPES
-from packages import P
+from model import D, OPS, DEFINITION_TYPES, REVISION
+from packages import P, RETIRED
 
 ROOT=Path(__file__).resolve().parents[2]
 DOC=ROOT/'docs/implementation'
+GENERATED_HEADER='# Implementation assignment: `'
+NON_GO_KINDS=('support','client')
 
 def dump(x): return json.dumps(x,ensure_ascii=False,indent=2)+'\n'
 def compact(x): return json.dumps(x,ensure_ascii=False,separators=(',',':'))
@@ -49,12 +51,23 @@ def schemas_md(ops,definitions):
     chunks.append('### Local schema definitions\n\nThe schemas above resolve exclusively against this embedded `$defs` object. Input objects reject additional properties except explicitly open schema/data fields. Field semantics are completed by the owned requirements and operation descriptions. Output `resource`, `items`, `draft`, `job`, etc. are literal keys. Pagination cursor lives in the common envelope.\n\n```json\n'+compact({'$defs':defs})+'\n```\n')
     return '\n'.join(chunks)
 
-def validate(requirements,acceptance,adapter):
+def validate(requirements,acceptance,adapter,common=None):
     names={p['name'] for p in P}; paths=[p['path'] for p in P]
+    if common is not None:
+        assert common.startswith(f'# Frozen implementation contract, revision {REVISION}\n'), f'contracts.md title must name revision {REVISION}'
     assert len(names)==len(P) and len(paths)==len(set(paths)), 'duplicate package/root'
     for a in paths:
         for b in paths:
             assert a==b or not b.startswith(a+'/'), f'overlapping implementation roots: {a}, {b}'
+    for r in RETIRED:
+        for a in paths:
+            assert a!=r and not a.startswith(r+'/') and not r.startswith(a+'/'), f'retired root overlaps live root: {r}, {a}'
+    kinds={p['name']:p['kind'] for p in P}
+    for p in P:
+        if p['kind'] in NON_GO_KINDS: assert not p['imports'], f"non-Go root declares Go imports: {p['path']}"
+        assert (p['kind']=='client')==bool(p.get('boundary')), f"client boundary statement required exactly for client roots: {p['path']}"
+        for d in p['imports']: assert kinds.get(d) not in NON_GO_KINDS, f"Go import of non-Go root: {p['path']} imports {d}"
+        assert set(p.get('refs',[]))<=names-{p['name']}, (p['name'],p.get('refs'))
     ids=[o['id'] for o in OPS]; assert len(ids)==len(set(ids)), 'duplicate operation'
     for key in ['mcp','cli']:
         vals=[compact(o[key]) for o in OPS if o['visibility']=='public']
@@ -106,16 +119,16 @@ def main():
     acceptance=json.loads((DOC/'acceptance.json').read_text())
     adapter=json.loads((DOC/'adapter-schemas.json').read_text())
     common=(DOC/'contracts.md').read_text()
-    validation=validate(requirements,acceptance,adapter)
-    fingerprint=hashlib.sha256(compact([P,D,OPS,requirements,acceptance,adapter,common]).encode()).hexdigest()
+    validation=validate(requirements,acceptance,adapter,common)
+    fingerprint=hashlib.sha256(compact([REVISION,P,RETIRED,D,OPS,requirements,acceptance,adapter,common]).encode()).hexdigest()
     lookup={p['name']:p for p in P}
     outputs={}
-    outputs['docs/implementation/operations.json']=dump({'revision':1,'$defs':D,'definition_kind_map':DEFINITION_TYPES,'operations':OPS})
-    outputs['docs/implementation/packages.json']=dump({'revision':1,'packages':P})
+    outputs['docs/implementation/operations.json']=dump({'revision':REVISION,'$defs':D,'definition_kind_map':DEFINITION_TYPES,'operations':OPS})
+    outputs['docs/implementation/packages.json']=dump({'revision':REVISION,'packages':P,'retired_roots':RETIRED})
     coverage=[]
     for r in requirements:
         coverage.append({'requirement':r['id'],'section':r['section'],'kind':r['kind'],'owner':lookup[r['owner']]['path'],'participants':[lookup[x]['path'] for x in r['participants']],'verification':['tests/integration','tests/qualification']})
-    outputs['docs/implementation/coverage.json']=dump({'revision':1,'requirements':coverage,'acceptance_cases':[{'id':a['id'],'gate':a['gate'],'scopes':[lookup[x]['path'] for x in a['owners']]} for a in acceptance]})
+    outputs['docs/implementation/coverage.json']=dump({'revision':REVISION,'requirements':coverage,'acceptance_cases':[{'id':a['id'],'gate':a['gate'],'scopes':[lookup[x]['path'] for x in a['owners']]} for a in acceptance]})
     consumers={'registry','application','server','cli','mcp','desktop','integration','qualification','zatiti'}
     for p in P:
         n=p['name']; owned=[o for o in OPS if o['owner']==n]
@@ -129,7 +142,11 @@ def main():
         incoming=sorted({c for o in owned for c in o['callers']})
         if any(o['visibility']=='public' for o in owned):incoming+=['application (authenticated public operations)']
         imports=', '.join('`github.com/zatiti/zatiti/'+lookup[x]['path']+'`' for x in p['imports']) or 'standard library only; no product package imports'
-        parts=[f"# Implementation assignment: `{p['path']}`\n\nGenerated specification revision 1; source digest `{fingerprint}`. This file is committed implementation context. Do not independently edit it. Everything required from the product specification and adjacent interfaces is embedded below; no RFC copy is required.\n\n## Mission and scope\n\n{p['mission']}\n\nWrite scope: **`{p['path']}/` only**, excluding this generated AGENTS.md. Go package name: `{('main' if p['kind']=='entrypoint' else 'integration_test' if n=='integration' else 'qualification_test' if n=='qualification' else n) if p['kind']!='support' else 'not a Go package'}`. Ownership kind: {p['kind']}; integration wave: {p['wave']}.\n\nAllowed production imports from this repository: {imports}. Tests may use interfaces/fakes defined locally and, once available, storage-backed temporary fixtures; integration owns cross-package tests. No sibling raw SQL. No root dependency edits except the integration exception stated in its own brief.\n\n## Implementation decisions and acceptance focus\n\n{p['design']}\n\nLocal proving focus: {p['tests']}\n\n## Incoming and outgoing boundaries\n\nIncoming callers: {', '.join(incoming) or 'entrypoint/assembly or tests via the explicit Go API'}.\n\nOutgoing owner calls: {', '.join('`'+o['id']+'`' for o in outgoing) or 'none; use only declared Go dependency interfaces'}. Each exact input/output schema appears below. Calls retain current Unit/authority; owner allowlists are mandatory.\n"]
+        if p['kind']=='client':
+            rules=f"Repository boundary: {p['boundary']} Allowed Go imports do not apply: this root is outside the Go module, imports no Go package and is imported by none. It has no database, state-directory or sibling-package access; its only product interface is the public operation catalog over the wire contract below. Tests use local fakes that speak the real envelope; integration and qualification own cross-process proving. No root dependency edits."
+        else:
+            rules=f"Allowed production imports from this repository: {imports}. Tests may use interfaces/fakes defined locally and, once available, storage-backed temporary fixtures; integration owns cross-package tests. No sibling raw SQL. No root dependency edits except the integration exception stated in its own brief."
+        parts=[f"# Implementation assignment: `{p['path']}`\n\nGenerated specification revision {REVISION}; source digest `{fingerprint}`. This file is committed implementation context. Do not independently edit it. Everything required from the product specification and adjacent interfaces is embedded below; no RFC copy is required.\n\n## Mission and scope\n\n{p['mission']}\n\nWrite scope: **`{p['path']}/` only**, excluding this generated AGENTS.md. Go package name: `{('main' if p['kind']=='entrypoint' else 'integration_test' if n=='integration' else 'qualification_test' if n=='qualification' else n) if p['kind'] not in NON_GO_KINDS else 'not a Go package'}`. Ownership kind: {p['kind']}; integration wave: {p['wave']}.\n\n{rules}\n\n## Implementation decisions and acceptance focus\n\n{p['design']}\n\nLocal proving focus: {p['tests']}\n\n## Incoming and outgoing boundaries\n\nIncoming callers: {', '.join(incoming) or ('none; this root is a separate client process and exposes no API to the repository' if p['kind']=='client' else 'entrypoint/assembly or tests via the explicit Go API')}.\n\nOutgoing owner calls: {', '.join('`'+o['id']+'`' for o in outgoing) or ('none internal; only public operations through the internal/server transport as the authenticated human principal' if p['kind']=='client' else 'none; use only declared Go dependency interfaces')}. Each exact input/output schema appears below. Calls retain current Unit/authority; owner allowlists are mandatory.\n"]
         if p['kind']=='domain':
             parts.append('Expose `New(contract.Dependencies) (*Service,error)`; `*Service` implements `contract.Module` with Name `'+n+'`, owner-prefixed migrations, all owned descriptors, and strict dispatch. No calls/goroutines during construction. Implement optional authentication/LocalIO interfaces where specified in the common contract. Tables are private under `'+n+'_`; external callers rely only on methods and schemas.\n')
         elif p['kind']=='adapter':
@@ -138,6 +155,11 @@ def main():
             parts.append('### Imported package APIs and behavior\n\nThese briefs are embedded so you need not read a sibling prompt to discover its incoming API. Implement only your own package.\n')
             for d in p['imports']:
                 if d=='contract':continue
+                dep=lookup[d]
+                parts.append(f"**`{dep['path']}`** — {dep['mission']}\n\n{dep['design']}\n")
+        if p.get('refs'):
+            parts.append('### Reference package briefs (wire behavior to match; not imports)\n\nThese sibling briefs describe the other side of this root\'s wire boundary or semantics it must reproduce. They are context only: this root imports none of them.\n')
+            for d in p['refs']:
                 dep=lookup[d]
                 parts.append(f"**`{dep['path']}`** — {dep['mission']}\n\n{dep['design']}\n")
         parts.append('## Shared foundation contract\n\n'+common)
@@ -156,7 +178,7 @@ def main():
     for p in P:rows.append(f"| [`{p['path']}`](../../{p['path']}/AGENTS.md) | {p['kind']} | {p['wave']} | {p['mission']} |")
     outputs['docs/implementation/README.md']=f'''# Package implementation specification
 
-Revision 1. **Specification scaffold; no product implementation or executed release qualification is claimed.**
+Revision {REVISION}. **Specification scaffold; no product implementation or executed release qualification is claimed.**
 
 {len(P)} disjoint implementation roots; {sum(o['visibility']=='public' for o in OPS)} public operations; {sum(o['visibility']=='internal' for o in OPS)} internal owner methods; {len(requirements)} source blocks with explicit ownership; {len(acceptance)} named acceptance cases covering Z01–Z21 and release journeys.
 
@@ -167,10 +189,10 @@ Each root already contains a complete committed AGENTS.md: local mission, allowe
 1. Assign the integration owner its **serialized foundation assignment**: create root go.mod/go.sum for module github.com/zatiti/zatiti, Go 1.26.0/toolchain 1.26.2, resolve exact dependency releases/commits/licenses/checksums, and qualify required upstream seams. Record docs/implementation/dependencies.lock.json. This is a specified implementation deliverable, not a preexisting lock or compatibility claim.
 2. Implement wave 0 contract/platform/storage against frozen interfaces. A dependency library required by a scope must be pinned before that scope starts. Land the shared contract baseline before dispatching dependent agents; no guessing or independently rewriting shared types.
 3. Wave 1 establishes identity/compiler and transport/application foundations. Wave 2 domain services, adapters and presentation transports can generate code concurrently against the baseline, using exact local fakes. The wave numbers are integration order, not a claim that all runtime collaborators already exist.
-4. Wave 3 assembles real controller, entrypoints and desktop; replace development fakes with actual modules. Wave 4 proves cross-package transactions, all operations/parity/journeys and real platform/client/provider qualification.
+4. Wave 3 assembles real controller and entrypoints and builds the Flutter desktop client; replace development fakes with actual modules. Wave 4 proves cross-package transactions, all operations/parity/journeys and real platform/client/provider qualification.
 5. Use one isolated worktree per concurrent root and one landing owner. Dispatch only disjoint roots; no ancestor/root assignment concurrently with descendants. A package may add private files in its root but no new ownership roots or exported seams without a coordinated revision.
 
-Root dependency work and the lock report belong only to integration's serialized exception. cmd entrypoints own wiring, tests/integration owns product-wide fixtures, tests/qualification owns external/GUI qualification, packaging owns distribution, and .github/workflows owns CI. The root AGENTS.md is stable repository guidance, not a concurrently implementable root task. There is no Kazi/apply dependency and no assumption about coding harness.
+Root dependency work and the lock report belong only to integration's serialized exception. cmd entrypoints own wiring, apps/desktop owns the Flutter desktop client (a non-Go root outside the Go module that consumes the operation catalog and wire envelope), tests/integration owns product-wide fixtures, tests/qualification owns external/GUI qualification, packaging owns distribution, and .github/workflows owns CI. The root AGENTS.md is stable repository guidance, not a concurrently implementable root task. There is no Kazi/apply dependency and no assumption about coding harness.
 
 ## Frozen ownership
 
@@ -184,7 +206,7 @@ Root dependency work and the lock report belong only to integration's serialized
 - [Requirements](requirements.json): retained full source requirement blocks, owner and participants. The renderer does not read docs/rfc.md.
 - [Coverage](coverage.json): source block → implementation/verification roots and named-case ownership.
 - [Acceptance](acceptance.json): named setups/actions/expected observations, not claims of tests already run.
-- [Package manifest](packages.json): frozen roots, imports, missions and implementation decisions.
+- [Package manifest](packages.json): frozen roots, imports, reference briefs, non-Go boundaries, retired roots, missions and implementation decisions.
 
 Authoritative edits: tools/specgen/model.py and packages.py, contracts.md, requirements.json, acceptance.json, adapter-schemas.json. Rendered: every package AGENTS.md, operations.json, packages.json, coverage.json and this index. The root AGENTS.md and ADR are authored stable guidance.
 
@@ -193,7 +215,7 @@ python3 tools/specgen/render.py
 python3 tools/specgen/render.py --check
 ```
 
-Renderer checks unique/disjoint roots, acyclic allowed Go imports, operation/schema ownership, public name collisions, internal caller allowlists, reference closure, requirement/case ownership, all Z01–Z21 gates and byte-for-byte prompt freshness. When Python jsonschema is available it also validates JSON Schema 2020-12 syntax. Structural checks do not prove semantic implementation correctness or replace real integration tests.
+Renderer checks the contract revision title, unique/disjoint roots, retired roots absent and not overlapped, acyclic allowed Go imports, no Go import of a non-Go root, operation/schema ownership, public name collisions, internal caller allowlists, reference closure, requirement/case ownership, all Z01–Z21 gates and byte-for-byte prompt freshness. When Python jsonschema is available it also validates JSON Schema 2020-12 syntax. Structural checks do not prove semantic implementation correctness or replace real integration tests.
 
 Regeneration can run with only the authoritative inputs above and no RFC. --output-dir DIR renders an independent tree for review. Contract changes update all copies together and require affected-dependency review; implementers cannot lower acceptance criteria.
 
@@ -202,6 +224,11 @@ Regeneration can run with only the authoritative inputs above and no RFC. --outp
 The RFC deliberately leaves external versions and protocol capability qualification open. This specification selects library families/framework/provider and freezes local interfaces; integration must resolve and test exact upstream pins before dependent implementation. In particular Serenity command reconciliation/cost enforcement and provider hard caps are requirements to establish, never invented capabilities. An unavailable required guarantee blocks enabling that mode and its release gate; it must not become fake success or an undocumented substitute.
 '''
     bad=[]
+    for r in RETIRED:
+        leftover=args.output_dir/r/'AGENTS.md'
+        if leftover.exists() and leftover.read_text().startswith(GENERATED_HEADER):
+            if args.check: bad.append(r+'/AGENTS.md (generated prompt of a retired root)')
+            else: leftover.unlink()
     for name,content in sorted(outputs.items()):
         dest=args.output_dir/name
         if args.check:

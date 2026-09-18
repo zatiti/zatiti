@@ -41,6 +41,56 @@ class SpecificationIntegrity(unittest.TestCase):
         with patch.object(render,'P',packages), self.assertRaisesRegex(AssertionError,'import cycle'):
             render.validate(self.requirements,self.acceptance,self.adapters)
 
+    def test_go_import_of_non_go_root_refuses_render(self):
+        packages=copy.deepcopy(render.P)
+        client=next(p for p in packages if p['kind']=='client')
+        importer=next(p for p in packages if p['kind']=='verification')
+        importer['imports'].append(client['name'])
+        with patch.object(render,'P',packages), self.assertRaisesRegex(AssertionError,'Go import of non-Go root'):
+            render.validate(self.requirements,self.acceptance,self.adapters)
+
+    def test_non_go_root_with_go_imports_or_without_boundary_refuses_render(self):
+        packages=copy.deepcopy(render.P)
+        next(p for p in packages if p['kind']=='client')['imports']=['contract']
+        with patch.object(render,'P',packages), self.assertRaisesRegex(AssertionError,'non-Go root declares Go imports'):
+            render.validate(self.requirements,self.acceptance,self.adapters)
+        packages=copy.deepcopy(render.P)
+        next(p for p in packages if p['kind']=='client')['boundary']=''
+        with patch.object(render,'P',packages), self.assertRaisesRegex(AssertionError,'client boundary statement'):
+            render.validate(self.requirements,self.acceptance,self.adapters)
+
+    def test_unknown_reference_brief_refuses_render(self):
+        packages=copy.deepcopy(render.P)
+        next(p for p in packages if p['kind']=='client')['refs']=['no_such_package']
+        with patch.object(render,'P',packages), self.assertRaises(AssertionError):
+            render.validate(self.requirements,self.acceptance,self.adapters)
+
+    def test_live_root_overlapping_retired_root_refuses_render(self):
+        self.assertTrue(render.RETIRED)
+        for path in (render.RETIRED[0],render.RETIRED[0]+'/child'):
+            packages=copy.deepcopy(render.P)
+            packages[0]['path']=path
+            with patch.object(render,'P',packages), self.assertRaisesRegex(AssertionError,'retired root overlaps'):
+                render.validate(self.requirements,self.acceptance,self.adapters)
+
+    def test_contract_title_must_name_current_revision(self):
+        common=(render.DOC/'contracts.md').read_text()
+        render.validate(self.requirements,self.acceptance,self.adapters,common)
+        with patch.object(render,'REVISION',render.REVISION+1), self.assertRaisesRegex(AssertionError,'contracts.md title'):
+            render.validate(self.requirements,self.acceptance,self.adapters,common)
+
+    def test_client_prompt_states_wire_boundary_and_embeds_reference_briefs(self):
+        packages={p['name']:p for p in render.P}
+        for p in render.P:
+            if p['kind']!='client':continue
+            text=(render.ROOT/p['path']/'AGENTS.md').read_text()
+            self.assertIn('Repository boundary: '+p['boundary'],text)
+            self.assertIn('not a Go package',text)
+            self.assertNotIn('Allowed production imports from this repository',text)
+            for d in p['refs']:self.assertIn(packages[d]['design'],text)
+        for r in render.RETIRED:
+            self.assertFalse((render.ROOT/r/'AGENTS.md').exists(),r)
+
     def test_generation_without_rfc_and_detection_of_tampered_prompt(self):
         with tempfile.TemporaryDirectory(prefix='zatiti-spec-') as tmp:
             root=Path(tmp)
@@ -59,6 +109,18 @@ class SpecificationIntegrity(unittest.TestCase):
             for p in render.P:
                 local=root/p['path']/'AGENTS.md'
                 self.assertEqual(local.read_bytes(),(render.ROOT/p['path']/'AGENTS.md').read_bytes())
+            leftover=root/render.RETIRED[0]/'AGENTS.md'
+            leftover.parent.mkdir(parents=True)
+            leftover.write_text(render.GENERATED_HEADER+render.RETIRED[0]+'`\n')
+            authored=leftover.parent/'design'/'README.md'
+            authored.parent.mkdir()
+            authored.write_text('authored reference\n')
+            retired=subprocess.run(cmd+['--check'],capture_output=True,text=True)
+            self.assertEqual(retired.returncode,1)
+            self.assertIn(render.RETIRED[0]+'/AGENTS.md',retired.stdout)
+            self.assertEqual(subprocess.run(cmd,capture_output=True,text=True).returncode,0)
+            self.assertFalse(leftover.exists())
+            self.assertTrue(authored.exists())
             victim=root/'internal/effects/AGENTS.md'
             victim.write_text(victim.read_text().replace('outcome_unknown','succeeded',1))
             drift=subprocess.run(cmd+['--check'],capture_output=True,text=True)

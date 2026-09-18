@@ -1,5 +1,5 @@
 {
-  "revision": 1,
+  "revision": 2,
   "requirements": [
     {
       "requirement": "R1-002",
@@ -82,7 +82,7 @@
         "internal/accounting",
         "internal/memory",
         "internal/installation",
-        "internal/desktop"
+        "apps/desktop"
       ],
       "verification": [
         "tests/integration",
@@ -100,7 +100,7 @@
         "internal/accounting",
         "internal/memory",
         "internal/installation",
-        "internal/desktop"
+        "apps/desktop"
       ],
       "verification": [
         "tests/integration",
@@ -118,7 +118,7 @@
         "internal/accounting",
         "internal/memory",
         "internal/installation",
-        "internal/desktop"
+        "apps/desktop"
       ],
       "verification": [
         "tests/integration",
@@ -136,7 +136,7 @@
         "internal/accounting",
         "internal/memory",
         "internal/installation",
-        "internal/desktop"
+        "apps/desktop"
       ],
       "verification": [
         "tests/integration",
@@ -154,7 +154,7 @@
         "internal/accounting",
         "internal/memory",
         "internal/installation",
-        "internal/desktop"
+        "apps/desktop"
       ],
       "verification": [
         "tests/integration",
@@ -170,7 +170,7 @@
         "internal/execution",
         "internal/cli",
         "internal/mcp",
-        "internal/desktop"
+        "apps/desktop"
       ],
       "verification": [
         "tests/integration",
@@ -186,7 +186,7 @@
         "internal/execution",
         "internal/cli",
         "internal/mcp",
-        "internal/desktop"
+        "apps/desktop"
       ],
       "verification": [
         "tests/integration",
@@ -202,7 +202,7 @@
         "internal/execution",
         "internal/cli",
         "internal/mcp",
-        "internal/desktop"
+        "apps/desktop"
       ],
       "verification": [
         "tests/integration",
@@ -218,7 +218,7 @@
         "internal/execution",
         "internal/cli",
         "internal/mcp",
-        "internal/desktop"
+        "apps/desktop"
       ],
       "verification": [
         "tests/integration",
@@ -232,7 +232,7 @@
       "owner": "tests/integration",
       "participants": [
         "tests/qualification",
-        "internal/desktop",
+        "apps/desktop",
         "internal/installation"
       ],
       "verification": [
@@ -247,7 +247,7 @@
       "owner": "tests/integration",
       "participants": [
         "tests/qualification",
-        "internal/desktop",
+        "apps/desktop",
         "internal/installation"
       ],
       "verification": [
@@ -262,7 +262,7 @@
       "owner": "tests/integration",
       "participants": [
         "tests/qualification",
-        "internal/desktop",
+        "apps/desktop",
         "internal/installation"
       ],
       "verification": [
@@ -702,7 +702,7 @@
       "participants": [
         "internal/identity",
         "internal/connections",
-        "internal/desktop",
+        "apps/desktop",
         "tests/integration"
       ],
       "verification": [
@@ -718,7 +718,7 @@
       "participants": [
         "internal/identity",
         "internal/connections",
-        "internal/desktop",
+        "apps/desktop",
         "tests/integration"
       ],
       "verification": [
@@ -734,7 +734,7 @@
       "participants": [
         "internal/identity",
         "internal/connections",
-        "internal/desktop",
+        "apps/desktop",
         "tests/integration"
       ],
       "verification": [
@@ -750,7 +750,7 @@
       "participants": [
         "internal/identity",
         "internal/connections",
-        "internal/desktop",
+        "apps/desktop",
         "tests/integration"
       ],
       "verification": [
@@ -766,7 +766,7 @@
       "participants": [
         "internal/identity",
         "internal/connections",
-        "internal/desktop",
+        "apps/desktop",
         "tests/integration"
       ],
       "verification": [
@@ -782,7 +782,7 @@
       "participants": [
         "internal/identity",
         "internal/connections",
-        "internal/desktop",
+        "apps/desktop",
         "tests/integration"
       ],
       "verification": [
@@ -798,7 +798,7 @@
       "participants": [
         "internal/identity",
         "internal/connections",
-        "internal/desktop",
+        "apps/desktop",
         "tests/integration"
       ],
       "verification": [
@@ -1871,7 +1871,7 @@
         "internal/execution",
         "internal/policy",
         "internal/installation",
-        "internal/desktop"
+        "apps/desktop"
       ],
       "verification": [
         "tests/integration",
@@ -1888,7 +1888,7 @@
         "internal/execution",
         "internal/policy",
         "internal/installation",
-        "internal/desktop"
+        "apps/desktop"
       ],
       "verification": [
         "tests/integration",
@@ -1905,7 +1905,7 @@
         "internal/execution",
         "internal/policy",
         "internal/installation",
-        "internal/desktop"
+        "apps/desktop"
       ],
       "verification": [
         "tests/integration",
@@ -1922,7 +1922,7 @@
         "internal/execution",
         "internal/policy",
         "internal/installation",
-        "internal/desktop"
+        "apps/desktop"
       ],
       "verification": [
         "tests/integration",
@@ -1939,7 +1939,7 @@
         "internal/execution",
         "internal/policy",
         "internal/installation",
-        "internal/desktop"
+        "apps/desktop"
       ],
       "verification": [
         "tests/integration",
@@ -1956,7 +1956,7 @@
         "internal/execution",
         "internal/policy",
         "internal/installation",
-        "internal/desktop"
+        "apps/desktop"
       ],
       "verification": [
         "tests/integration",
@@ -1973,7 +1973,7 @@
         "internal/execution",
         "internal/policy",
         "internal/installation",
-        "internal/desktop"
+        "apps/desktop"
       ],
       "verification": [
         "tests/integration",
@@ -1990,7 +1990,7 @@
         "internal/execution",
         "internal/policy",
         "internal/installation",
-        "internal/desktop"
+        "apps/desktop"
       ],
       "verification": [
         "tests/integration",
@@ -2001,7 +2001,7 @@
       "requirement": "R16-002",
       "section": "16",
       "kind": "requirement",
-      "owner": "internal/desktop",
+      "owner": "apps/desktop",
       "participants": [
         "internal/messaging",
         "internal/configuration",
@@ -2017,7 +2017,7 @@
       "requirement": "R16-003",
       "section": "16",
       "kind": "requirement",
-      "owner": "internal/desktop",
+      "owner": "apps/desktop",
       "participants": [
         "internal/messaging",
         "internal/configuration",
@@ -2033,7 +2033,7 @@
       "requirement": "R16-004",
       "section": "16",
       "kind": "requirement",
-      "owner": "internal/desktop",
+      "owner": "apps/desktop",
       "participants": [
         "internal/messaging",
         "internal/configuration",
@@ -2049,7 +2049,7 @@
       "requirement": "R16-005",
       "section": "16",
       "kind": "requirement",
-      "owner": "internal/desktop",
+      "owner": "apps/desktop",
       "participants": [
         "internal/messaging",
         "internal/configuration",
@@ -2065,7 +2065,7 @@
       "requirement": "R16-006",
       "section": "16",
       "kind": "requirement",
-      "owner": "internal/desktop",
+      "owner": "apps/desktop",
       "participants": [
         "internal/messaging",
         "internal/configuration",
@@ -2081,7 +2081,7 @@
       "requirement": "R16-007",
       "section": "16",
       "kind": "requirement",
-      "owner": "internal/desktop",
+      "owner": "apps/desktop",
       "participants": [
         "internal/messaging",
         "internal/configuration",
@@ -2097,7 +2097,7 @@
       "requirement": "R16-008",
       "section": "16",
       "kind": "requirement",
-      "owner": "internal/desktop",
+      "owner": "apps/desktop",
       "participants": [
         "internal/messaging",
         "internal/configuration",
@@ -2113,7 +2113,7 @@
       "requirement": "R16-009",
       "section": "16",
       "kind": "requirement",
-      "owner": "internal/desktop",
+      "owner": "apps/desktop",
       "participants": [
         "internal/messaging",
         "internal/configuration",
@@ -2129,7 +2129,7 @@
       "requirement": "R16-010",
       "section": "16",
       "kind": "requirement",
-      "owner": "internal/desktop",
+      "owner": "apps/desktop",
       "participants": [
         "internal/messaging",
         "internal/configuration",
@@ -2675,7 +2675,7 @@
       "gate": "Z13",
       "scopes": [
         "internal/execution",
-        "internal/desktop",
+        "apps/desktop",
         "internal/registry",
         "tests/integration"
       ]
@@ -2799,7 +2799,7 @@
       "scopes": [
         "internal/evidence",
         "internal/client",
-        "internal/desktop",
+        "apps/desktop",
         "internal/cli",
         "internal/mcp",
         "tests/integration"
@@ -3084,7 +3084,7 @@
       "scopes": [
         "internal/messaging",
         "internal/tasks",
-        "internal/desktop",
+        "apps/desktop",
         "tests/integration"
       ]
     },
@@ -3095,7 +3095,7 @@
         "internal/scheduling",
         "internal/tasks",
         "internal/policy",
-        "internal/desktop",
+        "apps/desktop",
         "tests/integration"
       ]
     },
@@ -3103,7 +3103,7 @@
       "id": "Z21.first_conversation",
       "gate": "Z21",
       "scopes": [
-        "internal/desktop",
+        "apps/desktop",
         "internal/installation",
         "internal/configuration",
         "tests/qualification"
@@ -3113,7 +3113,7 @@
       "id": "Z21.two_child_chiefs",
       "gate": "Z21",
       "scopes": [
-        "internal/desktop",
+        "apps/desktop",
         "internal/configuration",
         "internal/messaging",
         "tests/qualification"
@@ -3123,7 +3123,7 @@
       "id": "Z21.delegate_work",
       "gate": "Z21",
       "scopes": [
-        "internal/desktop",
+        "apps/desktop",
         "internal/tasks",
         "internal/scheduling",
         "internal/messaging",
@@ -3134,7 +3134,7 @@
       "id": "Z21.hierarchy_navigation",
       "gate": "Z21",
       "scopes": [
-        "internal/desktop",
+        "apps/desktop",
         "internal/configuration",
         "tests/qualification"
       ]
@@ -3143,7 +3143,7 @@
       "id": "Z21.exact_decision",
       "gate": "Z21",
       "scopes": [
-        "internal/desktop",
+        "apps/desktop",
         "internal/reviews",
         "internal/effects",
         "tests/qualification"
@@ -3153,7 +3153,7 @@
       "id": "Z21.reconnect_no_duplicate",
       "gate": "Z21",
       "scopes": [
-        "internal/desktop",
+        "apps/desktop",
         "internal/client",
         "internal/application",
         "tests/qualification"
@@ -3163,7 +3163,7 @@
       "id": "Z21.close_client",
       "gate": "Z21",
       "scopes": [
-        "internal/desktop",
+        "apps/desktop",
         "internal/controller",
         "internal/execution",
         "tests/qualification"
@@ -3173,7 +3173,7 @@
       "id": "Z21.groups_and_quiet_coordination",
       "gate": "Z21",
       "scopes": [
-        "internal/desktop",
+        "apps/desktop",
         "internal/messaging",
         "internal/memory",
         "internal/policy",
@@ -3184,7 +3184,7 @@
       "id": "Z21.capability_and_pause_cards",
       "gate": "Z21",
       "scopes": [
-        "internal/desktop",
+        "apps/desktop",
         "internal/policy",
         "internal/reviews",
         "internal/scheduling",
@@ -3280,7 +3280,7 @@
       "gate": "JOURNEY",
       "scopes": [
         "tests/qualification",
-        "internal/desktop",
+        "apps/desktop",
         "internal/configuration",
         "internal/tasks",
         "internal/scheduling",
@@ -3296,7 +3296,7 @@
         "tests/qualification",
         "internal/platform",
         "internal/installation",
-        "internal/desktop",
+        "apps/desktop",
         "internal/controller",
         "internal/adapters/serenity"
       ]
@@ -3308,7 +3308,7 @@
         "tests/qualification",
         "internal/platform",
         "internal/installation",
-        "internal/desktop",
+        "apps/desktop",
         "internal/controller",
         "internal/adapters/serenity"
       ]
