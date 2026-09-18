@@ -57,3 +57,11 @@ var wireSchemas = map[string]wireSchema{
 		Output: `{"type":"object","additionalProperties":false,"properties":{"resource":{"$ref":"#/$defs/Status"}},"required":["resource"]}`,
 	},
 }
+
+// completionSchemas maps each asynchronous operation to its exact eventual
+// job result schema (job.get resource.result), registered as the descriptor
+// completion schema.
+var completionSchemas = map[string]string{
+	"installation.backup":  `{"type":"object","additionalProperties":false,"properties":{"resource":{"$ref":"#/$defs/Backup"}},"required":["resource"]}`,
+	"installation.restore": `{"type":"object","additionalProperties":false,"properties":{"resource":{"$ref":"#/$defs/Status"}},"required":["resource"]}`,
+}

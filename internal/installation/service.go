@@ -152,8 +152,19 @@ func (s *Service) buildDescriptors() ([]contract.Descriptor, error) {
 			ExpectedVersion: m.expected,
 			SubmissionKey:   m.submission,
 		}
+		if completion, ok := completionSchemas[m.id]; ok {
+			merged, err := mergeSchema(completion)
+			if err != nil {
+				return nil, fmt.Errorf("installation: operation %s completion schema: %w", m.id, err)
+			}
+			d.CompletionSchema = merged
+		}
 		if m.visibility == contract.VisibilityPublic {
-			d.ScopeRequired = []string{"installation_id"}
+			// installation.init runs before any installation exists, so the
+			// frozen catalog keeps it scope-free.
+			if m.id != opInit {
+				d.ScopeRequired = []string{"installation_id"}
+			}
 			d.CLI = m.cli
 			d.MCP = "zatiti_" + strings.ReplaceAll(m.id, ".", "_")
 		}
