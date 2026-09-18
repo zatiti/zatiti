@@ -150,7 +150,7 @@ def main():
         if p['kind']=='domain':
             parts.append('Expose `New(contract.Dependencies) (*Service,error)`; `*Service` implements `contract.Module` with Name `'+n+'`, owner-prefixed migrations, all owned descriptors, and strict dispatch. No calls/goroutines during construction. Implement optional authentication/LocalIO interfaces where specified in the common contract. Tables are private under `'+n+'_`; external callers rely only on methods and schemas.\n')
         elif p['kind']=='adapter':
-            parts.append('Expose `New(contract.AdapterDependencies,json.RawMessage) (contract.Adapter,error)`. The profile/action/evidence schemas below are the local frozen seam. Upstream translation must use the qualified pinned public API; one Invoke means one accounted physical call. No arbitrary model-supplied endpoint/account.\n')
+            parts.append('Expose `New(contract.AdapterDependencies,json.RawMessage) (contract.Adapter,error)`. The profile/action/evidence schemas below are the local frozen seam. Upstream translation must use the qualified pinned public API; one Invoke means one accounted physical call. No arbitrary model-supplied endpoint/account. Stage the exact secret-free request record through Blobs before sending and return `physical_call.request_context` as a staged ArtifactLocator with its matching StagedOutput (purpose context); this adapter has no IDSource, never fabricates an ArtifactRef and never reuses capability evidence as a placeholder.\n')
         if p['imports']:
             parts.append('### Imported package APIs and behavior\n\nThese briefs are embedded so you need not read a sibling prompt to discover its incoming API. Implement only your own package.\n')
             for d in p['imports']:

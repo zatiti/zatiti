@@ -4359,7 +4359,7 @@
           "$ref": "#/$defs/Adapter_UTC"
         },
         "request_context": {
-          "$ref": "#/$defs/Adapter_ArtifactRef"
+          "$ref": "#/$defs/Adapter_ArtifactLocator"
         },
         "request_sent": {
           "type": "string",
@@ -4951,7 +4951,7 @@
           "maxLength": 1024
         },
         "request_context": {
-          "$ref": "#/$defs/Adapter_ArtifactRef"
+          "$ref": "#/$defs/Adapter_ArtifactLocator"
         },
         "finish_reason": {
           "type": "string",
@@ -5969,7 +5969,7 @@
             "$ref": "#/$defs/Adapter_StagedOutput"
           },
           "minItems": 0,
-          "maxItems": 1
+          "maxItems": 2
         },
         "output_artifacts": {
           "type": "array",
@@ -5977,7 +5977,7 @@
             "$ref": "#/$defs/Adapter_ArtifactRef"
           },
           "minItems": 0,
-          "maxItems": 1
+          "maxItems": 2
         },
         "content_digest": {
           "$ref": "#/$defs/Adapter_Digest"
