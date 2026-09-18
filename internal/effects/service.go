@@ -62,7 +62,7 @@ type opMeta struct {
 	submission bool
 	expected   bool
 	callers    []string
-	cli        string // "zatiti ..." CLI path; empty for internal operations
+	cli        string // CLI tokens below the root command, space separated; empty for internal operations
 }
 
 // opMetas lists every owned operation: internal first, then the public
@@ -80,14 +80,14 @@ var opMetas = []opMeta{
 	{id: opRecord, visibility: "internal", mode: "mutation",
 		callers: []string{"controller"}},
 	{id: opCompensationPropose, visibility: "public", mode: "mutation", submission: true, expected: true,
-		cli: "zatiti operation compensation propose"},
-	{id: opGet, visibility: "public", mode: "query", cli: "zatiti operation get"},
-	{id: opList, visibility: "public", mode: "query", cli: "zatiti operation list"},
-	{id: opPropose, visibility: "public", mode: "mutation", submission: true, cli: "zatiti operation propose"},
+		cli: "operation compensation propose"},
+	{id: opGet, visibility: "public", mode: "query", cli: "operation get"},
+	{id: opList, visibility: "public", mode: "query", cli: "operation list"},
+	{id: opPropose, visibility: "public", mode: "mutation", submission: true, cli: "operation propose"},
 	{id: opReconcile, visibility: "public", mode: "mutation", submission: true, expected: true,
-		effect: contract.EffectExternalRead, cli: "zatiti operation reconcile"},
+		effect: contract.EffectExternalRead, cli: "operation reconcile"},
 	{id: opReplacementPropose, visibility: "public", mode: "mutation", submission: true, expected: true,
-		cli: "zatiti operation replacement propose"},
+		cli: "operation replacement propose"},
 }
 
 // Service is the effects domain owner: immutable actions, logical
