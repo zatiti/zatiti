@@ -82,6 +82,11 @@ type wireVerificationProfile struct {
 	RunnerProfile   string          `json:"runner_profile,omitempty"`
 	CommandID       string          `json:"command_id,omitempty"`
 	CommandDigest   contract.Digest `json:"command_digest,omitempty"`
+	// CapabilityEvidence pins the qualification record of the verifier; its
+	// artifact is a reference every admission revalidates like any other.
+	CapabilityEvidence struct {
+		Artifact wireArtifactRef `json:"artifact"`
+	} `json:"capability_evidence"`
 }
 
 // profileDecoded extracts the discriminator and identity fields from either

@@ -65,8 +65,8 @@ type fakePorts struct {
 	workers       map[contract.ID]string
 	missingWorker bool
 
-	// _artifacts.metadata: artifact registry. An unregistered reference
-	// echoes the requested digest as an available artifact.
+	// _artifacts.metadata: artifact registry. Only registered references
+	// resolve, as with the real owner.
 	artifacts map[contract.ID]peerArtifact
 
 	// _accounting: intersected envelope, usage and reservation record.
@@ -255,24 +255,18 @@ func (p *fakePorts) snapshotBody(scope wireScope) peerScopeSnapshot {
 }
 
 // metadataBody resolves artifact references. Registered artifacts return
-// their stored metadata; unregistered ones echo the requested reference as
-// an available artifact in the requesting scope.
+// their stored metadata; unregistered ones do not resolve.
 func (p *fakePorts) metadataBody(in peerMetadataIn) peerMetadataOut {
+	// Like the real artifacts owner, only registered artifacts resolve; an
+	// unknown reference is omitted from the answer so the caller's own
+	// coverage check reports it as unresolvable. A fake that echoed every
+	// reference as available would hide exactly the admission hole that
+	// let a task be sealed against an artifact nobody holds.
 	out := peerMetadataOut{Artifacts: []peerArtifact{}}
 	for _, ref := range in.Artifacts {
 		if a, ok := p.artifacts[ref.ID]; ok {
 			out.Artifacts = append(out.Artifacts, a)
-			continue
 		}
-		out.Artifacts = append(out.Artifacts, peerArtifact{
-			ID:        ref.ID,
-			Version:   1,
-			Scope:     in.Scope,
-			Digest:    string(ref.Digest),
-			Size:      128,
-			MediaType: "application/octet-stream",
-			State:     "available",
-		})
 	}
 	return out
 }
@@ -386,6 +380,10 @@ func newEnv(t *testing.T) *testEnv {
 	env.worker = env.ids.New()
 	env.actor = contract.Actor{PrincipalID: env.owner, Kind: contract.KindService}
 	env.scope = wireScope{InstallationID: env.install}
+	// The verifier profile fixtures name this capability-evidence artifact;
+	// it exists in the fake registry the way a real installation publishes
+	// its qualification evidence before the first task.
+	env.ports.registerArtifact(fixtureEvidenceID, env.scope, fixtureProfileDigest, "application/json", "available")
 	return env
 }
 

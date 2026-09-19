@@ -301,3 +301,41 @@ func TestAdmissionRollsBackReservationOnCycle(t *testing.T) {
 		t.Fatalf("reserve calls %d, want parent plus attempted child", got)
 	}
 }
+
+// TestAdmissionRevalidatesAcceptanceArtifacts: the acceptance contract's
+// sealed inputs and the verifier profile's capability evidence artifact
+// are references like the task inputs, and admission refuses a contract
+// naming an artifact that does not resolve, does not match its digest or
+// is not available.
+func TestAdmissionRevalidatesAcceptanceArtifacts(t *testing.T) {
+	t.Run("capability evidence artifact not available", func(t *testing.T) {
+		env := newEnv(t)
+		env.ports.registerArtifact(fixtureEvidenceID, env.scope, fixtureProfileDigest, "", "fault")
+		_ = env.expectFault("task.create", map[string]any{"scope": env.scope, "definition": env.taskDef()},
+			contract.CodeArtifactFault)
+	})
+
+	t.Run("capability evidence digest mismatch", func(t *testing.T) {
+		env := newEnv(t)
+		env.ports.registerArtifact(fixtureEvidenceID, env.scope, altDigest, "", "")
+		_ = env.expectFault("task.create", map[string]any{"scope": env.scope, "definition": env.taskDef()},
+			contract.CodeInvalidInput)
+	})
+
+	t.Run("sealed input not available", func(t *testing.T) {
+		env := newEnv(t)
+		def := env.taskDef()
+		ref := env.artifactFixture("sealed-input")
+		env.ports.registerArtifact(ref.ID, env.scope, string(ref.Digest), "", "fault")
+		def.Acceptance.SealedInputs = []wireArtifactRef{ref}
+		_ = env.expectFault("task.create", map[string]any{"scope": env.scope, "definition": def},
+			contract.CodeArtifactFault)
+	})
+
+	t.Run("resolvable references admit", func(t *testing.T) {
+		env := newEnv(t)
+		def := env.taskDef()
+		def.Acceptance.SealedInputs = []wireArtifactRef{env.artifactFixture("sealed-input")}
+		_ = env.createTask(def)
+	})
+}

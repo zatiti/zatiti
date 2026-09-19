@@ -87,8 +87,24 @@ func (s *Service) admitTask(ctx context.Context, unit contract.Unit, req *admiss
 	}
 
 	// Pinned inputs: every artifact reference must resolve, match its
-	// digest, be in scope and be available.
+	// digest, be in scope and be available. The acceptance contract's own
+	// references, its sealed inputs and the verifier profile's capability
+	// evidence artifact, are revalidated the same way: a sealed contract
+	// that names an artifact nobody holds would fence success on evidence
+	// that can never be observed.
 	if _, err := s.validateArtifacts(ctx, unit, def.Scope.toContract(), def.Inputs); err != nil {
+		return nil, err
+	}
+	if _, err := s.validateArtifacts(ctx, unit, def.Scope.toContract(), def.Acceptance.SealedInputs); err != nil {
+		return nil, err
+	}
+	// Verifier profiles are installation-owned: their qualification evidence
+	// is published at installation scope, so it resolves at that scope
+	// rather than at the task's narrower one, which the artifacts owner
+	// would refuse to match against an installation-level artifact.
+	if evidence, err := profileEvidence(def.Acceptance.Profile); err != nil {
+		return nil, err
+	} else if _, err := s.validateArtifacts(ctx, unit, contract.Scope{InstallationID: def.Scope.InstallationID}, []wireArtifactRef{evidence}); err != nil {
 		return nil, err
 	}
 
@@ -422,4 +438,19 @@ func mustJSON(v any) json.RawMessage {
 		panic("tasks: wire value encoding failed: " + err.Error())
 	}
 	return raw
+}
+
+// profileEvidence extracts the verifier profile's capability evidence
+// artifact reference. The schema already requires it; an unreadable profile
+// is invalid input.
+func profileEvidence(raw json.RawMessage) (wireArtifactRef, error) {
+	profile, err := profileDecoded(raw)
+	if err != nil {
+		return wireArtifactRef{}, invalidInput("acceptance profile decoding failed: %v", err)
+	}
+	ref := profile.CapabilityEvidence.Artifact
+	if ref.ID == "" || ref.Digest == "" {
+		return wireArtifactRef{}, invalidInput("acceptance profile capability_evidence must name an artifact")
+	}
+	return ref, nil
 }
