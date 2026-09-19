@@ -1,0 +1,3655 @@
+{
+  "scopes": [
+    {
+      "name": "contract",
+      "root": "internal/contract",
+      "delivery_tasks": [
+        "P01"
+      ],
+      "assessment": "Existing implementation/scaffold present; targeted changes and integration/qualification assigned, not a rewrite."
+    },
+    {
+      "name": "platform",
+      "root": "internal/platform",
+      "delivery_tasks": [
+        "P30"
+      ],
+      "assessment": "Existing implementation/scaffold present; targeted changes and integration/qualification assigned, not a rewrite."
+    },
+    {
+      "name": "storage",
+      "root": "internal/storage",
+      "delivery_tasks": [
+        "P29"
+      ],
+      "assessment": "Existing implementation/scaffold present; targeted changes and integration/qualification assigned, not a rewrite."
+    },
+    {
+      "name": "identity",
+      "root": "internal/identity",
+      "delivery_tasks": [
+        "P03"
+      ],
+      "assessment": "Existing implementation/scaffold present; targeted changes and integration/qualification assigned, not a rewrite."
+    },
+    {
+      "name": "configuration",
+      "root": "internal/configuration",
+      "delivery_tasks": [
+        "P05"
+      ],
+      "assessment": "Existing implementation/scaffold present; targeted changes and integration/qualification assigned, not a rewrite."
+    },
+    {
+      "name": "skills",
+      "root": "internal/skills",
+      "delivery_tasks": [
+        "P19"
+      ],
+      "assessment": "Existing implementation/scaffold present; targeted changes and integration/qualification assigned, not a rewrite."
+    },
+    {
+      "name": "connections",
+      "root": "internal/connections",
+      "delivery_tasks": [
+        "P06"
+      ],
+      "assessment": "Existing implementation/scaffold present; targeted changes and integration/qualification assigned, not a rewrite."
+    },
+    {
+      "name": "policy",
+      "root": "internal/policy",
+      "delivery_tasks": [
+        "P07",
+        "P36"
+      ],
+      "assessment": "Existing implementation/scaffold present; targeted changes and integration/qualification assigned, not a rewrite."
+    },
+    {
+      "name": "reviews",
+      "root": "internal/reviews",
+      "delivery_tasks": [
+        "P35"
+      ],
+      "assessment": "Existing implementation/scaffold present; targeted changes and integration/qualification assigned, not a rewrite."
+    },
+    {
+      "name": "accounting",
+      "root": "internal/accounting",
+      "delivery_tasks": [
+        "P08"
+      ],
+      "assessment": "Existing implementation/scaffold present; targeted changes and integration/qualification assigned, not a rewrite."
+    },
+    {
+      "name": "tasks",
+      "root": "internal/tasks",
+      "delivery_tasks": [
+        "P11"
+      ],
+      "assessment": "Existing implementation/scaffold present; targeted changes and integration/qualification assigned, not a rewrite."
+    },
+    {
+      "name": "scheduling",
+      "root": "internal/scheduling",
+      "delivery_tasks": [
+        "P17"
+      ],
+      "assessment": "Existing implementation/scaffold present; targeted changes and integration/qualification assigned, not a rewrite."
+    },
+    {
+      "name": "messaging",
+      "root": "internal/messaging",
+      "delivery_tasks": [
+        "P10"
+      ],
+      "assessment": "Existing implementation/scaffold present; targeted changes and integration/qualification assigned, not a rewrite."
+    },
+    {
+      "name": "execution",
+      "root": "internal/execution",
+      "delivery_tasks": [
+        "P14",
+        "P15",
+        "P16",
+        "P18",
+        "P20",
+        "P21"
+      ],
+      "assessment": "Existing implementation/scaffold present; targeted changes and integration/qualification assigned, not a rewrite."
+    },
+    {
+      "name": "effects",
+      "root": "internal/effects",
+      "delivery_tasks": [
+        "P12"
+      ],
+      "assessment": "Existing implementation/scaffold present; targeted changes and integration/qualification assigned, not a rewrite."
+    },
+    {
+      "name": "memory",
+      "root": "internal/memory",
+      "delivery_tasks": [
+        "P26",
+        "P28"
+      ],
+      "assessment": "Existing implementation/scaffold present; targeted changes and integration/qualification assigned, not a rewrite."
+    },
+    {
+      "name": "artifacts",
+      "root": "internal/artifacts",
+      "delivery_tasks": [
+        "P09"
+      ],
+      "assessment": "Existing implementation/scaffold present; targeted changes and integration/qualification assigned, not a rewrite."
+    },
+    {
+      "name": "evidence",
+      "root": "internal/evidence",
+      "delivery_tasks": [
+        "P34"
+      ],
+      "assessment": "Existing implementation/scaffold present; targeted changes and integration/qualification assigned, not a rewrite."
+    },
+    {
+      "name": "installation",
+      "root": "internal/installation",
+      "delivery_tasks": [
+        "P25",
+        "P31"
+      ],
+      "assessment": "Existing implementation/scaffold present; targeted changes and integration/qualification assigned, not a rewrite."
+    },
+    {
+      "name": "registry",
+      "root": "internal/registry",
+      "delivery_tasks": [
+        "P37"
+      ],
+      "assessment": "Existing implementation/scaffold present; targeted changes and integration/qualification assigned, not a rewrite."
+    },
+    {
+      "name": "application",
+      "root": "internal/application",
+      "delivery_tasks": [
+        "P04"
+      ],
+      "assessment": "Existing implementation/scaffold present; targeted changes and integration/qualification assigned, not a rewrite."
+    },
+    {
+      "name": "controller",
+      "root": "internal/controller",
+      "delivery_tasks": [
+        "P22",
+        "P23",
+        "P32"
+      ],
+      "assessment": "Existing implementation/scaffold present; targeted changes and integration/qualification assigned, not a rewrite."
+    },
+    {
+      "name": "server",
+      "root": "internal/server",
+      "delivery_tasks": [
+        "P41"
+      ],
+      "assessment": "Existing implementation/scaffold present; targeted changes and integration/qualification assigned, not a rewrite."
+    },
+    {
+      "name": "client",
+      "root": "internal/client",
+      "delivery_tasks": [
+        "P38"
+      ],
+      "assessment": "Existing implementation/scaffold present; targeted changes and integration/qualification assigned, not a rewrite."
+    },
+    {
+      "name": "cli",
+      "root": "internal/cli",
+      "delivery_tasks": [
+        "P39"
+      ],
+      "assessment": "Existing implementation/scaffold present; targeted changes and integration/qualification assigned, not a rewrite."
+    },
+    {
+      "name": "mcp",
+      "root": "internal/mcp",
+      "delivery_tasks": [
+        "P40"
+      ],
+      "assessment": "Existing implementation/scaffold present; targeted changes and integration/qualification assigned, not a rewrite."
+    },
+    {
+      "name": "desktop",
+      "root": "apps/desktop",
+      "delivery_tasks": [
+        "P42",
+        "P43",
+        "P44"
+      ],
+      "assessment": "Existing implementation/scaffold present; targeted changes and integration/qualification assigned, not a rewrite."
+    },
+    {
+      "name": "responses",
+      "root": "internal/adapters/responses",
+      "delivery_tasks": [
+        "P13"
+      ],
+      "assessment": "Existing implementation/scaffold present; targeted changes and integration/qualification assigned, not a rewrite."
+    },
+    {
+      "name": "github",
+      "root": "internal/adapters/github",
+      "delivery_tasks": [
+        "P46",
+        "P47"
+      ],
+      "assessment": "Implemented strict repository adapter; preserve and exercise via real effect/reconciliation/engineering journeys (P12/P20/P46/P47). No separate replacement justified."
+    },
+    {
+      "name": "httpread",
+      "root": "internal/adapters/httpread",
+      "delivery_tasks": [
+        "P46",
+        "P47"
+      ],
+      "assessment": "Implemented bounded public-read adapter; preserve and exercise via real research tool loop and qualification (P16/P46/P47). No separate replacement justified."
+    },
+    {
+      "name": "serenity",
+      "root": "internal/adapters/serenity",
+      "delivery_tasks": [
+        "P27"
+      ],
+      "assessment": "Existing implementation/scaffold present; targeted changes and integration/qualification assigned, not a rewrite."
+    },
+    {
+      "name": "zatiti",
+      "root": "cmd/zatiti",
+      "delivery_tasks": [
+        "P24",
+        "P33"
+      ],
+      "assessment": "Existing implementation/scaffold present; targeted changes and integration/qualification assigned, not a rewrite."
+    },
+    {
+      "name": "integration",
+      "root": "tests/integration",
+      "delivery_tasks": [
+        "P46"
+      ],
+      "assessment": "Existing implementation/scaffold present; targeted changes and integration/qualification assigned, not a rewrite."
+    },
+    {
+      "name": "qualification",
+      "root": "tests/qualification",
+      "delivery_tasks": [
+        "P47"
+      ],
+      "assessment": "Existing implementation/scaffold present; targeted changes and integration/qualification assigned, not a rewrite."
+    },
+    {
+      "name": "distribution",
+      "root": "packaging",
+      "delivery_tasks": [
+        "P45"
+      ],
+      "assessment": "Existing implementation/scaffold present; targeted changes and integration/qualification assigned, not a rewrite."
+    },
+    {
+      "name": "ci",
+      "root": ".github/workflows",
+      "delivery_tasks": [
+        "P48"
+      ],
+      "assessment": "Existing implementation/scaffold present; targeted changes and integration/qualification assigned, not a rewrite."
+    }
+  ],
+  "operations": [
+    {
+      "operation_id": "principal.create",
+      "owner": "identity",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P03"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "principal.list",
+      "owner": "identity",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P03"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "principal.get",
+      "owner": "identity",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P03"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "principal.update",
+      "owner": "identity",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P03"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "principal.revoke",
+      "owner": "identity",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P03"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "grant.create",
+      "owner": "identity",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P03"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "grant.list",
+      "owner": "identity",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P03"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "grant.get",
+      "owner": "identity",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P03"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "grant.update",
+      "owner": "identity",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P03"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "grant.revoke",
+      "owner": "identity",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P03"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "credential.provision",
+      "owner": "identity",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P03"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "credential.revoke",
+      "owner": "identity",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P03"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "organization.create",
+      "owner": "configuration",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P05"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "organization.list",
+      "owner": "configuration",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P05"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "organization.get",
+      "owner": "configuration",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P05"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "organization.update",
+      "owner": "configuration",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P05"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "organization.archive",
+      "owner": "configuration",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P05"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "organization.export",
+      "owner": "configuration",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P05"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "organization.import",
+      "owner": "configuration",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P05"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "team.create",
+      "owner": "configuration",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P05"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "team.list",
+      "owner": "configuration",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P05"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "team.get",
+      "owner": "configuration",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P05"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "team.update",
+      "owner": "configuration",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P05"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "team.archive",
+      "owner": "configuration",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P05"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "team.export",
+      "owner": "configuration",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P05"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "team.import",
+      "owner": "configuration",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P05"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "project.create",
+      "owner": "configuration",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P05"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "project.list",
+      "owner": "configuration",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P05"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "project.get",
+      "owner": "configuration",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P05"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "project.update",
+      "owner": "configuration",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P05"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "project.archive",
+      "owner": "configuration",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P05"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "project.export",
+      "owner": "configuration",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P05"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "project.import",
+      "owner": "configuration",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P05"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "worker.create",
+      "owner": "configuration",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P05"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "worker.list",
+      "owner": "configuration",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P05"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "worker.get",
+      "owner": "configuration",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P05"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "worker.update",
+      "owner": "configuration",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P05"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "worker.archive",
+      "owner": "configuration",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P05"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "binding.create",
+      "owner": "configuration",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P05"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "binding.list",
+      "owner": "configuration",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P05"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "binding.get",
+      "owner": "configuration",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P05"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "binding.update",
+      "owner": "configuration",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P05"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "binding.archive",
+      "owner": "configuration",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P05"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "execution_profile.create",
+      "owner": "configuration",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P05"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "execution_profile.list",
+      "owner": "configuration",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P05"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "execution_profile.get",
+      "owner": "configuration",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P05"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "execution_profile.update",
+      "owner": "configuration",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P05"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "execution_profile.archive",
+      "owner": "configuration",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P05"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "organization.move",
+      "owner": "configuration",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P05"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "organization.chief.replace",
+      "owner": "configuration",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P05"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "worker.move",
+      "owner": "configuration",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P05"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "worker.pause",
+      "owner": "execution",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P14",
+        "P15",
+        "P16",
+        "P18",
+        "P20",
+        "P21"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "worker.resume",
+      "owner": "execution",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P14",
+        "P15",
+        "P16",
+        "P18",
+        "P20",
+        "P21"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "configuration.draft.list",
+      "owner": "configuration",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P05"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "configuration.draft.get",
+      "owner": "configuration",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P05"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "configuration.draft.create",
+      "owner": "configuration",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P05"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "configuration.draft.update",
+      "owner": "configuration",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P05"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "configuration.draft.discard",
+      "owner": "configuration",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P05"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "configuration.plan",
+      "owner": "configuration",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P05"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "configuration.plan.list",
+      "owner": "configuration",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P05"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "configuration.plan.get",
+      "owner": "configuration",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P05"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "configuration.apply",
+      "owner": "configuration",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P05"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "configuration.revision.list",
+      "owner": "configuration",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P05"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "configuration.revision.get",
+      "owner": "configuration",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P05"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "configuration.rollback.plan",
+      "owner": "configuration",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P05"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "skill.list",
+      "owner": "skills",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P19"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "skill.get",
+      "owner": "skills",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P19"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "skill.archive",
+      "owner": "skills",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P19"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "skill.import",
+      "owner": "skills",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P19"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "skill.evaluate",
+      "owner": "skills",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P19"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "skill.evaluation.status",
+      "owner": "skills",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P19"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "tool.list",
+      "owner": "connections",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P06"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "tool.get",
+      "owner": "connections",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P06"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "tool.schema",
+      "owner": "connections",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P06"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "tool.bind",
+      "owner": "connections",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P06"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "tool.unbind",
+      "owner": "connections",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P06"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "connection.create",
+      "owner": "connections",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P06"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "connection.list",
+      "owner": "connections",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P06"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "connection.get",
+      "owner": "connections",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P06"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "connection.update",
+      "owner": "connections",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P06"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "connection.archive",
+      "owner": "connections",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P06"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "connection.validate",
+      "owner": "connections",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P06"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "connection.setup.begin",
+      "owner": "connections",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P06"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "connection.setup.status",
+      "owner": "connections",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P06"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "connection.setup.complete",
+      "owner": "connections",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P06"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "connection.setup.cancel",
+      "owner": "connections",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P06"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "connection.rotate",
+      "owner": "connections",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P06"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "connection.revoke",
+      "owner": "connections",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P06"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "policy.create",
+      "owner": "policy",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P07",
+        "P36"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "policy.list",
+      "owner": "policy",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P07",
+        "P36"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "policy.get",
+      "owner": "policy",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P07",
+        "P36"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "policy.update",
+      "owner": "policy",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P07",
+        "P36"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "policy.archive",
+      "owner": "policy",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P07",
+        "P36"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "policy.explain",
+      "owner": "policy",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P07",
+        "P36"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "autonomy.rule.create",
+      "owner": "policy",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P07",
+        "P36"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "autonomy.rule.list",
+      "owner": "policy",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P07",
+        "P36"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "autonomy.rule.get",
+      "owner": "policy",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P07",
+        "P36"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "autonomy.rule.update",
+      "owner": "policy",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P07",
+        "P36"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "autonomy.rule.archive",
+      "owner": "policy",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P07",
+        "P36"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "autonomy.qualification.list",
+      "owner": "policy",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P07",
+        "P36"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "autonomy.qualification.get",
+      "owner": "policy",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P07",
+        "P36"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "autonomy.propose",
+      "owner": "policy",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P07",
+        "P36"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "autonomy.evaluate",
+      "owner": "policy",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P07",
+        "P36"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "autonomy.restrict",
+      "owner": "policy",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P07",
+        "P36"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "autonomy.demote",
+      "owner": "policy",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P07",
+        "P36"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "task.list",
+      "owner": "tasks",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P11"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "task.get",
+      "owner": "tasks",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P11"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "task.create",
+      "owner": "tasks",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P11"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "task.update",
+      "owner": "tasks",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P11"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "task.assign",
+      "owner": "tasks",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P11"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "task.delegate",
+      "owner": "tasks",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P11"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "task.cancel",
+      "owner": "tasks",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P11"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "task.retry",
+      "owner": "tasks",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P11"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "task.dependencies",
+      "owner": "tasks",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P11"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "task.accept",
+      "owner": "tasks",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P11"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "schedule.create",
+      "owner": "scheduling",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P17"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "schedule.list",
+      "owner": "scheduling",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P17"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "schedule.get",
+      "owner": "scheduling",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P17"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "schedule.update",
+      "owner": "scheduling",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P17"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "schedule.archive",
+      "owner": "scheduling",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P17"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "responsibility.create",
+      "owner": "scheduling",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P17"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "responsibility.list",
+      "owner": "scheduling",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P17"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "responsibility.get",
+      "owner": "scheduling",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P17"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "responsibility.update",
+      "owner": "scheduling",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P17"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "responsibility.archive",
+      "owner": "scheduling",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P17"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "schedule.pause",
+      "owner": "scheduling",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P17"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "schedule.resume",
+      "owner": "scheduling",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P17"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "responsibility.pause",
+      "owner": "scheduling",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P17"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "responsibility.resume",
+      "owner": "scheduling",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P17"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "run.list",
+      "owner": "execution",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P14",
+        "P15",
+        "P16",
+        "P18",
+        "P20",
+        "P21"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "run.get",
+      "owner": "execution",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P14",
+        "P15",
+        "P16",
+        "P18",
+        "P20",
+        "P21"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "run.cancel",
+      "owner": "execution",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P14",
+        "P15",
+        "P16",
+        "P18",
+        "P20",
+        "P21"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "run.recovery",
+      "owner": "execution",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P14",
+        "P15",
+        "P16",
+        "P18",
+        "P20",
+        "P21"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "attempt.list",
+      "owner": "execution",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P14",
+        "P15",
+        "P16",
+        "P18",
+        "P20",
+        "P21"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "attempt.get",
+      "owner": "execution",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P14",
+        "P15",
+        "P16",
+        "P18",
+        "P20",
+        "P21"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "attempt.cancel",
+      "owner": "execution",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P14",
+        "P15",
+        "P16",
+        "P18",
+        "P20",
+        "P21"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "attempt.recovery",
+      "owner": "execution",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P14",
+        "P15",
+        "P16",
+        "P18",
+        "P20",
+        "P21"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "run.claim",
+      "owner": "execution",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P14",
+        "P15",
+        "P16",
+        "P18",
+        "P20",
+        "P21"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "attempt.heartbeat",
+      "owner": "execution",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P14",
+        "P15",
+        "P16",
+        "P18",
+        "P20",
+        "P21"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "attempt.checkpoint",
+      "owner": "execution",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P14",
+        "P15",
+        "P16",
+        "P18",
+        "P20",
+        "P21"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "attempt.report",
+      "owner": "execution",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P14",
+        "P15",
+        "P16",
+        "P18",
+        "P20",
+        "P21"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "run.export",
+      "owner": "execution",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P14",
+        "P15",
+        "P16",
+        "P18",
+        "P20",
+        "P21"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "review.list",
+      "owner": "reviews",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P35"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "review.get",
+      "owner": "reviews",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P35"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "review.decide",
+      "owner": "reviews",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P35"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "review.delegate",
+      "owner": "reviews",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P35"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "operation.list",
+      "owner": "effects",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P12"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "operation.get",
+      "owner": "effects",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P12"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "operation.propose",
+      "owner": "effects",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P12"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "operation.reconcile",
+      "owner": "effects",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P12"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "operation.compensation.propose",
+      "owner": "effects",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P12"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "operation.replacement.propose",
+      "owner": "effects",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P12"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "artifact.list",
+      "owner": "artifacts",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P09"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "artifact.get",
+      "owner": "artifacts",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P09"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "artifact.upload.begin",
+      "owner": "artifacts",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P09"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "artifact.upload.chunk",
+      "owner": "artifacts",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P09"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "artifact.upload.finish",
+      "owner": "artifacts",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P09"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "artifact.upload.cancel",
+      "owner": "artifacts",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P09"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "artifact.read",
+      "owner": "artifacts",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P09"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "artifact.export",
+      "owner": "artifacts",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P09"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "event.list",
+      "owner": "evidence",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P34"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "event.get",
+      "owner": "evidence",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P34"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "command.get",
+      "owner": "evidence",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P34"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "budget.get",
+      "owner": "accounting",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P08"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "budget.propose",
+      "owner": "accounting",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P08"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "usage.get",
+      "owner": "accounting",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P08"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "memory.binding.create",
+      "owner": "memory",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P26",
+        "P28"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "memory.binding.list",
+      "owner": "memory",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P26",
+        "P28"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "memory.binding.get",
+      "owner": "memory",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P26",
+        "P28"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "memory.binding.update",
+      "owner": "memory",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P26",
+        "P28"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "memory.binding.archive",
+      "owner": "memory",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P26",
+        "P28"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "memory.recall",
+      "owner": "memory",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P26",
+        "P28"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "memory.remember",
+      "owner": "memory",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P26",
+        "P28"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "memory.inspect",
+      "owner": "memory",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P26",
+        "P28"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "memory.promote",
+      "owner": "memory",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P26",
+        "P28"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "memory.retract",
+      "owner": "memory",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P26",
+        "P28"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "memory.job.get",
+      "owner": "memory",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P26",
+        "P28"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "conversation.list",
+      "owner": "messaging",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P10"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "conversation.get",
+      "owner": "messaging",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P10"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "conversation.create",
+      "owner": "messaging",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P10"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "conversation.update",
+      "owner": "messaging",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P10"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "conversation.message.send",
+      "owner": "messaging",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P10"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "mailbox.send",
+      "owner": "messaging",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P10"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "mailbox.list",
+      "owner": "messaging",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P10"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "mailbox.ack",
+      "owner": "messaging",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P10"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "capabilities.list",
+      "owner": "registry",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P37"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "capabilities.schema",
+      "owner": "registry",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P37"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "installation.init",
+      "owner": "installation",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P25",
+        "P31"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "installation.status",
+      "owner": "installation",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P25",
+        "P31"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "installation.doctor",
+      "owner": "installation",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P25",
+        "P31"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "installation.pause",
+      "owner": "installation",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P25",
+        "P31"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "installation.resume",
+      "owner": "installation",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P25",
+        "P31"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "installation.maintenance.enter",
+      "owner": "installation",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P25",
+        "P31"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "installation.backup",
+      "owner": "installation",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P25",
+        "P31"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "installation.restore",
+      "owner": "installation",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P25",
+        "P31"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "installation.job.get",
+      "owner": "installation",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P25",
+        "P31"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "_identity.validate",
+      "owner": "identity",
+      "visibility": "internal",
+      "delivery_tasks": [
+        "P03"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "_identity.activate",
+      "owner": "identity",
+      "visibility": "internal",
+      "delivery_tasks": [
+        "P03"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "_configuration.validate",
+      "owner": "configuration",
+      "visibility": "internal",
+      "delivery_tasks": [
+        "P05"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "_configuration.activate",
+      "owner": "configuration",
+      "visibility": "internal",
+      "delivery_tasks": [
+        "P05"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "_skills.validate",
+      "owner": "skills",
+      "visibility": "internal",
+      "delivery_tasks": [
+        "P19"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "_skills.activate",
+      "owner": "skills",
+      "visibility": "internal",
+      "delivery_tasks": [
+        "P19"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "_connections.validate",
+      "owner": "connections",
+      "visibility": "internal",
+      "delivery_tasks": [
+        "P06"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "_connections.activate",
+      "owner": "connections",
+      "visibility": "internal",
+      "delivery_tasks": [
+        "P06"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "_policy.validate",
+      "owner": "policy",
+      "visibility": "internal",
+      "delivery_tasks": [
+        "P07",
+        "P36"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "_policy.activate",
+      "owner": "policy",
+      "visibility": "internal",
+      "delivery_tasks": [
+        "P07",
+        "P36"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "_accounting.validate",
+      "owner": "accounting",
+      "visibility": "internal",
+      "delivery_tasks": [
+        "P08"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "_accounting.activate",
+      "owner": "accounting",
+      "visibility": "internal",
+      "delivery_tasks": [
+        "P08"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "_scheduling.validate",
+      "owner": "scheduling",
+      "visibility": "internal",
+      "delivery_tasks": [
+        "P17"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "_scheduling.activate",
+      "owner": "scheduling",
+      "visibility": "internal",
+      "delivery_tasks": [
+        "P17"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "_memory.validate",
+      "owner": "memory",
+      "visibility": "internal",
+      "delivery_tasks": [
+        "P26",
+        "P28"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "_memory.activate",
+      "owner": "memory",
+      "visibility": "internal",
+      "delivery_tasks": [
+        "P26",
+        "P28"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "_identity.authority",
+      "owner": "identity",
+      "visibility": "internal",
+      "delivery_tasks": [
+        "P03"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "_identity.bootstrap",
+      "owner": "identity",
+      "visibility": "internal",
+      "delivery_tasks": [
+        "P03"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "_identity.restrict",
+      "owner": "identity",
+      "visibility": "internal",
+      "delivery_tasks": [
+        "P03"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "_identity.promote",
+      "owner": "identity",
+      "visibility": "internal",
+      "delivery_tasks": [
+        "P03"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "_configuration.stage",
+      "owner": "configuration",
+      "visibility": "internal",
+      "delivery_tasks": [
+        "P05"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "_configuration.snapshot",
+      "owner": "configuration",
+      "visibility": "internal",
+      "delivery_tasks": [
+        "P05"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "_configuration.bootstrap",
+      "owner": "configuration",
+      "visibility": "internal",
+      "delivery_tasks": [
+        "P05"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "_policy.check",
+      "owner": "policy",
+      "visibility": "internal",
+      "delivery_tasks": [
+        "P07",
+        "P36"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "_policy.invalidate",
+      "owner": "policy",
+      "visibility": "internal",
+      "delivery_tasks": [
+        "P07",
+        "P36"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "_reviews.ensure",
+      "owner": "reviews",
+      "visibility": "internal",
+      "delivery_tasks": [
+        "P35"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "_reviews.check",
+      "owner": "reviews",
+      "visibility": "internal",
+      "delivery_tasks": [
+        "P35"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "_accounting.reserve",
+      "owner": "accounting",
+      "visibility": "internal",
+      "delivery_tasks": [
+        "P08"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "_accounting.settle",
+      "owner": "accounting",
+      "visibility": "internal",
+      "delivery_tasks": [
+        "P08"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "_accounting.inspect",
+      "owner": "accounting",
+      "visibility": "internal",
+      "delivery_tasks": [
+        "P08"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "_connections.resolve",
+      "owner": "connections",
+      "visibility": "internal",
+      "delivery_tasks": [
+        "P06"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "_connections.validation.record",
+      "owner": "connections",
+      "visibility": "internal",
+      "delivery_tasks": [
+        "P06"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "_tasks.create",
+      "owner": "tasks",
+      "visibility": "internal",
+      "delivery_tasks": [
+        "P11"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "_tasks.snapshot",
+      "owner": "tasks",
+      "visibility": "internal",
+      "delivery_tasks": [
+        "P11"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "_tasks.transition",
+      "owner": "tasks",
+      "visibility": "internal",
+      "delivery_tasks": [
+        "P11"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "_scheduling.wake.due",
+      "owner": "scheduling",
+      "visibility": "internal",
+      "delivery_tasks": [
+        "P17"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "_scheduling.wake.admit",
+      "owner": "scheduling",
+      "visibility": "internal",
+      "delivery_tasks": [
+        "P17"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "_scheduling.cycle.record",
+      "owner": "scheduling",
+      "visibility": "internal",
+      "delivery_tasks": [
+        "P17"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "_effects.admit",
+      "owner": "effects",
+      "visibility": "internal",
+      "delivery_tasks": [
+        "P12"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "_effects.claim",
+      "owner": "effects",
+      "visibility": "internal",
+      "delivery_tasks": [
+        "P12"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "_effects.record",
+      "owner": "effects",
+      "visibility": "internal",
+      "delivery_tasks": [
+        "P12"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "_effects.pending",
+      "owner": "effects",
+      "visibility": "internal",
+      "delivery_tasks": [
+        "P12"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "_effects.prepare",
+      "owner": "effects",
+      "visibility": "internal",
+      "delivery_tasks": [
+        "P12"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "_execution.tick",
+      "owner": "execution",
+      "visibility": "internal",
+      "delivery_tasks": [
+        "P14",
+        "P15",
+        "P16",
+        "P18",
+        "P20",
+        "P21"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "_execution.context",
+      "owner": "execution",
+      "visibility": "internal",
+      "delivery_tasks": [
+        "P14",
+        "P15",
+        "P16",
+        "P18",
+        "P20",
+        "P21"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "_execution.observation",
+      "owner": "execution",
+      "visibility": "internal",
+      "delivery_tasks": [
+        "P14",
+        "P15",
+        "P16",
+        "P18",
+        "P20",
+        "P21"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "_execution.fence",
+      "owner": "execution",
+      "visibility": "internal",
+      "delivery_tasks": [
+        "P14",
+        "P15",
+        "P16",
+        "P18",
+        "P20",
+        "P21"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "_messaging.admit",
+      "owner": "messaging",
+      "visibility": "internal",
+      "delivery_tasks": [
+        "P10"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "_messaging.pending",
+      "owner": "messaging",
+      "visibility": "internal",
+      "delivery_tasks": [
+        "P10"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "_messaging.bootstrap",
+      "owner": "messaging",
+      "visibility": "internal",
+      "delivery_tasks": [
+        "P10"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "_memory.select",
+      "owner": "memory",
+      "visibility": "internal",
+      "delivery_tasks": [
+        "P26",
+        "P28"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "_memory.record",
+      "owner": "memory",
+      "visibility": "internal",
+      "delivery_tasks": [
+        "P26",
+        "P28"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "_memory.bootstrap",
+      "owner": "memory",
+      "visibility": "internal",
+      "delivery_tasks": [
+        "P26",
+        "P28"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "_memory.manifest",
+      "owner": "memory",
+      "visibility": "internal",
+      "delivery_tasks": [
+        "P26",
+        "P28"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "_artifacts.metadata",
+      "owner": "artifacts",
+      "visibility": "internal",
+      "delivery_tasks": [
+        "P09"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "_artifacts.publish",
+      "owner": "artifacts",
+      "visibility": "internal",
+      "delivery_tasks": [
+        "P09"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "_evidence.command.begin",
+      "owner": "evidence",
+      "visibility": "internal",
+      "delivery_tasks": [
+        "P34"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "_evidence.command.finish",
+      "owner": "evidence",
+      "visibility": "internal",
+      "delivery_tasks": [
+        "P34"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "_evidence.snapshot",
+      "owner": "evidence",
+      "visibility": "internal",
+      "delivery_tasks": [
+        "P34"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "_installation.restore.record",
+      "owner": "installation",
+      "visibility": "internal",
+      "delivery_tasks": [
+        "P25",
+        "P31"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "_execution.enqueue",
+      "owner": "execution",
+      "visibility": "internal",
+      "delivery_tasks": [
+        "P14",
+        "P15",
+        "P16",
+        "P18",
+        "P20",
+        "P21"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "_tasks.ready",
+      "owner": "tasks",
+      "visibility": "internal",
+      "delivery_tasks": [
+        "P11"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "job.get",
+      "owner": "execution",
+      "visibility": "public",
+      "delivery_tasks": [
+        "P14",
+        "P15",
+        "P16",
+        "P18",
+        "P20",
+        "P21"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "_execution.job.create",
+      "owner": "execution",
+      "visibility": "internal",
+      "delivery_tasks": [
+        "P14",
+        "P15",
+        "P16",
+        "P18",
+        "P20",
+        "P21"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "_execution.job.pending",
+      "owner": "execution",
+      "visibility": "internal",
+      "delivery_tasks": [
+        "P14",
+        "P15",
+        "P16",
+        "P18",
+        "P20",
+        "P21"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "_execution.job.claim",
+      "owner": "execution",
+      "visibility": "internal",
+      "delivery_tasks": [
+        "P14",
+        "P15",
+        "P16",
+        "P18",
+        "P20",
+        "P21"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "_execution.job.record",
+      "owner": "execution",
+      "visibility": "internal",
+      "delivery_tasks": [
+        "P14",
+        "P15",
+        "P16",
+        "P18",
+        "P20",
+        "P21"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    },
+    {
+      "operation_id": "_execution.verification.record",
+      "owner": "execution",
+      "visibility": "internal",
+      "delivery_tasks": [
+        "P14",
+        "P15",
+        "P16",
+        "P18",
+        "P20",
+        "P21"
+      ],
+      "verification_tasks": [
+        "P46"
+      ],
+      "status": "baseline_catalog_present_behavior_not_individually_qualified"
+    }
+  ]
+}

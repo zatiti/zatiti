@@ -1,0 +1,262 @@
+{
+  "date": "2026-09-19",
+  "revision": "34d291f4c44b1a2a4950e8155498daad2a56c251",
+  "go_test": {
+    "command": "GOMAXPROCS=2 go test -p 2 -json ./...",
+    "exit_code": 0,
+    "package_results": [
+      {
+        "package": "github.com/zatiti/zatiti",
+        "status": "skip",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "github.com/zatiti/zatiti/internal/accounting",
+        "status": "pass",
+        "elapsed_seconds": 2.07
+      },
+      {
+        "package": "github.com/zatiti/zatiti/internal/adapters/github",
+        "status": "pass",
+        "elapsed_seconds": 0.295
+      },
+      {
+        "package": "github.com/zatiti/zatiti/internal/adapters/httpread",
+        "status": "pass",
+        "elapsed_seconds": 0.247
+      },
+      {
+        "package": "github.com/zatiti/zatiti/internal/adapters/responses",
+        "status": "pass",
+        "elapsed_seconds": 0.355
+      },
+      {
+        "package": "github.com/zatiti/zatiti/internal/adapters/serenity",
+        "status": "pass",
+        "elapsed_seconds": 0.278
+      },
+      {
+        "package": "github.com/zatiti/zatiti/internal/application",
+        "status": "pass",
+        "elapsed_seconds": 2.698
+      },
+      {
+        "package": "github.com/zatiti/zatiti/internal/artifacts",
+        "status": "pass",
+        "elapsed_seconds": 0.373
+      },
+      {
+        "package": "github.com/zatiti/zatiti/internal/cli",
+        "status": "pass",
+        "elapsed_seconds": 0.248
+      },
+      {
+        "package": "github.com/zatiti/zatiti/internal/client",
+        "status": "pass",
+        "elapsed_seconds": 0.351
+      },
+      {
+        "package": "github.com/zatiti/zatiti/internal/configuration",
+        "status": "pass",
+        "elapsed_seconds": 0.934
+      },
+      {
+        "package": "github.com/zatiti/zatiti/internal/connections",
+        "status": "pass",
+        "elapsed_seconds": 0.621
+      },
+      {
+        "package": "github.com/zatiti/zatiti/internal/contract",
+        "status": "pass",
+        "elapsed_seconds": 0.259
+      },
+      {
+        "package": "github.com/zatiti/zatiti/internal/controller",
+        "status": "pass",
+        "elapsed_seconds": 3.123
+      },
+      {
+        "package": "github.com/zatiti/zatiti/cmd/zatiti",
+        "status": "pass",
+        "elapsed_seconds": 16.928
+      },
+      {
+        "package": "github.com/zatiti/zatiti/internal/effects",
+        "status": "pass",
+        "elapsed_seconds": 2.686
+      },
+      {
+        "package": "github.com/zatiti/zatiti/internal/evidence",
+        "status": "pass",
+        "elapsed_seconds": 0.419
+      },
+      {
+        "package": "github.com/zatiti/zatiti/internal/identity",
+        "status": "pass",
+        "elapsed_seconds": 0.439
+      },
+      {
+        "package": "github.com/zatiti/zatiti/internal/installation",
+        "status": "pass",
+        "elapsed_seconds": 0.464
+      },
+      {
+        "package": "github.com/zatiti/zatiti/internal/mcp",
+        "status": "pass",
+        "elapsed_seconds": 0.304
+      },
+      {
+        "package": "github.com/zatiti/zatiti/internal/memory",
+        "status": "pass",
+        "elapsed_seconds": 1.339
+      },
+      {
+        "package": "github.com/zatiti/zatiti/internal/messaging",
+        "status": "pass",
+        "elapsed_seconds": 0.487
+      },
+      {
+        "package": "github.com/zatiti/zatiti/internal/platform",
+        "status": "pass",
+        "elapsed_seconds": 1.279
+      },
+      {
+        "package": "github.com/zatiti/zatiti/internal/policy",
+        "status": "pass",
+        "elapsed_seconds": 0.484
+      },
+      {
+        "package": "github.com/zatiti/zatiti/internal/execution",
+        "status": "pass",
+        "elapsed_seconds": 8.677
+      },
+      {
+        "package": "github.com/zatiti/zatiti/internal/reviews",
+        "status": "pass",
+        "elapsed_seconds": 0.487
+      },
+      {
+        "package": "github.com/zatiti/zatiti/internal/scheduling",
+        "status": "pass",
+        "elapsed_seconds": 0.489
+      },
+      {
+        "package": "github.com/zatiti/zatiti/internal/registry",
+        "status": "pass",
+        "elapsed_seconds": 2.906
+      },
+      {
+        "package": "github.com/zatiti/zatiti/internal/server",
+        "status": "pass",
+        "elapsed_seconds": 0.488
+      },
+      {
+        "package": "github.com/zatiti/zatiti/internal/skills",
+        "status": "pass",
+        "elapsed_seconds": 0.607
+      },
+      {
+        "package": "github.com/zatiti/zatiti/internal/storage",
+        "status": "pass",
+        "elapsed_seconds": 0.37
+      },
+      {
+        "package": "github.com/zatiti/zatiti/internal/tasks",
+        "status": "pass",
+        "elapsed_seconds": 0.575
+      },
+      {
+        "package": "github.com/zatiti/zatiti/packaging",
+        "status": "pass",
+        "elapsed_seconds": 1.655
+      },
+      {
+        "package": "github.com/zatiti/zatiti/tests/integration",
+        "status": "pass",
+        "elapsed_seconds": 15.681000000000001
+      },
+      {
+        "package": "github.com/zatiti/zatiti/tests/qualification",
+        "status": "pass",
+        "elapsed_seconds": 15.77
+      }
+    ],
+    "test_event_counts_including_subtests": {
+      "pass": 2612,
+      "skip": 14
+    },
+    "skipped_tests": [
+      {
+        "package": "github.com/zatiti/zatiti/tests/qualification",
+        "test": "TestAdapterBoundsResponses"
+      },
+      {
+        "package": "github.com/zatiti/zatiti/tests/qualification",
+        "test": "TestQualificationNamedAgentClients"
+      },
+      {
+        "package": "github.com/zatiti/zatiti/tests/qualification",
+        "test": "TestZ21DesktopJourneys/Z21.first_conversation"
+      },
+      {
+        "package": "github.com/zatiti/zatiti/tests/qualification",
+        "test": "TestZ21DesktopJourneys/Z21.two_child_chiefs"
+      },
+      {
+        "package": "github.com/zatiti/zatiti/tests/qualification",
+        "test": "TestZ21DesktopJourneys/Z21.delegate_work"
+      },
+      {
+        "package": "github.com/zatiti/zatiti/tests/qualification",
+        "test": "TestZ21DesktopJourneys/Z21.hierarchy_navigation"
+      },
+      {
+        "package": "github.com/zatiti/zatiti/tests/qualification",
+        "test": "TestZ21DesktopJourneys/Z21.exact_decision"
+      },
+      {
+        "package": "github.com/zatiti/zatiti/tests/qualification",
+        "test": "TestZ21DesktopJourneys/Z21.reconnect_no_duplicate"
+      },
+      {
+        "package": "github.com/zatiti/zatiti/tests/qualification",
+        "test": "TestZ21DesktopJourneys/Z21.close_client"
+      },
+      {
+        "package": "github.com/zatiti/zatiti/tests/qualification",
+        "test": "TestZ21DesktopJourneys/Z21.groups_and_quiet_coordination"
+      },
+      {
+        "package": "github.com/zatiti/zatiti/tests/qualification",
+        "test": "TestZ21DesktopJourneys/Z21.capability_and_pause_cards"
+      },
+      {
+        "package": "github.com/zatiti/zatiti/tests/qualification",
+        "test": "TestZ21DesktopJourneys/JOURNEY.desktop_daily_work"
+      },
+      {
+        "package": "github.com/zatiti/zatiti/tests/qualification",
+        "test": "TestQualificationDistribution/QUALIFICATION.macos_distribution"
+      },
+      {
+        "package": "github.com/zatiti/zatiti/tests/qualification",
+        "test": "TestQualificationDistribution/QUALIFICATION.linux_distribution"
+      }
+    ],
+    "limitation": "Test event counts include parent tests and subtests, not unique product requirements. Root package has no tests. Hidden .github/workflows/cigate and Flutter are not included by ./...; external services/native qualification not executed."
+  },
+  "spec_check": {
+    "command": "python3 tools/specgen/render.py --check",
+    "exit_code": 0,
+    "rendered_files": 40,
+    "scopes": 36,
+    "operations": 264,
+    "requirements": 127,
+    "acceptance_cases": 116
+  },
+  "ajent": {
+    "retrieval": "unavailable: inbox/search/diagnose returned HTTP 409 conflict",
+    "used_prior_findings": false
+  },
+  "scope": "Source/call-site audit and local baseline only; no release qualification or exhaustive proof of absence of bugs."
+}

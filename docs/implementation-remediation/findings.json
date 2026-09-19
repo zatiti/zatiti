@@ -1,0 +1,495 @@
+{
+  "baseline_revision": "34d291f4c44b1a2a4950e8155498daad2a56c251",
+  "findings": [
+    {
+      "id": "G01",
+      "title": "Messages have no intent consumer",
+      "evidence_level": "source-confirmed",
+      "source_refs": [
+        "internal/messaging/delivery.go:133",
+        "internal/messaging/handlers_internal.go:138",
+        "internal/controller/tick.go:15"
+      ],
+      "finding": "Delivery stores the message and recipient rows. _messaging.pending exists, but the production controller/execution loop does not call it. No production path consumes a chief inbox into a planning turn.",
+      "consequence": "Chat can acknowledge and display messages while producing no reply or work.",
+      "delivery_tasks": [
+        "P10",
+        "P14",
+        "P16",
+        "P22",
+        "P42"
+      ]
+    },
+    {
+      "id": "G02",
+      "title": "Public task creation stops at draft",
+      "evidence_level": "source-and-test-confirmed",
+      "source_refs": [
+        "internal/tasks/handlers_public.go:29",
+        "internal/tasks/transition.go:348",
+        "cmd/zatiti/firsttask_test.go:129",
+        "internal/installation/firsttask.go:16"
+      ],
+      "finding": "task.create persists draft; task.assign changes worker/version without readying it. The current public catalog has no task.start. The first-task test explicitly asserts draft. Internal scheduling can ready generated tasks, so readiness itself is not entirely absent.",
+      "consequence": "A publicly created first task has no normal public transition into executable work.",
+      "delivery_tasks": [
+        "P00",
+        "P11",
+        "P25",
+        "P39",
+        "P40"
+      ]
+    },
+    {
+      "id": "G03",
+      "title": "Hosted runs are not automatically claimed",
+      "evidence_level": "source-confirmed",
+      "source_refs": [
+        "internal/controller/tick.go:81",
+        "internal/execution/controller_ops.go:228",
+        "internal/execution/run_ops.go:133"
+      ],
+      "finding": "readyScan only counts tasks. _execution.tick expires leases and admits already claimed attempts with a ContextArtifact. It does not claim queued hosted runs.",
+      "consequence": "Even ready scheduled work does not initiate a hosted attempt by itself.",
+      "delivery_tasks": [
+        "P14",
+        "P22"
+      ]
+    },
+    {
+      "id": "G04",
+      "title": "Context assembler is absent",
+      "evidence_level": "source-confirmed",
+      "source_refs": [
+        "internal/execution/run_ops.go:322",
+        "internal/execution/controller_ops.go:21",
+        "internal/adapters/responses/contextdoc.go"
+      ],
+      "finding": "run.claim can return a digest-only synthetic input envelope; _execution.context records a supplied artifact but no production caller builds and publishes the actual transcript/tool/memory context.",
+      "consequence": "No assembled authorized model input reaches a hosted worker.",
+      "delivery_tasks": [
+        "P05",
+        "P09",
+        "P15",
+        "P21"
+      ]
+    },
+    {
+      "id": "G05",
+      "title": "Prepared model action is incompatible with the implemented adapter",
+      "evidence_level": "source-confirmed",
+      "source_refs": [
+        "internal/execution/controller_ops.go:318",
+        "internal/adapters/responses/wire.go:96",
+        "internal/adapters/responses/action.go:15",
+        "internal/controller/deliver.go:34"
+      ],
+      "finding": "Execution emits attempt_id/run_id/model parameters, empty content, tool=profile.ID and connection.version=1. Responses requires schema/kind/context_artifact/max_output_tokens/tool_contract_versions and rejects unknown fields. Controller infers callback routing from attempt_id in those same parameters.",
+      "consequence": "Simply registering Responses still produces invalid actions; removing the illegal parameters would also lose the current callback route.",
+      "delivery_tasks": [
+        "P00",
+        "P06",
+        "P12",
+        "P13",
+        "P15"
+      ]
+    },
+    {
+      "id": "G06",
+      "title": "Model output is not converted into actions or a final result",
+      "evidence_level": "source-confirmed",
+      "source_refs": [
+        "internal/execution/controller_ops.go:121",
+        "internal/adapters/responses/wire.go:254"
+      ],
+      "finding": "handleObservation records observations and increments a counter, then prepares another model effect on succeeded or accepted until the bound. It does not consume text/tool_proposals, publish a chief reply, invoke local product operations, or report final outputs.",
+      "consequence": "The central intent-to-work step is unbuilt. A model call alone cannot run a workflow.",
+      "delivery_tasks": [
+        "P04",
+        "P14",
+        "P15",
+        "P16"
+      ]
+    },
+    {
+      "id": "G07",
+      "title": "Responses is implemented but not wired",
+      "evidence_level": "source-confirmed",
+      "source_refs": [
+        "cmd/zatiti/adapters.go:29",
+        "cmd/zatiti/adapters.go:37",
+        "internal/adapters/responses/adapter.go"
+      ],
+      "finding": "Startup constructors register github/httpread/serenity only; responses is still explicitly listed as unimplemented although its package and tests exist. A responses.json profile is rejected as an unknown adapter.",
+      "consequence": "Production cannot use its existing model adapter.",
+      "delivery_tasks": [
+        "P13",
+        "P24"
+      ]
+    },
+    {
+      "id": "G08",
+      "title": "Verification has no production driver",
+      "evidence_level": "source-confirmed",
+      "source_refs": [
+        "internal/execution/attempt_ops.go:195",
+        "internal/execution/verifier.go:34",
+        "internal/execution/store.go:940",
+        "cmd/zatiti/serve.go:167"
+      ],
+      "finding": "Reports create rows in execution_verification_jobs. NewVerifier and _execution.verification.record exist, but controller has no verifier phase/caller or pending verification scan, and entrypoint attaches only Identity and Blobs.",
+      "consequence": "Reported work cannot automatically become independently verified success.",
+      "delivery_tasks": [
+        "P18",
+        "P23",
+        "P24"
+      ]
+    },
+    {
+      "id": "G09",
+      "title": "Generated-output acceptance is not connected end to end",
+      "evidence_level": "source-confirmed",
+      "source_refs": [
+        "internal/tasks/acceptance.go:140",
+        "internal/execution/attempt_ops.go:239",
+        "internal/execution/verifier.go:124"
+      ],
+      "finding": "Presence checks demand an expected digest at task admission, while report builds VerificationRequest.Outputs as an empty array. Verifier addresses artifacts by expected digest rather than resolving the attempt output name.",
+      "consequence": "A newly generated report cannot be verified by its named output contract without prior knowledge or a workaround.",
+      "delivery_tasks": [
+        "P00",
+        "P09",
+        "P11",
+        "P18"
+      ]
+    },
+    {
+      "id": "G10",
+      "title": "Repository verification runner is unbuilt",
+      "evidence_level": "source-confirmed",
+      "source_refs": [
+        "internal/execution/verifier.go:186"
+      ],
+      "finding": "Repository patch/check observation kinds fall into an unavailable result explaining the controlled runner is absent. Artifact presence/digest/schema checks do exist.",
+      "consequence": "Engineering tasks cannot establish independent patch/check acceptance.",
+      "delivery_tasks": [
+        "P20",
+        "P47"
+      ]
+    },
+    {
+      "id": "G11",
+      "title": "Durable local jobs have no production runners",
+      "evidence_level": "source-confirmed",
+      "source_refs": [
+        "internal/controller/jobs.go:78",
+        "cmd/zatiti/serve.go:167",
+        "internal/skills/handlers.go:218",
+        "internal/execution/run_ops.go:528"
+      ],
+      "finding": "Jobs without a registered exact owner/operation runner remain pending; production registers no Jobs map. skill.evaluate and run.export create such work.",
+      "consequence": "These public operations can return a durable identity without ever producing their result.",
+      "delivery_tasks": [
+        "P19",
+        "P21",
+        "P23",
+        "P24"
+      ]
+    },
+    {
+      "id": "G12",
+      "title": "Configuration exports return unregistered result identities",
+      "evidence_level": "source-confirmed",
+      "source_refs": [
+        "internal/configuration/handlers.go:1185"
+      ],
+      "finding": "handleExport stages/publishes bytes inside the handler and constructs succeeded Job and Artifact IDs locally; it does not persist them through execution/artifacts owners.",
+      "consequence": "Returned job/artifact references have no demonstrated owner-backed lookup/read lifecycle; writer transaction also contains blob IO.",
+      "delivery_tasks": [
+        "P05",
+        "P09",
+        "P23"
+      ]
+    },
+    {
+      "id": "G13",
+      "title": "Reconciliation cannot reach Adapter.Reconcile",
+      "evidence_level": "source-confirmed",
+      "source_refs": [
+        "internal/effects/handlers.go:1132",
+        "internal/execution/job_ops.go:122",
+        "internal/controller/jobs.go:86",
+        "internal/controller/perform.go:55"
+      ],
+      "finding": "operation.reconcile creates an execution job referring to the original operation_id. Generic jobs treat linked effects as externally completed, while dispatch skips unknown/awaiting-confirmation originals. Production physical invocation calls Invoke; no controller caller invokes Reconcile.",
+      "consequence": "Unknown/accepted effects have no complete runtime lookup/confirmation path.",
+      "delivery_tasks": [
+        "P12",
+        "P23"
+      ]
+    },
+    {
+      "id": "G14",
+      "title": "Responsibility cycles never feed back their next decision",
+      "evidence_level": "source-confirmed",
+      "source_refs": [
+        "internal/scheduling/wake.go:304",
+        "internal/scheduling/cycle.go:24",
+        "internal/execution/service.go:54"
+      ],
+      "finding": "Wake admission creates a cycle task and deliberately leaves the next wake for _scheduling.cycle.record. There is no production execution caller that interprets the cycle and records it.",
+      "consequence": "An ongoing responsibility does not autonomously reason, spawn useful work and schedule its next reconsideration.",
+      "delivery_tasks": [
+        "P16",
+        "P17",
+        "P22"
+      ]
+    },
+    {
+      "id": "G15",
+      "title": "Credential setup ends at a helper contract without a shipped producer",
+      "evidence_level": "source-confirmed",
+      "source_refs": [
+        "internal/connections/localio.go:38",
+        "internal/connections/localio.go:474",
+        "cmd/zatiti/run.go:30",
+        "packaging/manifest.go:388"
+      ],
+      "finding": "Connections verifies signed helper receipts using a provisioned receipt key and a resolvable credential reference. Packaging validates secure-helper metadata. No production helper implementation/entrypoint producing this setup handoff was found in the executable tree.",
+      "consequence": "The operator cannot complete the intended secret-free onboarding solely through the advertised product flow.",
+      "delivery_tasks": [
+        "P06",
+        "P24",
+        "P25",
+        "P45"
+      ]
+    },
+    {
+      "id": "G16",
+      "title": "Serenity is a capability-refusal adapter, not working memory",
+      "evidence_level": "source-confirmed",
+      "source_refs": [
+        "internal/adapters/serenity/adapter.go:86",
+        "internal/adapters/serenity/capability.go:138",
+        "internal/adapters/serenity/PROTOCOL.md"
+      ],
+      "finding": "The pinned capability report declares physical_calls=none and unsupported command lookup; adapter operations refuse required missing guarantees rather than making requests. Local memory bindings/jobs exist.",
+      "consequence": "Real recall/curation/promotion/context memory and full memory backup require a qualified upstream seam, not just wiring.",
+      "delivery_tasks": [
+        "P26",
+        "P27",
+        "P28",
+        "P31"
+      ]
+    },
+    {
+      "id": "G17",
+      "title": "Backup captures database bytes but omits required content",
+      "evidence_level": "source-and-test-confirmed",
+      "source_refs": [
+        "internal/installation/backup.go:213",
+        "tests/integration/defects_test.go:341"
+      ],
+      "finding": "Backup genuinely captures/encrypts database bytes. Manifest schema versions, artifacts, brains and retained obligations are empty lists; these are required for complete installation recovery.",
+      "consequence": "A valid encrypted bundle is not yet a complete portable installation backup.",
+      "delivery_tasks": [
+        "P09",
+        "P29",
+        "P30",
+        "P31"
+      ]
+    },
+    {
+      "id": "G18",
+      "title": "Restore prepares an overlay but never rewinds the live installation",
+      "evidence_level": "source-and-test-confirmed",
+      "source_refs": [
+        "internal/installation/restore.go:12",
+        "internal/installation/restore.go:247",
+        "cmd/zatiti/serve.go:167",
+        "tests/integration/defects_test.go:403"
+      ],
+      "finding": "Restore validates a bundle and stages a recovery overlay; comments explicitly defer file replacement to controller. No production restore coordinator is wired. Integration test ends accepted/paused, not after restored data is read. The overlay also needs complete monotonic records, not only obligation summaries.",
+      "consequence": "Restore remains an incomplete job; clean-destination artifact/key/brain restoration and revocation preservation are not demonstrated.",
+      "delivery_tasks": [
+        "P29",
+        "P30",
+        "P31",
+        "P32",
+        "P33"
+      ]
+    },
+    {
+      "id": "G19",
+      "title": "Desktop chat contract lacks persistent complete history",
+      "evidence_level": "source-confirmed",
+      "source_refs": [
+        "apps/desktop/lib/src/state/live_source.dart:599",
+        "apps/desktop/README.md",
+        "internal/messaging/store.go"
+      ],
+      "finding": "Desktop combines incoming mailbox and this window\u2019s sent messages; catalog lacks full thread history/current caller/read-state projections. Local UI cache is in-memory; restart persistence is not implemented in the inspected client.",
+      "consequence": "Relaunch cannot show a reliable complete conversation, unread state or retained offline draft.",
+      "delivery_tasks": [
+        "P03",
+        "P10",
+        "P34",
+        "P42"
+      ]
+    },
+    {
+      "id": "G20",
+      "title": "Desktop management and detail journeys are incomplete",
+      "evidence_level": "source-confirmed",
+      "source_refs": [
+        "apps/desktop/lib/src/state/live_source.dart:431",
+        "apps/desktop/lib/src/api/controller_api.dart",
+        "apps/desktop/README.md"
+      ],
+      "finding": "The live client honestly renders notices for unlistable memory and absent history/provenance/check projections. New org/worker/task/responsibility creation flows and populated daily-work behavior are not complete production journeys.",
+      "consequence": "A rendered chat shell is not the specified daily work application.",
+      "delivery_tasks": [
+        "P09",
+        "P17",
+        "P26",
+        "P35",
+        "P42",
+        "P43",
+        "P44"
+      ]
+    },
+    {
+      "id": "G21",
+      "title": "Qualification has unconditional not-run branches",
+      "evidence_level": "source-and-test-confirmed",
+      "source_refs": [
+        "tests/qualification/adapter_bounds_test.go:589",
+        "tests/qualification/desktop_test.go:98",
+        "tests/qualification/desktop_test.go:121",
+        "tests/qualification/agent_clients_test.go:54"
+      ],
+      "finding": "Responses qualification always calls notRun even when Go source exists. Desktop cases always notRun even if a driver appears. Distribution tests always notRun after host checks. Named-agent sessions are correctly opt-in. Baseline observed 14 skipped test/subtest events.",
+      "consequence": "A green go test run does not mean these release gates are satisfied. Some need harness code, others real authorized environments.",
+      "delivery_tasks": [
+        "P45",
+        "P47",
+        "P48"
+      ]
+    },
+    {
+      "id": "G22",
+      "title": "Parity tests cover a small script, not all behavioral lifecycles",
+      "evidence_level": "source-confirmed",
+      "source_refs": [
+        "tests/integration/parity_test.go:15",
+        "tests/integration/parity_test.go:136",
+        "tests/integration/exposure_test.go"
+      ],
+      "finding": "Current parity script has nine calls largely covering installation/principal operations. Discovery tests enumerate the whole surface, but that is not all-operation success/state/recovery parity or end-to-end work. Many controller unit tests use fake owners.",
+      "consequence": "Package-local green tests can miss incompatible runtime seams and missing transitions.",
+      "delivery_tasks": [
+        "P46",
+        "P47",
+        "P48"
+      ]
+    },
+    {
+      "id": "G23",
+      "title": "Release library exists but no installable product is qualified",
+      "evidence_level": "source-confirmed",
+      "source_refs": [
+        "packaging/README.md",
+        "packaging/plan.go",
+        "packaging/desktop_bundle.go",
+        ".github/workflows/release-qualification.yml"
+      ],
+      "finding": "Packaging implements manifests, signing, install plans, services and desktop archives against synthetic trees. It lacks a completed artifact-production/clean-host lifecycle, and qualification workflow intentionally does not publish.",
+      "consequence": "Distribution/helper/service/keychain behavior remains coding plus real platform qualification work.",
+      "delivery_tasks": [
+        "P24",
+        "P45",
+        "P47",
+        "P48"
+      ]
+    },
+    {
+      "id": "G24",
+      "title": "Documentation and dependency evidence are stale",
+      "evidence_level": "source-confirmed",
+      "source_refs": [
+        "README.md:11",
+        "docs/implementation/README.md:3",
+        "docs/implementation/dependencies.lock.json",
+        "cmd/zatiti/adapters.go:20",
+        "apps/desktop/README.md"
+      ],
+      "finding": "README says no runnable implementation; index calls this only a scaffold; lock lists old Fyne qualification; Responses startup comments are stale. Some desktop notes describe defects now covered by passing regression tests.",
+      "consequence": "New implementers could rebuild working packages or carry obsolete assumptions forward.",
+      "delivery_tasks": [
+        "P02",
+        "P25",
+        "P49"
+      ]
+    },
+    {
+      "id": "G25",
+      "title": "Root budgets and authority need real-loop integration proof",
+      "evidence_level": "integration-risk-not-proven-defect",
+      "source_refs": [
+        "internal/accounting/reserve_ops.go",
+        "internal/policy/authority.go",
+        "internal/execution/run_ops.go",
+        "internal/tasks/admission.go"
+      ],
+      "finding": "Task/attempt/effect reservations and current authority exist independently. The missing hosted path has not demonstrated their combined semantics, worker identity intersection, current revocation and unknown cost settlement.",
+      "consequence": "Naively adding a planner could bypass authorization or double-reserve/spend; preserve existing code and test the integrated path.",
+      "delivery_tasks": [
+        "P03",
+        "P04",
+        "P07",
+        "P08",
+        "P16",
+        "P46"
+      ]
+    },
+    {
+      "id": "G26",
+      "title": "Recovery/fairness edges need explicit coverage",
+      "evidence_level": "source-confirmed-and-integration-risk",
+      "source_refs": [
+        "internal/controller/jobs.go:204",
+        "internal/controller/tick.go:113",
+        "internal/execution/job_ops.go:163"
+      ],
+      "finding": "Controller documents a stranded claim when a lost claim acknowledgement cannot be resolved through pending reads. Several pending scans are limited batches without a complete fair work cursor; starvation under many blocked records needs a reproducer.",
+      "consequence": "Recovery and long-running installations can stall even after the happy path is wired.",
+      "delivery_tasks": [
+        "P12",
+        "P14",
+        "P22",
+        "P23",
+        "P46"
+      ]
+    },
+    {
+      "id": "G27",
+      "title": "Responses performs two physical requests in one dispatch",
+      "evidence_level": "source-confirmed",
+      "source_refs": [
+        "internal/adapters/responses/adapter.go:234",
+        "internal/adapters/responses/openai.go:219",
+        "docs/roadmap.md:1041"
+      ],
+      "finding": "Invoke can create a conversation and then call Responses before returning one observation. This violates the frozen one-physical-call dispatch expectation and leaves the session-handle handoff inside adapter IO. Checked-in protocol notes correctly say an empty conversation cannot prove nonexecution and reconciled items do not recover billing usage.",
+      "consequence": "Crash accounting, call-count guarantees and uncertainty need a coordinated contract/runtime repair; a successful API-key probe does not establish them.",
+      "delivery_tasks": [
+        "P00",
+        "P12",
+        "P13",
+        "P15",
+        "P23",
+        "P47"
+      ]
+    }
+  ]
+}
