@@ -3,7 +3,7 @@ from copy import deepcopy
 
 # Specification revision. Bump with every coordinated contract revision; the renderer
 # refuses to render unless contracts.md names the same revision in its title.
-REVISION=2
+REVISION=3
 
 S={'type':'string','maxLength':8192}
 ID={'type':'string','format':'uuid'}
@@ -165,7 +165,7 @@ for v in ('restrict','demote'):
 resource('task','tasks','Task',('list','get'),False)
 add('task.create','tasks',fields({**SC,'definition':without_generated('Task')}),one('Task'),'Create bounded durable task with pinned outcome/inputs/acceptance/limits. Validate references, finite envelopes and worker home/bindings; ready only if prerequisites hold.')
 add('task.update','tasks',fields({**EDIT,'inputs':arr(ref('ArtifactRef')),'outcome?':S}),one('Task'),'Update only pending draft/ready input under version check; accepted verifier cannot be changed during execution.')
-add('task.assign','tasks',fields({**EDIT,'worker_id':ID}),one('Task'),'Versioned assignment shared by direct user and chief requests; conflicting concurrent assignment fails.')
+add('task.assign','tasks',fields({**EDIT,'worker_id':ID}),one('Task'),'Versioned assignment shared by direct user and chief requests; conflicting concurrent assignment fails. A chief-driven assignment is an ordinary authenticated call under the requesting worker\'s own scoped actor through the worker operation executor (revision 3), never a domain-internal caller path: this public operation carries no caller allowlist.')
 add('task.delegate','tasks',fields({**EDIT,'child':without_generated('Task')}),one('Task'),'Create linked child with intersected permissions/data/deadline, shared root budgets and finite depth/count/concurrency. Expansion is denied.')
 for v in ('cancel','retry'):
     add('task.'+v,'tasks',fields({**EDIT,'reason':S}),one('Task'),'Cancel first records intent and blocks new work; terminal only after owned execution stops or is conclusively fenced, retaining unresolved effects. Retry creates new run attempt under unchanged acceptance and requires safe replacement disposition.')
@@ -349,7 +349,11 @@ D['Usage']['properties']['currency']={'type':'string','pattern':'^[A-Z]{3}$'}
 for o in OPS:
     if o['id']=='_execution.verification.record':
         o['input_schema']=obj(attempt_id=ID,expected_version=VER,result=ref('Adapter_VerificationResult'))
-    if o['id']=='task.assign':o['callers']=['messaging']
+    # Revision 3: task.assign is a public operation and the registry rejects any
+    # public descriptor with callers (docs/roadmap.md, 2026-09-18 descriptor-drift
+    # finding). The prior 'messaging' caller override was a catalog defect; a
+    # chief-driven assignment goes through the worker operation executor under the
+    # worker's own authenticated actor instead. See its updated behavior text above.
     if 'filter' in o['input_schema'].get('properties',{}):
         o['input_schema']['properties']['filter']=obj(**{'state?':S,'key?':S,'parent_id?':ID,'worker_id?':ID,'task_id?':ID,'organization_id?':ID,'descendants?':BOOL,'needs_you?':BOOL})
         o['behavior']+=' Filters are structured exact-match fields (AND semantics); unsupported fields for this resource refuse invalid_input. Never interpolate filter strings as SQL.'
@@ -383,3 +387,120 @@ for _o in OPS:
     if _o['id']=='_evidence.command.finish':
         _o['input_schema']=obj(command_id=ID,result=ref('Result'))
         _o['behavior']+=' Retain complete original result envelope including Fault message/details/retryability and cursor; replays return it exactly. Command ID must match result.command_id.'
+
+# =============================================================================
+# Revision 3: durable worker turns, worker-subject dispatch, context
+# preparation/publication, named output slots, job ownership linkage,
+# reconciliation requests, verification scans, and roadmap backlog
+# reconciliation (docs/roadmap.md revision-3 items; see contract-proposals.md).
+#
+# Migration rule for every addition below: every new field on an EXISTING type
+# is optional (never added to a 'required' list) and no existing required
+# field changed type, name or was removed. Old persisted rows therefore
+# validate unchanged and remain inspectable with the new field simply absent;
+# new tables (WorkerTurn, ProposalRecord) are additive migrations with no
+# effect on existing rows. New operations have no prior callers to break.
+# =============================================================================
+
+# --- 1. Durable worker turn and per-step proposal identity -----------------
+D['TurnSource']=obj(kind=enum('message','task','responsibility','continuation'),source_id=ID,source_version=VER,**{'recipient_worker_id?':ID})
+D['WorkerTurn']=obj(
+    id=ID,worker_id=ID,principal_id=ID,scope=ref('Scope'),source=ref('TurnSource'),requester_id=ID,
+    version=VER,configuration_revision=VER,
+    state=enum('pending','claimed','context_pending','model_pending','proposal_pending','waiting','reporting','completed','failed','cancelled'),
+    generation=VER,limits=ref('Limits'),root_id=ID,steps_used=INT,created_at=TIME,updated_at=TIME,
+    **{'conversation_id?':ID,'task_id?':ID,'run_id?':ID,'attempt_id?':ID,
+       'waiting_reason?':enum('setup','clarification','review','effect','dependency','budget','recovery'),
+       'waiting_resource_id?':ID,'next_wake?':TIME,'lease_id?':ID,'lease_expires_at?':TIME,
+       'context_artifact?':ref('ArtifactRef'),'last_observation_id?':ID})
+D['ProposalRecord']=obj(
+    turn_id=ID,step_index=INT,proposal_id=S,source_context_digest=DIG,normalized_proposal=JSON,
+    state=enum('prepared','recorded','duplicate','stale','superseded'),created_at=TIME,updated_at=TIME,
+    **{'command_id?':ID,'effect_operation_id?':ID,'result_artifact?':ref('ArtifactRef')})
+D['CallbackRoute']=obj(kind=enum('worker_turn','job','memory','skill','connection'),**{'turn_id?':ID,'step_index?':INT,'job_id?':ID})
+D['OperationAttempt']=obj(attempt_id=ID,generation=VER)
+D['WorkItem']=obj(id=ID,kind=enum('claim','context','proposal','resume'),scope=ref('Scope'),turn=ref('WorkerTurn'),**{'run_id?':ID})
+D['ContextPlan']=obj(id=ID,turn_id=ID,expected_version=VER,generation=VER,refs=arr(ref('ArtifactRef')),configuration_revision=VER,byte_bound=INT,token_bound=INT)
+
+# Unique source identity (installation_id, source_kind, source_id, source_version,
+# recipient_worker_id) makes _execution.turn.admit idempotent re-admission. A pending
+# inbox message and its turn admission/processed marker commit in one shared
+# transaction (see _messaging.processed). Store each model step/proposal separately;
+# unique (turn_id, step_index, proposal_id) is the proposal deduplication fence, and
+# the same key with different bytes is submission_conflict.
+internal('turn.admit','execution',obj(source=ref('TurnSource'),worker_id=ID,scope=ref('Scope'),requester_id=ID),one('WorkerTurn'),'Admit or return the existing WorkerTurn for its unique source identity; derive requester/limits from the durable source, never from asserted proposal fields. A message arriving during an active turn is admitted as a safe-boundary injection durably linked to that turn, never silently dropped or processed twice. One active decision stream per worker/task lane; different eligible workers may run concurrently within aggregate limits.',['controller','scheduling'])
+internal('work.pending','execution',obj(limit={'type':'integer','minimum':1,'maximum':100}),obj(items=arr(ref('WorkItem'),100)),'Bounded scan of typed claim/context/proposal/resume work items, including ready hosted runs and safely waiting turns; excludes cooperative auto-claims, which continue to use the public run.claim path.',['controller'],mode='query')
+internal('work.claim','execution',obj(work_id=ID,expected_version=VER,generation=VER),obj(item=ref('WorkItem'),claim_token=S,version=VER),'Return the immutable work item plus a claim token/version; a retry against the same key inspects and returns the same claim rather than creating a second one.',['controller'])
+internal('context.prepare','execution',obj(turn_id=ID,expected_version=VER,generation=VER),one('ContextPlan'),'Build a versioned immutable context plan naming exact authorized refs, versions and byte/token bounds inside the transaction; no IO, no provider call and no bytes read here.',['controller'])
+internal('context.commit','execution',obj(plan_id=ID,expected_version=VER,generation=VER,staged_context=ref('Adapter_ArtifactLocator')),one('WorkerTurn'),'Publish the plan bytes/metadata and commit the pinned context after rechecking generation, referenced versions and current authority. A stale plan is discarded and rebuilt without spending or sending.',['controller'])
+internal('proposal.prepare','execution',obj(turn_id=ID,step_index=INT,proposal_id=S,expected_version=VER),one('ProposalRecord'),'Return the typed proposal built only from persisted normalized model evidence; the caller cannot submit substituted proposal bytes.',['controller'])
+internal('proposal.record','execution',obj(proposal_id=S,expected_version=VER,**{'command_id?':ID,'effect_operation_id?':ID,'result_artifact?':ref('ArtifactRef')}),one('WorkerTurn'),'Record the next durable turn disposition and result artifact refs from a committed command or effect outcome; an identical repeat for the same proposal replays, a different result is submission_conflict.',['controller'])
+internal('report','execution',fields({**LEASE,'outputs':arr(ref('ArtifactRef')),'observations':JSON,'usage':ref('Usage')}),one('Attempt'),'Same report/verification transition as the public cooperative attempt.report, driven by the controller on behalf of the current worker subject bound to this turn/attempt/lease/generation; process exit/report never directly succeeds the task.',['controller'])
+internal('verification.pending','execution',obj(limit={'type':'integer','minimum':1,'maximum':100}),obj(items=arr(ref('Adapter_VerificationRequest'),100)),'Bounded scan of sealed VerificationRequest work; no worker can claim verifier authority through this scan.',['controller'],mode='query')
+internal('verification.claim','execution',obj(request_id=ID,expected_version=VER,generation=VER),obj(request=ref('Adapter_VerificationRequest'),claim_token=S),'Exact version+generation claim of one sealed VerificationRequest for the trusted verifier identity only; lost claim acknowledgement resolves through this same generation-bound token, never by assuming unclaimed.',['controller'])
+
+# --- 2. task.start and dependency/mailbox admission completions ------------
+add('task.start','tasks',fields(EDIT),obj(task=ref('Task'),run=ref('Run')),'Transition an eligible draft/ready task to ready and enqueue its run in the same transaction; existing draft-only task.create stays compatible and task.assign continues to only change worker/version without readying. Reject a task with unresolved required dependencies or missing acceptance/verifier prerequisites; replay of the same submission key returns the original disposition.')
+internal('evidence.record','tasks',obj(task_id=ID,attempt_id=ID,expected_version=VER,acceptance_digest=DIG,verification_artifact=ref('ArtifactRef'),output_bindings=arr(obj(name=S,artifact=ref('ArtifactRef'))),verdict=enum('passed','failed')),one('Task'),'Record trusted verifier evidence against the pinned acceptance digest and bound named outputs before any task state depends on it; only this recorded lineage, or eligible explicit manual acceptance, can ever establish succeeded.',['execution'])
+internal('dependencies.wake','tasks',obj(completed_task_id=ID,limit={'type':'integer','minimum':1,'maximum':100},**{'cursor?':S}),obj(dependents=arr(ref('Task'),100),**{'next_cursor?':S}),'Bounded scan of dependents blocked on a just-completed task; revalidate current eligibility per dependent and never report success for a dependent whose required child failed.',['execution','controller'])
+internal('ready','messaging',obj(limit={'type':'integer','minimum':1,'maximum':100}),page('Message'),'Bounded fair scan of admitted messages awaiting a durable worker turn, scoped and ordered without acknowledgment.',['execution','controller'],mode='query')
+internal('processed','messaging',obj(message_id=ID,recipient_id=ID,turn_id=ID,**{'context_artifact?':ref('ArtifactRef')}),one('Message'),'Record durable delivery disposition sharing the same transaction as turn admission/context commit; replay of the same message/turn pair is idempotent.',['execution'])
+add('conversation.message.list','messaging',fields({**SC,'conversation_id':ID,'cursor?':S,'limit?':{'type':'integer','minimum':1,'maximum':200}}),page('Message'),'Read authorized sent/received message history for a conversation, limited to disclosed membership intervals; joining a group discloses no retroactive restricted history.',mode='query')
+D['Conversation']['properties'].update(caller_unread_count=deepcopy(INT),caller_last_read_marker=deepcopy(TIME))
+# conversation.get/list now also return the calling principal's unread count and read
+# marker (optional, computed, excluded from create/update input since it was already
+# built via without_generated before this section runs).
+
+# --- 3. Effects callback routing (fixes G05: no undeclared attempt_id in adapter params) --
+D['Operation']['properties'].update(attempts=arr(ref('OperationAttempt')),callback_route=ref('CallbackRoute'))
+D['Dispatch']['properties']['callback_route']=ref('CallbackRoute')
+for o in OPS:
+    if o['id']=='_effects.prepare':
+        o['input_schema']['properties']['callback_route']=ref('CallbackRoute')
+        o['behavior']+=' callback_route is an explicit controller-owned routing reference (worker turn/step or job id), persisted alongside the action and returned at claim; adapters never receive it. The controller resolves callback routing from this persisted route, never by inserting an undeclared attempt_id into strict adapter parameters.'
+    if o['id']=='_effects.record':
+        o['input_schema']['properties']['current_generation']=deepcopy(VER)
+        o['behavior']+=' Optional current_generation names the controller generation attempting to resolve a stray attempt whose claim journal spans a generation change: not_sent for an attempt never actually claimed under its recorded generation, outcome_unknown for one claimed but unconfirmed; the attempt is never silently dropped.'
+    if o['id']=='_execution.job.create':
+        o['input_schema']['properties']['operation_id']=deepcopy(ID)
+        o['behavior']+=' Optional operation_id links a network-backed job to its originating effects Operation at creation, so reconciliation resolves it without scanning another owner\'s table; a job without operation_id is an ordinary local runner.'
+    if o['id']=='_execution.enqueue':
+        o['callers']=sorted(set(o['callers'])|{'controller'})
+    if o['id']=='_identity.bootstrap':
+        o['input_schema']['properties'].update(service_credential_id=deepcopy(ID),service_store_ref=deepcopy(S))
+        o['behavior']+=' Optional service_credential_id/service_store_ref provision a credential for the bootstrap-created controller service principal in the same transaction, so an out-of-process controller can authenticate; omitted fields leave the service principal creditalless for an in-process explicit-Actor seam, unchanged from revision 2.'
+    if o['id']=='_scheduling.cycle.record':
+        o['input_schema']['properties']['cycle_id']=deepcopy(ID)
+        o['input_schema']['properties']['turn_id']=deepcopy(ID)
+        o['input_schema']['required'].append('cycle_id')
+        o['behavior']+=' cycle_id is the unique replay/conflict fence: an identical result for the same cycle_id replays, a different result for the same cycle_id is submission_conflict. Optional turn_id links the cycle to the WorkerTurn (revision 3) that produced it.'
+
+# --- 4. Effects reconciliation reaching Adapter.Reconcile (fixes G13) ------
+internal('reconciliation.prepare','effects',obj(operation_id=ID,expected_version=VER),one('Operation'),'Create a separately admitted, separately authorized and accounted bounded reconciliation read distinct from the original write; no replay of the original action.',['controller'])
+internal('reconciliation.record','effects',obj(operation_id=ID,attempt_id=ID,generation=VER,observation=ref('Observation')),one('Operation'),'Merge the qualified reconciliation observation into the original operation uncertainty; retain outcome_unknown until authoritative evidence resolves it, and never overwrite the original action or its history.',['controller'])
+
+# --- 5. Skill evaluation and configuration export durable job linkage (fixes G11/G12) --
+internal('evaluation.record','skills',obj(evaluation_id=ID,job_id=ID,expected_version=VER,verifier_id=S,verifier_version=S,evidence_ids=arr(ID),passed=BOOL),one('Job'),'Record published verifier evidence against the exact immutable skill version the evaluation names; a skill or evaluator change since evaluation admission invalidates the evaluation instead of recording it.',['execution','controller'])
+internal('export.prepare','configuration',obj(scope=ref('Scope'),family=S,resource_id=ID),one('Job'),'Persist an immutable export snapshot/version plan through the durable job ledger before any bytes are staged; no phantom completed job and no blob IO inside this transaction.',['controller','application'])
+internal('export.record','configuration',obj(job_id=ID,expected_version=VER,generation=VER,artifact=ref('ArtifactRef')),one('Job'),'Publish the exported Job/Artifact through their owning ports after canonical bytes are staged outside the transaction; replaces the prior handler-local ID minting that had no owner-backed lookup.',['controller'])
+
+# --- 6. Small query/result revisions named by contract-proposals.md section 2 --
+add('memory.list','memory',fields({**SC,'binding_ids':arr(ID),'cursor?':S,'limit?':{'type':'integer','minimum':1,'maximum':200}}),page('Claim'),'List authorized scoped claim refs with source, freshness, lineage and supported actions for brains the caller can access; never lists an unauthorized brain and never performs paid retrieval.',mode='query')
+D['VerifierDescriptor']=obj(id=S,version=VER,kind=enum('artifact','repository'),classification=enum('internal','public','restricted'))
+add('installation.verifier.list','installation',fields({**SC,'cursor?':S,'limit?':{'type':'integer','minimum':1,'maximum':200}}),page('VerifierDescriptor'),'Enumerate installed trusted verifier profiles available to name in a task acceptance contract; secret-free, no executable path or argv disclosed.',mode='query')
+D['Artifact']['properties'].update(source_operation_id=deepcopy(ID),purpose=deepcopy(S))
+D['Status']['properties']['runtime_ready']=deepcopy(BOOL)
+D['Responsibility']['properties']['last_cycle_id']=deepcopy(ID)
+# event.list keeps its existing schema; its drained-cursor/filter/scope/principal/
+# retention behavior is already exact (see contracts.md wire conventions) and needed
+# only the explicit revision-3 confirmation recorded there, not a schema change.
+
+# --- 7. Local decision tools: pinned separately from provider-executable tools --
+# These are execution-local proposal schemas the context builder registers as
+# non-provider tool definitions (contract-proposals.md section 4); they are never
+# routed through a connections.Tool/adapter and never receive an operation mapping.
+D['ReplyProposal']=obj(text=S)
+D['ClarifyProposal']=obj(question=S)
+D['ReportOutputsProposal']=obj(bindings=arr(obj(name=S,artifact=ref('ArtifactRef'))))
+D['CycleDecisionProposal']=obj(decision=enum('continue','wait','escalate','done'),reason=S,**{'next_wake?':TIME})
+D['LocalDecisionTool']={'oneOf':[dict(ref('ReplyProposal'),description='reply'),dict(ref('ClarifyProposal'),description='clarify'),dict(ref('ReportOutputsProposal'),description='report_outputs'),dict(ref('CycleDecisionProposal'),description='cycle_decision')]}
