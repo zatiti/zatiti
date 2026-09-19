@@ -977,6 +977,37 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   as a permanent test; it is the only artefact that walks plan, decide and
   apply through the real modules.
 
+- 2026-09-19 03:15 PT -- ALL 36 PACKAGE ROOTS ARE ON MAIN. The frozen plan
+  (docs/implementation/packages.json, revision 2) is complete as a codebase.
+  Landed in the final run: the qualification suite (54cea3a), packaging
+  slice 2 with desktop bundle assembly and install lifecycle (abf8f7e), the
+  CI and release workflows with their policy validator (b94f254), and the
+  hosted-model adapter (af6de5d, c0a3210). Every root passed build, vet,
+  gofmt, golangci-lint, go test -race, the module-wide suite, and an
+  independent lead mutation check.
+  Mutation checks in this run, each red then restored byte-identical:
+  * qualification -- breaking httpread's loopback refusal in a DIFFERENT
+    package was caught by the suite ("loopback read: err=<nil>, want
+    permission_denied"), which is exactly what a qualification suite is for.
+  * packaging slice 2 -- allowing a bundle symlink to escape made
+    TestExtractBundleRefusesHostileArchives/escaping_symlink accept a
+    hostile archive. (A first attempt was INVALID -- it left a variable
+    unused and failed to build, which proves nothing; redone so the code
+    still compiled.)
+  * CI -- disabling the explicit-timeout policy rule made
+    TestPolicyRejectsMutations fail on both the unit and release profiles.
+    That rule now enforces, in CI, the exact defect that broke every commit
+    in the module last night.
+  * responses -- disabling the profile classification check let a
+    restricted-classified artifact be disclosed to the provider, and
+    TestInvokeRefusesBeforeAnyCall caught it. That is the guard that keeps
+    private data from reaching a vendor.
+  WHAT THIS DOES NOT MEAN: the product is structurally complete, not
+  finished. The model adapter refuses every call until a wire protocol is
+  written against a real endpoint and qualified; task creation and the
+  review flow have fixes in flight; and memory stays offline until Serenity
+  ships what its adapter needs.
+
 ## Planned
 
 - Wave 3: controller, desktop, cmd/zatiti, cmd/zatiti-desktop.
