@@ -109,5 +109,15 @@
     "OpenAI Responses endpoint/profile and Serenity service pin are operator/foundation-integration decisions deferred with contract knowledge; dependent adapters must not start against guessed endpoints.",
     "Rebuild reproducibility (vendor/ or GONOSUMDB policy) is undecided; go.sum-only pinning is the current state.",
     "darwin/arm64, linux, and windows release targets unexercised; packaging and CI must qualify before release evidence."
-  ]
+  ],
+  "flutter_sdk": {
+    "version": "3.32.1",
+    "channel": "stable",
+    "framework_revision": "b25305a8832cfc6ba632a7f87ad455e319dccce8",
+    "engine_revision": "1425e5e9ec",
+    "dart_sdk": "3.8.1",
+    "role": "Flutter desktop client at apps/desktop (ADR 002); outside the Go module",
+    "qualified": false,
+    "qualification_note": "Tag 3.32.1 resolved to this framework revision with git ls-remote against github.com/flutter/flutter and confirmed against the installed SDK reporting the same revision and Dart 3.8.1. apps/desktop's pubspec.lock records package constraints only (Flutter >=3.29.0), so the SDK itself needs this explicit pin; the CI gate refuses to build without it. Version resolution only: no upstream behavioral qualification is claimed."
+  }
 }

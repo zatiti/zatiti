@@ -21,10 +21,24 @@ if [ -n "$STAGED_GO_FILES" ]; then
   # tag-exclusive files (fs_darwin.go / fs_linux.go / fs_other.go) typecheck
   # together and fail on their redeclarations.
   STAGED_GO_DIRS="$(printf "%s\n" "$STAGED_GO_FILES" | xargs -n1 dirname | sort -u)"
-  echo "$STAGED_GO_DIRS" | xargs golangci-lint run --fix || {
-    echo "Commit failed: golangci-lint found issues."
+  # ./ prefix: golangci-lint reads a bare path as an import path, so a
+  # dot-prefixed directory such as .github/workflows/cigate fails with
+  # "no required module provides package"; ./.github/... lints clean, and
+  # ./internal/... is equally valid, so prefix every directory.
+  # --allow-parallel-runners: golangci-lint takes a lock in its cache
+  # directory, so a concurrent run elsewhere on the machine aborts this one
+  # with "parallel golangci-lint is running" — which this branch then
+  # reported as "found issues", failing a commit whose code was fine.
+  lintout="$(echo "$STAGED_GO_DIRS" | sed 's|^|./|' | xargs golangci-lint run --fix --allow-parallel-runners 2>&1)" || {
+    printf '%s\n' "$lintout"
+    if printf '%s' "$lintout" | grep -q "parallel golangci-lint is running"; then
+      echo "Commit failed: golangci-lint could not run (another run holds the lock), NOT because of your code."
+    else
+      echo "Commit failed: golangci-lint found issues."
+    fi
     exit 1
   }
+  printf '%s\n' "$lintout"
 
   # If auto-fixes modified files, require user to re-stage
   if ! git diff --quiet -- $STAGED_GO_FILES; then
@@ -34,9 +48,14 @@ if [ -n "$STAGED_GO_FILES" ]; then
   fi
 fi
 
-# Always run tests when Go code or module files are staged
-echo "Running tests: go test ./..."
-if ! go test ./... ; then
+# Always run tests when Go code or module files are staged.
+# -timeout: cmd/zatiti builds a binary and runs real controllers, and its
+# end-to-end journey carries its own multi-minute budget, so on a loaded
+# machine that package alone exceeds Go's default 10-minute per-package
+# timeout and every commit fails on a panic that looks like a product bug.
+# -p 2 keeps a commit from saturating the machine while other lanes work.
+echo "Running tests: go test -p 2 -timeout 30m ./..."
+if ! go test -p 2 -timeout 30m ./... ; then
   echo "Commit failed: tests did not pass."
   exit 1
 fi
