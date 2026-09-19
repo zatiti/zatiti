@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>{{xml .Label}}</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>{{xml .Executable}}</string>
+{{- range .Arguments}}
+		<string>{{xml .}}</string>
+{{- end}}
+	</array>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>KeepAlive</key>
+	<true/>
+	<key>ProcessType</key>
+	<string>Background</string>
+	<key>Umask</key>
+	<integer>63</integer>
+	<key>ExitTimeOut</key>
+	<integer>{{.StopTimeoutSeconds}}</integer>
+{{- if .WorkingDirectory}}
+	<key>WorkingDirectory</key>
+	<string>{{xml .WorkingDirectory}}</string>
+{{- end}}
+{{- if .Environment}}
+	<key>EnvironmentVariables</key>
+	<dict>
+{{- range .Environment}}
+		<key>{{xml .Name}}</key>
+		<string>{{xml .Value}}</string>
+{{- end}}
+	</dict>
+{{- end}}
+{{- if .LogFile}}
+	<key>StandardOutPath</key>
+	<string>{{xml .LogFile}}</string>
+	<key>StandardErrorPath</key>
+	<string>{{xml .LogFile}}</string>
+{{- end}}
+</dict>
+</plist>

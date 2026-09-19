@@ -1,0 +1,24 @@
+[Unit]
+Description={{.Description}}
+
+[Service]
+Type=simple
+ExecStart={{.Executable}}{{range .Arguments}} {{quote .}}{{end}}
+Restart=always
+RestartSec=2
+TimeoutStopSec={{.StopTimeoutSeconds}}
+UMask=0077
+NoNewPrivileges=yes
+{{- if .WorkingDirectory}}
+WorkingDirectory={{.WorkingDirectory}}
+{{- end}}
+{{- range .Environment}}
+Environment={{quoteenv .Name .Value}}
+{{- end}}
+{{- if .LogFile}}
+StandardOutput=append:{{.LogFile}}
+StandardError=append:{{.LogFile}}
+{{- end}}
+
+[Install]
+WantedBy=default.target
