@@ -56,16 +56,30 @@ func (f *fixture) provisionTransportCredential(token string) {
 // socket path.
 func (f *fixture) serve() string {
 	f.t.Helper()
+	sock := f.socketPath()
+	srv, err := server.New(server.Config{SocketPath: sock, MaxBodyBytes: 4 << 20}, f.app)
+	if err != nil {
+		f.t.Fatalf("server.New: %v", err)
+	}
+	f.runServer(srv)
+	return sock
+}
+
+// socketPath returns a fresh short socket path (Unix socket paths are
+// length-limited), removed at cleanup.
+func (f *fixture) socketPath() string {
+	f.t.Helper()
 	dir, err := os.MkdirTemp("", "zt")
 	if err != nil {
 		f.t.Fatalf("socket dir: %v", err)
 	}
-	sock := filepath.Join(dir, "c.sock")
-	srv, err := server.New(server.Config{SocketPath: sock, MaxBodyBytes: 4 << 20}, f.app)
-	if err != nil {
-		_ = os.RemoveAll(dir)
-		f.t.Fatalf("server.New: %v", err)
-	}
+	f.t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	return filepath.Join(dir, "c.sock")
+}
+
+// runServer serves until cleanup and waits for the server to stop.
+func (f *fixture) runServer(srv *server.Server) {
+	f.t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() { done <- srv.Serve(ctx) }()
@@ -76,9 +90,7 @@ func (f *fixture) serve() string {
 		case <-time.After(10 * time.Second):
 			f.t.Errorf("server did not stop")
 		}
-		_ = os.RemoveAll(dir)
 	})
-	return sock
 }
 
 func newClient(t testing.TB, sock string, creds contract.CredentialSource) *client.Client {

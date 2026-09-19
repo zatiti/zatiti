@@ -17,22 +17,6 @@ import (
 // has already run and observed the failure; the skip carries the suspected
 // cause so the integration lead can route a fix. A skip is never a pass: the
 // defect list in this package's hand-off report enumerates every call site.
-// skipOnOpenAssemblyDefect skips on the one assembly defect still open on
-// main after the registry seam fix (3926941) and the public-descriptor batch
-// (c7f9cf3): accounting, memory, effects and execution deliver bare internal
-// schemas whose owner-private $defs (Candidate, Context, Dispatch) no
-// document carries. Fixed by the descriptor-drift lane's second batch; once
-// that lands this helper matches nothing and the caller fails loudly.
-func skipOnOpenAssemblyDefect(t *testing.T, err error) {
-	t.Helper()
-	if strings.Contains(err.Error(), "does not resolve") {
-		skipKnownDefect(t,
-			"bare internal schemas referencing owner-private $defs in accounting/memory/effects/execution "+
-				"(descriptor-drift batch 2)",
-			err.Error())
-	}
-}
-
 func skipKnownDefect(t *testing.T, cause, observed string) {
 	t.Helper()
 	t.Skipf("KNOWN DEFECT (not a pass). suspected cause: %s. observed: %s", cause, observed)
@@ -86,17 +70,18 @@ func realModules(t *testing.T) []contract.Module {
 	return modules
 }
 
-// TestRealRegistryAssemblesLandedModules is the target assembly: the real
-// registry over the sixteen real modules, unedited.
+// TestRealRegistryAssemblesLandedModules: the real registry assembles the
+// sixteen real modules unedited and exposes the whole frozen public
+// surface.
 func TestRealRegistryAssemblesLandedModules(t *testing.T) {
 	t.Parallel()
-	_, err := registry.New(realModules(t))
-	if err == nil {
-		t.Log("registry.New assembles the landed modules; flip defaultCatalogMode to catalogRegistry and delete moduleCatalog")
-		return
+	reg, err := registry.New(realModules(t))
+	if err != nil {
+		t.Fatalf("registry.New over the landed modules: %v", err)
 	}
-	skipOnOpenAssemblyDefect(t, err)
-	t.Fatalf("registry.New failed in an unrecorded way: %v", err)
+	if n := len(reg.Public()); n != 197 {
+		t.Fatalf("registry exposes %d public operations, the frozen catalog holds 197", n)
+	}
 }
 
 // editedModules applies edit to every descriptor of every real module.
@@ -195,15 +180,13 @@ func TestRealRegistryResolvesCurrentVersion(t *testing.T) {
 	}
 }
 
-// TestBootstrapThroughRealRegistry is the end state the open assembly
-// defect blocks: bootstrap through application over the real registry.
+// TestBootstrapThroughRealRegistry: bootstrap through application over the
+// real registry, and the registry-owned capabilities catalog is served
+// through the same dispatcher afterwards.
 func TestBootstrapThroughRealRegistry(t *testing.T) {
 	t.Parallel()
-	f, err := assemble(t, fixtureOptions{mode: catalogRegistry})
+	f, err := assemble(t, fixtureOptions{})
 	if err != nil {
-		if strings.Contains(err.Error(), "registry:") {
-			skipKnownDefect(t, "see TestRealRegistryAssemblesLandedModules", err.Error())
-		}
 		t.Fatalf("assemble: %v", err)
 	}
 	res, err := f.app.Invoke(context.Background(), bootstrapActor(), "installation.init",
@@ -213,5 +196,13 @@ func TestBootstrapThroughRealRegistry(t *testing.T) {
 	}
 	if res.Status != contract.StatusCompleted {
 		t.Fatalf("installation.init status %q", res.Status)
+	}
+	f.owner = f.authenticate(f.ownerToken())
+	caps, err := f.invoke(f.owner, "capabilities.list", "", map[string]any{})
+	if err != nil {
+		t.Fatalf("capabilities.list through the real registry: %v", err)
+	}
+	if !strings.Contains(string(caps.Data), `"installation.status"`) {
+		t.Fatalf("capabilities.list does not enumerate the public surface: %.300s", caps.Data)
 	}
 }

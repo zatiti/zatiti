@@ -12,6 +12,7 @@ import (
 
 	"github.com/zatiti/zatiti/internal/cli"
 	"github.com/zatiti/zatiti/internal/contract"
+	"github.com/zatiti/zatiti/internal/registry"
 )
 
 // Cross-package defects the real assembly surfaces beyond the registry seam
@@ -27,49 +28,110 @@ const reviewDeadlockCause = "internal/policy/authority.go:318-338,616-619 puts g
 	"activated by configuration.apply. No principal, including the bootstrap owner, can ever pass grant.create, grant.update, " +
 	"grant.revoke or configuration.apply"
 
-// stageTeam stages one configuration-owned change and seals its plan.
-func (f *fixture) stageTeam() (plan struct {
+// draftRef is the draft a typed create/update staged.
+type draftRef struct {
+	ID      contract.ID `json:"id"`
+	Version int64       `json:"version"`
+}
+
+// planRef is the sealed plan configuration.plan returns.
+type planRef struct {
 	ID              contract.ID `json:"id"`
 	BaseRevision    int64       `json:"base_revision"`
 	CandidateDigest string      `json:"candidate_digest"`
-}) {
+}
+
+// stage runs one typed definition operation and returns its draft.
+func (f *fixture) stage(op, key string, definition map[string]any) draftRef {
 	f.t.Helper()
-	org, _ := f.rootOrganization()
-	staged := f.must(f.owner, "team.create", "defect-team", map[string]any{
-		"scope": f.scope(), "definition": map[string]any{
-			"organization_id": org, "key": "engineering", "name": "Engineering", "worker_ids": []string{}},
-	})
-	var draft struct {
-		Draft struct {
-			ID      contract.ID `json:"id"`
-			Version int64       `json:"version"`
-		} `json:"draft"`
+	staged := f.must(f.owner, op, key, map[string]any{"scope": f.scope(), "definition": definition})
+	var out struct {
+		Draft draftRef `json:"draft"`
 	}
-	decode(f.t, staged.Data, &draft)
-	sealed := f.must(f.owner, "configuration.plan", "defect-plan", map[string]any{
-		"scope": f.scope(), "draft_id": draft.Draft.ID, "expected_version": draft.Draft.Version,
+	decode(f.t, staged.Data, &out)
+	return out.Draft
+}
+
+// plan seals a draft.
+func (f *fixture) plan(key string, draft draftRef) planRef {
+	f.t.Helper()
+	sealed := f.must(f.owner, "configuration.plan", key, map[string]any{
+		"scope": f.scope(), "draft_id": draft.ID, "expected_version": draft.Version,
 	})
 	var out struct {
-		Resource json.RawMessage `json:"resource"`
+		Resource planRef `json:"resource"`
 	}
 	decode(f.t, sealed.Data, &out)
-	decode(f.t, out.Resource, &plan)
-	return plan
+	return out.Resource
+}
+
+// decidePlanReview approves the exact review a plan opened for its
+// candidate digest, if one exists, as the owner.
+func (f *fixture) decidePlanReview(key string, plan planRef) bool {
+	f.t.Helper()
+	reviews := f.must(f.owner, "review.list", "", map[string]any{"scope": f.scope()})
+	var out struct {
+		Items []struct {
+			ID           contract.ID `json:"id"`
+			Version      int64       `json:"version"`
+			ActionDigest string      `json:"action_digest"`
+			State        string      `json:"state"`
+		} `json:"items"`
+	}
+	decode(f.t, reviews.Data, &out)
+	for _, r := range out.Items {
+		if r.ActionDigest != plan.CandidateDigest || r.State != "pending" {
+			continue
+		}
+		f.must(f.owner, "review.decide", key, map[string]any{
+			"scope": f.scope(), "id": r.ID, "expected_version": r.Version, "action_digest": r.ActionDigest,
+			"decision": "approve", "reason": "integration fixture approves its own exact plan",
+		})
+		return true
+	}
+	return false
+}
+
+// apply activates a sealed plan.
+func (f *fixture) apply(key string, plan planRef) (contract.Result, error) {
+	f.t.Helper()
+	return f.invoke(f.owner, "configuration.apply", key, map[string]any{
+		"scope": f.scope(), "plan_id": plan.ID, "base_revision": plan.BaseRevision, "candidate_digest": plan.CandidateDigest,
+	})
+}
+
+// activate stages, plans, decides the plan's review and applies, the full
+// journey-1 "activate a plan" path. It returns the apply result or its
+// refusal.
+func (f *fixture) activate(label, op string, definition map[string]any) (contract.Result, error) {
+	f.t.Helper()
+	draft := f.stage(op, label+"-stage", definition)
+	plan := f.plan(label+"-plan", draft)
+	f.decidePlanReview(label+"-decide", plan)
+	return f.apply(label+"-apply", plan)
 }
 
 // TestOwnerActivatesConfiguration (Z04 one compiler and exact atomic
 // activation; journey 1 "activate a plan"): the owner stages a team, seals
-// the plan and applies it; the team becomes effective and a repeated apply
-// under the same key replays.
+// the plan, decides the exact review the plan opened, and applies it; the
+// team becomes effective and a repeated apply under the same key replays.
 func TestOwnerActivatesConfiguration(t *testing.T) {
 	t.Parallel()
 	f := newBootstrappedFixture(t)
-	plan := f.stageTeam()
+	org, _ := f.rootOrganization()
+	team := map[string]any{"organization_id": org, "key": "engineering", "name": "Engineering", "worker_ids": []string{}}
+	draft := f.stage("team.create", "activate-stage", team)
+	plan := f.plan("activate-plan", draft)
 	if n := f.count("team.list", map[string]any{"scope": f.scope()}); n != 0 {
 		t.Fatalf("a staged, unapplied team is already effective (%d teams)", n)
 	}
-	apply := map[string]any{"scope": f.scope(), "plan_id": plan.ID, "base_revision": plan.BaseRevision, "candidate_digest": plan.CandidateDigest}
-	first, err := f.invoke(f.owner, "configuration.apply", "defect-apply", apply)
+	if _, err := f.apply("activate-early", plan); faultCode(err) != contract.CodeReviewRequired {
+		t.Fatalf("apply before the review decision: %v, want review_required", err)
+	}
+	if !f.decidePlanReview("activate-decide", plan) {
+		skipKnownDefect(t, reviewDeadlockCause, "configuration.plan opened no review for candidate "+plan.CandidateDigest)
+	}
+	first, err := f.apply("activate-apply", plan)
 	if faultCode(err) == contract.CodeReviewRequired {
 		skipKnownDefect(t, reviewDeadlockCause, err.Error())
 	}
@@ -79,9 +141,14 @@ func TestOwnerActivatesConfiguration(t *testing.T) {
 	if n := f.count("team.list", map[string]any{"scope": f.scope()}); n != 1 {
 		t.Fatalf("applied plan left %d effective teams, want 1", n)
 	}
-	replay := f.must(f.owner, "configuration.apply", "defect-apply", apply)
-	if replay.CommandID != first.CommandID {
-		t.Fatalf("repeated apply returned command %s, original %s", replay.CommandID, first.CommandID)
+	replay, err := f.apply("activate-apply", plan)
+	if err != nil || replay.CommandID != first.CommandID {
+		t.Fatalf("repeated apply returned command %s (err %v), original %s", replay.CommandID, err, first.CommandID)
+	}
+	// A second apply of the same plan under a new key is stale: the head
+	// moved.
+	if _, err := f.apply("activate-again", plan); faultCode(err) != contract.CodeStaleVersion && faultCode(err) != contract.CodeConflict {
+		t.Fatalf("re-applying an applied plan under a new key: %v, want stale_version or conflict", err)
 	}
 }
 
@@ -317,29 +384,30 @@ func TestCLIReachesEveryLandedOperationPath(t *testing.T) {
 }
 
 // TestLandedDescriptorsDeliverOneSchemaForm: internal/application validates
-// Descriptor.InputSchema exactly as delivered, so every landed descriptor
-// must resolve its own $refs.
+// Descriptor.InputSchema exactly as the registry delivers it, so every
+// landed descriptor, public and internal, must resolve its own $refs after
+// registration.
 func TestLandedDescriptorsDeliverOneSchemaForm(t *testing.T) {
 	t.Parallel()
-	bare := map[string]int{}
-	selfContained := map[string]int{}
-	for _, m := range realModules(t) {
+	modules := realModules(t)
+	reg, err := registry.New(modules)
+	if err != nil {
+		t.Fatalf("registry.New: %v", err)
+	}
+	for _, m := range modules {
 		for _, d := range m.Descriptors() {
-			if isBareSchema(d.InputSchema) {
-				bare[m.Name()]++
-			} else {
-				selfContained[m.Name()]++
+			registered, _, err := reg.Lookup(d.ID, 0)
+			if err != nil {
+				t.Errorf("operation %s is not resolvable after registration: %v", d.ID, err)
+				continue
+			}
+			for label, schema := range map[string]json.RawMessage{"input": registered.InputSchema, "output": registered.OutputSchema} {
+				if err := contract.ValidateSchema(schema, json.RawMessage(`{}`)); err != nil && strings.Contains(err.Error(), "does not resolve") {
+					t.Errorf("operation %s %s schema does not resolve its $refs as delivered: %v", d.ID, label, err)
+				}
 			}
 		}
 	}
-	if len(bare) == 0 || len(selfContained) == 0 {
-		return
-	}
-	skipKnownDefect(t,
-		"the frozen contract does not say who merges the shared $defs: internal/registry (catalog.go:189-202) demands bare operation schemas and "+
-			"returns them unmerged from Lookup, internal/application/dispatch.go:91 validates the delivered schema as-is, eleven domains "+
-			"deliver self-contained documents and five deliver bare ones whose $refs cannot resolve at the dispatcher",
-		fmt.Sprintf("bare descriptors by owner %v; self-contained by owner %v. moduleCatalog merges the frozen shared $defs for the bare ones", bare, selfContained))
 }
 
 // TestBackupRestoresActualBytes (Z14 paused clean restore; R2.3-002 step 6):

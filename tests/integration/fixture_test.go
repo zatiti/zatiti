@@ -108,24 +108,6 @@ func (r *recordingSecrets) refFor(key string) (string, bool) {
 	return ref, ok
 }
 
-// catalogMode selects which operation catalog fronts the real modules.
-type catalogMode int
-
-const (
-	// catalogRegistry is the production assembly: internal/registry.New over
-	// the real modules. It is the target mode for every case in this package.
-	catalogRegistry catalogMode = iota
-	// catalogDirect fronts the same real modules with moduleCatalog. It
-	// exists only while internal/registry cannot assemble the landed modules
-	// (see TestRealRegistryAssemblesLandedModules); it invents no operation
-	// behavior and must be deleted once the registry path is green.
-	catalogDirect
-)
-
-// defaultCatalogMode is the single switch to flip to catalogRegistry once
-// the registry defects recorded in registry_seam_test.go are fixed.
-const defaultCatalogMode = catalogDirect
-
 // moduleOrder is the explicit assembly and migration order.
 var moduleOrder = []string{
 	"identity", "configuration", "skills", "connections", "policy", "reviews",
@@ -151,7 +133,7 @@ type fixture struct {
 	secrets *recordingSecrets
 	db      contract.Database
 	modules []contract.Module
-	catalog application.Catalog
+	catalog *registry.Registry
 	app     *application.Application
 
 	generation int64
@@ -161,10 +143,9 @@ type fixture struct {
 	owner          contract.Actor
 }
 
-// fixtureOptions narrows assembly for the seam tests.
+// fixtureOptions reuses an existing state directory (restart cases).
 type fixtureOptions struct {
-	mode     catalogMode
-	stateDir string // reuse an existing state directory (restart)
+	stateDir string
 	keyRef   string
 }
 
@@ -229,7 +210,7 @@ func writeMasterKey(t testing.TB) string {
 
 // assemble follows the frozen entrypoint order: platform.Open -> Acquire ->
 // storage.Open -> Migrate -> StartGeneration -> NewPorts -> modules ->
-// catalog -> application.New -> Bind. It returns an error instead of failing
+// registry.New -> application.New -> Bind. It returns an error instead of failing
 // the test so the seam tests can assert on assembly failures.
 func assemble(t testing.TB, opts fixtureOptions) (*fixture, error) {
 	t.Helper()
@@ -277,19 +258,8 @@ func assemble(t testing.TB, opts fixtureOptions) (*fixture, error) {
 		return nil, err
 	}
 
-	switch opts.mode {
-	case catalogRegistry:
-		reg, err := registry.New(modules)
-		if err != nil {
-			return nil, err
-		}
-		f.catalog = reg
-	default:
-		cat, err := newModuleCatalog(modules)
-		if err != nil {
-			return nil, err
-		}
-		f.catalog = cat
+	if f.catalog, err = registry.New(modules); err != nil {
+		return nil, err
 	}
 
 	if f.app, err = application.New(f.db, f.catalog, auth, f.clock, uuidSource{}); err != nil {
@@ -319,11 +289,11 @@ func (f *fixture) close() {
 	}
 }
 
-// newFixture assembles in the default catalog mode and fails the test on any
+// newFixture assembles a fresh installation and fails the test on any
 // assembly error.
 func newFixture(t testing.TB) *fixture {
 	t.Helper()
-	f, err := assemble(t, fixtureOptions{mode: defaultCatalogMode})
+	f, err := assemble(t, fixtureOptions{})
 	if err != nil {
 		t.Fatalf("assemble: %v", err)
 	}

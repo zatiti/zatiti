@@ -150,26 +150,69 @@ func TestPrincipalWithoutGrantsReadsNothing(t *testing.T) {
 }
 
 // TestForeignOrganizationGrantDoesNotReachPeerOrganization (Z01
-// cross-organization reference): a principal granted read capabilities in
-// organization B cannot read organization A. Reaching it needs a second
-// organization and a grant, both of which the fresh installation refuses.
+// cross-organization reference, Z17 inherited denial): a principal granted
+// read capabilities in a second organization cannot read the root
+// organization's task, events, artifacts or memory bindings, while it can
+// read its own organization. Reaching the grant needs a standing policy
+// that takes grant.create out of the default review class and a second
+// organization, both activated through plan, exact review and apply.
 func TestForeignOrganizationGrantDoesNotReachPeerOrganization(t *testing.T) {
 	t.Parallel()
 	f := newBootstrappedFixture(t)
-	foreignScope := contract.Scope{InstallationID: f.installationID, OrganizationID: "00000000-0000-4000-8000-0000000000f0"}
-	foreign := f.newAgent("granted", foreignScope)
-	_, err := f.invoke(f.owner, "grant.create", "foreign-grant", map[string]any{
-		"scope": f.scope(), "definition": map[string]any{
-			"principal_id": foreign.id, "scope": foreignScope, "capabilities": []string{"task.get", "task.list"},
-			"destinations": []string{}, "denied": false},
+	scope, task, event, binding := f.seedOrganizationState()
+
+	_, err := f.activate("grant-policy", "policy.create", map[string]any{
+		"scope": f.scope(), "rules": []any{map[string]any{
+			"capability": "grant.create", "effect": "local", "destinations": []string{},
+			"decision": "allow", "human_required": false, "conditions": map[string]any{}}},
 	})
-	if err == nil {
-		t.Fatal("grant.create succeeded; extend this case: create organization B, grant there, and probe organization A")
-	}
 	if faultCode(err) == contract.CodeReviewRequired {
 		skipKnownDefect(t, reviewDeadlockCause, err.Error())
 	}
-	t.Fatalf("grant.create failed in an unrecorded way: %v", err)
+	if err != nil {
+		t.Fatalf("activating the grant policy: %v", err)
+	}
+	created, err := f.activate("org-b", "organization.create", map[string]any{"key": "research", "name": "Research"})
+	if err != nil {
+		t.Fatalf("activating organization B: %v", err)
+	}
+	_ = created
+	orgs := f.must(f.owner, "organization.list", "", map[string]any{"scope": f.scope()})
+	var ol struct {
+		Items []struct {
+			ID  contract.ID `json:"id"`
+			Key string      `json:"key"`
+		} `json:"items"`
+	}
+	decode(t, orgs.Data, &ol)
+	var orgB contract.ID
+	for _, o := range ol.Items {
+		if o.Key == "research" {
+			orgB = o.ID
+		}
+	}
+	if orgB == "" {
+		t.Fatalf("organization B is not effective after apply: %s", orgs.Data)
+	}
+	foreignScope := contract.Scope{InstallationID: f.installationID, OrganizationID: orgB}
+	foreign := f.newAgent("granted", foreignScope)
+	f.must(f.owner, "grant.create", "foreign-grant", map[string]any{
+		"scope": f.scope(), "definition": map[string]any{
+			"principal_id": foreign.id, "scope": foreignScope,
+			"capabilities": []string{"task.get", "task.list", "event.get", "event.list", "artifact.list", "memory.binding.get", "memory.binding.list"},
+			"destinations": []string{}, "denied": false},
+	})
+	// Its own organization is readable.
+	if _, err := f.invoke(foreign.actor, "task.list", "", map[string]any{"scope": foreignScope}); err != nil {
+		t.Fatalf("granted agent reading its own organization: %v", err)
+	}
+	// The root organization is not, under any scope.
+	for _, s := range []contract.Scope{scope, f.scope()} {
+		for _, c := range probes(s, task, event, binding) {
+			res, err := f.invoke(foreign.actor, c.op, "", c.input)
+			refusedWithoutData(t, "granted foreign agent", c.name, res, err)
+		}
+	}
 }
 
 // TestRevokedPrincipalIsDeniedImmediately (Z01 revoked principal): after

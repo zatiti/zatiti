@@ -183,7 +183,7 @@ func TestBootstrapRunsExactlyOnce(t *testing.T) {
 func TestSecondControllerIsRefused(t *testing.T) {
 	t.Parallel()
 	f := newBootstrappedFixture(t)
-	_, err := assemble(t, fixtureOptions{mode: defaultCatalogMode, stateDir: f.stateDir, keyRef: f.keyRef})
+	_, err := assemble(t, fixtureOptions{stateDir: f.stateDir, keyRef: f.keyRef})
 	if err == nil {
 		t.Fatal("a second controller assembled on a state directory that is already served")
 	}
@@ -209,7 +209,7 @@ func TestRestartKeepsStateAndAdvancesGeneration(t *testing.T) {
 	installation, generation, stateDir, keyRef := f.installationID, f.generation, f.stateDir, f.keyRef
 	f.close()
 
-	g, err := assemble(t, fixtureOptions{mode: defaultCatalogMode, stateDir: stateDir, keyRef: keyRef})
+	g, err := assemble(t, fixtureOptions{stateDir: stateDir, keyRef: keyRef})
 	if err != nil {
 		t.Fatalf("restart: %v", err)
 	}
