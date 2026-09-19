@@ -266,8 +266,8 @@ func TestPlanSealsIdentityAndDependencies(t *testing.T) {
 
 func TestRevisionGetAndList(t *testing.T) {
 	env := newEnv(t)
-	plan := env.applyAll(workerChange(env.ids.New(), env.org, "revised"))
-	rev := env.apply(plan) // replay returns the original revision
+	plan := env.planDraft(env.stage(workerChange(env.ids.New(), env.org, "revised")))
+	rev := env.apply(plan)
 
 	payload := env.mustOK("configuration.revision.get", getInput{Scope: env.scope, ID: rev.ID})
 	var got struct {

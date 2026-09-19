@@ -309,35 +309,48 @@ func TestApplyAuthorityOldStateAndDecisions(t *testing.T) {
 	}
 }
 
-// Z04.submission_replay: an identical retry of an applied plan returns the
-// original revision without a new revision or event; changed parameters are
-// refused as stale.
+// Z04.submission_replay: an identical retry under the original submission
+// key is replayed by evidence before the handler runs, so a second apply
+// that reaches the handler is a new command against a consumed plan. It is
+// refused stale_version and changes nothing: no second activation, no new
+// revision or event, head unchanged.
 func TestSubmissionReplayReturnsOriginalRevision(t *testing.T) {
 	env := newEnv(t)
 	wid := env.ids.New()
-	plan := env.applyAll(workerChange(wid, env.org, "replayable"))
+	plan := env.planDraft(env.stage(workerChange(wid, env.org, "replayable")))
 	rev := env.apply(plan)
+	eventsBefore, err := env.db.Events(env.ctx, 0, 500)
+	if err != nil {
+		t.Fatalf("events: %v", err)
+	}
 
-	again := env.apply(plan)
-	if again.ID != rev.ID {
-		t.Fatalf("replay returned revision %s, want original %s", again.ID, rev.ID)
+	fault := env.expectFault("configuration.apply", applyInput{
+		Scope: env.scope, PlanID: plan.ID, BaseRevision: plan.BaseRevision, CandidateDigest: plan.CandidateDigest,
+	}, contract.CodeStaleVersion)
+	if !strings.Contains(fault.Message, string(rev.ID)) {
+		t.Fatalf("stale_version fault %q does not name the revision the plan was applied as", fault.Message)
 	}
 	items := env.listItems("configuration.revision.list", listInput{Scope: env.scope})
 	if len(items) != 1 {
-		t.Fatalf("revision.list items = %d, want 1 (replay must not add a revision)", len(items))
+		t.Fatalf("revision.list items = %d, want 1 (a refused re-apply must not add a revision)", len(items))
 	}
 	if after := env.head(); after != plan.BaseRevision+1 {
-		t.Fatalf("head = %d after replay, want %d", after, plan.BaseRevision+1)
+		t.Fatalf("head = %d after the refused re-apply, want %d", after, plan.BaseRevision+1)
 	}
-	if got := env.getWorker(wid); got.Version != 1 {
-		t.Fatalf("replay re-applied the change: worker version %d", got.Version)
+	if state, found := env.rowState(kindWorker, wid); !found || state != stateActive {
+		t.Fatalf("worker %q (found %v) after the refused re-apply, want active exactly once", state, found)
+	}
+	eventsAfter, err := env.db.Events(env.ctx, 0, 500)
+	if err != nil {
+		t.Fatalf("events: %v", err)
+	}
+	if len(eventsAfter) != len(eventsBefore) {
+		t.Fatalf("a refused re-apply emitted %d events", len(eventsAfter)-len(eventsBefore))
 	}
 
-	// a retry with different parameters is refused
+	// Changed parameters against the consumed plan are stale as well.
 	_ = env.expectFault("configuration.apply", applyInput{
-		Scope: env.scope, PlanID: plan.ID,
-		BaseRevision:    plan.BaseRevision,
-		CandidateDigest: string(contract.Digest(strings.Repeat("ab", 32))),
+		Scope: env.scope, PlanID: plan.ID, BaseRevision: plan.BaseRevision + 1, CandidateDigest: plan.CandidateDigest,
 	}, contract.CodeStaleVersion)
 }
 
@@ -689,8 +702,7 @@ func TestRollbackPlanRestoresPriorDefinitions(t *testing.T) {
 	// an update revision: rollback restores the prior name at the post-apply
 	// version, and a rollback requested against a stale head refuses
 	wid := env.ids.New()
-	createPlan := env.applyAll(workerChange(wid, env.org, "original"))
-	env.apply(createPlan) // replay returns the create revision
+	env.applyAll(workerChange(wid, env.org, "original"))
 	worker := env.getWorker(wid)
 	payload := env.mustOK("worker.update", env.workerUpdateIn(env.org, worker, "renamed"))
 	var staged struct {
@@ -751,7 +763,7 @@ func TestRollbackPlanRestoresPriorDefinitions(t *testing.T) {
 
 	// a create revision: rollback deletes the created object and nothing else
 	victimID := env.ids.New()
-	victimPlan := env.applyAll(workerChange(victimID, env.org, "victim"))
+	victimPlan := env.planDraft(env.stage(workerChange(victimID, env.org, "victim")))
 	victimRev := env.apply(victimPlan)
 	head = env.head()
 	payload = env.mustOK("configuration.rollback.plan", rollbackInput{

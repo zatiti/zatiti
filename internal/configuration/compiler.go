@@ -437,8 +437,9 @@ func (s *Service) authorityCheck(ctx context.Context, unit contract.Unit, scope 
 // handleApply implements configuration.apply: atomically recheck current
 // head, old authority, restrictions, dependency and prerequisite validity and
 // exact decisions; activate the complete bundle; record the revision and
-// event. Stale plans fail; an identical retry of an applied plan returns its
-// original result without another revision or event.
+// event. Stale plans fail, an applied plan included; an identical retry
+// under the original submission key is replayed by evidence before this
+// handler runs, without another revision or event.
 func handleApply(ctx context.Context, s *Service, unit contract.Unit, inv contract.Invocation) (contract.Payload, error) {
 	in, err := decodeInto[applyInput](s, "configuration.apply", inv.Input)
 	if err != nil {
@@ -452,18 +453,22 @@ func handleApply(ctx context.Context, s *Service, unit contract.Unit, inv contra
 		return contract.Payload{}, notFound("plan %s not found", in.PlanID)
 	}
 	if plan.State == planApplied {
-		// Exact replay of a completed apply returns the original revision.
-		if plan.BaseRevision == in.BaseRevision && plan.CandidateDigest == in.CandidateDigest {
-			rev, err := loadRevisionByPlan(ctx, unit, plan.InstallationID, plan.ID)
-			if err != nil {
-				return contract.Payload{}, faultOf(err)
-			}
-			if rev == nil {
-				return contract.Payload{}, internalError("applied plan %s has no recorded revision", in.PlanID)
-			}
-			return s.revisionBody(rev)
+		// An applied plan is consumed: its activation moved the head past
+		// the base revision it was sealed against, so a new command to apply
+		// it is stale and must regenerate. An identical retry under the
+		// original submission key never reaches this handler: evidence
+		// replays the retained result before dispatch. Answering a fresh
+		// command with the old revision would mint a new completed command
+		// for work that did not happen.
+		rev, err := loadRevisionByPlan(ctx, unit, plan.InstallationID, plan.ID)
+		if err != nil {
+			return contract.Payload{}, faultOf(err)
 		}
-		return contract.Payload{}, staleVersion("plan %s was applied with different parameters", in.PlanID)
+		if rev == nil {
+			return contract.Payload{}, internalError("applied plan %s has no recorded revision", in.PlanID)
+		}
+		return contract.Payload{}, staleVersion("plan %s was already applied as revision %s against head %d; stage and plan again against the current head",
+			in.PlanID, rev.ID, plan.BaseRevision)
 	}
 	if plan.BaseRevision != in.BaseRevision || plan.CandidateDigest != in.CandidateDigest {
 		return contract.Payload{}, staleVersion("apply parameters do not match sealed plan %s", in.PlanID)
