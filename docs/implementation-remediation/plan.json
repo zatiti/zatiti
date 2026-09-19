@@ -932,12 +932,14 @@
         "Implement typed encrypted blob inventory/import and backup key-transfer mechanics fixed by P00 without exposing raw keys in manifests/API results.",
         "Backups must be recoverable in a clean destination using explicit secure key provisioning; current opaque references to a different secret store are insufficient.",
         "Verify every imported artifact digest and encrypt under the destination custody policy; retain restricted permissions and symlink defenses.",
-        "Keep failed restore staging isolated and cleanable without touching live user data."
+        "Keep failed restore staging isolated and cleanable without touching live user data.",
+        "Reproduce the platform failures from CI run 35473210732 on Linux and macOS: TestListenPrivateRefusesSymlinkedRunDirectory accepted a symlinked directory on both; TestBlobTamperedObjectFailsPublishOverExisting accepted tampered content on macOS. Establish the cause with filesystem fixtures before fixing implementation or fixture assumptions; preserve the rejection contracts."
       ],
       "required_tests": [
         "Backup key provisioned to a clean destination opens the bundle; missing key returns prerequisite_missing.",
         "Corrupt/truncated artifact, symlinked destination or wrong installation cannot replace live blobs.",
-        "Secrets stay absent from ordinary logs, manifests and exported configuration."
+        "Secrets stay absent from ordinary logs, manifests and exported configuration.",
+        "TestListenPrivateRefusesSymlinkedRunDirectory and TestBlobTamperedObjectFailsPublishOverExisting pass on Linux and macOS without skips or weakened error assertions."
       ],
       "deliverable": "Blob/key capabilities required for an actual portable restore.",
       "serialized_global": false,
@@ -1504,12 +1506,14 @@
         "Enumerate every required case, not just tests that happen to emit a record. Treat missing tests, unconditional skips and stale evidence as blocked release claims.",
         "Run Go baseline, renderer check, catalog parity, Flutter analyze/tests/live proof and native qualification on supported runners; retain bounded sanitized logs/artifacts.",
         "Keep artifact assembly/qualification separate from publication/signing authorization and do not make tag creation a substitute for evidence.",
-        "Respect shared-machine heavy-build rules on self-hosted runners; standard hosted runners need their own concurrency/resource limits."
+        "Respect shared-machine heavy-build rules on self-hosted runners; standard hosted runners need their own concurrency/resource limits.",
+        "Track the platform regressions recorded in audit.md through P30 and require passing Linux/macOS evidence before claiming a healthy Go baseline; the local passing run does not supersede hosted failures."
       ],
       "required_tests": [
         "Deliberately omit or skip one required journey: release gate fails.",
         "A stale source revision or changed catalog/profile digest invalidates prior evidence.",
-        "Healthy baseline, renderer and completed journey matrices pass with linked artifacts."
+        "Healthy baseline, renderer and completed journey matrices pass with linked artifacts.",
+        "Both supported hosted Go jobs exercise the symlink-directory and tampered-blob regression tests and retain their results."
       ],
       "deliverable": "CI gates that reflect product readiness rather than unit-test success.",
       "serialized_global": false,
