@@ -72,11 +72,14 @@ type requestRecord struct {
 // A record that contains the credential is refused rather than staged: the
 // wire protocol contract makes encode secret-free, and this is the check
 // that holds it to that.
-func stageRequestContext(ctx context.Context, blobs contract.BlobStore, secret []byte, destination string, call protocolCall, classification string) (wireStagedOutput, wireStagedLocator, error) {
+func stageRequestContext(ctx context.Context, blobs contract.BlobStore, secret []byte, call protocolCall, classification string) (wireStagedOutput, wireStagedLocator, error) {
+	if blobs == nil {
+		return wireStagedOutput{}, wireStagedLocator{}, prerequisiteMissing("responses adapter requires a blob store dependency to stage the request context before sending")
+	}
 	record := requestRecord{
 		Schema:      requestRecordSchema,
 		Method:      call.Method,
-		Destination: destination,
+		Destination: call.Destination,
 		Headers:     make([]requestRecordHeader, 0, len(call.Header)),
 		BodyDigest:  contract.Hash(call.Body),
 		BodySize:    int64(len(call.Body)),
@@ -121,6 +124,7 @@ type usageInput struct {
 	Bounds         admittedBounds
 	Sent           bool                // false only when the request provably never left
 	Reported       *protocolTokenUsage // the provider's own usage report, if any
+	Unpriceable    bool                // the reported tokens carry a price the profile's rates do not cover
 	NoCharge       bool                // the qualified contract establishes no charge
 	UsageReference string
 }
@@ -142,6 +146,9 @@ func (p *responsesProfile) usageFor(in usageInput) wireProviderUsage {
 		usage.Accounting.Advisory = false
 	case in.Reported != nil:
 		spent, err := p.costOf(in.Reported.InputTokens, in.Reported.OutputTokens)
+		if in.Unpriceable {
+			err = errAmountOverflow // priced outside the profile's rates: the amount is not known
+		}
 		if err != nil {
 			// The provider reported tokens whose charge cannot be
 			// represented. The tokens are still recorded exactly; the
@@ -176,7 +183,7 @@ type builtEvidence struct {
 // buildEvidence assembles and marshals the zatiti.responses.evidence/v1
 // document, plus a standalone marshal of its usage for Observation.Usage.
 func buildEvidence(physical wirePhysicalCallEvidence, output wireModelOutput, staged []wireStagedOutput) (builtEvidence, error) {
-	usageDoc, err := json.Marshal(output.Usage)
+	usageDoc, err := json.Marshal(output.Usage.Accounting)
 	if err != nil {
 		return builtEvidence{}, internalError("encoding responses usage failed: %v", err)
 	}

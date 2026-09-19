@@ -3,7 +3,6 @@ package responses
 import (
 	"context"
 	"fmt"
-	"net/http"
 
 	"github.com/zatiti/zatiti/internal/contract"
 )
@@ -15,8 +14,10 @@ import (
 type interpretation struct {
 	secret         []byte
 	bounds         admittedBounds
+	inputBound     *int64 // the input token bound the step was admitted under, if any
 	classification string
 	stageErr       error // staging the raw provider response failed
+	reconcile      bool  // the response answers a reconciliation lookup, not the step itself
 	disposition    string
 }
 
@@ -26,7 +27,7 @@ type interpretation struct {
 func (in *interpretation) unknown(physical *wirePhysicalCallEvidence, output *wireModelOutput, profile *responsesProfile, code, message string) {
 	in.disposition = contract.DispositionUnknown
 	physical.Confirmation = "unknown"
-	physical.ErrorCode = code
+	physical.ErrorCode = sanitizeText(in.secret, code, maxErrorCodeChars)
 	physical.ErrorMessage = sanitizeText(in.secret, message, maxMessageChars)
 	output.FinishReason = finishUnknown
 	output.Usage = profile.usageFor(usageInput{Bounds: in.bounds, Sent: true})
@@ -35,14 +36,17 @@ func (in *interpretation) unknown(physical *wirePhysicalCallEvidence, output *wi
 // interpret classifies a fully read, in-bounds response. It returns staged
 // extended with any model text it staged.
 //
-// Status classes follow HTTP semantics, not any vendor's: a 3xx is a
-// redirect this adapter never follows and a 4xx is the server refusing the
-// request, both authoritative failures of this attempt; a 5xx is the
-// server (or an intermediary) failing on an apparently valid request,
-// which cannot rule out that the model step ran, so it stays unknown. Only
-// a decoded 2xx can succeed.
-func (in *interpretation) interpret(ctx context.Context, a *Adapter, resp *http.Response, result protocolResult, decodeErr error, physical *wirePhysicalCallEvidence, output *wireModelOutput, staged []wireStagedOutput) []wireStagedOutput {
-	status := resp.StatusCode
+// For the model step, status classes follow HTTP semantics, not any
+// vendor's: a 3xx is a redirect this adapter never follows and a 4xx is
+// the server refusing the request, both authoritative failures of this
+// attempt; a 5xx is the server (or an intermediary) failing on an
+// apparently valid request, which cannot rule out that the model step ran,
+// so it stays unknown. Only a decoded 2xx can succeed.
+//
+// For a reconciliation lookup, any status but a decoded 2xx resolves
+// nothing: the lookup failing (a 404 included) never proves the step did
+// not execute.
+func (in *interpretation) interpret(ctx context.Context, a *Adapter, status int, result protocolResult, decodeErr error, physical *wirePhysicalCallEvidence, output *wireModelOutput, staged []wireStagedOutput) []wireStagedOutput {
 	is2xx := status >= 200 && status < 300
 	if decodeErr == nil {
 		decodeErr = validateResult(result, is2xx)
@@ -54,7 +58,7 @@ func (in *interpretation) interpret(ctx context.Context, a *Adapter, resp *http.
 		// cannot turn a non-2xx into anything better.
 		var usage usageInput
 		if decodeErr == nil {
-			usage = usageInput{Reported: result.Usage, NoCharge: result.NoCharge, UsageReference: sanitizeText(in.secret, result.UsageReference, maxReferenceChars)}
+			usage = usageInput{Reported: result.Usage, Unpriceable: result.UsageUnpriceable != "", NoCharge: result.NoCharge, UsageReference: sanitizeText(in.secret, result.UsageReference, maxReferenceChars)}
 			output.ResponseID = scrubSecret(in.secret, result.ResponseID)
 			physical.ErrorMessage = sanitizeText(in.secret, result.ErrorMessage, maxMessageChars)
 		}
@@ -63,7 +67,7 @@ func (in *interpretation) interpret(ctx context.Context, a *Adapter, resp *http.
 		physical.ProviderReference = output.ResponseID
 		physical.ErrorCode = fmt.Sprintf("http_%d", status)
 		switch {
-		case status >= 500:
+		case in.reconcile || status >= 500:
 			in.disposition = contract.DispositionUnknown
 			physical.Confirmation = "unknown"
 		case status >= 300 && status < 400:
@@ -88,11 +92,19 @@ func (in *interpretation) interpret(ctx context.Context, a *Adapter, resp *http.
 	output.ResponseID = scrubSecret(in.secret, result.ResponseID)
 	physical.ProviderReference = output.ResponseID
 	output.Usage = a.profile.usageFor(usageInput{
-		Bounds: in.bounds, Sent: true, Reported: result.Usage, NoCharge: result.NoCharge,
+		Bounds: in.bounds, Sent: true, Reported: result.Usage, Unpriceable: result.UsageUnpriceable != "", NoCharge: result.NoCharge,
 		UsageReference: sanitizeText(in.secret, result.UsageReference, maxReferenceChars),
 	})
 
 	switch result.State {
+	case stateUnresolved:
+		// The documented lookup found no evidence either way.
+		in.disposition = contract.DispositionUnknown
+		physical.Confirmation = "unknown"
+		physical.ErrorCode = "reconcile_unresolved"
+		physical.ErrorMessage = "the authoritative lookup shows no completed output yet; the outcome remains unknown"
+		output.FinishReason = finishUnknown
+		return staged
 	case stateAccepted:
 		// Provider acceptance is not completion and is never promoted to it.
 		in.disposition = contract.DispositionAccepted
@@ -114,18 +126,31 @@ func (in *interpretation) interpret(ctx context.Context, a *Adapter, resp *http.
 	output.Refusal = sanitizeText(in.secret, result.Refusal, maxRefusalChars)
 	output.ContinuationReference = scrubSecret(in.secret, result.ContinuationReference)
 
-	// Adapter-side problems after an authoritative provider success are
+	// Adapter-side findings after an authoritative provider success are
 	// flagged on the physical call without rewriting what the provider
-	// did: the step ran and its usage is final.
+	// did: the step ran and its usage is final. The first finding wins.
+	flag := func(code, message string) {
+		if physical.ErrorCode == "" {
+			physical.ErrorCode = sanitizeText(in.secret, code, maxErrorCodeChars)
+			physical.ErrorMessage = sanitizeText(in.secret, message, maxMessageChars)
+		}
+	}
+	if result.ErrorCode != "" {
+		flag(result.ErrorCode, result.ErrorMessage)
+	}
+	if result.UsageUnpriceable != "" {
+		flag("usage_unpriceable", result.UsageUnpriceable)
+	}
+	if result.Usage != nil && in.inputBound != nil && result.Usage.InputTokens > *in.inputBound {
+		flag("input_token_bound_exceeded", fmt.Sprintf("the provider reported %d input tokens, above the %d-token bound the step was admitted under; the bound's qualification is unsound", result.Usage.InputTokens, *in.inputBound))
+	}
 	if in.stageErr != nil {
-		physical.ErrorCode = "provider_response_staging_failed"
-		physical.ErrorMessage = "the raw provider response could not be staged as evidence"
+		flag("provider_response_staging_failed", "the raw provider response could not be staged as evidence")
 	}
 	for _, text := range result.Texts {
 		stagedText, err := stageBytes(ctx, a.deps.Blobs, []byte(scrubSecret(in.secret, text)), textMediaType, in.classification, "model_text")
 		if err != nil {
-			physical.ErrorCode = "model_text_staging_failed"
-			physical.ErrorMessage = "one or more model text outputs could not be staged and are absent from text_outputs"
+			flag("model_text_staging_failed", "one or more model text outputs could not be staged and are absent from text_outputs")
 			continue
 		}
 		staged = append(staged, stagedText)
@@ -138,8 +163,7 @@ func (in *interpretation) interpret(ctx context.Context, a *Adapter, resp *http.
 		// mapping, so this package has no honest source for them. The
 		// calls are not dropped -- they remain verbatim in the staged
 		// provider_response -- but no typed proposal is fabricated.
-		physical.ErrorCode = "tool_proposal_mapping_unspecified"
-		physical.ErrorMessage = fmt.Sprintf("the model returned %d tool call(s); the frozen contract provides no tool-to-operation mapping, so no typed proposal was produced (raw calls are retained in the staged provider_response)", n)
+		flag("tool_proposal_mapping_unspecified", fmt.Sprintf("the model returned %d tool call(s); the frozen contract provides no tool-to-operation mapping, so no typed proposal was produced (raw calls are retained in the staged provider_response)", n))
 	}
 	return staged
 }
@@ -152,7 +176,7 @@ func (in *interpretation) interpret(ctx context.Context, a *Adapter, resp *http.
 func validateResult(r protocolResult, requireState bool) error {
 	if requireState {
 		switch r.State {
-		case stateCompleted, stateFailed, stateAccepted:
+		case stateCompleted, stateFailed, stateAccepted, stateUnresolved:
 		default:
 			return fmt.Errorf("wire protocol reported unknown response state %q", r.State)
 		}

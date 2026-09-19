@@ -147,12 +147,9 @@ func TestContractDocument(t *testing.T) {
 	if doc.Schema != "zatiti.responses.contract/v1" {
 		t.Fatalf("schema = %q", doc.Schema)
 	}
-	// Production qualifies no wire protocol revision, and says so.
-	if doc.QualifiedProtocolRevisions == nil || len(doc.QualifiedProtocolRevisions) != 0 {
-		t.Fatalf("qualified_protocol_revisions = %v, want empty", doc.QualifiedProtocolRevisions)
-	}
-	if !strings.Contains(string(a.Contract()), `"qualified_protocol_revisions":[]`) {
-		t.Fatalf("contract document does not encode an empty revision list: %s", a.Contract())
+	// Production qualifies exactly the revisions PROTOCOL.md pins.
+	if len(doc.QualifiedProtocolRevisions) != 1 || doc.QualifiedProtocolRevisions[0] != openaiProtocolRevision {
+		t.Fatalf("qualified_protocol_revisions = %v, want [%s]", doc.QualifiedProtocolRevisions, openaiProtocolRevision)
 	}
 	// The embedded profile schema is the one New enforces.
 	if err := contract.ValidateSchema(doc.ProfileSchema, bindProfile(t, defaultProfile())); err != nil {

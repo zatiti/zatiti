@@ -5,10 +5,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/zatiti/zatiti/internal/contract"
@@ -34,8 +34,7 @@ func New(deps contract.AdapterDependencies, raw json.RawMessage) (contract.Adapt
 
 // newWithProtocols is New over an explicit protocol registry, so this
 // package's tests can drive the transport, accounting and evidence
-// machinery through a synthetic protocol while production keeps the
-// (empty) qualified registry.
+// machinery through a synthetic protocol as well as the qualified ones.
 func newWithProtocols(deps contract.AdapterDependencies, raw json.RawMessage, protocols map[string]wireProtocol) (*Adapter, error) {
 	if deps.HTTP == nil {
 		return nil, invalidInput("responses adapter requires an HTTP client dependency")
@@ -46,6 +45,12 @@ func newWithProtocols(deps contract.AdapterDependencies, raw json.RawMessage, pr
 	profile, err := loadProfile(raw)
 	if err != nil {
 		return nil, err
+	}
+	protocol := protocols[profile.CapabilityEvidence.ProtocolRevision]
+	if protocol != nil {
+		if err := protocol.validateProfile(profile.protocolProfile()); err != nil {
+			return nil, capabilityUnsupported("profile cannot be honoured by wire protocol %q: %v", profile.CapabilityEvidence.ProtocolRevision, err)
+		}
 	}
 	revisions := make([]string, 0, len(protocols))
 	for revision := range protocols {
@@ -72,7 +77,7 @@ func newWithProtocols(deps contract.AdapterDependencies, raw json.RawMessage, pr
 		profile:  profile,
 		deps:     deps,
 		client:   client,
-		protocol: protocols[profile.CapabilityEvidence.ProtocolRevision],
+		protocol: protocol,
 		schema:   contractDoc,
 	}, nil
 }
@@ -128,188 +133,405 @@ func buildContractDocument(revisions []string) (json.RawMessage, error) {
 	return out, nil
 }
 
-// Reconcile implements contract.Adapter. It never performs a physical
-// call: reconciliation is "only documented authoritative lookup under
-// qualified retention, otherwise preserve unknown", and the frozen profile
-// schema carries neither a lookup contract nor a retention window. Issuing
-// the model step again would be a second paid mutation, not a read. The
-// refusal leaves the original attempt's unknown outcome and reservation
-// exactly as recorded.
-func (a *Adapter) Reconcile(_ context.Context, dispatch contract.Dispatch) (contract.Observation, error) {
-	if dispatch.Adapter != adapterName {
-		return contract.Observation{}, invalidInput("dispatch adapter %q does not match %q", dispatch.Adapter, adapterName)
-	}
-	return contract.Observation{}, capabilityUnsupported("responses adapter has no qualified authoritative lookup or retention window; the original outcome remains unknown and no call was made")
+// step is the validated, admitted model step every physical call of one
+// Invoke or Reconcile works from.
+type step struct {
+	doc     *contextDocument
+	request protocolRequest
+	bound   *int64
+	bounds  admittedBounds
+	secret  []byte
 }
 
-// Invoke implements contract.Adapter: at most one physical HTTP request for
-// dispatch's model step. A non-nil error means no request was attempted;
-// once the request is handed to the transport, the outcome is reported
-// through Observation with a nil error.
-func (a *Adapter) Invoke(ctx context.Context, dispatch contract.Dispatch) (contract.Observation, error) {
+// admitStep performs every local check that precedes any physical call:
+// action and context validation, protocol selection, the output ceiling,
+// the input bound and the cost bound, then credential resolution. A
+// non-nil error means nothing was sent.
+func (a *Adapter) admitStep(ctx context.Context, dispatch contract.Dispatch, reconcile bool) (*step, error) {
 	if dispatch.Adapter != adapterName {
-		return contract.Observation{}, invalidInput("dispatch adapter %q does not match %q", dispatch.Adapter, adapterName)
+		return nil, invalidInput("dispatch adapter %q does not match %q", dispatch.Adapter, adapterName)
 	}
 	act, err := decodeAction(dispatch.Action)
 	if err != nil {
-		return contract.Observation{}, err
+		return nil, err
 	}
 	if act.MaxOutputTokens > a.profile.MaxOutputTokens {
-		return contract.Observation{}, budgetUnavailable("action max_output_tokens %d exceeds the profile's max_output_tokens %d", act.MaxOutputTokens, a.profile.MaxOutputTokens)
+		return nil, budgetUnavailable("action max_output_tokens %d exceeds the profile's max_output_tokens %d", act.MaxOutputTokens, a.profile.MaxOutputTokens)
 	}
 	doc, err := loadContext(ctx, a.deps.Blobs, a.profile, act)
 	if err != nil {
-		return contract.Observation{}, err
+		return nil, err
 	}
 
-	// The exact unspecified boundary: everything above is defined by the
-	// frozen Zatiti-side contract; the upstream request is not.
+	// The wire boundary: everything above is defined by the frozen
+	// Zatiti-side contract; the upstream request is defined only by a
+	// qualified protocol revision.
 	if a.protocol == nil {
-		return contract.Observation{}, capabilityUnsupported(
-			"wire protocol revision %q is not qualified in this build: the upstream request and response shapes are pinned only by real-endpoint qualification, and none has been performed; no call was made",
+		return nil, capabilityUnsupported(
+			"wire protocol revision %q is not qualified in this build: the upstream request and response shapes are pinned only by real-endpoint qualification; no call was made",
 			a.profile.CapabilityEvidence.ProtocolRevision)
 	}
 	limits := a.protocol.limits()
 	if act.ContinuationReference != "" && !limits.SupportsContinuation {
-		return contract.Observation{}, capabilityUnsupported("the qualified wire protocol cannot express continuation_reference")
+		return nil, capabilityUnsupported("the qualified wire protocol cannot express continuation_reference")
 	}
-	call, err := a.protocol.encode(protocolRequest{
-		Model:                 a.profile.Model,
-		MaxOutputTokens:       act.MaxOutputTokens,
-		Context:               doc,
-		ContinuationReference: act.ContinuationReference,
-	})
-	if err != nil {
-		var f *contract.Fault
-		if errors.As(err, &f) && f != nil {
-			return contract.Observation{}, f
-		}
-		return contract.Observation{}, capabilityUnsupported("the qualified wire protocol cannot express this model step: %v", err)
+	if act.MaxOutputTokens < limits.MinOutputTokens {
+		return nil, capabilityUnsupported("action max_output_tokens %d is below the %d-token minimum the qualified wire protocol can enforce", act.MaxOutputTokens, limits.MinOutputTokens)
 	}
-	if call.Method == "" || len(call.Body) == 0 {
-		return contract.Observation{}, internalError("wire protocol encoded an empty request")
+	if reconcile && !limits.SupportsReconcile {
+		return nil, capabilityUnsupported("the qualified wire protocol has no documented authoritative lookup; the original outcome remains unknown and no call was made")
 	}
 
-	bounds, err := a.profile.admit(act.MaxOutputTokens, limits, call.InputTokenBound)
-	if err != nil {
-		return contract.Observation{}, err
+	s := &step{
+		doc: doc,
+		request: protocolRequest{
+			Profile:               a.profile.protocolProfile(),
+			OperationID:           string(dispatch.OperationID),
+			AttemptID:             string(dispatch.AttemptID),
+			MaxOutputTokens:       act.MaxOutputTokens,
+			Context:               doc,
+			ContinuationReference: act.ContinuationReference,
+		},
 	}
-
-	secret, err := a.resolveCredential(ctx, dispatch.CredentialRef)
-	if err != nil {
-		return contract.Observation{}, err
+	s.bound = a.protocol.inputTokenBound(s.request)
+	if reconcile {
+		// A reconciliation resolves an attempt that was already admitted;
+		// its bounds describe the outstanding charge, and cannot refuse.
+		s.bounds = a.profile.outstandingBounds(act.MaxOutputTokens, s.bound)
+	} else if s.bounds, err = a.profile.admit(act.MaxOutputTokens, limits, s.bound); err != nil {
+		return nil, err
 	}
+	if s.secret, err = a.resolveCredential(ctx, dispatch.CredentialRef); err != nil {
+		return nil, err
+	}
+	return s, nil
+}
 
+// callContext bounds the whole attempt by the earlier of the profile
+// timeout and the dispatch deadline, both measured on the injected clock
+// but applied as a duration so a test clock pinned in the past cannot
+// pre-expire it.
+func (a *Adapter) callContext(ctx context.Context, deadline time.Time) (context.Context, context.CancelFunc, error) {
 	remaining := a.profile.Timeout
-	if !dispatch.Deadline.IsZero() {
-		if untilDeadline := dispatch.Deadline.Sub(a.deps.Clock.Now()); untilDeadline < remaining {
+	if !deadline.IsZero() {
+		if untilDeadline := deadline.Sub(a.deps.Clock.Now()); untilDeadline < remaining {
 			remaining = untilDeadline
 		}
 	}
 	if remaining <= 0 {
-		return contract.Observation{}, invalidInput("dispatch deadline has already passed; no call was made")
+		return nil, nil, invalidInput("dispatch deadline has already passed; no call was made")
 	}
+	callCtx, cancel := context.WithTimeout(ctx, remaining)
+	return callCtx, cancel, nil
+}
 
-	// Persist the exact secret-free request record before dispatch. If it
-	// cannot be staged, nothing is sent.
-	stagedRequest, requestContext, err := stageRequestContext(ctx, a.deps.Blobs, secret, a.profile.Endpoint, call, doc.Classification)
+// Invoke implements contract.Adapter. It performs the physical calls the
+// qualified wire protocol requires for one model step -- a preparatory
+// call that mints the reconciliation handle when the protocol needs one,
+// then the model step itself -- each staged before it is sent. A non-nil
+// error means nothing was sent; once any request is handed to the
+// transport, the outcome is reported through Observation with a nil error.
+func (a *Adapter) Invoke(ctx context.Context, dispatch contract.Dispatch) (contract.Observation, error) {
+	s, err := a.admitStep(ctx, dispatch, false)
 	if err != nil {
 		return contract.Observation{}, err
 	}
-	staged := []wireStagedOutput{stagedRequest}
-
-	// The timeout is measured on the injected clock but applied as a
-	// duration, so a test clock pinned in the past cannot pre-expire it.
-	callCtx, cancel := context.WithTimeout(ctx, remaining)
+	callCtx, cancel, err := a.callContext(ctx, dispatch.Deadline)
+	if err != nil {
+		return contract.Observation{}, err
+	}
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(callCtx, call.Method, a.profile.Endpoint, bytes.NewReader(call.Body))
+	// Translation is validated before any preparatory call so a refusal
+	// never follows a sent request; the handle-bearing request is encoded
+	// again once the handle exists.
+	if _, err := a.encodeStep(s, ""); err != nil {
+		return contract.Observation{}, err
+	}
+	prep, err := a.protocol.prepare(s.request)
+	if err != nil {
+		return contract.Observation{}, capabilityUnsupported("the qualified wire protocol cannot prepare this model step: %v", err)
+	}
+
+	var staged []wireStagedOutput
+	handle := ""
+	if prep != nil {
+		po, err := a.physical(ctx, callCtx, *prep, s)
+		if err != nil {
+			return contract.Observation{}, err
+		}
+		staged = po.staged()
+		if reason, message := po.failure(); reason != "" {
+			// The preparatory call did not establish a handle, so the
+			// model step was never sent: nothing was billed and there is
+			// nothing to reconcile. The preparatory request record stands
+			// as this attempt's request context.
+			return a.notSent(dispatch, s, po, staged, "prepare_"+reason, message)
+		}
+		handle, err = a.protocol.decodePrepare(po.status, po.header, po.body)
+		if err != nil {
+			return a.notSent(dispatch, s, po, staged, "prepare_rejected", err.Error())
+		}
+	}
+
+	call, err := a.encodeStep(s, handle)
+	if err != nil {
+		return contract.Observation{}, err
+	}
+	po, err := a.physical(ctx, callCtx, call, s)
+	if err != nil {
+		// Nothing was sent. A handle minted by the preparatory call is
+		// orphaned upstream, which is harmless: no step is journaled under
+		// it and nothing is billed.
+		return contract.Observation{}, err
+	}
+	staged = append(staged, po.staged()...)
+
+	physical, output := a.baseEvidence(dispatch, po)
+	in := interpretation{secret: s.secret, bounds: s.bounds, inputBound: s.bound, classification: s.doc.Classification, stageErr: po.stageErr}
+	if reason, message := po.failure(); reason != "" {
+		if po.doErr != nil {
+			physical.RequestSent, in.disposition, physical.Confirmation = classifyNetworkError(po.doErr)
+			physical.ErrorCode = "transport_error"
+			physical.ErrorMessage = sanitizeText(s.secret, message, maxMessageChars)
+			output.Usage = a.profile.usageFor(usageInput{Bounds: s.bounds, Sent: in.disposition != contract.DispositionNotSent})
+		} else {
+			in.unknown(&physical, &output, a.profile, reason, message)
+		}
+	} else {
+		result, decodeErr := a.protocol.decode(po.status, po.header, po.body)
+		staged = in.interpret(ctx, a, po.status, result, decodeErr, &physical, &output, staged)
+	}
+	reference := handle
+	if reference == "" {
+		reference = output.ResponseID
+	}
+	return observe(in.disposition, reference, physical, output, staged)
+}
+
+// encodeStep translates the admitted step through the wire protocol,
+// mapping a translation failure to the shared fault vocabulary.
+func (a *Adapter) encodeStep(s *step, handle string) (protocolCall, error) {
+	call, err := a.protocol.encode(s.request, handle)
+	if err != nil {
+		var f *contract.Fault
+		if errors.As(err, &f) && f != nil {
+			return protocolCall{}, f
+		}
+		return protocolCall{}, capabilityUnsupported("the qualified wire protocol cannot express this model step: %v", err)
+	}
+	if call.Method == "" || len(call.Body) == 0 {
+		return protocolCall{}, internalError("wire protocol encoded an empty request")
+	}
+	return call, nil
+}
+
+// Reconcile implements contract.Adapter: one bounded, documented
+// authoritative lookup for a model step whose outcome is unknown, keyed by
+// Dispatch.ProviderKey -- the handle the original Invoke reported as
+// Observation.ProviderReference. It never repeats the model step. The
+// lookup can only confirm that the step completed; it cannot prove
+// non-execution, so anything short of positive evidence leaves the outcome
+// unknown.
+func (a *Adapter) Reconcile(ctx context.Context, dispatch contract.Dispatch) (contract.Observation, error) {
+	s, err := a.admitStep(ctx, dispatch, true)
+	if err != nil {
+		return contract.Observation{}, err
+	}
+	if dispatch.ProviderKey == "" {
+		return contract.Observation{}, prerequisiteMissing("reconciliation requires dispatch provider_key, the handle the original attempt reported as its provider reference; the outcome remains unknown")
+	}
+	callCtx, cancel, err := a.callContext(ctx, dispatch.Deadline)
+	if err != nil {
+		return contract.Observation{}, err
+	}
+	defer cancel()
+
+	call, err := a.protocol.reconcile(s.request.Profile, dispatch.ProviderKey)
+	if err != nil {
+		return contract.Observation{}, invalidInput("reconciliation lookup cannot be formed: %v", err)
+	}
+	po, err := a.physical(ctx, callCtx, call, s)
+	if err != nil {
+		return contract.Observation{}, err
+	}
+	staged := po.staged()
+	physical, output := a.baseEvidence(dispatch, po)
+	in := interpretation{secret: s.secret, bounds: s.bounds, inputBound: s.bound, classification: s.doc.Classification, stageErr: po.stageErr, reconcile: true}
+	if reason, message := po.failure(); reason != "" {
+		if po.doErr != nil {
+			physical.RequestSent, _, _ = classifyNetworkError(po.doErr)
+			physical.ErrorCode = "transport_error"
+		} else {
+			physical.ErrorCode = reason
+		}
+		// A failed lookup resolves nothing: the original outcome and its
+		// reservation stay exactly as recorded.
+		in.disposition = contract.DispositionUnknown
+		physical.Confirmation = "unknown"
+		physical.ErrorMessage = sanitizeText(s.secret, message, maxMessageChars)
+		output.Usage = a.profile.usageFor(usageInput{Bounds: s.bounds, Sent: true})
+	} else {
+		result, decodeErr := a.protocol.decodeReconcile(po.status, po.header, po.body)
+		staged = in.interpret(ctx, a, po.status, result, decodeErr, &physical, &output, staged)
+	}
+	return observe(in.disposition, dispatch.ProviderKey, physical, output, staged)
+}
+
+// physicalOutcome is what one physical call produced: the staged request
+// record, the transport result, the bounded body and its staged copy.
+type physicalOutcome struct {
+	started, finished time.Time
+	requestContext    wireStagedLocator
+	stagedRequest     wireStagedOutput
+	stagedResponse    *wireStagedOutput
+	stageErr          error
+	destination       string
+	doErr             error
+	status            int
+	header            http.Header
+	body              []byte
+	readErr           error
+	truncated         bool
+}
+
+// staged lists the outputs this call staged, request record first.
+func (po *physicalOutcome) staged() []wireStagedOutput {
+	out := []wireStagedOutput{po.stagedRequest}
+	if po.stagedResponse != nil {
+		out = append(out, *po.stagedResponse)
+	}
+	return out
+}
+
+// failure names why the call produced no complete, in-bounds body: a
+// transport error, a body cut short after the status line, or a body
+// beyond max_response_bytes. An empty reason means a full body arrived.
+func (po *physicalOutcome) failure() (reason, message string) {
+	switch {
+	case po.doErr != nil:
+		return "transport_error", po.doErr.Error()
+	case po.readErr != nil:
+		return "response_read_failed", po.readErr.Error()
+	case po.truncated:
+		return "max_response_bytes_exceeded", "response body exceeds the profile's max_response_bytes bound and was not interpreted"
+	}
+	return "", ""
+}
+
+// physical performs exactly one physical HTTP request: it checks the
+// destination against the profile, stages the exact secret-free request
+// record, sends once with no retry and no redirect, reads the response
+// within max_response_bytes and stages it. A non-nil error means nothing
+// was sent.
+func (a *Adapter) physical(ctx, callCtx context.Context, call protocolCall, s *step) (*physicalOutcome, error) {
+	if call.Method == "" || call.Destination == "" {
+		return nil, internalError("wire protocol described an incomplete request")
+	}
+	if !a.profile.permitsDestination(call.Destination) {
+		return nil, permissionDenied("wire protocol destination %q is not within enforcement.provider_destinations; declare the origin or that exact resource", redactURL(call.Destination))
+	}
+	stagedRequest, requestContext, err := stageRequestContext(ctx, a.deps.Blobs, s.secret, call, s.doc.Classification)
+	if err != nil {
+		return nil, err
+	}
+	po := &physicalOutcome{requestContext: requestContext, stagedRequest: stagedRequest, destination: call.Destination}
+
+	var bodyReader io.Reader
+	if len(call.Body) > 0 {
+		bodyReader = bytes.NewReader(call.Body)
+	}
+	req, err := http.NewRequestWithContext(callCtx, call.Method, call.Destination, bodyReader)
 	if err != nil {
 		_ = a.deps.Blobs.RemoveStaged(ctx, stagedRequest.StagingRef)
-		return contract.Observation{}, internalError("building responses request failed")
+		return nil, internalError("building the provider request failed")
 	}
 	// net/http may transparently replay a request whose body it can rewind.
-	// One Invoke is one physical request, so the body is made unrewindable.
+	// One call is one physical request, so the body is made unrewindable.
 	req.GetBody = nil
 	for name, values := range call.Header {
 		for _, v := range values {
 			req.Header.Add(name, v)
 		}
 	}
-	a.protocol.authorize(req.Header, secret)
+	a.protocol.authorize(req.Header, s.secret)
 
-	started := a.now()
+	po.started = a.now()
 	resp, doErr := a.client.Do(req)
-
-	physical := wirePhysicalCallEvidence{
-		OperationID:          dispatch.OperationID,
-		AttemptID:            dispatch.AttemptID,
-		AccountIdentity:      "connection:" + string(a.profile.ConnectionID),
-		RequestedDestination: a.profile.Endpoint,
-		ResolvedDestination:  a.profile.Endpoint,
-		ProfileDigest:        a.profile.Digest,
-		CapabilityEvidence:   a.profile.CapabilityEvidence.Artifact,
-		StartedAt:            started,
-		RequestContext:       requestContext,
-	}
-	output := wireModelOutput{
-		Schema:         "zatiti.model-output/v1",
-		RequestContext: requestContext,
-		FinishReason:   finishUnknown,
-	}
-
 	if doErr != nil {
-		physical.FinishedAt = a.now()
-		requestSent, disposition, confirmation := classifyNetworkError(doErr)
-		physical.RequestSent = requestSent
-		physical.Confirmation = confirmation
-		physical.ErrorCode = "transport_error"
-		physical.ErrorMessage = sanitizeText(secret, doErr.Error(), maxMessageChars)
-		output.Usage = a.profile.usageFor(usageInput{Bounds: bounds, Sent: disposition != contract.DispositionNotSent})
-		return observe(disposition, physical, output, staged)
+		po.finished = a.now()
+		po.doErr = doErr
+		return po, nil
 	}
 	defer func() { _ = resp.Body.Close() }()
-
-	physical.RequestSent = "yes"
-	physical.HTTPStatus = int64(resp.StatusCode)
+	po.status = resp.StatusCode
+	po.header = resp.Header
 
 	body, readErr := io.ReadAll(io.LimitReader(resp.Body, a.profile.MaxResponseBytes+1))
-	physical.FinishedAt = a.now()
-	truncated := int64(len(body)) > a.profile.MaxResponseBytes
-	if truncated {
+	po.finished = a.now()
+	po.readErr = readErr
+	if int64(len(body)) > a.profile.MaxResponseBytes {
 		body = body[:a.profile.MaxResponseBytes]
+		po.truncated = true
 	}
+	po.body = body
 
 	// Best-effort: a staging failure must never erase an observation of a
 	// call that may have been billed.
-	var stageErr error
 	if len(body) > 0 {
 		mediaType := resp.Header.Get("Content-Type")
 		if mediaType == "" || len(mediaType) > 256 {
 			mediaType = "application/octet-stream"
 		}
-		stagedBody, err := stageBytes(ctx, a.deps.Blobs, scrubSecretBytes(secret, body), mediaType, doc.Classification, "provider_response")
+		stagedBody, err := stageBytes(ctx, a.deps.Blobs, scrubSecretBytes(s.secret, body), mediaType, s.doc.Classification, "provider_response")
 		if err != nil {
-			stageErr = err
+			po.stageErr = err
 		} else {
-			staged = append(staged, stagedBody)
+			po.stagedResponse = &stagedBody
 		}
 	}
+	return po, nil
+}
 
-	in := interpretation{secret: secret, bounds: bounds, classification: doc.Classification, stageErr: stageErr}
-	switch {
-	case readErr != nil:
-		// Headers arrived but the body did not: the model step may have
-		// run and been billed. This is the timeout-after-success case.
-		in.unknown(&physical, &output, a.profile, "response_read_failed", readErr.Error())
-	case truncated:
-		in.unknown(&physical, &output, a.profile, "max_response_bytes_exceeded",
-			fmt.Sprintf("response body exceeds the profile's %d byte bound and was not interpreted", a.profile.MaxResponseBytes))
-	default:
-		result, decodeErr := a.protocol.decode(resp.StatusCode, resp.Header, body)
-		staged = in.interpret(ctx, a, resp, result, decodeErr, &physical, &output, staged)
+// baseEvidence starts the physical-call evidence and model output for the
+// call po, before its outcome is classified.
+func (a *Adapter) baseEvidence(dispatch contract.Dispatch, po *physicalOutcome) (wirePhysicalCallEvidence, wireModelOutput) {
+	physical := wirePhysicalCallEvidence{
+		OperationID:          dispatch.OperationID,
+		AttemptID:            dispatch.AttemptID,
+		AccountIdentity:      "connection:" + string(a.profile.ConnectionID),
+		RequestedDestination: po.destination,
+		ResolvedDestination:  po.destination,
+		ProfileDigest:        a.profile.Digest,
+		CapabilityEvidence:   a.profile.CapabilityEvidence.Artifact,
+		StartedAt:            po.started,
+		FinishedAt:           po.finished,
+		RequestContext:       po.requestContext,
+		RequestSent:          "yes",
 	}
-	return observe(in.disposition, physical, output, staged)
+	if po.doErr == nil {
+		physical.HTTPStatus = int64(po.status)
+	}
+	output := wireModelOutput{
+		Schema:         "zatiti.model-output/v1",
+		RequestContext: po.requestContext,
+		FinishReason:   finishUnknown,
+	}
+	return physical, output
+}
+
+// notSent reports a model step that was never dispatched because its
+// preparatory call failed: the model step's own physical call did not
+// happen, so request_sent is "no" and nothing was billed. The preparatory
+// call's evidence (its staged request record and response) is retained.
+func (a *Adapter) notSent(dispatch contract.Dispatch, s *step, po *physicalOutcome, staged []wireStagedOutput, code, message string) (contract.Observation, error) {
+	physical, output := a.baseEvidence(dispatch, po)
+	physical.RequestSent = "no"
+	physical.Confirmation = "authoritative_nonexecution"
+	physical.ErrorCode = sanitizeText(s.secret, code, maxErrorCodeChars)
+	physical.ErrorMessage = sanitizeText(s.secret, message, maxMessageChars)
+	output.Usage = a.profile.usageFor(usageInput{Bounds: s.bounds, Sent: false})
+	return observe(contract.DispositionNotSent, "", physical, output, staged)
 }
 
 // now reads the injected clock in UTC, the only zone the frozen UTC
@@ -317,7 +539,9 @@ func (a *Adapter) Invoke(ctx context.Context, dispatch contract.Dispatch) (contr
 func (a *Adapter) now() time.Time { return a.deps.Clock.Now().UTC() }
 
 // observe assembles the Observation for one attempted physical call.
-func observe(disposition string, physical wirePhysicalCallEvidence, output wireModelOutput, staged []wireStagedOutput) (contract.Observation, error) {
+// Observation.Usage carries the accounting Usage the controller validates
+// against $defs/Usage; the full ProviderUsage lives in the evidence.
+func observe(disposition, reference string, physical wirePhysicalCallEvidence, output wireModelOutput, staged []wireStagedOutput) (contract.Observation, error) {
 	built, err := buildEvidence(physical, output, staged)
 	if err != nil {
 		return contract.Observation{}, err
@@ -329,7 +553,7 @@ func observe(disposition string, physical wirePhysicalCallEvidence, output wireM
 	}
 	return contract.Observation{
 		Disposition:       disposition,
-		ProviderReference: output.ResponseID,
+		ProviderReference: reference,
 		Evidence:          built.doc,
 		Usage:             built.usage,
 		ConfirmedAt:       confirmedAt,
@@ -353,4 +577,13 @@ func (a *Adapter) resolveCredential(ctx context.Context, ref string) ([]byte, er
 		return nil, prerequisiteMissing("responses credential %q resolved to empty secret material", ref)
 	}
 	return secret, nil
+}
+
+// redactURL keeps a destination's scheme, host and path for a diagnostic
+// and drops any query, which a lookup may carry.
+func redactURL(destination string) string {
+	if i := strings.IndexByte(destination, '?'); i >= 0 {
+		return destination[:i] + "?..."
+	}
+	return destination
 }

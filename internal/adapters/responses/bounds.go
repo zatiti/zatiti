@@ -53,6 +53,22 @@ func (p *responsesProfile) costOf(inputTokens, outputTokens int64) (int64, error
 	return addAmounts(in, out)
 }
 
+// outstandingBounds describes the charge an already-admitted attempt may
+// still have incurred, for a reconciliation: the tighter of the qualified
+// input bound and the profile ceiling, priced with the action's output
+// ceiling. It never refuses; an unrepresentable amount saturates.
+func (p *responsesProfile) outstandingBounds(maxOutputTokens int64, inputTokenBound *int64) admittedBounds {
+	inputTokens := p.MaxInputTokens
+	if inputTokenBound != nil && *inputTokenBound >= 0 && *inputTokenBound < inputTokens {
+		inputTokens = *inputTokenBound
+	}
+	worst, err := p.costOf(inputTokens, maxOutputTokens)
+	if err != nil {
+		worst = math.MaxInt64
+	}
+	return admittedBounds{WorstCase: worst, Advisory: p.CostMode != enforcementEnforced}
+}
+
 // admittedBounds is what one call was admitted under: the worst-case
 // charge the call can incur and whether that worst case is a hard cap or
 // only advisory.

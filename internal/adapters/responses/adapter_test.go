@@ -584,8 +584,6 @@ func TestHardCapRefusalsMakeNoCall(t *testing.T) {
 			withProtocol(func(p *testProtocol) { p.lim.SupportsContinuation = false }),
 			withAction(func(a *wireResponsesParameters) { a.ContinuationReference = "prev-1" })},
 			contract.CodeCapabilityUnsupported, "continuation_reference"},
-		{"protocol cannot express the step", []harnessOption{withProtocol(func(p *testProtocol) { p.encodeErr = errors.New("artifact parts are not qualified") })},
-			contract.CodeCapabilityUnsupported, "artifact parts are not qualified"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -600,6 +598,27 @@ func TestHardCapRefusalsMakeNoCall(t *testing.T) {
 				t.Fatalf("refusal did work: calls=%d secret gets=%d stages=%d", h.transport.count(), h.secrets.getCount(), h.blobs.stageCount())
 			}
 		})
+	}
+}
+
+func TestUnexpressibleStepIsRefusedBeforeAnyStagingOrCall(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t, respond(200, completedBody), withProtocol(func(p *testProtocol) { p.encodeErr = errors.New("artifact parts are not qualified") }))
+	_, err := h.adapter.Invoke(context.Background(), h.dispatch)
+	f := mustFault(t, err, contract.CodeCapabilityUnsupported)
+	if !strings.Contains(f.Message, "artifact parts are not qualified") || h.transport.count() != 0 || h.blobs.stageCount() != 0 {
+		t.Fatalf("message %q, calls %d, stages %d", f.Message, h.transport.count(), h.blobs.stageCount())
+	}
+}
+
+func TestOutputCeilingBelowTheProtocolMinimumIsRefused(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t, respond(200, completedBody), withProtocol(func(p *testProtocol) { p.lim.MinOutputTokens = 16 }),
+		withAction(func(a *wireResponsesParameters) { a.MaxOutputTokens = 15 }))
+	_, err := h.adapter.Invoke(context.Background(), h.dispatch)
+	f := mustFault(t, err, contract.CodeCapabilityUnsupported)
+	if !strings.Contains(f.Message, "16-token minimum") || h.transport.count() != 0 || h.secrets.getCount() != 0 {
+		t.Fatalf("message %q, calls %d, secret gets %d", f.Message, h.transport.count(), h.secrets.getCount())
 	}
 }
 
@@ -831,15 +850,229 @@ func TestDispatchChecks(t *testing.T) {
 	})
 }
 
-func TestReconcileNeverCalls(t *testing.T) {
+// ---------- reconcile: the documented lookup, keyed by the provider key ----------
+
+func TestReconcileRequiresTheProviderKeyAndNeverRepeatsTheStep(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t, respond(200, completedBody))
 	obs, err := h.adapter.Reconcile(context.Background(), h.dispatch)
-	f := mustFault(t, err, contract.CodeCapabilityUnsupported)
-	if !strings.Contains(f.Message, "remains unknown") {
-		t.Fatalf("message = %q", f.Message)
+	f := mustFault(t, err, contract.CodePrerequisiteMissing)
+	if !strings.Contains(f.Message, "provider_key") || obs.Disposition != "" || h.transport.count() != 0 {
+		t.Fatalf("message %q, obs %+v, calls %d", f.Message, obs, h.transport.count())
 	}
-	if obs.Disposition != "" || h.transport.count() != 0 || h.secrets.getCount() != 0 {
-		t.Fatalf("reconcile did work: %+v calls=%d gets=%d", obs, h.transport.count(), h.secrets.getCount())
+
+	noLookup := newHarness(t, respond(200, completedBody), withProtocol(func(p *testProtocol) { p.lim.SupportsReconcile = false }))
+	noLookup.dispatch.ProviderKey = "handle-1"
+	_, err = noLookup.adapter.Reconcile(context.Background(), noLookup.dispatch)
+	f = mustFault(t, err, contract.CodeCapabilityUnsupported)
+	if !strings.Contains(f.Message, "remains unknown") || noLookup.transport.count() != 0 {
+		t.Fatalf("message %q, calls %d", f.Message, noLookup.transport.count())
+	}
+}
+
+func TestReconcileOutcomes(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name        string
+		fn          func(*http.Request) (*http.Response, error)
+		disposition string
+		confirm     string
+		code        string
+		texts       int
+	}{
+		{"completed output found", respond(200, `{"ref":"resp-9","state":"completed","finish":"completed","texts":["recovered"]}`),
+			contract.DispositionSucceeded, "authoritative_success", "", 1},
+		{"nothing found yet", respond(200, `{}`), contract.DispositionUnknown, "unknown", "reconcile_unresolved", 0},
+		{"lookup not found never proves nonexecution", respond(404, `{"error":"no such handle"}`), contract.DispositionUnknown, "unknown", "http_404", 0},
+		{"lookup server error", respond(503, ``), contract.DispositionUnknown, "unknown", "http_503", 0},
+		{"lookup transport failure", func(*http.Request) (*http.Response, error) {
+			return nil, &net.OpError{Op: "dial", Net: "tcp", Err: errors.New("connection refused")}
+		}, contract.DispositionUnknown, "unknown", "transport_error", 0},
+		{"lookup undecodable", respond(200, `<html>`), contract.DispositionUnknown, "unknown", "response_undecodable", 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			h := newHarness(t, tc.fn, withProfile(func(p *wireResponsesProfile) {
+				p.Enforcement.ProviderDestinations = []string{"https://models.example.test"}
+			}))
+			h.dispatch.ProviderKey = "handle-7"
+			obs, err := h.adapter.Reconcile(context.Background(), h.dispatch)
+			if err != nil {
+				t.Fatalf("Reconcile: %v", err)
+			}
+			if h.transport.count() != 1 {
+				t.Fatalf("physical calls = %d, want exactly 1", h.transport.count())
+			}
+			req := h.transport.requests[0]
+			if req.Method != http.MethodGet || req.URL.String() != testEndpoint+"/lookup/handle-7" || req.Header.Get(testCredentialHeader) != testToken {
+				t.Fatalf("lookup request = %s %s %v", req.Method, req.URL, req.Header)
+			}
+			if obs.Disposition != tc.disposition || obs.ProviderReference != "handle-7" {
+				t.Fatalf("disposition %q reference %q", obs.Disposition, obs.ProviderReference)
+			}
+			ev := decodeEvidence(t, obs)
+			if ev.PhysicalCall.Confirmation != tc.confirm || ev.PhysicalCall.ErrorCode != tc.code || len(ev.Output.TextOutputs) != tc.texts {
+				t.Fatalf("physical call %+v, texts %d", ev.PhysicalCall, len(ev.Output.TextOutputs))
+			}
+			// A lookup never sees usage: the amount stays outstanding either way.
+			u := ev.Output.Usage
+			if u.Billing != "unknown" || u.Accounting.Unknown == 0 || u.Accounting.Spent != 0 {
+				t.Fatalf("usage = %+v", u)
+			}
+			record := requestRecordOf(t, h, ev)
+			if record.Method != http.MethodGet || record.BodySize != 0 {
+				t.Fatalf("reconcile request record = %+v, want its own bodiless lookup", record)
+			}
+		})
+	}
+}
+
+// ---------- the preparatory call ----------
+
+// prepareThenStep answers the synthetic prepare resource with a handle and
+// the step with body.
+func prepareThenStep(handleStatus int, handleBody, stepBody string) func(*http.Request) (*http.Response, error) {
+	return func(r *http.Request) (*http.Response, error) {
+		if strings.HasSuffix(r.URL.Path, "/prepare") {
+			return respond(handleStatus, handleBody)(r)
+		}
+		return respond(200, stepBody)(r)
+	}
+}
+
+func TestPreparatoryCallMintsTheHandleBeforeTheStep(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t, prepareThenStep(200, `{"handle":"conv-42"}`, completedBody),
+		withProtocol(func(p *testProtocol) { p.withPrepare = true }),
+		withProfile(func(p *wireResponsesProfile) {
+			p.Enforcement.ProviderDestinations = []string{"https://models.example.test"}
+		}))
+	obs, err := h.adapter.Invoke(context.Background(), h.dispatch)
+	if err != nil {
+		t.Fatalf("Invoke: %v", err)
+	}
+	if h.transport.count() != 2 {
+		t.Fatalf("physical calls = %d, want the preparatory call and the step", h.transport.count())
+	}
+	prep, stepReq := h.transport.requests[0], h.transport.requests[1]
+	if prep.URL.String() != testEndpoint+"/prepare" || prep.Header.Get(testCredentialHeader) != testToken {
+		t.Fatalf("preparatory request = %s %v", prep.URL, prep.Header)
+	}
+	var sent testWireRequest
+	if err := json.Unmarshal(h.transport.bodies[1], &sent); err != nil || sent.Handle != "conv-42" || stepReq.URL.String() != testEndpoint {
+		t.Fatalf("step did not carry the handle: %+v (%v)", sent, err)
+	}
+	if obs.Disposition != contract.DispositionSucceeded || obs.ProviderReference != "conv-42" {
+		t.Fatalf("disposition %q, provider reference %q; the handle is the reconciliation key", obs.Disposition, obs.ProviderReference)
+	}
+	ev := decodeEvidence(t, obs)
+	// Both request records and both responses are retained; the step's
+	// record is the request context and it was staged before the step
+	// was sent.
+	purposes := []string{}
+	for _, s := range ev.StagedOutputs {
+		purposes = append(purposes, s.Purpose)
+	}
+	if strings.Join(purposes, ",") != "context,provider_response,context,provider_response,model_text,model_text" {
+		t.Fatalf("staged purposes = %v", purposes)
+	}
+	if ev.PhysicalCall.RequestContext.StagingRef != ev.StagedOutputs[2].StagingRef || ev.PhysicalCall.RequestedDestination != testEndpoint {
+		t.Fatalf("request_context = %+v, destination %q", ev.PhysicalCall.RequestContext, ev.PhysicalCall.RequestedDestination)
+	}
+	record := requestRecordOf(t, h, ev)
+	if !strings.Contains(record.BodyBase64, "") || record.Destination != testEndpoint {
+		t.Fatalf("record = %+v", record)
+	}
+	if ev.Output.Usage.Accounting.Spent != 251 {
+		t.Fatalf("usage = %+v", ev.Output.Usage)
+	}
+}
+
+func TestPreparatoryFailureLeavesTheStepUnsent(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		fn   func(*http.Request) (*http.Response, error)
+		code string
+	}{
+		{"rejected", prepareThenStep(401, `{"error":"bad key"}`, completedBody), "prepare_rejected"},
+		{"undecodable", prepareThenStep(200, `{"nothing":true}`, completedBody), "prepare_rejected"},
+		{"server error", prepareThenStep(503, ``, completedBody), "prepare_rejected"},
+		{"transport failure", func(*http.Request) (*http.Response, error) {
+			return nil, errors.New("connection reset by peer")
+		}, "prepare_transport_error"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			h := newHarness(t, tc.fn,
+				withProtocol(func(p *testProtocol) { p.withPrepare = true }),
+				withProfile(func(p *wireResponsesProfile) {
+					p.Enforcement.ProviderDestinations = []string{"https://models.example.test"}
+				}))
+			obs, err := h.adapter.Invoke(context.Background(), h.dispatch)
+			if err != nil {
+				t.Fatalf("Invoke: %v", err)
+			}
+			if h.transport.count() != 1 || !strings.HasSuffix(h.transport.requests[0].URL.Path, "/prepare") {
+				t.Fatalf("calls = %d; the step must not be sent without a handle", h.transport.count())
+			}
+			if obs.Disposition != contract.DispositionNotSent || obs.ProviderReference != "" {
+				t.Fatalf("disposition %q reference %q", obs.Disposition, obs.ProviderReference)
+			}
+			ev := decodeEvidence(t, obs)
+			pc := ev.PhysicalCall
+			if pc.RequestSent != "no" || pc.Confirmation != "authoritative_nonexecution" || pc.ErrorCode != tc.code {
+				t.Fatalf("physical call = %+v", pc)
+			}
+			if u := ev.Output.Usage; u.Billing != "no_charge" || u.Accounting != (wireUsage{Currency: "USD"}) {
+				t.Fatalf("usage = %+v", u)
+			}
+		})
+	}
+}
+
+func TestPreparatoryDestinationMustBeDeclared(t *testing.T) {
+	t.Parallel()
+	// The default profile declares only the endpoint itself, not its
+	// sibling prepare resource.
+	h := newHarness(t, prepareThenStep(200, `{"handle":"conv-1"}`, completedBody), withProtocol(func(p *testProtocol) { p.withPrepare = true }))
+	_, err := h.adapter.Invoke(context.Background(), h.dispatch)
+	f := mustFault(t, err, contract.CodePermissionDenied)
+	if !strings.Contains(f.Message, "provider_destinations") || h.transport.count() != 0 || h.blobs.stageCount() != 0 {
+		t.Fatalf("message %q, calls %d, stages %d", f.Message, h.transport.count(), h.blobs.stageCount())
+	}
+}
+
+// ---------- accounting findings flagged after a success ----------
+
+func TestUnpriceableUsageIsRecordedButNotPriced(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t, respond(200, `{"ref":"r","state":"completed","finish":"completed","tokens":{"in":10,"out":2},"unpriceable":"served at a tier the profile does not price"}`))
+	obs, err := h.adapter.Invoke(context.Background(), h.dispatch)
+	if err != nil {
+		t.Fatalf("Invoke: %v", err)
+	}
+	ev := decodeEvidence(t, obs)
+	u := ev.Output.Usage
+	if obs.Disposition != contract.DispositionSucceeded || u.Billing != "unknown" || u.Accounting.Spent != 0 || u.Accounting.Unknown != defaultWorstCase(h) {
+		t.Fatalf("disposition %q usage %+v", obs.Disposition, u)
+	}
+	if u.InputTokens == nil || *u.InputTokens != 10 || ev.PhysicalCall.ErrorCode != "usage_unpriceable" {
+		t.Fatalf("tokens %v, error_code %q", u.InputTokens, ev.PhysicalCall.ErrorCode)
+	}
+}
+
+func TestReportedInputAboveTheAdmittedBoundIsFlagged(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t, respond(200, `{"ref":"r","state":"completed","finish":"completed","tokens":{"in":999999,"out":1}}`))
+	obs, err := h.adapter.Invoke(context.Background(), h.dispatch)
+	if err != nil {
+		t.Fatalf("Invoke: %v", err)
+	}
+	ev := decodeEvidence(t, obs)
+	if obs.Disposition != contract.DispositionSucceeded || ev.PhysicalCall.ErrorCode != "input_token_bound_exceeded" || ev.Output.Usage.Billing != "observed" {
+		t.Fatalf("disposition %q, physical %+v, usage %+v", obs.Disposition, ev.PhysicalCall, ev.Output.Usage)
 	}
 }

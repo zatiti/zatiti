@@ -8,19 +8,25 @@
 // the SecretStore. There is no default account, model, price or fallback
 // provider.
 //
-// The upstream wire shape (HTTP method, credential placement, request and
-// response bodies) is deliberately NOT part of this package's frozen
-// specification: it is pinned during real-endpoint qualification. That
-// translation lives behind the unexported wireProtocol seam, selected by the
-// profile's capability_evidence.protocol_revision. This build registers no
-// qualified protocol revision (see qualifiedProtocols), so a production
-// Invoke performs every reachable local step -- action validation, token
-// bounds, context loading and digest verification, disclosure
-// classification -- and then refuses with capability_unsupported at the
-// exact point where the request would have to be encoded. No byte is sent.
-// The transport, accounting and evidence machinery behind the seam is real
-// and is exercised in this package's tests through a synthetic protocol that
-// makes no claim about any vendor's API.
+// The upstream wire shape (HTTP methods, credential placement, request
+// and response bodies) is not part of this package's frozen specification:
+// it lives behind the unexported wireProtocol seam, selected by the
+// profile's capability_evidence.protocol_revision. This build qualifies one
+// revision, the OpenAI Responses API as pinned in PROTOCOL.md
+// (openai.go). A profile naming any other revision is refused with
+// capability_unsupported at the wire boundary after every local check has
+// run, without sending a byte.
+//
+// The qualified protocol needs a client-known handle before the model
+// step so a dropped connection stays reconcilable: Invoke first performs
+// the protocol's preparatory call (a conversation is created), stages the
+// step's request record naming that handle, then sends the step. Both
+// calls are staged and both responses retained; the physical_call evidence
+// describes the model step. If the preparatory call fails, the step is
+// not_sent. Reconcile performs the protocol's documented lookup keyed by
+// Dispatch.ProviderKey, the handle the original attempt reported as its
+// provider reference; it can confirm completion but never prove
+// non-execution.
 //
 // Before anything is sent, the exact secret-free request record (method,
 // destination, permitted headers, body as sent) is staged and named by
@@ -29,10 +35,10 @@
 // the request record, because the translated request adds the profile's
 // model identifier beyond the persisted context.
 //
-// One Invoke is at most one physical HTTP request: redirects are never
+// Every physical request is sent exactly once: redirects are never
 // followed, the request body cannot be rewound (so net/http cannot replay
-// it), and there is no retry, preflight or polling. Model tool proposals
-// are observations only; this package never executes one.
+// it), and there is no retry or polling. Model tool proposals are
+// observations only; this package never executes one.
 //
 // Model calls cost money, so lost responses are never reported as failures.
 // A DNS or dial failure is not_sent with no charge. Any failure after bytes
@@ -43,12 +49,9 @@
 // the provider reports usage; when it does not, billing is unknown (or
 // advisory), never zero and never a silent estimate.
 //
-// Reconcile never performs a physical call: the frozen profile carries no
-// qualified authoritative lookup or retention window, so it refuses with
-// capability_unsupported and the original outcome stays unknown.
-//
-// Return convention: Invoke returns a non-nil error (always a
+// Return convention: Invoke and Reconcile return a non-nil error (always a
 // *contract.Fault) only when no physical call was attempted. Once a request
 // is handed to the transport, the outcome is reported through
-// Observation.Disposition with a nil error.
+// Observation.Disposition with a nil error. Observation.Usage carries the
+// accounting Usage document; the full ProviderUsage is in the evidence.
 package responses

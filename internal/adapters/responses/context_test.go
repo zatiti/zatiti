@@ -9,11 +9,17 @@ import (
 	"github.com/zatiti/zatiti/internal/contract"
 )
 
+// attachmentBytes is the content every artifactPart references; tests that
+// reach the wire store it with storeAttachment first.
+const attachmentBytes = "attachment"
+
+func storeAttachment(blobs *fakeBlobStore) contract.Digest { return blobs.put([]byte(attachmentBytes)) }
+
 func artifactPart(t *testing.T, classification string) json.RawMessage {
 	t.Helper()
 	raw, err := json.Marshal(wireContextArtifactPart{
 		Kind:           partArtifact,
-		Artifact:       wireArtifactRef{ID: "dddddddd-0000-4000-8000-000000000001", Digest: contract.Hash([]byte("attachment"))},
+		Artifact:       wireArtifactRef{ID: "dddddddd-0000-4000-8000-000000000001", Digest: contract.Hash([]byte(attachmentBytes))},
 		MediaType:      "text/plain",
 		Classification: classification,
 	})
@@ -99,6 +105,31 @@ func TestInvokeRefusesUntrustworthyContextBytes(t *testing.T) {
 		}
 	})
 
+	t.Run("referenced tool result is absent", func(t *testing.T) {
+		t.Parallel()
+		h := newHarness(t, respond(200, `{}`), withContext(func(c *wireContextArtifact) {
+			c.Messages[1].Parts = append(c.Messages[1].Parts, json.RawMessage(`{"kind":"tool_result","proposal_id":"call-9","operation_id":"ffffffff-0000-4000-8000-000000000009","status":"completed","artifact":{"id":"ffffffff-0000-4000-8000-000000000008","digest":"`+string(contract.Hash([]byte("never stored")))+`"}}`))
+		}))
+		_, err := h.adapter.Invoke(context.Background(), h.dispatch)
+		assertFault(t, err, contract.CodeArtifactFault)
+		if h.transport.count() != 0 {
+			t.Fatalf("calls = %d", h.transport.count())
+		}
+	})
+
+	t.Run("referenced artifact bytes do not match", func(t *testing.T) {
+		t.Parallel()
+		h := newHarness(t, respond(200, `{}`), withContext(func(c *wireContextArtifact) {
+			c.Messages[1].Parts = append(c.Messages[1].Parts, artifactPart(t, "internal"))
+		}))
+		h.blobs.putAs(contract.Hash([]byte(attachmentBytes)), []byte("tampered"))
+		_, err := h.adapter.Invoke(context.Background(), h.dispatch)
+		f := mustFault(t, err, contract.CodeArtifactFault)
+		if !strings.Contains(f.Message, "the context binds") {
+			t.Fatalf("message = %q", f.Message)
+		}
+	})
+
 	t.Run("no blob store", func(t *testing.T) {
 		t.Parallel()
 		h := newHarness(t, respond(200, `{}`))
@@ -111,6 +142,8 @@ func TestInvokeRefusesUntrustworthyContextBytes(t *testing.T) {
 func TestLoadContextDecodesEveryPartInOrderAndRaisesClassification(t *testing.T) {
 	t.Parallel()
 	blobs := newFakeBlobStore()
+	storeAttachment(blobs)
+	resultDigest := blobs.put([]byte(`{"status":"ok"}`))
 	c := defaultContext(t)
 	proposal := wireModelToolProposal{
 		ID: "call-1", Tool: testTool, OperationID: "artifact.read", OperationVersion: 1,
@@ -128,7 +161,7 @@ func TestLoadContextDecodesEveryPartInOrderAndRaisesClassification(t *testing.T)
 		artifactPart(t, "restricted"),
 		mustJSON(wireContextToolCall{Kind: partToolCall, Proposal: proposal}),
 		mustJSON(wireContextToolResult{Kind: partToolResult, ProposalID: "call-1", OperationID: "ffffffff-0000-4000-8000-000000000001", Status: "completed",
-			Artifact: wireArtifactRef{ID: "ffffffff-0000-4000-8000-000000000002", Digest: contract.Hash([]byte("result"))}}),
+			Artifact: wireArtifactRef{ID: "ffffffff-0000-4000-8000-000000000002", Digest: resultDigest}}),
 		mustJSON(wireContextMemoryExcerpt{Kind: partMemoryExcerpt, BrainID: "12121212-0000-4000-8000-000000000001", Claim: wireVersionRef{ID: "12121212-0000-4000-8000-000000000002", Version: 1},
 			Text: "remembered", Sources: []wireArtifactRef{}, Confidence: 5, Freshness: c.CreatedAt, Scope: c.Scope,
 			SelectedContext: wireArtifactRef{ID: "12121212-0000-4000-8000-000000000003", Digest: contract.Hash([]byte("selected"))}}),
@@ -157,6 +190,10 @@ func TestLoadContextDecodesEveryPartInOrderAndRaisesClassification(t *testing.T)
 	if doc.Classification != "restricted" {
 		t.Fatalf("classification = %q, want restricted", doc.Classification)
 	}
+	// Referenced bytes are loaded and verified for artifact and tool_result parts only.
+	if string(parts[1].Bytes) != attachmentBytes || string(parts[3].Bytes) != `{"status":"ok"}` || parts[0].Bytes != nil || parts[2].Bytes != nil || parts[4].Bytes != nil {
+		t.Fatalf("part bytes = %q / %q", parts[1].Bytes, parts[3].Bytes)
+	}
 	if doc.Ref != act.ContextArtifact {
 		t.Fatalf("ref = %+v", doc.Ref)
 	}
@@ -164,6 +201,7 @@ func TestLoadContextDecodesEveryPartInOrderAndRaisesClassification(t *testing.T)
 	// Public-only content still stages as internal, the default floor.
 	public := defaultContext(t)
 	public.Messages[1].Parts = []json.RawMessage{artifactPart(t, "public")}
+	storeAttachment(blobs)
 	act = defaultAction(storeContext(t, blobs, public))
 	profile.Classifications["public"] = true
 	doc, err = loadContext(context.Background(), blobs, profile, &act)

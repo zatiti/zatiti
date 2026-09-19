@@ -234,21 +234,44 @@ const testProtocolRevision = "zatiti-synthetic-wire/1"
 const testCredentialHeader = "X-Synthetic-Credential"
 
 type testProtocol struct {
-	lim        protocolLimits
-	inputBound func(body []byte) *int64
-	encodeErr  error
+	lim         protocolLimits
+	inputBound  func(in protocolRequest) *int64
+	encodeErr   error
+	profileErr  error
+	withPrepare bool // describe a preparatory call that mints a handle
 }
 
 // newTestProtocol is a synthetic protocol that can enforce every bound: it
-// claims an output ceiling and bounds input tokens at one per body byte.
+// claims an output ceiling and bounds input tokens at one per byte of the
+// request it would encode.
 func newTestProtocol() *testProtocol {
 	return &testProtocol{
-		lim: protocolLimits{BoundsOutputTokens: true, SupportsContinuation: true},
-		inputBound: func(body []byte) *int64 {
+		lim: protocolLimits{BoundsOutputTokens: true, SupportsContinuation: true, MinOutputTokens: 1, SupportsReconcile: true},
+		inputBound: func(in protocolRequest) *int64 {
+			body, err := json.Marshal(testWireBody(in, ""))
+			if err != nil {
+				return nil
+			}
 			n := int64(len(body))
 			return &n
 		},
 	}
+}
+
+// testWireBody is the synthetic request body for in.
+func testWireBody(in protocolRequest, handle string) testWireRequest {
+	w := testWireRequest{Model: in.Profile.Model, Limit: in.MaxOutputTokens, Turns: []testWireTurn{}, Tools: []string{}, Resume: in.ContinuationReference, Handle: handle}
+	for _, msg := range in.Context.Messages {
+		for _, part := range msg.DecodedParts {
+			if part.Text != nil {
+				w.Turns = append(w.Turns, testWireTurn{Role: msg.Role, Text: part.Text.Text})
+			}
+		}
+	}
+	for _, tool := range in.Context.Document.Tools {
+		w.Tools = append(w.Tools, tool.Name)
+	}
+	return w
 }
 
 type testWireTurn struct {
@@ -262,6 +285,7 @@ type testWireRequest struct {
 	Turns  []testWireTurn `json:"synthetic_turns"`
 	Tools  []string       `json:"synthetic_tools"`
 	Resume string         `json:"synthetic_resume,omitempty"`
+	Handle string         `json:"synthetic_handle,omitempty"`
 }
 
 type testWireResponse struct {
@@ -282,6 +306,7 @@ type testWireResponse struct {
 	Refusal  string `json:"refusal"`
 	Resume   string `json:"resume"`
 	UsageRef string `json:"usage_ref"`
+	Unpriced string `json:"unpriceable"`
 	Error    *struct {
 		Code    string `json:"code"`
 		Message string `json:"message"`
@@ -290,34 +315,74 @@ type testWireResponse struct {
 
 func (p *testProtocol) limits() protocolLimits { return p.lim }
 
-func (p *testProtocol) encode(in protocolRequest) (protocolCall, error) {
+func (p *testProtocol) validateProfile(protocolProfile) error { return p.profileErr }
+
+func (p *testProtocol) inputTokenBound(in protocolRequest) *int64 {
+	if p.inputBound == nil {
+		return nil
+	}
+	return p.inputBound(in)
+}
+
+// prepare, when enabled, describes a POST to the endpoint's sibling
+// "prepare" resource whose JSON reply {"handle": "..."} mints the handle.
+func (p *testProtocol) prepare(in protocolRequest) (*protocolCall, error) {
+	if !p.withPrepare {
+		return nil, nil
+	}
+	return &protocolCall{
+		Method:      http.MethodPost,
+		Destination: in.Profile.Endpoint + "/prepare",
+		Header:      http.Header{"Content-Type": []string{"application/json"}},
+		Body:        []byte(`{"synthetic_prepare":true}`),
+	}, nil
+}
+
+func (p *testProtocol) decodePrepare(status int, _ http.Header, body []byte) (string, error) {
+	if status < 200 || status >= 300 {
+		return "", fmt.Errorf("prepare rejected with HTTP %d", status)
+	}
+	var w struct {
+		Handle string `json:"handle"`
+	}
+	if err := json.Unmarshal(body, &w); err != nil || w.Handle == "" {
+		return "", errors.New("prepare reply carries no handle")
+	}
+	return w.Handle, nil
+}
+
+func (p *testProtocol) encode(in protocolRequest, handle string) (protocolCall, error) {
 	if p.encodeErr != nil {
 		return protocolCall{}, p.encodeErr
 	}
-	w := testWireRequest{Model: in.Model, Limit: in.MaxOutputTokens, Turns: []testWireTurn{}, Tools: []string{}, Resume: in.ContinuationReference}
-	for _, msg := range in.Context.Messages {
-		for _, part := range msg.DecodedParts {
-			if part.Text != nil {
-				w.Turns = append(w.Turns, testWireTurn{Role: msg.Role, Text: part.Text.Text})
-			}
-		}
-	}
-	for _, tool := range in.Context.Document.Tools {
-		w.Tools = append(w.Tools, tool.Name)
-	}
-	body, err := json.Marshal(w)
+	body, err := json.Marshal(testWireBody(in, handle))
 	if err != nil {
 		return protocolCall{}, err
 	}
-	call := protocolCall{
-		Method: http.MethodPost,
-		Header: http.Header{"Content-Type": []string{"application/json"}},
-		Body:   body,
+	return protocolCall{
+		Method:      http.MethodPost,
+		Destination: in.Profile.Endpoint,
+		Header:      http.Header{"Content-Type": []string{"application/json"}},
+		Body:        body,
+	}, nil
+}
+
+func (p *testProtocol) reconcile(pp protocolProfile, handle string) (protocolCall, error) {
+	return protocolCall{Method: http.MethodGet, Destination: pp.Endpoint + "/lookup/" + handle, Header: http.Header{}}, nil
+}
+
+// decodeReconcile reads the same synthetic response shape; an empty body
+// object means the lookup found nothing.
+func (p *testProtocol) decodeReconcile(status int, h http.Header, body []byte) (protocolResult, error) {
+	if status < 200 || status >= 300 {
+		return protocolResult{ErrorMessage: fmt.Sprintf("lookup HTTP %d", status)}, nil
 	}
-	if p.inputBound != nil {
-		call.InputTokenBound = p.inputBound(body)
+	if strings.TrimSpace(string(body)) == "{}" {
+		return protocolResult{State: stateUnresolved}, nil
 	}
-	return call, nil
+	r, err := p.decode(status, h, body)
+	r.Usage = nil // a lookup never reports usage
+	return r, err
 }
 
 func (p *testProtocol) authorize(h http.Header, secret []byte) {
@@ -332,6 +397,7 @@ func (p *testProtocol) decode(_ int, _ http.Header, body []byte) (protocolResult
 	r := protocolResult{
 		State: w.State, ResponseID: w.Ref, FinishReason: w.Finish, Texts: w.Texts,
 		NoCharge: w.NoCharge, Refusal: w.Refusal, ContinuationReference: w.Resume, UsageReference: w.UsageRef,
+		UsageUnpriceable: w.Unpriced,
 	}
 	for _, c := range w.Calls {
 		r.ToolCalls = append(r.ToolCalls, protocolToolCall{ID: c.ID, Name: c.Name, Arguments: c.Args})
@@ -501,6 +567,7 @@ func testDispatch(t *testing.T, action any) contract.Dispatch {
 
 // harness wires one adapter to its fakes.
 type harness struct {
+	profile   wireResponsesProfile // the profile the adapter was built from, after options
 	adapter   *Adapter
 	transport *countingTransport
 	blobs     *fakeBlobStore
@@ -555,6 +622,7 @@ func newHarness(t *testing.T, fn func(*http.Request) (*http.Response, error), op
 		opt(cfg)
 	}
 	h := &harness{
+		profile:   cfg.profile,
 		transport: &countingTransport{fn: fn},
 		blobs:     newFakeBlobStore(),
 		secrets:   newFakeSecrets(testCredentialRef, []byte(testToken)),
@@ -626,24 +694,23 @@ func decodeEvidence(t *testing.T, obs contract.Observation) wireResponsesEvidenc
 	if rc.Kind != "staged" || rc != ev.Output.RequestContext {
 		t.Fatalf("request_context = %+v / %+v, want one identical staged locator", rc, ev.Output.RequestContext)
 	}
-	matches, contexts := 0, 0
+	matches := 0
 	for _, s := range ev.StagedOutputs {
-		if s.Purpose == "context" {
-			contexts++
-		}
 		if s.StagingRef == rc.StagingRef && s.Digest == rc.Digest && s.Purpose == "context" {
 			matches++
 		}
 	}
-	if matches != 1 || contexts != 1 {
-		t.Fatalf("request_context matches %d of %d context staged outputs, want exactly 1 of 1", matches, contexts)
+	if matches != 1 {
+		t.Fatalf("request_context matches %d context staged outputs, want exactly 1", matches)
 	}
-	want, err := json.Marshal(ev.Output.Usage)
+	// Observation.Usage is the accounting Usage the controller validates
+	// against $defs/Usage; the full ProviderUsage lives in the evidence.
+	want, err := json.Marshal(ev.Output.Usage.Accounting)
 	if err != nil {
 		t.Fatalf("marshal usage: %v", err)
 	}
 	if !bytes.Equal(want, obs.Usage) {
-		t.Fatalf("Observation.Usage = %s, want the evidence usage %s", obs.Usage, want)
+		t.Fatalf("Observation.Usage = %s, want the evidence accounting %s", obs.Usage, want)
 	}
 	return ev
 }

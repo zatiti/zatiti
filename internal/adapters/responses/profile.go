@@ -34,8 +34,35 @@ type responsesProfile struct {
 	CostMode           string
 	MaximumCost        int64
 	Classifications    map[string]bool
+	Destinations       []string
 	CapabilityEvidence wireCapabilityEvidence
 	Digest             contract.Digest
+}
+
+// permitsDestination reports whether the profile's enforcement.
+// provider_destinations covers destination. Every physical call a wire
+// protocol describes is checked against it before it is staged or sent.
+func (p *responsesProfile) permitsDestination(destination string) bool {
+	u, err := url.Parse(destination)
+	if err != nil || u.Scheme != "https" || u.User != nil || u.Fragment != "" {
+		return false
+	}
+	for _, d := range p.Destinations {
+		if destinationPermits(d, u) {
+			return true
+		}
+	}
+	return false
+}
+
+// protocolProfile is the profile as a wire protocol sees it.
+func (p *responsesProfile) protocolProfile() protocolProfile {
+	return protocolProfile{
+		Endpoint:       p.Endpoint,
+		Model:          p.Model,
+		MaxInputTokens: p.MaxInputTokens,
+		Capabilities:   p.CapabilityEvidence.Capabilities,
+	}
 }
 
 // loadProfile validates raw against the zatiti.responses/v1 schema, strict
@@ -124,6 +151,7 @@ func loadProfile(raw json.RawMessage) (*responsesProfile, error) {
 		CostMode:           w.Enforcement.Cost,
 		MaximumCost:        w.Enforcement.MaximumCost.MicroUnits,
 		Classifications:    classifications,
+		Destinations:       w.Enforcement.ProviderDestinations,
 		CapabilityEvidence: w.CapabilityEvidence,
 		Digest:             digest,
 	}, nil

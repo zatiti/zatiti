@@ -22,8 +22,15 @@ const (
 	partMemoryExcerpt = "memory_excerpt"
 )
 
+// maxPartBytes bounds one referenced artifact (an artifact part or a tool
+// result) loaded for the model step; the whole context, references
+// included, stays within maxContextBytes.
+const maxPartBytes = 4 << 20
+
 // contextPart is one decoded ContextPart. Exactly one typed field is
-// non-nil, matching Kind.
+// non-nil, matching Kind. Bytes holds the referenced artifact's content
+// for artifact and tool_result parts, loaded and digest-verified by
+// loadContext, so a wire protocol never performs I/O.
 type contextPart struct {
 	Kind          string
 	Text          *wireContextText
@@ -31,6 +38,7 @@ type contextPart struct {
 	ToolCall      *wireContextToolCall
 	ToolResult    *wireContextToolResult
 	MemoryExcerpt *wireContextMemoryExcerpt
+	Bytes         []byte
 }
 
 // contextMessage is one model-visible message with its parts decoded in
@@ -67,21 +75,11 @@ func loadContext(ctx context.Context, blobs contract.BlobStore, profile *respons
 	if blobs == nil {
 		return nil, prerequisiteMissing("responses adapter requires a blob store dependency to load context artifact %s", act.ContextArtifact.ID)
 	}
-	rc, err := blobs.Open(ctx, act.ContextArtifact.Digest, 0, 0)
+	raw, err := readArtifact(ctx, blobs, act.ContextArtifact, maxContextBytes, "the action")
 	if err != nil {
-		return nil, blobFault(err)
+		return nil, err
 	}
-	raw, readErr := io.ReadAll(io.LimitReader(rc, maxContextBytes+1))
-	_ = rc.Close()
-	if readErr != nil {
-		return nil, artifactFault("reading context artifact %s failed", act.ContextArtifact.ID)
-	}
-	if len(raw) > maxContextBytes {
-		return nil, invalidInput("context artifact %s exceeds the %d byte context bound", act.ContextArtifact.ID, maxContextBytes)
-	}
-	if got := contract.Hash(raw); got != act.ContextArtifact.Digest {
-		return nil, artifactFault("context artifact %s bytes hash to %s, not the digest the action binds", act.ContextArtifact.ID, got)
-	}
+	budget := int64(maxContextBytes - len(raw))
 
 	schema, err := contextSchema()
 	if err != nil {
@@ -122,6 +120,7 @@ func loadContext(ctx context.Context, blobs contract.BlobStore, profile *respons
 			if err != nil {
 				return nil, err
 			}
+			var ref *wireArtifactRef
 			if part.Artifact != nil {
 				c := part.Artifact.Classification
 				if !profile.Classifications[c] {
@@ -130,12 +129,47 @@ func loadContext(ctx context.Context, blobs contract.BlobStore, profile *respons
 				if classificationRank[c] > classificationRank[doc.Classification] {
 					doc.Classification = c
 				}
+				ref = &part.Artifact.Artifact
+			}
+			if part.ToolResult != nil {
+				ref = &part.ToolResult.Artifact
+			}
+			if ref != nil {
+				bound := min(int64(maxPartBytes), budget)
+				data, err := readArtifact(ctx, blobs, *ref, bound, "the context")
+				if err != nil {
+					return nil, err
+				}
+				budget -= int64(len(data))
+				part.Bytes = data
 			}
 			decoded.DecodedParts = append(decoded.DecodedParts, part)
 		}
 		doc.Messages = append(doc.Messages, decoded)
 	}
 	return doc, nil
+}
+
+// readArtifact reads one referenced artifact through the BlobStore, bounded
+// to limit bytes, and verifies the bytes hash to the digest the reference
+// binds: the model step discloses exactly the content the action names.
+func readArtifact(ctx context.Context, blobs contract.BlobStore, ref wireArtifactRef, limit int64, binder string) ([]byte, error) {
+	rc, err := blobs.Open(ctx, ref.Digest, 0, 0)
+	if err != nil {
+		return nil, blobFault(err)
+	}
+	raw, readErr := io.ReadAll(io.LimitReader(rc, limit+1))
+	_ = rc.Close()
+	if readErr != nil {
+		return nil, artifactFault("reading artifact %s failed", ref.ID)
+	}
+	if int64(len(raw)) > limit {
+		return nil, invalidInput("artifact %s exceeds the %d byte bound for a model step", ref.ID, limit)
+	}
+	if got := contract.Hash(raw); got != ref.Digest {
+		return nil, artifactFault("artifact %s bytes hash to %s, not the digest %s binds", ref.ID, got, binder)
+	}
+	return raw, nil
 }
 
 // decodeContextPart strict-decodes one schema-validated ContextPart into
