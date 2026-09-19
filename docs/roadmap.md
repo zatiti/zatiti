@@ -790,6 +790,35 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   was left alone. One lease-economy ruling issued: exec-seams collapsed
   three commits into one, saving two module-wide runs.
 
+- 2026-09-18 evening -- tests/integration slice 1 LANDED (655683a,
+  ecfbaf0): the first suite that runs the real modules against each other.
+  Lead mutation check: neutralizing the submission replay fence in
+  internal/application (commandBegin returning no retained result) made
+  TestWireClientReplaysOriginalKeyAfterDisconnect fail at wire_test.go:112
+  with a 409 and a different command id; restored byte-identical. Race and
+  lint green on the package, module-wide green. The suite adds a raw HTTP
+  wire driver over the Unix socket -- the path apps/desktop consumes -- as
+  a fifth transport compared against CLI, MCP, in-process and client.
+  32 of 36 package roots now have verified code on main.
+- 2026-09-18 evening -- cmd/zatiti MILESTONE committed (10cdbfd on
+  ff37ea7, landing): the entrypoint runs the controller as the
+  bootstrap-created service principal (identity.ControllerPrincipal on one
+  read snapshot) instead of provisioning its own, and with batch B
+  delivering self-contained internal schemas the drift skips are deleted,
+  so the catalog, serve-lifecycle and end-to-end binary tests run against
+  the real unpatched sixteen-module assembly. Lane reports serve, init over
+  the socket, owner credential hand-off to a 0600 profile, principal create
+  with a submission key, exact replay, changed-input refusal, principal
+  list, `mcp serve` over stdio with 197 tools, and SIGTERM shutdown, plus
+  fail-closed behavior on lock loss and an unknown principal override.
+  Lead mutation check: disabling the explicit --controller-principal
+  override branch stopped TestServeRefusesUnknownControllerPrincipalOverride
+  from passing -- but by hanging to the 10-minute Go test timeout rather
+  than failing fast, because serve then starts successfully; the invariant
+  is covered, the test budget is not. Routed to the lane with the e2e
+  3-minute budget flake (e2e_test.go:39, failed once at 192s under the
+  parallel hook run, passed on retry).
+
 ## Planned
 
 - Wave 3: controller, desktop, cmd/zatiti, cmd/zatiti-desktop.
