@@ -1770,5 +1770,196 @@
     ],
     "kind": "reference",
     "text": "- [MCP tools](https://modelcontextprotocol.io/specification/2025-11-25/server/tools) and [transports](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports): protocol references for the proposed adapter, not proof of Zatiti conformance.\n- [Mint](https://github.com/sirerun/mint): proposed build-time OpenAPI-to-MCP generator; pin its version/commit and qualify generated output before release.\n- [Official MCP Go SDK](https://github.com/modelcontextprotocol/go-sdk): protocol implementation used by the generated adapter or a fallback adapter; pin and test a release.\n- [Agent Skills specification](https://agentskills.io/specification): proposed instructional-package import format; Zatiti permissions remain separate.\n- [SQLite WAL](https://sqlite.org/wal.html) and [online backup API](https://sqlite.org/backup.html): storage implementation references.\n- [Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0): distribution license.\n- [Serenity](https://github.com/sirerun/serenity): proposed scoped memory integration; pin and qualify its public read and write interfaces.\n- [Rakazo](https://github.com/elie222/rakazo): reference for persistent teammates, chat-first interaction, provider boundaries, and execution recovery; not evidence of Zatiti conformance.\n- [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness): reference for capability-declared executors, durable agent messaging, reconstructable model context, and pre-effect checkpoints; not a required runtime dependency."
+  },
+  {
+    "id": "P00-001",
+    "section": "P00",
+    "owner": "execution",
+    "participants": [
+      "controller",
+      "tasks",
+      "messaging",
+      "application"
+    ],
+    "kind": "requirement",
+    "text": "Execution owns a durable WorkerTurn per worker/task/message/responsibility decision stream, keyed by unique (installation_id, source_kind, source_id, source_version, recipient_worker_id). _execution.turn.admit is idempotent: re-admission for the same source identity returns the existing turn rather than creating a second one. A pending inbox message and its turn admission/processed marker commit in one shared transaction; a message arriving during an active turn is admitted as a safe-boundary injection durably linked to that turn, never silently dropped or processed twice."
+  },
+  {
+    "id": "P00-002",
+    "section": "P00",
+    "owner": "execution",
+    "participants": [
+      "controller"
+    ],
+    "kind": "requirement",
+    "text": "The durable worker loop is driven by _execution.work.pending/.claim, _execution.context.prepare/.commit, _execution.proposal.prepare/.record, _execution.report and _execution.verification.pending/.claim, each internal and callable only by controller. Context preparation is a versioned immutable plan built inside a transaction with no IO and no provider call; a stale plan (expected_version or generation mismatch at commit) is discarded and rebuilt without spending or sending. Each model step/proposal is stored separately, keyed by unique (turn_id, step_index, proposal_id); the same key with different normalized bytes is submission_conflict, not a silent overwrite."
+  },
+  {
+    "id": "P00-003",
+    "section": "P00",
+    "owner": "application",
+    "participants": [
+      "execution",
+      "controller"
+    ],
+    "kind": "requirement",
+    "text": "A narrow contract.WorkerOperator capability lets a worker-authored local proposal invoke an ordinary public operation under the worker's own authenticated actor, scope-intersected with the task/source authorization envelope, resolved from the persisted turn/worker mapping (WorkerID is an asserted match against that turn, never a free choice of principal). Local model-visible operations are an explicit allowlist (authorized configuration authoring/inspection, task/delegation/responsibility actions, approved memory/messaging operations, output publication); grant/policy changes, secrets, internal bookkeeping and human review never become callable merely because they exist in the public catalog, and the controller's administrative identity never substitutes for a worker's own denial."
+  },
+  {
+    "id": "P00-004",
+    "section": "P00",
+    "owner": "tasks",
+    "participants": [
+      "execution"
+    ],
+    "kind": "requirement",
+    "text": "task.start transitions an eligible draft/ready task to ready and enqueues its run in the same transaction, distinct from task.create (which stays draft-only) and task.assign (which only changes worker/version). _tasks.evidence.record binds trusted verifier evidence to the pinned acceptance digest and named output bindings before any task state depends on it; only this recorded lineage, or eligible explicit manual acceptance, ever establishes succeeded. _tasks.dependencies.wake bounded-scans dependents of a just-completed task and revalidates each dependent's current eligibility; it never reports success for a dependent whose required child failed."
+  },
+  {
+    "id": "P00-005",
+    "section": "P00",
+    "owner": "messaging",
+    "participants": [
+      "execution",
+      "controller"
+    ],
+    "kind": "requirement",
+    "text": "_messaging.ready bounded-scans admitted messages awaiting a durable worker turn, fair-ordered and scoped without acknowledgment; _messaging.processed records durable delivery disposition sharing the same transaction as turn admission/context commit. conversation.get/.list additionally return the calling principal's own caller_unread_count/caller_last_read_marker; conversation.message.list reads authorized sent/received history for one conversation limited to disclosed membership intervals, disclosing no retroactive restricted history on joining."
+  },
+  {
+    "id": "P00-006",
+    "section": "P00",
+    "owner": "effects",
+    "participants": [
+      "execution",
+      "controller",
+      "responses",
+      "github",
+      "httpread",
+      "serenity"
+    ],
+    "kind": "requirement",
+    "text": "_effects.prepare accepts an optional callback_route (CallbackRoute: worker_turn/job/memory/skill/connection plus the relevant turn/step/job id) persisted alongside the immutable action and returned unmodified at claim as Dispatch.callback_route; adapters never receive it. The controller resolves callback routing exclusively from this persisted route, never by inserting an undeclared attempt_id into strict adapter parameters (Responses/GitHub/httpread/Serenity all reject unknown fields). _effects.record accepts an optional current_generation to resolve a stray attempt whose claim journal spans a controller-generation change: not_sent for an attempt never actually claimed under its recorded generation, outcome_unknown for one claimed but unconfirmed; the attempt is never silently dropped."
+  },
+  {
+    "id": "P00-007",
+    "section": "P00",
+    "owner": "effects",
+    "participants": [
+      "controller"
+    ],
+    "kind": "requirement",
+    "text": "_effects.reconciliation.prepare/.record create a separately admitted, separately authorized and accounted bounded reconciliation read distinct from the original write, reaching Adapter.Reconcile through the controller's own dispatch outside any transaction. The reconciliation observation merges into the original operation's uncertainty; it never overwrites the original action or its history, and authoritative no-effect evidence is distinguished from eventual-consistency not-found."
+  },
+  {
+    "id": "P00-008",
+    "section": "P00",
+    "owner": "execution",
+    "participants": [
+      "skills",
+      "configuration",
+      "controller"
+    ],
+    "kind": "requirement",
+    "text": "_execution.job.create accepts an optional operation_id linking a network-backed job to its originating effects Operation at creation, so reconciliation resolves it without scanning another owner's table; a job without operation_id is an ordinary local runner. _skills.evaluation.record and _configuration.export.prepare/.record route skill evaluation and configuration export/import completions through this durable job ledger instead of a handler-local ID minting with no owner-backed lookup; a skill or evaluator change since evaluation admission invalidates the evaluation instead of recording it."
+  },
+  {
+    "id": "P00-009",
+    "section": "P00",
+    "owner": "responses",
+    "participants": [
+      "execution",
+      "effects",
+      "controller"
+    ],
+    "kind": "requirement",
+    "text": "ResponsesParameters/ResponsesEvidence are a kind-discriminated oneOf: prepare_session creates the provider conversation and returns session_handle, carrying no model-visible content and no context_artifact; model_step names that persisted session_handle and sends context_artifact/max_output_tokens/tool_contract_versions. Each adapter Invoke performs exactly one of the two physical calls, never both inside one Invoke. A prepare_session whose response is lost after the request was sent stays unknown and is never retried into a second, unlinked provider conversation; a model_step timeout after bytes were sent is outcome_unknown, and an empty item list is equally consistent with never ran and still running, so nonexecution is never assumed and no automatic fresh call follows. A lookup that finds output but no usage cannot release the worst-case billing liability."
+  },
+  {
+    "id": "P00-010",
+    "section": "P00",
+    "owner": "tasks",
+    "participants": [
+      "execution",
+      "artifacts"
+    ],
+    "kind": "requirement",
+    "text": "An accepted output slot freezes name, classification, media type, max bytes and check definition (artifact_presence/json_schema/artifact_digest), never unknowable generated bytes. On report, the runtime binds each slot to a published artifact from that attempt and seals the verification request; after binding, bytes/digests cannot change and the accepted task/criterion digest stays immutable throughout. VerificationRequest.Outputs is populated from those bindings; a report that omits a required output slot never reaches succeeded."
+  },
+  {
+    "id": "P00-011",
+    "section": "P00",
+    "owner": "installation",
+    "participants": [
+      "controller",
+      "storage",
+      "platform"
+    ],
+    "kind": "requirement",
+    "text": "A narrow entrypoint-supplied SnapshotInventory/RestoreCoordinator capability, distinct from DatabaseBackup and supplied only to internal/installation the same way, implements the six-step restore protocol: exclusive maintenance and admission closure; source verification including installation binding, schema compatibility and key availability; a captured authenticated current monotonic RecoveryOverlay; atomic database/blob switch without mixing WAL files; reopening with a newer controller generation and an owner-defined monotonic overlay merge that never resurrects a revoked credential, resends a consumed dispatch or erases a liability absent from the older snapshot; and a paused result requiring an explicit authorized resume that rechecks prerequisites again. A missing required Serenity export guarantee blocks a full-memory backup claim; an empty Brains array is never reported complete."
+  },
+  {
+    "id": "P00-012",
+    "section": "P00",
+    "owner": "registry",
+    "participants": [
+      "application"
+    ],
+    "kind": "requirement",
+    "text": "Registry.Lookup(id, 0) resolves the highest registered version for that operation id. Registration accepts either a bare $defs-relative schema or a fully self-contained document, and Lookup always returns a self-contained document pruned to reachable $defs. These rules were implemented and tested against application's assumptions before this revision; this is their authored contract record."
+  },
+  {
+    "id": "P00-013",
+    "section": "P00",
+    "owner": "cli",
+    "participants": [
+      "registry",
+      "zatiti"
+    ],
+    "kind": "requirement",
+    "text": "Descriptor.CLI is the subcommand path only and excludes the binary name; cmd/zatiti prepends `zatiti` exactly once at command-tree assembly. Generated AGENTS.md prose showing the full invocation (for example \"CLI `zatiti artifact export`\") is a rendering convenience for readability, not part of the wire contract, and must never be read as though the printed binary name were part of Descriptor.CLI itself."
+  },
+  {
+    "id": "P00-014",
+    "section": "P00",
+    "owner": "identity",
+    "participants": [
+      "installation",
+      "controller",
+      "policy"
+    ],
+    "kind": "requirement",
+    "text": "_identity.bootstrap accepts optional service_credential_id/service_store_ref so the bootstrap-created controller service principal can receive a credential in the same transaction, letting an out-of-process controller authenticate; an in-process explicit-Actor seam may omit them and remains credential-less as in revision 2. _identity.authority, like every internal operation, is gated by its caller allowlist and by the calling actor being a registered, unrevoked principal in the transaction's installation -- never by requiring that actor to already hold the capability named in its own request; no standing grant of _identity.authority is needed to work around a circular subject-capability check."
+  },
+  {
+    "id": "P00-015",
+    "section": "P00",
+    "owner": "reviews",
+    "participants": [
+      "policy"
+    ],
+    "kind": "requirement",
+    "text": "The eligible reviewer of an exact review-class request is the human principal whose current authority admitted that request; services, workers and agents are never eligible reviewers, and proposer separation stays mandatory for them regardless of any narrower standing policy. This settles \"an eligible owner's decision\", left undefined in the revision 2 policy/reviews briefs."
+  },
+  {
+    "id": "P00-016",
+    "section": "P00",
+    "owner": "tasks",
+    "participants": [
+      "execution",
+      "messaging"
+    ],
+    "kind": "requirement",
+    "text": "task.assign is a public operation and carries no internal caller allowlist; the registry rejects any public descriptor declaring callers. A chief-driven assignment is an ordinary authenticated task.assign call made through the worker operation executor under the requesting worker's own actor, never a domain-internal caller path from messaging or any other owner."
+  },
+  {
+    "id": "P00-017",
+    "section": "P00",
+    "owner": "memory",
+    "participants": [
+      "execution"
+    ],
+    "kind": "requirement",
+    "text": "memory.list lists authorized scoped claim refs (source, freshness, lineage, supported actions) for brains the calling principal can access; it never lists an unauthorized brain and never performs paid retrieval. installation.verifier.list separately enumerates installed trusted verifier profiles (secret-free, no executable path or argv) so a task's acceptance contract can name one before admission."
   }
 ]

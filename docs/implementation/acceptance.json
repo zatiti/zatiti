@@ -1910,5 +1910,235 @@
       "Planned tests, skipped suites, golden files alone and a zero process exit do not satisfy release gates.",
       "README and installation/client/platform claims match executed evidence; public fixtures use synthetic identities and contain no private operational data."
     ]
+  },
+  {
+    "id": "P00.worker_turn_admission_idempotent",
+    "gate": "P00",
+    "owners": [
+      "execution",
+      "controller",
+      "integration"
+    ],
+    "setup": "A worker is bound and a message names it as recipient; no WorkerTurn yet exists for that (source_kind, source_id, source_version, recipient_worker_id).",
+    "action": "Call _execution.turn.admit twice with the identical source identity, once as the original admission and once after a simulated lost-acknowledgement retry.",
+    "expected": [
+      "Both calls return the same WorkerTurn id and version.",
+      "No second turn or duplicate execution_turns row is created.",
+      "A message admitted mid-turn is linked to the active turn as a safe-boundary injection rather than dropped or processed as a second turn."
+    ]
+  },
+  {
+    "id": "P00.proposal_duplicate_and_conflict",
+    "gate": "P00",
+    "owners": [
+      "execution",
+      "integration"
+    ],
+    "setup": "A WorkerTurn is in proposal_pending state with one recorded ProposalRecord at (turn_id, step_index=1, proposal_id=P1).",
+    "action": "Call _execution.proposal.record again with the identical proposal_id and identical result, then again with the same proposal_id and a different result.",
+    "expected": [
+      "The identical repeat replays the original recorded disposition without creating a second record.",
+      "The differing repeat is refused submission_conflict and the original record is unchanged."
+    ]
+  },
+  {
+    "id": "P00.effects_callback_route_not_in_adapter_params",
+    "gate": "P00",
+    "owners": [
+      "effects",
+      "execution",
+      "controller",
+      "responses",
+      "integration"
+    ],
+    "setup": "Execution prepares a model_step effect for a WorkerTurn step and passes callback_route naming that turn/step.",
+    "action": "Claim and dispatch the effect through the controller, inspect the exact adapter Dispatch.Action bytes sent to the Responses adapter, then resolve the callback using only Dispatch.callback_route after the observation returns.",
+    "expected": [
+      "Dispatch.Action contains no attempt_id, run_id or any field beyond ResponsesModelStepParameters' declared schema; an inserted attempt_id is rejected by the adapter's strict decode.",
+      "The controller correctly routes the recorded proposal back to the originating turn/step using only callback_route."
+    ]
+  },
+  {
+    "id": "P00.effects_successor_generation_resolves_stray_attempt",
+    "gate": "P00",
+    "owners": [
+      "effects",
+      "controller",
+      "integration"
+    ],
+    "setup": "An effect attempt is claimed under generation N; the controller restarts and advances to generation N+1 before any record is written for that attempt.",
+    "action": "Call _effects.record for the stray attempt with current_generation=N+1, once for an attempt that was never actually claimed under N and once for one that was claimed but unconfirmed.",
+    "expected": [
+      "The never-claimed attempt records not_sent.",
+      "The claimed-but-unconfirmed attempt records outcome_unknown, never succeeded or failed.",
+      "Neither call silently drops the attempt or loses its reservation."
+    ]
+  },
+  {
+    "id": "P00.job_registry_operation_id_linkage",
+    "gate": "P00",
+    "owners": [
+      "execution",
+      "memory",
+      "effects",
+      "integration"
+    ],
+    "setup": "Memory prepares a network-backed remember effect and calls _execution.job.create with operation_id naming that effect's Operation.",
+    "action": "Read the job back through public job.get, then trigger reconciliation for the underlying effect.",
+    "expected": [
+      "job.get's Job.operation_id matches the effects Operation id supplied at creation.",
+      "Reconciliation resolves the job's originating effect directly from operation_id without an owner-table scan.",
+      "A job created without operation_id behaves as an ordinary ownerless local runner and is unaffected."
+    ]
+  },
+  {
+    "id": "P00.responses_prepare_session_then_model_step",
+    "gate": "P00",
+    "owners": [
+      "responses",
+      "execution",
+      "effects",
+      "controller",
+      "integration"
+    ],
+    "setup": "A hosted worker turn requires its first model call against a profile with no existing session_handle.",
+    "action": "Dispatch prepare_session, record its evidence, then dispatch model_step naming the returned session_handle; separately simulate a prepare_session whose HTTP response is lost after the request was sent.",
+    "expected": [
+      "Exactly two physical calls occur, one per Invoke, never both inside one Invoke.",
+      "model_step's persisted session_handle equals prepare_session's returned session_handle.",
+      "The lost-response prepare_session stays outcome_unknown and no second session is created or retried automatically."
+    ]
+  },
+  {
+    "id": "P00.task_start_readies_and_enqueues",
+    "gate": "P00",
+    "owners": [
+      "tasks",
+      "execution",
+      "integration"
+    ],
+    "setup": "A draft task exists with satisfied dependencies, a pinned acceptance contract and no run.",
+    "action": "Call task.start with the task's expected_version.",
+    "expected": [
+      "The task transitions to ready and exactly one Run is created for it in the same transaction.",
+      "task.create and task.assign remain unchanged: create still yields draft, assign still only changes worker/version.",
+      "A task with an unresolved required dependency is refused rather than readied."
+    ]
+  },
+  {
+    "id": "P00.output_slot_binding_and_verification_request",
+    "gate": "P00",
+    "owners": [
+      "tasks",
+      "execution",
+      "artifacts",
+      "integration"
+    ],
+    "setup": "A task's acceptance contract names one required output slot (name, classification, media_type, max_bytes, artifact_digest check).",
+    "action": "Report the attempt with a published artifact bound to that slot, then inspect the sealed VerificationRequest and attempt a byte change after binding.",
+    "expected": [
+      "VerificationRequest.Outputs contains the bound slot with its resolved artifact, not an empty array.",
+      "The bound digest cannot be changed after binding; a differing report is refused.",
+      "A report omitting the required slot never reaches succeeded."
+    ]
+  },
+  {
+    "id": "P00.review_eligibility_human_only",
+    "gate": "P00",
+    "owners": [
+      "reviews",
+      "policy",
+      "integration"
+    ],
+    "setup": "A review-class action is pending; the eligible set includes the human principal whose current authority admitted the request and a worker/service/agent principal that also holds broad standing capability.",
+    "action": "Attempt review.decide as the worker/service/agent principal, then as the eligible human principal, then as the human principal who authored the original proposal.",
+    "expected": [
+      "The worker/service/agent decision is refused regardless of its standing capability.",
+      "The eligible human principal's decision is accepted.",
+      "The proposer-as-reviewer attempt is refused on separation even though they are human."
+    ]
+  },
+  {
+    "id": "P00.identity_authority_caller_allowlist_only",
+    "gate": "P00",
+    "owners": [
+      "identity",
+      "policy",
+      "integration"
+    ],
+    "setup": "A narrowly granted principal holds no _identity.authority capability itself; policy is on _identity.authority's caller allowlist.",
+    "action": "Have policy call _identity.authority for that principal's current grants, then have an off-allowlist caller attempt the same internal call, then attempt it for a revoked principal and for a principal in a different installation.",
+    "expected": [
+      "Policy's call succeeds despite the subject holding no _identity.authority capability of its own.",
+      "The off-allowlist caller is refused.",
+      "The revoked principal and cross-installation principal are refused."
+    ]
+  },
+  {
+    "id": "P00.restore_protocol_paused_and_resume_rechecks",
+    "gate": "P00",
+    "owners": [
+      "installation",
+      "controller",
+      "storage",
+      "platform",
+      "integration"
+    ],
+    "setup": "A verified encrypted backup bundle exists for a distinct destination installation with at least one revoked credential and one unresolved effect recorded after the backup was taken.",
+    "action": "Run RestoreCoordinator.Prepare then Commit against the destination, inspect the paused result, then call the explicit authorized resume.",
+    "expected": [
+      "Restore completes paused, not resumed, and names its recovery overlay.",
+      "The revocation recorded after the backup is preserved after restore; the credential is not resurrected.",
+      "Resume rechecks prerequisites again rather than assuming the paused state was already validated."
+    ]
+  },
+  {
+    "id": "P00.old_persisted_rows_remain_inspectable",
+    "gate": "P00",
+    "owners": [
+      "execution",
+      "effects",
+      "tasks",
+      "messaging",
+      "integration"
+    ],
+    "setup": "An Operation, Job, Status and Conversation row persisted before this revision lack attempts, callback_route, operation_id, runtime_ready and caller_unread_count/caller_last_read_marker respectively.",
+    "action": "Read each row back through its existing public/internal query operation after the revision-3 schema lands.",
+    "expected": [
+      "Every row validates against its updated schema with the new fields simply absent.",
+      "No read fails, migrates destructively or fabricates a value for an absent optional field.",
+      "Writing any of the rows again populates the new fields going forward without altering the unrelated persisted history."
+    ]
+  },
+  {
+    "id": "P00.worker_operation_denies_unlisted_operation",
+    "gate": "P00",
+    "owners": [
+      "application",
+      "execution",
+      "policy",
+      "integration"
+    ],
+    "setup": "A worker's local proposal names grant.create as its target operation, which is not on the local model-visible allowlist.",
+    "action": "Route the proposal through contract.WorkerOperator.ExecuteWorker.",
+    "expected": [
+      "The call is refused before reaching grant.create's handler.",
+      "An allowlisted operation (for example task.delegate) submitted the same way for the same worker succeeds under that worker's own intersected scope.",
+      "The controller's administrative identity is never substituted to force the denied call through."
+    ]
+  },
+  {
+    "id": "P00.render_check_clean_offline",
+    "gate": "P00",
+    "owners": [
+      "integration"
+    ],
+    "setup": "A clean checkout of tools/specgen and docs/implementation with no docs/rfc.md present and no network access.",
+    "action": "Run `python3 tools/specgen/render.py` then `python3 tools/specgen/render.py --check`.",
+    "expected": [
+      "Both commands exit 0 with no RFC file read and no network call.",
+      "render --check reports zero stale/missing generated files.",
+      "All prior Z01-Z21 and JOURNEY/QUALIFICATION cases remain present and unweakened in the regenerated coverage.json."
+    ]
   }
 ]
