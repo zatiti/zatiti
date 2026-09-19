@@ -850,6 +850,43 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   builds a binary and runs real controllers, so it is the slowest in the
   module and runs on every landing.
 
+- 2026-09-18 20:10 PT -- THE GATE WAS BROKEN FOR EVERY LANE, root cause and
+  fix. Commits and landings kept failing with a ten-minute panic that looked
+  like a product defect and was not: cmd/zatiti builds a binary and runs
+  real controllers, and its end-to-end journey carries an eight-minute
+  internal budget, so on a loaded machine that one package exceeds Go's
+  default 10-minute PER-PACKAGE timeout -- in the plain module-wide run, not
+  only under -race. Every lane's pre-commit hook ran `go test ./...` with no
+  -timeout, so every commit in the module was hostage to it. Fixed in three
+  places: the pre-commit hook now runs `go test -p 2 -timeout 30m ./...`
+  (the -p 2 also stops a commit saturating the machine while other lanes
+  work), land.sh's module-wide run takes MODULE_TIMEOUT (default 30m), and
+  its per-package race run takes RACE_TIMEOUT (default 25m). The httpread
+  landing that exposed it was re-run afterwards.
+- 2026-09-18 20:00 PT -- second machine-wide hazard fixed: golangci-lint
+  takes a lock inside its cache directory, so any two concurrent runs
+  collide with "parallel golangci-lint is running" regardless of which lease
+  each holds -- the two-lease split made this reachable. with-lease.sh now
+  exports a per-worktree GOLANGCI_LINT_CACHE. Credit to the edge-seams lane,
+  which corrected the lead's wrong diagnosis (it was not a stale base) with
+  evidence.
+- 2026-09-18 20:00 PT -- shared-stash hazard, twice in one hour, no work
+  lost. The git stash stack is shared across every worktree and lanes push
+  and drop concurrently, so stash@{n} selectors go stale between two
+  commands: one lane dropped another's entry by position (restored with
+  `git stash store`), and another lane's entry disappeared under it (it
+  recovered the tree from the dangling stash commit and proved it
+  byte-identical). Lane rules now require applying by SHA, keeping the entry
+  until the commit succeeds, and dropping only by resolving the selector
+  from the SHA in the same command.
+- 2026-09-18 20:07 PT -- account session limit stopped every lane for the
+  fourth time today (resets 22:20 PT). Uncommitted work on disk at that
+  moment: responses (rev-2 plus the github conversion), edge-seams (11 files,
+  reviews.ensure), exec-seams (12 files), packaging (26 files, slice 1), ci
+  (17 files), cmd (12 files, the DatabaseBackup seam just started), desktop
+  (not started). A recurring two-hourly cron re-enters the standing plan in
+  scratchpad/autonomous-run.md so the run survives the stop.
+
 ## Planned
 
 - Wave 3: controller, desktop, cmd/zatiti, cmd/zatiti-desktop.
