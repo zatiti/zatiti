@@ -1,0 +1,245 @@
+[
+  {
+    "id": "RUNTIME.intent_to_result",
+    "delivery_tasks": [
+      "P10",
+      "P14",
+      "P15",
+      "P16",
+      "P18",
+      "P22",
+      "P24",
+      "P46"
+    ],
+    "action": "Send a bounded research request to a configured chief through the production socket; controlled provider proposes an HTTP read then a named report.",
+    "expected": [
+      "One durable turn and task are created.",
+      "Tool runs under worker authority.",
+      "New output bytes pass sealed independent checks.",
+      "One reply links task, artifact and verifier evidence."
+    ],
+    "status": "planned_not_run"
+  },
+  {
+    "id": "RUNTIME.public_task_start",
+    "delivery_tasks": [
+      "P11",
+      "P46"
+    ],
+    "action": "Create a task through each public transport, start it twice with the same key, then retry with stale expected version.",
+    "expected": [
+      "Draft becomes ready with exactly one run.",
+      "Identical replay preserves identity.",
+      "Stale or changed-input request refuses."
+    ],
+    "status": "planned_not_run"
+  },
+  {
+    "id": "RUNTIME.idle_chief_clarification",
+    "delivery_tasks": [
+      "P14",
+      "P16",
+      "P42",
+      "P46"
+    ],
+    "action": "Ask an idle chief an underspecified question before any task exists, then reply to its clarification.",
+    "expected": [
+      "Chief can answer without a preexisting task.",
+      "Reply resumes the correct turn.",
+      "No authority is inferred from free text."
+    ],
+    "status": "planned_not_run"
+  },
+  {
+    "id": "RUNTIME.context_action_schema",
+    "delivery_tasks": [
+      "P15",
+      "P13",
+      "P46"
+    ],
+    "action": "Feed actual runtime context/action into the real Responses adapter against a controlled endpoint.",
+    "expected": [
+      "Exact context/tool schema accepted.",
+      "Callback route is independent of adapter parameters.",
+      "Stale/unauthorized input causes zero sends."
+    ],
+    "status": "planned_not_run"
+  },
+  {
+    "id": "RUNTIME.final_stops",
+    "delivery_tasks": [
+      "P16",
+      "P46"
+    ],
+    "action": "Provider emits final output before model-step limit.",
+    "expected": [
+      "Final reply/output published once.",
+      "No additional model step occurs.",
+      "Task remains verifying until trusted verdict."
+    ],
+    "status": "planned_not_run"
+  },
+  {
+    "id": "RUNTIME.tool_accepted_unknown",
+    "delivery_tasks": [
+      "P12",
+      "P16",
+      "P23",
+      "P46"
+    ],
+    "action": "Tool accepts asynchronously, then loses an acknowledgement.",
+    "expected": [
+      "Dependent model/tool work waits.",
+      "One original mutation.",
+      "Only admitted lookup can resolve it; billing uncertainty remains if evidence is absent."
+    ],
+    "status": "planned_not_run"
+  },
+  {
+    "id": "RUNTIME.dynamic_output",
+    "delivery_tasks": [
+      "P09",
+      "P11",
+      "P18",
+      "P46"
+    ],
+    "action": "Accept a task whose generated output digest is unknown, then bind and verify a named report.",
+    "expected": [
+      "Accepted checks stay unchanged.",
+      "Reported artifact binding is immutable.",
+      "Presence/schema checks read actual named bytes."
+    ],
+    "status": "planned_not_run"
+  },
+  {
+    "id": "RUNTIME.verifier_driver",
+    "delivery_tasks": [
+      "P18",
+      "P23",
+      "P46"
+    ],
+    "action": "Report a task through normal worker lifecycle and restart during verification.",
+    "expected": [
+      "Trusted registered verifier runs without test-injected verdict.",
+      "One persisted verdict and evidence linkage.",
+      "Missing bytes or failed checks cannot succeed."
+    ],
+    "status": "planned_not_run"
+  },
+  {
+    "id": "RUNTIME.job_completion",
+    "delivery_tasks": [
+      "P05",
+      "P19",
+      "P21",
+      "P23",
+      "P46"
+    ],
+    "action": "Start each supported local job and inspect after restart.",
+    "expected": [
+      "Returned job ID resolves.",
+      "Published artifact ID is readable.",
+      "Owner row and execution job agree; unknown kinds remain explicit prerequisites."
+    ],
+    "status": "planned_not_run"
+  },
+  {
+    "id": "RUNTIME.session_call_count",
+    "delivery_tasks": [
+      "P12",
+      "P13",
+      "P23",
+      "P46"
+    ],
+    "action": "Crash between session preparation and model request, then reconcile a lost response.",
+    "expected": [
+      "Each claimed effect makes at most one HTTP request.",
+      "Persisted session handle is reused without duplicate creation.",
+      "Empty conversation never proves nonexecution and missing usage remains unknown."
+    ],
+    "status": "planned_not_run"
+  },
+  {
+    "id": "RUNTIME.cycle_feedback",
+    "delivery_tasks": [
+      "P16",
+      "P17",
+      "P46"
+    ],
+    "action": "Run a responsibility through useful-work then no-work outcomes and advance clock.",
+    "expected": [
+      "Typed cycle result arms exactly one later wake.",
+      "Limits account for every cycle.",
+      "Pause or duplicate event cannot duplicate a cycle."
+    ],
+    "status": "planned_not_run"
+  },
+  {
+    "id": "RUNTIME.restore_rewinds",
+    "delivery_tasks": [
+      "P29",
+      "P30",
+      "P31",
+      "P32",
+      "P33",
+      "P46"
+    ],
+    "action": "Back up, mutate state/revoke credential/lose a write response, then restore into a clean destination.",
+    "expected": [
+      "Database and artifact bytes are actually restored.",
+      "Newer revocation and unknown effect liability survive.",
+      "Installation stays paused and no old write is resent."
+    ],
+    "status": "planned_not_run"
+  },
+  {
+    "id": "RUNTIME.chat_relaunch",
+    "delivery_tasks": [
+      "P10",
+      "P34",
+      "P42",
+      "P47"
+    ],
+    "action": "Send/receive, close built desktop, reopen, draft offline then reconnect.",
+    "expected": [
+      "Complete authorized history and selected conversation restored.",
+      "Draft is unsent until explicit action.",
+      "One submission identity and correct unread state."
+    ],
+    "status": "planned_not_run"
+  },
+  {
+    "id": "RUNTIME.worker_authority",
+    "delivery_tasks": [
+      "P03",
+      "P04",
+      "P07",
+      "P16",
+      "P46"
+    ],
+    "action": "Model proposes self-grant/human approval or a newly revoked external action.",
+    "expected": [
+      "Proposal cannot impersonate controller/owner.",
+      "Human-required review stays human.",
+      "No forbidden provider call or grant change."
+    ],
+    "status": "planned_not_run"
+  },
+  {
+    "id": "RUNTIME.pending_fairness",
+    "delivery_tasks": [
+      "P12",
+      "P14",
+      "P22",
+      "P23",
+      "P46"
+    ],
+    "action": "Place more than one batch of blocked work ahead of an eligible turn/effect.",
+    "expected": [
+      "Eligible work progresses within bounded passes.",
+      "No unbounded scan/model loop.",
+      "Lost job-claim acknowledgement has an exact lookup path."
+    ],
+    "status": "planned_not_run"
+  }
+]

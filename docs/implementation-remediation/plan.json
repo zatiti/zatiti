@@ -1,0 +1,1551 @@
+{
+  "schema": "zatiti.remediation-plan/v1",
+  "baseline_revision": "34d291f4c44b1a2a4950e8155498daad2a56c251",
+  "date": "2026-09-19",
+  "state": "plan_only_not_implemented",
+  "tasks": [
+    {
+      "id": "P00",
+      "title": "Freeze the remediation contracts and regenerate assignments",
+      "owner": "tools/specgen",
+      "write_roots": [
+        "tools/specgen",
+        "docs/implementation/contracts.md",
+        "docs/implementation/requirements.json",
+        "docs/implementation/acceptance.json",
+        "docs/implementation/adapter-schemas.json",
+        "generated specification outputs (serialized renderer only)"
+      ],
+      "depends_on": [],
+      "priority": "P0",
+      "status": "planned",
+      "steps": [
+        "Read this audit, contract-proposals.md, the 127 requirement blocks and 116 acceptance cases. Turn the proposed seams into revision 3 authored schemas and contracts; do not weaken existing acceptance.",
+        "Reconcile the recorded revision-3 backlog in docs/roadmap.md against current code: registry version-0 lookup and self-contained schema normalization, CLI root tokens, public/internal caller declarations, service-principal bootstrap, artifact locator staging, review eligibility and internal authority checks. Preserve tested current behavior unless a coordinated migration explicitly changes it.",
+        "Freeze the Responses prepare_session/model_step split: two explicit effects with a persisted session handle, each making one physical call; specify disclosure, timeout, cost and unknown-outcome behavior for both.",
+        "Add durable worker turns, task start/readiness, worker-subject dispatch, context preparation/publication, named output slots, job ownership, reconciliation requests, verification scans, history and restore capabilities described in contract-proposals.md.",
+        "Update model.py, packages.py and authored inputs; enumerate every affected owner/caller and migration. Generate exact DTO examples for success, denial, duplicate, stale, unknown and cancellation paths.",
+        "Resolve model action routing using an explicit controller-owned route, never by inserting undeclared attempt_id into strict adapter parameters. Pin schemas for local proposals separately from provider actions.",
+        "Publish self-contained updated AGENTS.md assignments and golden JSON fixtures before any downstream writer starts. Run render and render --check; retain all old gates and add the new vertical journeys."
+      ],
+      "required_tests": [
+        "Renderer passes without the RFC or network and generated files have no drift.",
+        "Each internal operation has exact callers, transaction mode, input/output schema and replay semantics; invalid authority fields are rejected.",
+        "All new fields have migration/default/version rules; old persisted tasks and operations remain inspectable."
+      ],
+      "deliverable": "Revision 3 contracts, generated prompts, schema fixtures and caller matrix; serialized specification assignment.",
+      "serialized_global": true,
+      "verification_command": "python3 tools/specgen/render.py --check (plus assignment-specific checks above)",
+      "integration_wave": 0
+    },
+    {
+      "id": "P01",
+      "title": "Implement shared types and strict validation for the new seams",
+      "owner": "internal/contract",
+      "write_roots": [
+        "internal/contract"
+      ],
+      "depends_on": [
+        "P00"
+      ],
+      "priority": "P0",
+      "status": "planned",
+      "steps": [
+        "Implement only the revision 3 shared DTOs/interfaces and schema primitives; preserve existing fault/result and canonicalization behavior.",
+        "Add worker-subject execution, job claim/result, context work item, output-slot binding, restore snapshot/overlay types and discriminated model decision validation.",
+        "Reject unknown fields, duplicate keys, invalid discriminator combinations and widened scopes; keep ordered transcript/proposal arrays ordered while canonicalizing declared sets.",
+        "Provide fixture-based contract tests that all package owners can reuse without importing sibling implementations."
+      ],
+      "required_tests": [
+        "All P00 golden documents round-trip and canonicalize identically.",
+        "Malformed model decisions cannot smuggle arbitrary operations, identity, grants or review decisions.",
+        "Revision 2 persisted envelopes remain readable under the declared compatibility policy."
+      ],
+      "deliverable": "Shared revision 3 baseline and executable schema fixtures.",
+      "serialized_global": true,
+      "verification_command": "go test ./internal/contract",
+      "integration_wave": 1
+    },
+    {
+      "id": "P02",
+      "title": "Reconcile toolchain and dependency evidence",
+      "owner": "foundation",
+      "write_roots": [
+        "go.mod",
+        "go.sum",
+        "tools.go",
+        "docs/implementation/dependencies.lock.json"
+      ],
+      "depends_on": [
+        "P01"
+      ],
+      "priority": "P0",
+      "status": "planned",
+      "steps": [
+        "Integration owner alone owns root go.mod/go.sum, tools.go if needed, and docs/implementation/dependencies.lock.json during this assignment.",
+        "Compare actual Go imports, pubspec.lock, Flutter/Dart metadata and adapter protocol documents with the lock; remove stale Fyne qualification claims and distinguish historical from current evidence.",
+        "Record exact existing pins and licenses. If a controlled repository runner or Serenity seam needs a new library, resolve and pin it here before downstream use; never silently download latest at runtime.",
+        "Keep unsupported provider hard caps and Serenity capabilities explicitly blocked. Record which controlled-fixture evidence and which real-service evidence are required.",
+        "Land this root change before child-package implementation begins; no root-writing lane runs concurrently with descendants."
+      ],
+      "required_tests": [
+        "Module graph, Go version and Flutter lock agree with committed manifests.",
+        "CI lock validation accepts this actual source tree and rejects a changed dependency hash.",
+        "No provider capability becomes qualified merely by editing a lock entry."
+      ],
+      "deliverable": "An honest dependency and capability lock; exact build commands and known prerequisites.",
+      "serialized_global": true,
+      "verification_command": "python3 tools/specgen/render.py --check (plus assignment-specific checks above)",
+      "integration_wave": 2
+    },
+    {
+      "id": "P03",
+      "title": "Bind worker principals and expose authenticated caller metadata",
+      "owner": "internal/identity",
+      "write_roots": [
+        "internal/identity"
+      ],
+      "depends_on": [
+        "P02"
+      ],
+      "priority": "P0",
+      "status": "planned",
+      "steps": [
+        "Add identity.current from the authenticated actor, exposing principal kind/scope only, never a credential.",
+        "Implement the internal worker-subject resolver from P00: a controller can resolve a configured worker to its own scoped principal, but cannot choose an arbitrary human identity.",
+        "Ensure personal chiefs, child chiefs and ordinary workers can be provisioned atomically by authorized configuration/bootstrap calls with stable worker-principal bindings.",
+        "Recheck revocation on every resolution and dispatch; preserve service-principal privileges only for controller bookkeeping."
+      ],
+      "required_tests": [
+        "A worker cannot obtain the owner identity or another worker's scope.",
+        "Revocation between context construction and dispatch denies the action.",
+        "Bootstrap/replay creates one chief principal; identity.current agrees over CLI, MCP and desktop."
+      ],
+      "deliverable": "Worker identity and caller-discovery operations with revocation tests.",
+      "serialized_global": false,
+      "verification_command": "go test ./internal/identity",
+      "integration_wave": 3
+    },
+    {
+      "id": "P04",
+      "title": "Route worker proposals through the common authorization boundary",
+      "owner": "internal/application",
+      "write_roots": [
+        "internal/application"
+      ],
+      "depends_on": [
+        "P03",
+        "P02"
+      ],
+      "priority": "P0",
+      "status": "planned",
+      "steps": [
+        "Implement WorkerOperator from the frozen contract as a controller-only capability; resolve worker actor through identity instead of accepting an actor JSON field.",
+        "For each proposal recheck current worker grants, bindings, installation restrictions, scope and operation allowlist before the ordinary application dispatcher runs.",
+        "Use deterministic submission identities derived from turn/proposal identity. Preserve original command IDs and result envelopes on replay, including refusals.",
+        "Support local IO outside transactions using existing Prepare/Perform/Finish; never nest network or model calls inside a database Unit.",
+        "Keep model-visible operations separate from controller internal methods and human decisions."
+      ],
+      "required_tests": [
+        "A malicious proposal for grant.create, review.decide or an internal owner operation is denied unless the explicit worker-facing contract permits it; human-required decisions always refuse.",
+        "Crash after proposal commit then redeliver: one domain mutation and same command result.",
+        "Pause/revoke between proposal and admission is observed by the real dispatcher."
+      ],
+      "deliverable": "A narrow authenticated proposal executor, usable by hosted and cooperative paths.",
+      "serialized_global": false,
+      "verification_command": "go test ./internal/application",
+      "integration_wave": 4
+    },
+    {
+      "id": "P05",
+      "title": "Resolve complete immutable worker configuration",
+      "owner": "internal/configuration",
+      "write_roots": [
+        "internal/configuration"
+      ],
+      "depends_on": [
+        "P02"
+      ],
+      "priority": "P0",
+      "status": "planned",
+      "steps": [
+        "Extend snapshots to resolve the exact worker, principal binding, instructions, skill version closure, tool bindings, execution profile, connection versions and classification constraints needed by context assembly.",
+        "Implement configuration prerequisites for runnable hosted workers; a missing profile/provider/budget must yield named diagnostics and remain unready.",
+        "Ensure chief/team creation through plans provisions identities and conversations through explicit owner ports, atomically with configuration changes.",
+        "Move organization/team/project export off the query transaction into the common durable/local-IO pipeline; register both export job and artifact metadata rather than returning invented IDs.",
+        "Preserve canonical import/export exclusions and cross-installation rebinding; export may not include secrets or execution history."
+      ],
+      "required_tests": [
+        "A new worker snapshot resolves all pinned dependencies, and a stale connection version blocks apply/dispatch.",
+        "Export result is readable through job.get and artifact.read and survives restart.",
+        "Organization export/import/export preserves definitions; exported credential references require explicit rebinding on another installation."
+      ],
+      "deliverable": "Runnable worker snapshots, honest prerequisites and durable configuration exports.",
+      "serialized_global": false,
+      "verification_command": "go test ./internal/configuration",
+      "integration_wave": 3
+    },
+    {
+      "id": "P06",
+      "title": "Complete connection setup and adapter validation actions",
+      "owner": "internal/connections",
+      "write_roots": [
+        "internal/connections"
+      ],
+      "depends_on": [
+        "P02"
+      ],
+      "priority": "P0",
+      "status": "planned",
+      "steps": [
+        "Define executable tool contracts for model calls, public HTTP reads, repository operations and supported memory reads using exact adapter schemas, separate from ExecutionProfile IDs.",
+        "Complete the secure-helper receipt handoff: custody a real reference, bind receipt to challenge/account/destinations/expiry and atomically apply the verified credential reference at Finish.",
+        "Generate connection.validate actions supported by the selected adapter; do not send an invented generic probe to adapters that accept only domain-specific actions.",
+        "Persist validation evidence/freshness and callback ownership, and complete the execution-side job when validation records.",
+        "Expose setup/probe prerequisites and blocked capabilities through discovery without secret bytes."
+      ],
+      "required_tests": [
+        "Real helper fixture completes a challenge; wrong account, replay, expiry and changed connection refuse.",
+        "Every built-in validation action passes its adapter's strict schema and completes job.get.",
+        "Validation freshness expires and stale validation cannot activate a changed tool or connection."
+      ],
+      "deliverable": "Usable setup/validation lifecycle and pinned executable tool mappings.",
+      "serialized_global": false,
+      "verification_command": "go test ./internal/connections",
+      "integration_wave": 3
+    },
+    {
+      "id": "P07",
+      "title": "Enforce authority on planned model and tool actions",
+      "owner": "internal/policy",
+      "write_roots": [
+        "internal/policy"
+      ],
+      "depends_on": [
+        "P02"
+      ],
+      "priority": "P0",
+      "status": "planned",
+      "steps": [
+        "Use the frozen worker-subject and context disclosure contracts to intersect installation/org/project/task/worker authority for every model call and proposal.",
+        "Validate all resolved context classifications and destinations before model dispatch, including skills, attachments, tool results and memory excerpts.",
+        "Bind exact reviews to final action bytes, connection account/version, destination, time window and repository preconditions; no broad conversational approval may stand in for review.decide.",
+        "Return actionable prerequisite/review/deny results that the hosted loop can persist and wait on without busy retry."
+      ],
+      "required_tests": [
+        "Empty tool bindings allow no external tool call even if discovery lists it.",
+        "A restricted attachment prevents a public-model request before any provider call.",
+        "Content/account/head changes invalidate the earlier review and require a new exact decision."
+      ],
+      "deliverable": "Policy integration for the real hosted loop, retaining deny-wins and human review.",
+      "serialized_global": false,
+      "verification_command": "go test ./internal/policy",
+      "integration_wave": 3
+    },
+    {
+      "id": "P08",
+      "title": "Close runtime budget and reservation accounting",
+      "owner": "internal/accounting",
+      "write_roots": [
+        "internal/accounting"
+      ],
+      "depends_on": [
+        "P02"
+      ],
+      "priority": "P0",
+      "status": "planned",
+      "steps": [
+        "Specify reservation ownership for root task, attempt, physical model/tool call, evaluation and responsibility cycle; avoid double-reserving the same ceiling as independent spend.",
+        "Enforce shared root/ancestor limits across parallel children and model calls; settle real provider usage once by operation/attempt identity.",
+        "Preserve unknown/advisory liabilities across report, cancellation, retry and restore; verification success is not provider cost evidence.",
+        "Expose aggregate spending, outstanding reservations and reasons a worker cannot proceed for doctor and desktop projections."
+      ],
+      "required_tests": [
+        "Two competing children cannot exceed one root/ancestor budget.",
+        "Duplicate observation settlement is idempotent; lost billing leaves the reservation visible.",
+        "Many empty reasoning cycles stop at the configured aggregate bound; zero-spend bootstrap remains usable."
+      ],
+      "deliverable": "Runtime accounting rules proven with competing actual owner transactions.",
+      "serialized_global": false,
+      "verification_command": "go test ./internal/accounting",
+      "integration_wave": 3
+    },
+    {
+      "id": "P09",
+      "title": "Publish named outputs and context artifacts durably",
+      "owner": "internal/artifacts",
+      "write_roots": [
+        "internal/artifacts"
+      ],
+      "depends_on": [
+        "P02"
+      ],
+      "priority": "P0",
+      "status": "planned",
+      "steps": [
+        "Implement artifact metadata/provenance additions for output name, task/run/attempt, producing operation and source artifacts; validate scope ownership through the frozen ports.",
+        "Support the staged-to-published handoff for contexts, model text, tool results, verifier requests and verdicts using stable source identities.",
+        "Bind an output name to one published artifact digest for a reported attempt; replacement requires a new report/attempt version and never rewrites accepted checks.",
+        "Provide bounded enumerations/pins for backups and exports, integrity verification and abandoned-staging cleanup with recovery-safe retention."
+      ],
+      "required_tests": [
+        "Crash between blob publish and metadata commit can replay without a duplicate artifact or orphaned result reference.",
+        "A task cannot bind a foreign artifact or replace another attempt's output.",
+        "Reported output bytes remain readable after restart; missing/corrupt bytes fail verification and backup."
+      ],
+      "deliverable": "Named output/provenance registry and reusable durable publication.",
+      "serialized_global": false,
+      "verification_command": "go test ./internal/artifacts",
+      "integration_wave": 3
+    },
+    {
+      "id": "P10",
+      "title": "Add durable intent delivery and complete chat queries",
+      "owner": "internal/messaging",
+      "write_roots": [
+        "internal/messaging"
+      ],
+      "depends_on": [
+        "P02"
+      ],
+      "priority": "P0",
+      "status": "planned",
+      "steps": [
+        "Add controller/execution-facing ready-recipient discovery and atomic turn admission/ack fences using message ID plus recipient ID as the deduplication identity.",
+        "Do not acknowledge a worker message until an execution turn or safe-boundary injection is committed in the same unit; reading a mailbox is not processing.",
+        "Implement authorized conversation.message.list with stable paging, sender-inclusive history, current participant checks and the declared history-disclosure boundary for newly joined participants.",
+        "Expose preview/unread/read-marker projections and exact meaningful-activity ordering; routine agent coordination must not reorder human chats.",
+        "Support durable worker replies/task links/group attachments and cancellation or clarification correlation without parsing free text into authority."
+      ],
+      "required_tests": [
+        "Lost ack/restart admits one turn and one reply; multiple recipients each get their own delivery.",
+        "Reopened desktop sees both previously sent and received messages without relying on window memory.",
+        "A newly joined participant cannot read earlier undisclosed history, and quiet worker chatter leaves unread/order unchanged."
+      ],
+      "deliverable": "Durable message-to-turn inbox seam and complete conversation read surface.",
+      "serialized_global": false,
+      "verification_command": "go test ./internal/messaging",
+      "integration_wave": 3
+    },
+    {
+      "id": "P11",
+      "title": "Make tasks startable and unblock dependency progress",
+      "owner": "internal/tasks",
+      "write_roots": [
+        "internal/tasks"
+      ],
+      "depends_on": [
+        "P02"
+      ],
+      "priority": "P0",
+      "status": "planned",
+      "steps": [
+        "Implement versioned task.start as the explicit draft-to-ready public path using existing applyTransition, preserving draft creation semantics.",
+        "Recheck prerequisites, sealed acceptance, budgets, dependencies and worker binding at start; enqueue atomically and deduplicate the current accepted task version.",
+        "Replace preknown-output-digest dependence with sealed named-output checks from P00; only digest checks for known content require an expected digest at task admission.",
+        "Record and consume verified evidence through an explicit owner port, then wake dependent tasks only after required children independently succeed.",
+        "Handle reassignment or pending-input changes for already queued tasks: invalidate/supersede old queued runs and pin the new contract rather than executing stale work; preserve cancellation/retry fences."
+      ],
+      "required_tests": [
+        "Public create then start creates exactly one ready run; duplicate start/key and concurrent start behave deterministically.",
+        "A generated report whose bytes were unknown at admission can satisfy a sealed schema/presence check, but a worker assertion cannot.",
+        "Failed child, stale accepted inputs, cancellation and changed assignment prevent old queued work from starting."
+      ],
+      "deliverable": "Usable task lifecycle and generated-output acceptance without weakening verification.",
+      "serialized_global": false,
+      "verification_command": "go test ./internal/tasks",
+      "integration_wave": 3
+    },
+    {
+      "id": "P12",
+      "title": "Finish effect reconciliation and durable callback ownership",
+      "owner": "internal/effects",
+      "write_roots": [
+        "internal/effects"
+      ],
+      "depends_on": [
+        "P02"
+      ],
+      "priority": "P0",
+      "status": "planned",
+      "steps": [
+        "Persist an explicit callback route and dispatch mode outside adapter Action parameters; validate source/owner linkage so arbitrary JSON cannot select an execution callback.",
+        "Replace operation.reconcile's stalled job with a separately admitted bounded read linked to the original logical effect, exact prior attempt/provider reference and review/policy constraints.",
+        "Return a dispatch mode of reconcile only for the admitted lookup; controller must call Adapter.Reconcile, never Invoke on original mutation bytes.",
+        "Record delayed/contradictory evidence into the original effect without allowing later failure to erase earlier uncertainty or established success.",
+        "Use fair pending scans/cursors so unresolved operations cannot permanently hide new dispatchable work beyond the batch limit."
+      ],
+      "required_tests": [
+        "Lost write response followed by reconcile produces one write and only authorized read calls; never a second write.",
+        "A reconciliation job reaches a real terminal/unknown disposition and duplicate callbacks do not settle twice.",
+        "More than 100 blocked operations do not starve a later ready operation."
+      ],
+      "deliverable": "Executable reconciliation and explicit callback routing with crash tests.",
+      "serialized_global": false,
+      "verification_command": "go test ./internal/effects",
+      "integration_wave": 3
+    },
+    {
+      "id": "P13",
+      "title": "Finish Responses-to-runtime integration contract",
+      "owner": "internal/adapters/responses",
+      "write_roots": [
+        "internal/adapters/responses"
+      ],
+      "depends_on": [
+        "P02"
+      ],
+      "priority": "P0",
+      "status": "planned",
+      "steps": [
+        "Retain the existing adapter and protocol implementation. Validate runtime-created actions against zatiti.responses.action/v1 and expose fixtures using actual context artifacts/tool closure.",
+        "Split OpenAI conversation/session preparation from the model call into separately admitted, journaled single-call effects. Persist the session handle before the model call; retain unknown preparation outcome and never use an empty conversation as proof of nonexecution. P00 must add the exact prepare_session action and pinned session-reference schema.",
+        "Define normalization for text, tool_proposals, continuation, refusal, truncation and malformed output; never execute model proposals inside the adapter.",
+        "Ensure request-context and output artifacts can be published by controller and consumed under their normalized stable references.",
+        "Keep one physical call per dispatch, explicit price/cost/disclosure limits, no hidden SDK retries and unsupported guarantees visible.",
+        "Extend protocol fixture coverage for multi-turn tool results and the exact proposed runtime stop behavior."
+      ],
+      "required_tests": [
+        "Action/context produced by execution is accepted by this real adapter without schema bypass.",
+        "One model tool proposal returns inert typed data; malformed/foreign source-context proposals fail.",
+        "Lost response, missing usage and truncation retain honest disposition and cost.",
+        "Call counters observe at most one HTTP request per claimed effect; crash between prepare_session and model_step does not repeat either call, and reconciliation never invents missing usage."
+      ],
+      "deliverable": "Real adapter contract fixtures and output semantics for the worker loop.",
+      "serialized_global": false,
+      "verification_command": "go test ./internal/adapters/responses",
+      "integration_wave": 3
+    },
+    {
+      "id": "P14",
+      "title": "Implement durable worker turns and automatic hosted claims",
+      "owner": "internal/execution",
+      "write_roots": [
+        "internal/execution"
+      ],
+      "depends_on": [
+        "P03",
+        "P05",
+        "P08",
+        "P10",
+        "P11",
+        "P02"
+      ],
+      "priority": "P0",
+      "status": "planned",
+      "steps": [
+        "Create execution-owned turns for chat, task and responsibility triggers; use unique trigger/recipient identity and persist accountable source actor, worker, scope, limits and configuration revision.",
+        "Admit queued hosted runs automatically through the same fenced claim rules as cooperative run.claim; never auto-claim cooperative runs as hosted.",
+        "Add bounded/fair pending and claim operations for controller. Claim/run generation, lease expiry, worker pause and installation pause must be durable.",
+        "Allow bounded chief conversation turns before a task exists so the chief can clarify or propose configuration; do not require a task merely to create the first task.",
+        "Persist typed waiting reasons for missing provider, clarification, review, tool completion, dependency and budget; wakes revalidate current state."
+      ],
+      "required_tests": [
+        "Message to an idle chief creates one durable turn; a duplicate creates none.",
+        "Queued hosted run gets an attempt without a human calling run.claim; cooperative run stays available to its external worker.",
+        "Controller restart fences stale claims, respects pause/cancel and does not reset a root's cumulative limits."
+      ],
+      "deliverable": "A durable intake/claim state machine shared by chat and task execution.",
+      "serialized_global": false,
+      "verification_command": "go test ./internal/execution",
+      "integration_wave": 4
+    },
+    {
+      "id": "P15",
+      "title": "Build and publish the actual model context",
+      "owner": "internal/execution",
+      "write_roots": [
+        "internal/execution"
+      ],
+      "depends_on": [
+        "P14",
+        "P06",
+        "P07",
+        "P09",
+        "P13",
+        "P02"
+      ],
+      "priority": "P0",
+      "status": "planned",
+      "steps": [
+        "Implement context prepare/perform/commit from P00. Prepare resolves pinned configuration/task/history/tool/memory references in a read transaction; perform reads bounded artifact bytes and stages outside the Unit; commit validates pins and publishes metadata/lineage.",
+        "Build zatiti.context/v1 in exact transcript order from worker instructions, immutable skill closure, accepted task, authorized inbox, selected memory, prior outputs and tool results. Mark untrusted parts by origin.",
+        "Carry only allowed tool schemas; empty bindings yield no tools. Enforce total token/byte limits, classification and destination constraints before dispatch.",
+        "Construct exact Responses action fields schema, kind, context_artifact, max_output_tokens, tool_contract_versions and optional continuation_reference. Resolve actual Tool and Connection refs/account; remove profile-as-tool and hardcoded connection version assumptions.",
+        "Advance context every turn/step; retained contexts remain immutable and readable after source memory/config changes."
+      ],
+      "required_tests": [
+        "Produced context and action pass real adapter schemas, then a controlled provider sees the intended ordered messages.",
+        "Missing instruction bytes, stale config or out-of-scope memory refuse before network IO.",
+        "A tool result appears once in the next context; previous request context bytes never change."
+      ],
+      "deliverable": "Persisted model-ready context and schema-valid model effects.",
+      "serialized_global": false,
+      "verification_command": "go test ./internal/execution",
+      "integration_wave": 5
+    },
+    {
+      "id": "P16",
+      "title": "Interpret model responses into bounded governed work",
+      "owner": "internal/execution",
+      "write_roots": [
+        "internal/execution"
+      ],
+      "depends_on": [
+        "P15",
+        "P04",
+        "P12",
+        "P02"
+      ],
+      "priority": "P0",
+      "status": "planned",
+      "steps": [
+        "Replace unconditional prepare-next-model-step behavior with the decision state machine in contract-proposals.md: reply/clarify, local proposal, external proposal, delegate, wait, complete, refused/incomplete.",
+        "Strictly validate normalized ModelOutput and source_context against the dispatched request. Admit proposals via the worker operator and deterministic turn/proposal keys; resolve current tool/connection/bindings independently of model text.",
+        "For local management operations drive existing draft/plan/apply/task/responsibility APIs under worker authority. Report missing prerequisites or exact reviews as structured pending state and human-facing messages.",
+        "For external tools prepare effects and await their observation; append published tool result and resume with a new context. Never treat accepted as confirmed success.",
+        "Publish final reply/output artifacts, record report through the trusted internal equivalent of attempt.report and stop on completion, cancellation, timeout, root/model-step bound or unresolved effect. Heartbeats extend only an eligible live lease."
+      ],
+      "required_tests": [
+        "Controlled model requests organization/task creation, a HTTP read, then a final report; real domain owners receive the calls and one final reply appears.",
+        "Duplicate proposal, injection in fetched content, fabricated human approval and unauthorized connection cannot produce effects.",
+        "Final output stops model calls; accepted/unknown external effect blocks dependent work; malformed output yields a durable bounded failure."
+      ],
+      "deliverable": "The missing intent-to-work interpreter and useful hosted loop.",
+      "serialized_global": false,
+      "verification_command": "go test ./internal/execution",
+      "integration_wave": 6
+    },
+    {
+      "id": "P17",
+      "title": "Complete responsibility reasoning and event wakes",
+      "owner": "internal/scheduling",
+      "write_roots": [
+        "internal/scheduling"
+      ],
+      "depends_on": [
+        "P14",
+        "P11",
+        "P02"
+      ],
+      "priority": "P0",
+      "status": "planned",
+      "steps": [
+        "Consume durable cycle results from execution containing source responsibility/version, artifacts, child task IDs and bounded next-wake decision.",
+        "Validate useful-work/no-work/wait/escalate outcomes; record cycle and arm the next wake atomically, idempotent by cycle turn identity.",
+        "Implement authenticated event/signal and reply/dependency triggers with persisted source-event cursors, not arbitrary string matching or polling every model tick.",
+        "Recheck pause/cancel, minimum reconsideration intervals, DST/misfire and aggregate limits at wake admission; cap catch-up enumeration and batch work.",
+        "Make responsibility source linkage visible on cycle tasks and schedules so desktop can show real schedule/time-zone relationships."
+      ],
+      "required_tests": [
+        "First cycle creates bounded work and a second wake without manual _scheduling.cycle.record.",
+        "No-work decisions consume bounded accounted spend; duplicate event/restart does not repeat a cycle.",
+        "Pause versus due-wake and reply versus wake races admit at most the permitted work."
+      ],
+      "deliverable": "An ongoing-work cycle that actually recurs and remains bounded.",
+      "serialized_global": false,
+      "verification_command": "go test ./internal/scheduling",
+      "integration_wave": 5
+    },
+    {
+      "id": "P18",
+      "title": "Drive independent verification and bind real output evidence",
+      "owner": "internal/execution",
+      "write_roots": [
+        "internal/execution"
+      ],
+      "depends_on": [
+        "P16",
+        "P09",
+        "P11",
+        "P02"
+      ],
+      "priority": "P0",
+      "status": "planned",
+      "steps": [
+        "Expose pending/claim/request/record verification work separately from generic jobs, or implement the exact unified mapping frozen in P00; never leave execution_verification_jobs undiscoverable.",
+        "Resolve named output slots to published attempt artifacts and populate VerificationRequest.Outputs; seal the exact request digest before dispatch.",
+        "Invoke the trusted verifier outside all Units through the controller; record only results from that registered verifier identity/code digest, never a worker-supplied passed flag.",
+        "Publish request/verdict artifacts and hand verified evidence to tasks before its success transition. Distinguish failed checks, unavailable verifier, manual acceptance and interruption.",
+        "Make claim/record/restart idempotent and preserve unknown costs separately from a verification verdict."
+      ],
+      "required_tests": [
+        "A reported task reaches succeeded via real NewVerifier and tasks evidence, without directly inserting SQL rows or calling record from a test.",
+        "Missing bytes, wrong digest, tampered acceptance/profile or failed required child prevents success.",
+        "Crash at verifier claim/result publication/record yields one verdict with the correct task/attempt binding."
+      ],
+      "deliverable": "A complete report-to-independent-result path.",
+      "serialized_global": false,
+      "verification_command": "go test ./internal/execution",
+      "integration_wave": 7
+    },
+    {
+      "id": "P19",
+      "title": "Run sealed skill evaluations to completion",
+      "owner": "internal/skills",
+      "write_roots": [
+        "internal/skills"
+      ],
+      "depends_on": [
+        "P18",
+        "P02"
+      ],
+      "priority": "P0",
+      "status": "planned",
+      "steps": [
+        "Implement the frozen local job executor for skill.evaluate, preserving its accepted skill/version, fixtures, posture, limits and verifier profile.",
+        "Use published fixture artifacts and real verification rather than storing pending evaluation metadata forever.",
+        "Wire terminal results back into the skills-owned evaluation row and execution job; attach observation/evidence refs so activation can use them.",
+        "Dry-run, sandbox and advisory posture must expose their actual guarantees; never advertise unavailable containment.",
+        "Deduplicate claims/results and keep cancellation, unknown effects and changed skill bytes visible."
+      ],
+      "required_tests": [
+        "An imported skill's evaluation job finishes and activation consumes its real evidence.",
+        "Failing fixture blocks activation; changed skill version cannot reuse old qualification.",
+        "Restart during evaluation does not rerun an uncertain external action or invent a pass."
+      ],
+      "deliverable": "Executable skill evaluation jobs and owner completion callbacks.",
+      "serialized_global": false,
+      "verification_command": "go test ./internal/skills",
+      "integration_wave": 8
+    },
+    {
+      "id": "P20",
+      "title": "Implement controlled repository verification",
+      "owner": "internal/execution",
+      "write_roots": [
+        "internal/execution"
+      ],
+      "depends_on": [
+        "P18",
+        "P02"
+      ],
+      "priority": "P1",
+      "status": "planned",
+      "steps": [
+        "Implement repository_patch_applies and repository_command using the controlled runner/profile fixed by P00/P02 inside the execution root.",
+        "Checkout the pinned repository/base/tree into a fresh disposable workspace; apply only the reported patch artifact and run only accepted argv/env/check definitions.",
+        "Bound wall time, child processes, output bytes, disk and permitted network according to the declared runner capability; do not call ordinary subprocess isolation a sandbox.",
+        "Capture base/head, patch hash, runner/version, exit status and output artifacts as independent evidence; clean up only the runner's own workspace.",
+        "If a required containment guarantee is unavailable, refuse that profile with a named prerequisite and preserve the task result as unverified."
+      ],
+      "required_tests": [
+        "Valid patch/check passes; nonapplying patch, failing command and wrong repository head fail independently.",
+        "Timeout terminates the owned process group and retains bounded diagnostics.",
+        "Worker-authored passing logs or a modified verifier command cannot satisfy the sealed checks."
+      ],
+      "deliverable": "Engineering-task verification, with precise supported runner guarantees.",
+      "serialized_global": false,
+      "verification_command": "go test ./internal/execution",
+      "integration_wave": 8
+    },
+    {
+      "id": "P21",
+      "title": "Complete cooperative recovery and run export jobs",
+      "owner": "internal/execution",
+      "write_roots": [
+        "internal/execution"
+      ],
+      "depends_on": [
+        "P18",
+        "P02",
+        "P20"
+      ],
+      "priority": "P1",
+      "status": "planned",
+      "steps": [
+        "Make cooperative claim return a published context artifact rather than the current digest-only synthetic envelope; show advisory posture and required capabilities.",
+        "Resume waiting runs only after unknown effects/leases are resolved under explicit recovery policy; enforce cumulative root/model-step/deadline limits across replacement attempts.",
+        "Implement run.export as a durable bounded job including accepted task, contexts, attempts, effects, outputs, costs and verifier evidence with source digests.",
+        "Provide terminal job callbacks and export artifact metadata; expose recovery obligations in task/run inspection.",
+        "Verify report outputs belong to the claimed worker/attempt and current lease."
+      ],
+      "required_tests": [
+        "External worker claims, checkpoints, reports and receives independently verified result through supported public operations.",
+        "Lost claim acknowledgement replays the same lease/context and stale heartbeat cannot revive it.",
+        "run.export reaches succeeded and produces readable canonical history; restart preserves uncertainty."
+      ],
+      "deliverable": "Usable external-worker lifecycle and run history export.",
+      "serialized_global": false,
+      "verification_command": "go test ./internal/execution",
+      "integration_wave": 9
+    },
+    {
+      "id": "P22",
+      "title": "Drive turns, contexts and model/tool work in the controller",
+      "owner": "internal/controller",
+      "write_roots": [
+        "internal/controller"
+      ],
+      "depends_on": [
+        "P16",
+        "P17",
+        "P02"
+      ],
+      "priority": "P0",
+      "status": "planned",
+      "steps": [
+        "Extend tick with bounded fair work phases: discover worker recipients, atomically admit turns, claim hosted work, prepare/publish context, prepare effects, settle observations and resume eligible turns.",
+        "Use internal owner ports; never query another package's tables or bypass worker authority. Remove the monitoring-only ready scan as the sole stranded-task response.",
+        "Journal every physical-call boundary, publication and callback before advancing; shutdown/restart preserves already admitted work and generation fencing.",
+        "Use explicit stored route/mode from effects; provider parameters remain strict. Dispatch Invoke versus Reconcile correctly once P23 provides reconciliation work.",
+        "Publish actionable controller obligations/health for missing profiles, blocked jobs and stalled turns with scoped IDs and no secret logs."
+      ],
+      "required_tests": [
+        "A real message plus controlled model reaches a reply and verified task result while no client stays open.",
+        "Crash before claim, after context publication and after provider response resumes safely without duplicate model/tool mutations.",
+        "Blocked work beyond one batch does not starve an eligible later item; pause closes admission promptly."
+      ],
+      "deliverable": "The production autonomous worker driver.",
+      "serialized_global": false,
+      "verification_command": "go test ./internal/controller",
+      "integration_wave": 7
+    },
+    {
+      "id": "P23",
+      "title": "Attach verifier, local jobs and reconciliation driver",
+      "owner": "internal/controller",
+      "write_roots": [
+        "internal/controller"
+      ],
+      "depends_on": [
+        "P22",
+        "P18",
+        "P19",
+        "P21",
+        "P12",
+        "P02"
+      ],
+      "priority": "P0",
+      "status": "planned",
+      "steps": [
+        "Add declared verifier/job collaborators and execute them outside Units with bounded concurrency, deadlines and explicit owner callbacks.",
+        "Drive verification pending/claim/result records; retain independent verifier identity and publish staged request/verdict bytes before domain completion.",
+        "Register supported jobs by exact owner/operation; support skill evaluation, configuration/run exports and reconciliation. Keep unknown job kinds pending with a visible requirement.",
+        "For reconciliation consume the new admitted read dispatch and call Adapter.Reconcile once; route the observation back to the original effect owner and finish the job.",
+        "Repair post-claim crash recovery with a durable claim lookup rather than phaseStranded merely because the current pending scan cannot reveal a claimed job version."
+      ],
+      "required_tests": [
+        "Every registered job kind reaches its actual completion through real owners.",
+        "Crash after claim commit but before ack can inspect the exact claim and records unknown or safely resumes according to its mode.",
+        "Reconcile call counter proves one original write and bounded lookup reads; verifier cannot be replaced by a worker runner."
+      ],
+      "deliverable": "Running durable jobs and independent verification in production.",
+      "serialized_global": false,
+      "verification_command": "go test ./internal/controller",
+      "integration_wave": 10
+    },
+    {
+      "id": "P24",
+      "title": "Wire the implemented runtime and secure setup helper",
+      "owner": "cmd/zatiti",
+      "write_roots": [
+        "cmd/zatiti"
+      ],
+      "depends_on": [
+        "P23",
+        "P06",
+        "P13",
+        "P02"
+      ],
+      "priority": "P0",
+      "status": "planned",
+      "steps": [
+        "Import/register responses.New and remove the stale unimplemented-adapter entry; load only valid explicit profiles.",
+        "Construct trusted verifier, local job adapters and worker operator; attach every supported collaborator in superviseController instead of only Identity/Blobs.",
+        "Implement the documented installation-time helper mechanism for credential import/consent receipts using secure local IO; profile/account secrets never enter normal operation JSON or model context.",
+        "Expose startup doctor requirements when provider, price, currency, tools, helper or runner are missing. Test registrations against the operation/job catalogs.",
+        "Keep bootstrap usable with missing paid providers and make readiness diagnostics distinguish storage-only, chat-ready and task-ready."
+      ],
+      "required_tests": [
+        "The production binary accepts a valid Responses profile, starts an actual controlled model turn and attaches the real verifier.",
+        "Supported jobs are registered; a catalog-supported job lacking a runner fails an assembly test.",
+        "Fresh setup through CLI/MCP helper mechanics establishes an opaque usable connection without printing secrets."
+      ],
+      "deliverable": "Production wiring and a workable credential-setup entrypoint.",
+      "serialized_global": false,
+      "verification_command": "go test ./cmd/zatiti",
+      "integration_wave": 11
+    },
+    {
+      "id": "P25",
+      "title": "Make first-use guidance reach actual useful work",
+      "owner": "internal/installation",
+      "write_roots": [
+        "internal/installation"
+      ],
+      "depends_on": [
+        "P24",
+        "P02"
+      ],
+      "priority": "P0",
+      "status": "planned",
+      "steps": [
+        "Replace the current draft-only FirstTaskSequence with a truthful sequence for configure provider/budget/tool/worker, create/start task and inspect verified output.",
+        "Keep zero-spend initialization separate from paid work and expose missing setup requirements rather than requiring users to self-publish arbitrary verifier qualification evidence.",
+        "Provision trusted installed verifier profiles/evidence through the installation contract; capability evidence must reflect a real supported verifier build.",
+        "Report stalled turns, unclaimed jobs, unavailable memory/runner and outstanding liabilities in doctor/status.",
+        "Test first-task documentation as executable commands ending in a verified artifact, plus an unconfigured installation that remains honest and usable."
+      ],
+      "required_tests": [
+        "Fresh installation can complete the documented controlled-fixture first task; terminal state is succeeded, not draft.",
+        "Missing provider/currency yields named actionable requirements and no spend.",
+        "Untrusted/self-published verifier evidence does not manufacture installed capability qualification."
+      ],
+      "deliverable": "First-use diagnostics and a first-task recipe that does work.",
+      "serialized_global": false,
+      "verification_command": "go test ./internal/installation",
+      "integration_wave": 12
+    },
+    {
+      "id": "P26",
+      "title": "Finish memory projections and governed context integration",
+      "owner": "internal/memory",
+      "write_roots": [
+        "internal/memory"
+      ],
+      "depends_on": [
+        "P02"
+      ],
+      "priority": "P1",
+      "status": "planned",
+      "steps": [
+        "Add authorized memory.list/source/freshness/lineage projections for the desktop and context builder; do not invent claims when Serenity is unavailable.",
+        "Expose context selection as a governed durable job with exact brain revisions, scope, classification, freshness and disclosure/spend bounds.",
+        "Persist selected excerpts and provenance into immutable artifacts; use completion callbacks to finish owner/job state.",
+        "Implement promotion/retraction follow-up queue and corrected-source lineage so local metadata alone never claims the upstream write succeeded.",
+        "Keep unavailable upstream guarantees named, with read-only/advisory/enforced capabilities distinguished."
+      ],
+      "required_tests": [
+        "Unauthorized brain is not queried; a revoked binding excludes future context but retained old context is unchanged.",
+        "Stale/missing provenance produces explicit prerequisite rather than fabricated memory.",
+        "Duplicate completion and restart preserve one selection/promotion lineage."
+      ],
+      "deliverable": "Complete local memory read/projection and governed job contracts.",
+      "serialized_global": false,
+      "verification_command": "go test ./internal/memory",
+      "integration_wave": 3
+    },
+    {
+      "id": "P27",
+      "title": "Implement the missing qualified Serenity service seam",
+      "owner": "internal/adapters/serenity",
+      "write_roots": [
+        "internal/adapters/serenity"
+      ],
+      "depends_on": [
+        "P26",
+        "P02"
+      ],
+      "priority": "P1",
+      "status": "planned",
+      "steps": [
+        "Begin with PROTOCOL.md and current capability report: all actual operations currently refuse and no physical request is made.",
+        "Qualify a public pinned service/read facade against the frozen local memory schemas. Implement only the operations whose actual upstream guarantees meet freshness, scope, bounded cost and disclosure requirements.",
+        "Translate read/context results into staged artifacts with provenance and pinned brain/index revisions; keep unsupported writes disabled with exact gaps.",
+        "For writer mode require one writer owner, stable command IDs, lookup/reconciliation and actual aggregate cost enforcement; implementing these upstream is an external prerequisite, not permission to edit another repository.",
+        "Record reproducible protocol-fixture evidence and required real-service qualification; do not relabel the current capability-only refusal adapter as working memory."
+      ],
+      "required_tests": [
+        "Qualified reads issue bounded requests and return real claims/provenance; unauthorized destination issues zero calls.",
+        "Timeout/lost write ack remains unknown with no replay; unavailable required guarantee stays disabled.",
+        "Backup/export/freshness behavior is exercised against the pinned service before writer mode is advertised."
+      ],
+      "deliverable": "A functioning qualified Serenity adapter or a precise upstream blocker per required capability.",
+      "serialized_global": false,
+      "verification_command": "go test ./internal/adapters/serenity",
+      "integration_wave": 4
+    },
+    {
+      "id": "P28",
+      "title": "Complete memory lifecycle against the qualified adapter",
+      "owner": "internal/memory",
+      "write_roots": [
+        "internal/memory"
+      ],
+      "depends_on": [
+        "P27",
+        "P16",
+        "P02",
+        "P26"
+      ],
+      "priority": "P1",
+      "status": "planned",
+      "steps": [
+        "Connect selection/recall/curation/promotion/retraction jobs to the real adapter modes and record normalized result artifacts.",
+        "Reconcile unknown memory writes by stable command identity and propagate corrections to derived/promoted claims without overwriting provenance.",
+        "Return actionable setup prerequisites if the installation's personal/org/worker brain has no qualified binding.",
+        "Integrate actual selected memory into hosted contexts while preserving current revocation and classification checks."
+      ],
+      "required_tests": [
+        "A scoped turn recalls real selected claims with source refs and later audit reads exact old context.",
+        "Correction/retraction survives restart and never leaves a promoted claim falsely current.",
+        "Hard-bound mode refuses advisory/unsupported provider profiles."
+      ],
+      "deliverable": "End-to-end usable memory, gated on explicit upstream capability evidence.",
+      "serialized_global": false,
+      "verification_command": "go test ./internal/memory",
+      "integration_wave": 7
+    },
+    {
+      "id": "P29",
+      "title": "Add safe storage snapshot and offline restore mechanics",
+      "owner": "internal/storage",
+      "write_roots": [
+        "internal/storage"
+      ],
+      "depends_on": [
+        "P02"
+      ],
+      "priority": "P1",
+      "status": "planned",
+      "steps": [
+        "Implement the narrow backup inventory/restore capability frozen in P00; expose migrations/schema checks through a typed capability, not arbitrary domain SQL access.",
+        "Validate an imported SQLite image and schema versions in staging before replacing the live file; checkpoint/close writers and prevent WAL mixing.",
+        "Provide crash-safe replacement/rollback markers and ownership/generation fencing for entrypoint/controller use while domain services are closed.",
+        "Support merge of the typed monotonic recovery overlay through owner migrations/ports after reopen; storage must not invent domain reconciliation.",
+        "Restore remains paused and cannot reopen the public mutation surface until verification/overlay completion."
+      ],
+      "required_tests": [
+        "Crash at each staged-image/rename/reopen boundary yields a recoverable old or new database, never a mixed WAL.",
+        "Wrong installation/schema/image digest refuses before replacement.",
+        "Reopened database has a newer generation and exactly one writer."
+      ],
+      "deliverable": "Narrow real database rewind primitive and recovery journal.",
+      "serialized_global": false,
+      "verification_command": "go test ./internal/storage",
+      "integration_wave": 3
+    },
+    {
+      "id": "P30",
+      "title": "Support portable encrypted backup custody and blob restore",
+      "owner": "internal/platform",
+      "write_roots": [
+        "internal/platform"
+      ],
+      "depends_on": [
+        "P02"
+      ],
+      "priority": "P1",
+      "status": "planned",
+      "steps": [
+        "Implement typed encrypted blob inventory/import and backup key-transfer mechanics fixed by P00 without exposing raw keys in manifests/API results.",
+        "Backups must be recoverable in a clean destination using explicit secure key provisioning; current opaque references to a different secret store are insufficient.",
+        "Verify every imported artifact digest and encrypt under the destination custody policy; retain restricted permissions and symlink defenses.",
+        "Keep failed restore staging isolated and cleanable without touching live user data."
+      ],
+      "required_tests": [
+        "Backup key provisioned to a clean destination opens the bundle; missing key returns prerequisite_missing.",
+        "Corrupt/truncated artifact, symlinked destination or wrong installation cannot replace live blobs.",
+        "Secrets stay absent from ordinary logs, manifests and exported configuration."
+      ],
+      "deliverable": "Blob/key capabilities required for an actual portable restore.",
+      "serialized_global": false,
+      "verification_command": "go test ./internal/platform",
+      "integration_wave": 3
+    },
+    {
+      "id": "P31",
+      "title": "Build complete backup bundles and monotonic recovery overlays",
+      "owner": "internal/installation",
+      "write_roots": [
+        "internal/installation"
+      ],
+      "depends_on": [
+        "P25",
+        "P29",
+        "P30",
+        "P09",
+        "P02"
+      ],
+      "priority": "P1",
+      "status": "planned",
+      "steps": [
+        "Replace empty manifest lists with actual schema versions, encrypted artifact bytes/pins, brain exports/revisions, adapter profiles and retained obligations, all from narrow owner ports.",
+        "Capture a consistent paused/quiesced snapshot; required unavailable brain/blob capability must block a complete backup rather than yield success.",
+        "Include current credential/grant revocations, dispatch claims, provider keys, unknown effects/costs and cancellations in the authenticated monotonic overlay with enough records to merge, not just a summary digest.",
+        "Validate source binding/version/key prerequisites and stage a controller-readable restore work item; expose verification and progress through installation.job.get.",
+        "Record completion only after actual database/blob rewind and overlay merge. Never auto-resume."
+      ],
+      "required_tests": [
+        "Back up real artifact and domain state, restore elsewhere, read identical bytes and find the same accepted task/history.",
+        "A post-backup revocation and unknown write remain effective after restore.",
+        "Missing brain export or referenced blob blocks complete backup; partial backup cannot be advertised as complete."
+      ],
+      "deliverable": "Complete recoverable backups and explicit paused restore protocol.",
+      "serialized_global": false,
+      "verification_command": "go test ./internal/installation",
+      "integration_wave": 13
+    },
+    {
+      "id": "P32",
+      "title": "Coordinate real restore outside the running database",
+      "owner": "internal/controller",
+      "write_roots": [
+        "internal/controller"
+      ],
+      "depends_on": [
+        "P23",
+        "P31",
+        "P02"
+      ],
+      "priority": "P1",
+      "status": "planned",
+      "steps": [
+        "Implement an exclusive restore handoff that quiesces work, drains/records in-flight effects, closes admission and hands the sealed work item to entrypoint storage lifecycle code.",
+        "Do not run database replacement as an ordinary JobRunner that retains a live application/database handle.",
+        "Journal pre/post swap phases and merge monotonic owner evidence on reopen, then record installation/execution job result under the new generation.",
+        "Preserve unknown external effects and paused state across failure, restart and cancellation."
+      ],
+      "required_tests": [
+        "Actual database state changes to the selected backup while newer revocations/unknown liabilities survive.",
+        "Crash during swap/overlay merge resumes paused and does not dispatch a provider call.",
+        "No old-generation controller/worker can commit after reopen."
+      ],
+      "deliverable": "Exclusive controller restore coordination.",
+      "serialized_global": false,
+      "verification_command": "go test ./internal/controller",
+      "integration_wave": 14
+    },
+    {
+      "id": "P33",
+      "title": "Wire restore lifecycle and recovery startup",
+      "owner": "cmd/zatiti",
+      "write_roots": [
+        "cmd/zatiti"
+      ],
+      "depends_on": [
+        "P24",
+        "P32",
+        "P02"
+      ],
+      "priority": "P1",
+      "status": "planned",
+      "steps": [
+        "Implement startup detection of pending restore markers before normal assembly and listener admission.",
+        "Close old application/server/database in order, invoke narrow validated restore capability, reassemble owners and merge overlays, then expose paused status.",
+        "Attach restore coordinator through an explicit lifecycle seam; keep work/secret access out of ordinary client processes.",
+        "Provide machine-readable recoverable failure and exact resume prerequisites."
+      ],
+      "required_tests": [
+        "A subprocess restore followed by a new process reads restored real state and retains post-backup revocation.",
+        "Restart during every restore phase never serves a partially restored writable installation.",
+        "Explicit resume is required and rechecks outstanding obligations."
+      ],
+      "deliverable": "Production restore/restart lifecycle.",
+      "serialized_global": false,
+      "verification_command": "go test ./cmd/zatiti",
+      "integration_wave": 15
+    },
+    {
+      "id": "P34",
+      "title": "Expose complete receipts, event tails and audit projections",
+      "owner": "internal/evidence",
+      "write_roots": [
+        "internal/evidence"
+      ],
+      "depends_on": [
+        "P02"
+      ],
+      "priority": "P0",
+      "status": "planned",
+      "steps": [
+        "Add a stable resumable event-tail cursor even on a drained page; bind it to principal/scope/filter/retention semantics.",
+        "Project turn/proposal/task/run/effect/verification linkage from committed evidence, including waiting and unknown dispositions, never from worker claims.",
+        "Provide retained command/result and job completion links for clients to resolve lost acknowledgements and later outcomes.",
+        "Preserve filter authorization, cursor expiry and no-secret output across new projections."
+      ],
+      "required_tests": [
+        "A client drains events, restarts, then resumes without missing or endlessly rereading events.",
+        "Foreign/revoked scope cannot use an earlier cursor; expired cursor returns the named recovery path.",
+        "Receipt for an accepted effect remains pending until authoritative confirmation and never implies verified task success."
+      ],
+      "deliverable": "Usable event streaming and truthful end-to-end evidence.",
+      "serialized_global": false,
+      "verification_command": "go test ./internal/evidence",
+      "integration_wave": 3
+    },
+    {
+      "id": "P35",
+      "title": "Close review lifecycle for live worker proposals",
+      "owner": "internal/reviews",
+      "write_roots": [
+        "internal/reviews"
+      ],
+      "depends_on": [
+        "P07",
+        "P12",
+        "P02"
+      ],
+      "priority": "P1",
+      "status": "planned",
+      "steps": [
+        "Exercise exact reviews created by real hosted proposals, retaining proposer, immutable action digest, account/destination and content artifacts.",
+        "Provide readable reason/title plus pending/resolved review links for waiting turns; current eligibility and human-required policy remain authoritative.",
+        "Version/revoke/expire reviews and wake the corresponding turn only after the decision is committed; stale or denied reviews cannot trigger dispatch.",
+        "Keep delegated reviewer bounds independent of model text and preserve task/effect uncertainty when an operator cancels."
+      ],
+      "required_tests": [
+        "Human approves one exact live proposal and only that action runs; changed content/head/account refuses.",
+        "Agent claiming approved_by_human cannot decide a human-required review.",
+        "Expired/revoked/duplicate decision produces no extra action or reply."
+      ],
+      "deliverable": "Live review completion/wake integration.",
+      "serialized_global": false,
+      "verification_command": "go test ./internal/reviews",
+      "integration_wave": 4
+    },
+    {
+      "id": "P36",
+      "title": "Drive earned-autonomy evidence updates",
+      "owner": "internal/policy",
+      "write_roots": [
+        "internal/policy"
+      ],
+      "depends_on": [
+        "P07",
+        "P18",
+        "P34",
+        "P02"
+      ],
+      "priority": "P1",
+      "status": "planned",
+      "steps": [
+        "Connect verified result/incident events to autonomy evaluation and immediate demotion with durable deduplication/cursors.",
+        "Require pinned evidence identity, verifier versions, freshness and unchanged dependency closure; model reports and stale tests are not qualification.",
+        "Keep qualification below the configured ceiling and preserve human-required classes.",
+        "Expose why a capability was earned, lost or needs requalification for the desktop."
+      ],
+      "required_tests": [
+        "Verified qualifying results can promote only within the ceiling.",
+        "Relevant version change or incident invalidates qualification before the next effect admission.",
+        "Worker assertions/self-qualification and an unrelated dependency change behave according to the existing Z19 acceptance cases."
+      ],
+      "deliverable": "Operational autonomy updates rather than inspectable rules alone.",
+      "serialized_global": false,
+      "verification_command": "go test ./internal/policy",
+      "integration_wave": 8
+    },
+    {
+      "id": "P37",
+      "title": "Regenerate complete capabilities and transport catalogs",
+      "owner": "internal/registry",
+      "write_roots": [
+        "internal/registry"
+      ],
+      "depends_on": [
+        "P02"
+      ],
+      "priority": "P0",
+      "status": "planned",
+      "steps": [
+        "Register every revision 3 operation and strict schemas, with stable CLI/MCP paths, version/caller metadata and collision checks.",
+        "Distinguish operation availability from runtime readiness and qualified execution guarantees; a listed operation is not proof its provider/job runner is configured.",
+        "Generate OpenAPI and checked catalog fixtures from the same descriptors; include new task/history/identity/verification projections.",
+        "Keep compatibility explicit so older clients can show unsupported rather than silently guessing shapes."
+      ],
+      "required_tests": [
+        "All declared operations register exactly once with resolvable schemas and transport mappings.",
+        "Runtime readiness reports absent hosted/memory/runner prerequisites honestly.",
+        "Old/new schema compatibility follows P00 and a changed operation version invalidates stale clients."
+      ],
+      "deliverable": "Revision 3 discovery/OpenAPI/catalog baseline.",
+      "serialized_global": false,
+      "verification_command": "go test ./internal/registry",
+      "integration_wave": 3
+    },
+    {
+      "id": "P38",
+      "title": "Carry new operation and event recovery semantics in the Go client",
+      "owner": "internal/client",
+      "write_roots": [
+        "internal/client"
+      ],
+      "depends_on": [
+        "P37",
+        "P34",
+        "P02"
+      ],
+      "priority": "P1",
+      "status": "planned",
+      "steps": [
+        "Support revision 3 version negotiation and new stable event cursors without duplicating domain logic.",
+        "Retain complete command lookup coordinates: scope, operation, version and original submission key; update regression fixtures for worker/task lifecycles.",
+        "Separate no-bytes-sent, unknown acknowledgement, accepted job and completed result states.",
+        "Expose bounded reconnect/poll helpers that do not silently resend mutations."
+      ],
+      "required_tests": [
+        "Lost task.start or review decision acknowledgement resolves the original command, not a second mutation.",
+        "Expired events resynchronize an authorized snapshot without replaying writes.",
+        "Unsupported server version remains an actionable permanent error."
+      ],
+      "deliverable": "Client support for the new lifecycle and recovery operations.",
+      "serialized_global": false,
+      "verification_command": "go test ./internal/client",
+      "integration_wave": 4
+    },
+    {
+      "id": "P39",
+      "title": "Expose complete CLI work journeys",
+      "owner": "internal/cli",
+      "write_roots": [
+        "internal/cli"
+      ],
+      "depends_on": [
+        "P37",
+        "P38",
+        "P02"
+      ],
+      "priority": "P1",
+      "status": "planned",
+      "steps": [
+        "Generate commands for new catalog operations; preserve --input, --json, submission key and exit semantics.",
+        "Provide discoverable start/inspect/wait paths through public operations without a TTY or hidden confirmation.",
+        "Render accepted versus completed versus blocked/unknown results distinctly and keep diagnostics on stderr.",
+        "Add CLI-local fixtures for new input/output shapes; cross-package process journeys belong to P46."
+      ],
+      "required_tests": [
+        "New task/history/current-identity commands resolve to exact catalog operations.",
+        "Accepted job and unknown mutation are never printed as successful task completion.",
+        "JSON mode emits one envelope and retains original command identity on replay."
+      ],
+      "deliverable": "CLI parity for useful work and honest long-running results.",
+      "serialized_global": false,
+      "verification_command": "go test ./internal/cli",
+      "integration_wave": 5
+    },
+    {
+      "id": "P40",
+      "title": "Expose complete MCP work journeys",
+      "owner": "internal/mcp",
+      "write_roots": [
+        "internal/mcp"
+      ],
+      "depends_on": [
+        "P37",
+        "P38",
+        "P02"
+      ],
+      "priority": "P1",
+      "status": "planned",
+      "steps": [
+        "Regenerate MCP tool definitions from revision 3 catalog, including new start/history and recovery operations.",
+        "Keep tools backed by the authenticated common client; no model-supplied profile/actor switch or private internal-operation shortcut.",
+        "Preserve protocol-only stdout, structuredContent/text equivalence and domain-fault isError mapping.",
+        "Ensure long work remains discoverable/inspectable after the MCP client disconnects."
+      ],
+      "required_tests": [
+        "Every public operation has one correct tool/schema and all new paths are callable through a real SDK client.",
+        "Client reconnect inspects original task/command without duplication.",
+        "Human-only review remains denied to an agent through MCP exactly as through CLI."
+      ],
+      "deliverable": "MCP parity for the complete runtime.",
+      "serialized_global": false,
+      "verification_command": "go test ./internal/mcp",
+      "integration_wave": 5
+    },
+    {
+      "id": "P41",
+      "title": "Verify transport admission and new runtime lifecycle boundaries",
+      "owner": "internal/server",
+      "write_roots": [
+        "internal/server"
+      ],
+      "depends_on": [
+        "P37",
+        "P02"
+      ],
+      "priority": "P1",
+      "status": "planned",
+      "steps": [
+        "Serve revision 3 operations through the unchanged authenticated envelope and enforce exact version/error HTTP mapping.",
+        "Integrate quiesce/restore admission states: queries remain intentionally scoped, prohibited mutations refuse, bootstrap cannot reopen after initialization.",
+        "Keep local credential and remote certificate-principal mapping explicit; identity.current must use the actual authenticated caller.",
+        "Add bounded long-work submission/disconnect tests without keeping server request contexts alive as task lifetimes."
+      ],
+      "required_tests": [
+        "Disconnect after task submission does not cancel durable work or repeat it.",
+        "Restoring/paused installation refuses forbidden operations with named faults.",
+        "Remote mTLS maps the correct principal and cannot spoof a local-human actor."
+      ],
+      "deliverable": "Transport support and verification for runtime/restore boundaries.",
+      "serialized_global": false,
+      "verification_command": "go test ./internal/server",
+      "integration_wave": 4
+    },
+    {
+      "id": "P42",
+      "title": "Make desktop chat durable and connected to actual workers",
+      "owner": "apps/desktop",
+      "write_roots": [
+        "apps/desktop"
+      ],
+      "depends_on": [
+        "P10",
+        "P24",
+        "P34",
+        "P37",
+        "P02"
+      ],
+      "priority": "P0",
+      "status": "planned",
+      "steps": [
+        "Use identity.current and conversation.message.list instead of optional principal config and window-only sent history.",
+        "Persist selected conversation, bounded authorized cache and unsent drafts in OS-protected local storage; credential remains only in secure storage. Revalidate cache on revocation/account switch.",
+        "Render turn acknowledgement, working, clarification, blocked setup, review waiting, error and final reply using controller state, never a fabricated local response.",
+        "Implement real unread/preview/quiet-coordination behavior and resumable event cursors; offline/reconnect sends nothing automatically.",
+        "Provide a secure remote TLS profile import flow if remote desktop remains supported."
+      ],
+      "required_tests": [
+        "Send to chief, close/reopen app: both messages and real reply remain, with correct read state.",
+        "Offline draft/reconnect preserves original submission identity and creates no duplicate turn.",
+        "Account/scope switch does not leak cached history; unsupported controller shows a named state."
+      ],
+      "deliverable": "Durable usable chat backed by the working controller.",
+      "serialized_global": false,
+      "verification_command": "cd apps/desktop && dart format --output=none --set-exit-if-changed . && flutter analyze && flutter test",
+      "integration_wave": 12
+    },
+    {
+      "id": "P43",
+      "title": "Finish desktop organization and work management flows",
+      "owner": "apps/desktop",
+      "write_roots": [
+        "apps/desktop"
+      ],
+      "depends_on": [
+        "P42",
+        "P17",
+        "P25",
+        "P35",
+        "P02"
+      ],
+      "priority": "P1",
+      "status": "planned",
+      "steps": [
+        "Implement New organization/New worker/group flows through draft/plan/review/apply and actual conversation membership operations.",
+        "Drive bounded task creation/start/delegation and ongoing responsibility creation/pause through public APIs; chief chat uses the same APIs through hosted execution.",
+        "Show setup/prerequisite cards for provider, currency, worker profile and credential action with exact acknowledged state.",
+        "Populate real task/results/decisions and allow eligible human review of exact artifacts, head/account/destination and timing.",
+        "Do not claim paused/stopped until acknowledged, and preserve unresolved external operations visibly."
+      ],
+      "required_tests": [
+        "A clean user creates two child chiefs/teams, starts work and receives a verified output in the built app.",
+        "A pending action approval runs only the displayed exact content; stale dialog cannot submit.",
+        "Closing desktop leaves controller tasks/responsibilities running and reopening restores them."
+      ],
+      "deliverable": "Actual Z21 organization/delegation/decision journeys.",
+      "serialized_global": false,
+      "verification_command": "cd apps/desktop && dart format --output=none --set-exit-if-changed . && flutter analyze && flutter test",
+      "integration_wave": 13
+    },
+    {
+      "id": "P44",
+      "title": "Finish desktop memory, files, routines and capability details",
+      "owner": "apps/desktop",
+      "write_roots": [
+        "apps/desktop"
+      ],
+      "depends_on": [
+        "P43",
+        "P28",
+        "P36",
+        "P21",
+        "P02"
+      ],
+      "priority": "P1",
+      "status": "planned",
+      "steps": [
+        "Replace prerequisite-only tabs with authorized memory claims/source/freshness/retract views when capability exists, keeping unsupported modes clearly visible.",
+        "Render artifact output names, task/run provenance, immutable digest and authorized sharing metadata; show verifier observations and failed checks.",
+        "Render responsibility-to-cycle/schedule/time-zone links and next-wake decisions rather than treating trigger strings as schedule descriptions.",
+        "Show cost liabilities, context-capture/advisory posture, autonomy evidence and recovery obligations using truthful controller projections.",
+        "Exercise keyboard/focus/semantics and native platform storage with populated live state."
+      ],
+      "required_tests": [
+        "Populated live records render correct source, checks, costs and schedules; empty or unavailable states stay honest.",
+        "Memory correction and artifact deletion/integrity failure update the UI without hiding retained audit evidence.",
+        "Keyboard-only and assistive-technology journeys handle review/pause and reconnect."
+      ],
+      "deliverable": "Complete specified desktop detail surfaces.",
+      "serialized_global": false,
+      "verification_command": "cd apps/desktop && dart format --output=none --set-exit-if-changed . && flutter analyze && flutter test",
+      "integration_wave": 14
+    },
+    {
+      "id": "P45",
+      "title": "Produce usable release and installation tooling",
+      "owner": "packaging",
+      "write_roots": [
+        "packaging"
+      ],
+      "depends_on": [
+        "P24",
+        "P33",
+        "P43",
+        "P27",
+        "P02"
+      ],
+      "priority": "P1",
+      "status": "planned",
+      "steps": [
+        "Build on the existing manifest/signature/install library: add a documented executable packaging/install driver within the allowed root and reproducible controller/desktop release assembly.",
+        "Include the qualified secure helper, adapter profiles, Serenity runtime/read facade and exact licenses/SBOM; missing mandatory memory guarantees block the full release.",
+        "Drive real per-user launchd/systemd lifecycle and secure key provisioning; separate controller/desktop packages so closing UI does not stop work.",
+        "Validate upgrade, rollback, uninstall and state retention. Signing/notarization must consume authorized external identities and retain evidence; do not publish as part of this coding assignment.",
+        "Document clean-host installation and restoration with accurate supported OS/architecture list; Windows is unqualified until an explicit release scope decision and evidence."
+      ],
+      "required_tests": [
+        "Install produced artifact on clean macOS/Linux, bootstrap, run first work, upgrade/restart, back up/restore and uninstall according to docs.",
+        "Tampered manifest/binary/helper/profile is refused before service start.",
+        "Uninstall preserves or removes state only according to explicit user choice and permissions remain private."
+      ],
+      "deliverable": "Installable reproducible artifacts and executable distribution qualification inputs.",
+      "serialized_global": false,
+      "verification_command": "go test ./packaging",
+      "integration_wave": 16
+    },
+    {
+      "id": "P46",
+      "title": "Prove vertical journeys and all-operation behavior",
+      "owner": "tests/integration",
+      "write_roots": [
+        "tests/integration"
+      ],
+      "depends_on": [
+        "P25",
+        "P18",
+        "P12",
+        "P17",
+        "P19",
+        "P21",
+        "P35",
+        "P37",
+        "P39",
+        "P40",
+        "P41",
+        "P02",
+        "P20",
+        "P28",
+        "P33",
+        "P36"
+      ],
+      "priority": "P0",
+      "status": "planned",
+      "steps": [
+        "Add a full real-owner fixture with the actual controller, Responses adapter pointed at a controlled provider, real artifact store and trusted verifier; fake only external services/time where specified.",
+        "Prove message-to-chief-to-task-to-tool-to-output-to-verification-to-reply with no test SQL writes or internal operations standing in for missing production code.",
+        "Expand current nine-step parity script to all public operations using legal prerequisite lifecycles, not merely descriptor discovery or invalid-input calls.",
+        "Run CLI subprocess and real MCP client variants, plus cross-interface continuation; normalize only generated IDs/timestamps explicitly.",
+        "Inject crash/revocation/pause/stale-version/funding/unknown-effect failures at every durable boundary and assert external physical call counts.",
+        "Extend restore/memory/engineering fixtures when P20/P28/P33 land; record these as explicit additional dependency gates before the full release matrix passes."
+      ],
+      "required_tests": [
+        "Z03 and setup/research journeys finish with readable independently verified artifacts through both interfaces.",
+        "Hosted tools, cooperative claims, skill evaluation, cycles, review and reconcile all finish using production paths.",
+        "One-reply/one-effect invariants hold across every lost-ack/restart injection, and every operation has positive and negative behavior coverage."
+      ],
+      "deliverable": "A real end-to-end suite exposing missing orchestration rather than hiding it behind fakes.",
+      "serialized_global": false,
+      "verification_command": "go test ./tests/integration",
+      "integration_wave": 16
+    },
+    {
+      "id": "P47",
+      "title": "Replace unconditional qualification skips with executable harnesses",
+      "owner": "tests/qualification",
+      "write_roots": [
+        "tests/qualification"
+      ],
+      "depends_on": [
+        "P46",
+        "P20",
+        "P28",
+        "P33",
+        "P44",
+        "P45",
+        "P02"
+      ],
+      "priority": "P1",
+      "status": "planned",
+      "steps": [
+        "Replace Responses' unconditional notRun with a pinned controlled-protocol harness and separately authorized real-provider qualification; record actual endpoint/model/price/limits evidence.",
+        "Launch the built Flutter application with an integration_test/native driver for all Z21 and daily-work journeys; widget tests alone do not qualify the built app.",
+        "Install produced artifacts on clean macOS/Linux hosts and execute service restart/backup/restore/uninstall journeys.",
+        "Run actual claimed named-agent clients only in explicitly authorized billed/network sessions; missing credentials or host must be recorded as not_run and block that claim.",
+        "Map every one of the 116 existing cases and added cases to executable test identity, source revision, fixtures, environment and evidence; omissions and skips cannot pass release qualification."
+      ],
+      "required_tests": [
+        "No unconditional notRun branch remains where a supported harness can run.",
+        "Required release cases with missing, skipped, failed or stale evidence fail the release gate.",
+        "Report distinguishes simulator/protocol checks, real service guarantees and native platform/client evidence."
+      ],
+      "deliverable": "Executable external/native qualification and a claim-specific release evidence report.",
+      "serialized_global": false,
+      "verification_command": "go test ./tests/qualification",
+      "integration_wave": 17
+    },
+    {
+      "id": "P48",
+      "title": "Enforce full runtime and release gates in CI",
+      "owner": ".github/workflows",
+      "write_roots": [
+        ".github/workflows"
+      ],
+      "depends_on": [
+        "P46",
+        "P47",
+        "P02"
+      ],
+      "priority": "P1",
+      "status": "planned",
+      "steps": [
+        "Extend existing CI/gate tooling to the updated contract/dependency pins and actual hosted/integration/desktop suites.",
+        "Enumerate every required case, not just tests that happen to emit a record. Treat missing tests, unconditional skips and stale evidence as blocked release claims.",
+        "Run Go baseline, renderer check, catalog parity, Flutter analyze/tests/live proof and native qualification on supported runners; retain bounded sanitized logs/artifacts.",
+        "Keep artifact assembly/qualification separate from publication/signing authorization and do not make tag creation a substitute for evidence.",
+        "Respect shared-machine heavy-build rules on self-hosted runners; standard hosted runners need their own concurrency/resource limits."
+      ],
+      "required_tests": [
+        "Deliberately omit or skip one required journey: release gate fails.",
+        "A stale source revision or changed catalog/profile digest invalidates prior evidence.",
+        "Healthy baseline, renderer and completed journey matrices pass with linked artifacts."
+      ],
+      "deliverable": "CI gates that reflect product readiness rather than unit-test success.",
+      "serialized_global": false,
+      "verification_command": "go test ./.github/workflows/cigate",
+      "integration_wave": 18
+    },
+    {
+      "id": "P49",
+      "title": "Reconcile documentation and close the delivery matrix",
+      "owner": "documentation",
+      "write_roots": [
+        "README.md",
+        "docs (authored status and operator documentation only)"
+      ],
+      "depends_on": [
+        "P48",
+        "P02"
+      ],
+      "priority": "P1",
+      "status": "planned",
+      "steps": [
+        "Integration owner updates authored README/status/setup/recovery docs with actual supported behavior and executable examples; regenerate spec index rather than editing generated README directly.",
+        "Remove stale claims that all code is absent, Responses has not landed, Fyne is the desktop, or fixed first-task/command-lookup defects still apply.",
+        "Preserve honest limitations for provider guarantees, memory, platform support and external-worker containment; no skipped test becomes qualification.",
+        "Record all package/operation/requirement/case statuses and exact evidence links. Any unresolved external prerequisite blocks only explicitly identified claims and remains visible.",
+        "Publish nothing externally as part of this repository documentation task."
+      ],
+      "required_tests": [
+        "Documented first-use commands reach the promised terminal output in CI.",
+        "All 36 scopes, 264 baseline operations plus additions, 127 requirements and 116 cases plus additions have owners and evidence status.",
+        "No work item is marked complete solely because it compiles, has a plan, or has a skipped test."
+      ],
+      "deliverable": "Accurate product documentation and closed implementation/evidence ledger.",
+      "serialized_global": true,
+      "verification_command": "python3 tools/specgen/render.py --check (plus assignment-specific checks above)",
+      "integration_wave": 19
+    }
+  ]
+}

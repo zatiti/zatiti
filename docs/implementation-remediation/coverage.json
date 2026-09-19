@@ -1,0 +1,5490 @@
+{
+  "schema": "zatiti.remediation-coverage/v1",
+  "acceptance_cases": [
+    {
+      "case_id": "Z01.duplicate_controller",
+      "original_owners": [
+        "platform",
+        "controller",
+        "storage",
+        "integration"
+      ],
+      "delivery_tasks": [
+        "P03",
+        "P04",
+        "P07",
+        "P22",
+        "P41",
+        "P46"
+      ],
+      "verification_owner": "P46",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "Second controller refuses exclusive ownership and serves no requests.",
+        "Only the original controller admits work; no extra scheduler or writer appears."
+      ]
+    },
+    {
+      "case_id": "Z01.revoked_principal",
+      "original_owners": [
+        "identity",
+        "policy",
+        "application",
+        "integration"
+      ],
+      "delivery_tasks": [
+        "P03",
+        "P04",
+        "P07",
+        "P22",
+        "P41",
+        "P46"
+      ],
+      "verification_owner": "P46",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "Current authorization denies the mutation.",
+        "Revocation is durable and survives controller restart."
+      ]
+    },
+    {
+      "case_id": "Z01.cross_scope_reference",
+      "original_owners": [
+        "identity",
+        "configuration",
+        "policy",
+        "integration"
+      ],
+      "delivery_tasks": [
+        "P03",
+        "P04",
+        "P07",
+        "P22",
+        "P41",
+        "P46"
+      ],
+      "verification_owner": "P46",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "The unauthorized reference is rejected.",
+        "No activation, task admission or secret lookup occurs until an explicit valid binding exists."
+      ]
+    },
+    {
+      "case_id": "Z01.credential_custody",
+      "original_owners": [
+        "identity",
+        "connections",
+        "platform",
+        "integration"
+      ],
+      "delivery_tasks": [
+        "P03",
+        "P04",
+        "P07",
+        "P22",
+        "P41",
+        "P46"
+      ],
+      "verification_owner": "P46",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "Only opaque references and permitted metadata are returned.",
+        "Profile names, MCP client names and socket access do not independently confer authority; owner profile cannot be selected through tool arguments."
+      ]
+    },
+    {
+      "case_id": "Z02.registry_surface",
+      "original_owners": [
+        "registry",
+        "cli",
+        "mcp",
+        "integration"
+      ],
+      "delivery_tasks": [
+        "P37",
+        "P38",
+        "P39",
+        "P40",
+        "P46"
+      ],
+      "verification_owner": "P46",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "Every registry operation has both mappings and equivalent input/output schemas.",
+        "Generation rejects mapping collisions; capabilities has its declared special mapping.",
+        "Optional MCP resources or prompts are never the sole route to a capability."
+      ]
+    },
+    {
+      "case_id": "Z02.lifecycle_parity",
+      "original_owners": [
+        "integration",
+        "registry",
+        "cli",
+        "mcp",
+        "application"
+      ],
+      "delivery_tasks": [
+        "P37",
+        "P38",
+        "P39",
+        "P40",
+        "P46"
+      ],
+      "verification_owner": "P46",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "Equivalent results, resource versions, state changes, errors, pagination, authorization and business events are observed.",
+        "Only generated IDs and timestamps are normalized through an explicit mapping; permissions and uncertainty are never normalized away."
+      ]
+    },
+    {
+      "case_id": "Z02.wire_errors",
+      "original_owners": [
+        "cli",
+        "mcp",
+        "contract",
+        "integration"
+      ],
+      "delivery_tasks": [
+        "P37",
+        "P38",
+        "P39",
+        "P40",
+        "P46"
+      ],
+      "verification_owner": "P46",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "CLI JSON mode emits exactly one versioned result on stdout and diagnostics on stderr; exit mappings match the specification.",
+        "MCP emits protocol frames only on stdout, returns equivalent structuredContent and JSON text, maps domain faults to isError, and uses protocol errors for malformed protocol messages."
+      ]
+    },
+    {
+      "case_id": "Z03.agent_setup_mcp",
+      "original_owners": [
+        "integration",
+        "mcp",
+        "configuration",
+        "connections",
+        "skills",
+        "tasks"
+      ],
+      "delivery_tasks": [
+        "P05",
+        "P06",
+        "P19",
+        "P24",
+        "P25",
+        "P46"
+      ],
+      "verification_owner": "P46",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "The complete authorized setup succeeds without dashboard or repository-source knowledge.",
+        "A verified output artifact is inspectable; paid work remains refused until provider, currency and limits are configured.",
+        "Credential prerequisites return actionable challenges without secret bytes in model-visible input or output."
+      ]
+    },
+    {
+      "case_id": "Z03.agent_setup_cli",
+      "original_owners": [
+        "integration",
+        "cli",
+        "configuration",
+        "connections",
+        "skills",
+        "tasks"
+      ],
+      "delivery_tasks": [
+        "P05",
+        "P06",
+        "P19",
+        "P24",
+        "P25",
+        "P46"
+      ],
+      "verification_owner": "P46",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "The CLI completes the same lifecycle and produces equivalent authorized state and verified output.",
+        "No TTY or silent prompt is required; incomplete input returns a structured actionable result."
+      ]
+    },
+    {
+      "case_id": "Z03.bootstrap_parity",
+      "original_owners": [
+        "installation",
+        "identity",
+        "platform",
+        "cli",
+        "mcp",
+        "integration"
+      ],
+      "delivery_tasks": [
+        "P05",
+        "P06",
+        "P19",
+        "P24",
+        "P25",
+        "P46"
+      ],
+      "verification_owner": "P46",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "Both use the one-time local initializer and create owner, personal organization and personal chief consistently.",
+        "Results contain metadata only; reinitialization is refused and bootstrap cannot become a normal administration session."
+      ]
+    },
+    {
+      "case_id": "Z04.concurrent_apply",
+      "original_owners": [
+        "configuration",
+        "storage",
+        "application",
+        "integration"
+      ],
+      "delivery_tasks": [
+        "P05",
+        "P07",
+        "P35",
+        "P46"
+      ],
+      "verification_owner": "P46",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "Exactly one revision activates; the other returns stale/conflicting state.",
+        "Every object in the winning bundle and its event commit atomically; no partial activation occurs."
+      ]
+    },
+    {
+      "case_id": "Z04.stale_dependencies",
+      "original_owners": [
+        "configuration",
+        "connections",
+        "reviews",
+        "integration"
+      ],
+      "delivery_tasks": [
+        "P05",
+        "P07",
+        "P35",
+        "P46"
+      ],
+      "verification_owner": "P46",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "The original plan cannot activate.",
+        "Regeneration repins dependencies and requires renewal of any decision whose action digest changed."
+      ]
+    },
+    {
+      "case_id": "Z04.explicit_removal",
+      "original_owners": [
+        "configuration",
+        "tasks",
+        "effects",
+        "integration"
+      ],
+      "delivery_tasks": [
+        "P05",
+        "P07",
+        "P35",
+        "P46"
+      ],
+      "verification_owner": "P46",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "Omission does not delete live objects.",
+        "Explicit removal first disables new work and requires archival disposition or refuses destructive removal while obligations remain.",
+        "Artifacts, operation uncertainty and accounting obligations are not discarded."
+      ]
+    },
+    {
+      "case_id": "Z04.old_authority",
+      "original_owners": [
+        "configuration",
+        "policy",
+        "identity",
+        "integration"
+      ],
+      "delivery_tasks": [
+        "P05",
+        "P07",
+        "P35",
+        "P46"
+      ],
+      "verification_owner": "P46",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "Apply evaluates existing authority and rejects or requests an eligible exact decision.",
+        "Proposed policy and imported instructions cannot authorize their own activation."
+      ]
+    },
+    {
+      "case_id": "Z04.submission_replay",
+      "original_owners": [
+        "application",
+        "evidence",
+        "configuration",
+        "integration"
+      ],
+      "delivery_tasks": [
+        "P05",
+        "P07",
+        "P35",
+        "P46"
+      ],
+      "verification_owner": "P46",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "Identical retry returns the original durable command disposition without another revision or event.",
+        "Changed input is refused; command identity survives restart and remains retained through unresolved obligations and at least 30 days."
+      ]
+    },
+    {
+      "case_id": "Z05.malicious_instructions",
+      "original_owners": [
+        "skills",
+        "policy",
+        "execution",
+        "integration"
+      ],
+      "delivery_tasks": [
+        "P06",
+        "P07",
+        "P15",
+        "P16",
+        "P19",
+        "P46"
+      ],
+      "verification_owner": "P46",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "Instructions remain untrusted input and install no grants.",
+        "Tool, data and effect access remains limited to the pinned authorized binding closure."
+      ]
+    },
+    {
+      "case_id": "Z05.archive_safety",
+      "original_owners": [
+        "skills",
+        "artifacts",
+        "integration"
+      ],
+      "delivery_tasks": [
+        "P06",
+        "P07",
+        "P15",
+        "P16",
+        "P19",
+        "P46"
+      ],
+      "verification_owner": "P46",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "Every unsafe archive is rejected before publication and performs no executable side effects.",
+        "Valid import produces immutable hashed draft content and source/license provenance; discovery and extraction execute no scripts."
+      ]
+    },
+    {
+      "case_id": "Z05.changed_tool_schema",
+      "original_owners": [
+        "configuration",
+        "policy",
+        "execution",
+        "integration"
+      ],
+      "delivery_tasks": [
+        "P06",
+        "P07",
+        "P15",
+        "P16",
+        "P19",
+        "P46"
+      ],
+      "verification_owner": "P46",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "Changed executable meaning cannot silently enter the active tool closure.",
+        "Revalidation and authorized activation are required; unsupported contracts return capability or prerequisite faults."
+      ]
+    },
+    {
+      "case_id": "Z05.callback_discovery",
+      "original_owners": [
+        "connections",
+        "effects",
+        "httpread",
+        "integration"
+      ],
+      "delivery_tasks": [
+        "P06",
+        "P07",
+        "P15",
+        "P16",
+        "P19",
+        "P46"
+      ],
+      "verification_owner": "P46",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "Discovery grants no execution or disclosure authority.",
+        "Unreviewed callbacks, destination changes and arbitrary external MCP/subprocess execution are refused."
+      ]
+    },
+    {
+      "case_id": "Z05.empty_bindings",
+      "original_owners": [
+        "configuration",
+        "execution",
+        "policy",
+        "integration"
+      ],
+      "delivery_tasks": [
+        "P06",
+        "P07",
+        "P15",
+        "P16",
+        "P19",
+        "P46"
+      ],
+      "verification_owner": "P46",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "The worker receives no implicit global tool or credential access.",
+        "Missing or ambiguous scope produces a named refusal rather than selecting a global organization."
+      ]
+    },
+    {
+      "case_id": "Z05.agent_self_grant",
+      "original_owners": [
+        "identity",
+        "configuration",
+        "policy",
+        "integration"
+      ],
+      "delivery_tasks": [
+        "P06",
+        "P07",
+        "P15",
+        "P16",
+        "P19",
+        "P46"
+      ],
+      "verification_owner": "P46",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "No authority expands without an eligible act under existing policy.",
+        "The exact denial or review requirement identifies the missing authority."
+      ]
+    },
+    {
+      "case_id": "Z06.admission_claim_revoke",
+      "original_owners": [
+        "effects",
+        "policy",
+        "accounting",
+        "integration"
+      ],
+      "delivery_tasks": [
+        "P12",
+        "P22",
+        "P23",
+        "P46"
+      ],
+      "verification_owner": "P46",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "Revocation committed before claim prevents invocation; physical call count is zero.",
+        "Admission reserves and writes intent/evidence atomically; claimed dispatch follows the specified irreversible boundary.",
+        "Revocation after claim is recorded honestly and does not claim to retract transmitted bytes."
+      ]
+    },
+    {
+      "case_id": "Z06.crash_call_counts",
+      "original_owners": [
+        "effects",
+        "storage",
+        "controller",
+        "integration"
+      ],
+      "delivery_tasks": [
+        "P12",
+        "P22",
+        "P23",
+        "P46"
+      ],
+      "verification_owner": "P46",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "No crash recovery blindly repeats a potentially sent effect.",
+        "Attempt records and provider call counts correspond exactly; failed record persistence does not authorize another send."
+      ]
+    },
+    {
+      "case_id": "Z06.no_hidden_retries",
+      "original_owners": [
+        "effects",
+        "responses",
+        "github",
+        "httpread",
+        "integration"
+      ],
+      "delivery_tasks": [
+        "P12",
+        "P22",
+        "P23",
+        "P46"
+      ],
+      "verification_owner": "P46",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "The adapter performs exactly one physical request per claimed attempt.",
+        "SDK or transport mutation retries are disabled; any permitted retry receives a new authorized recorded attempt."
+      ]
+    },
+    {
+      "case_id": "Z07.exact_action_changes",
+      "original_owners": [
+        "reviews",
+        "effects",
+        "configuration",
+        "integration"
+      ],
+      "delivery_tasks": [
+        "P07",
+        "P12",
+        "P35",
+        "P46"
+      ],
+      "verification_owner": "P46",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "Every material change invalidates the original digest-bound approval where review is required.",
+        "Dispatch waits for a new eligible decision over the exact changed preview."
+      ]
+    },
+    {
+      "case_id": "Z07.agent_impersonates_human",
+      "original_owners": [
+        "reviews",
+        "identity",
+        "cli",
+        "mcp",
+        "integration"
+      ],
+      "delivery_tasks": [
+        "P07",
+        "P12",
+        "P35",
+        "P46"
+      ],
+      "verification_owner": "P46",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "The agent credential cannot satisfy the review regardless of its payload or transport.",
+        "No approval or protected dispatch is committed."
+      ]
+    },
+    {
+      "case_id": "Z07.reviewer_eligibility",
+      "original_owners": [
+        "reviews",
+        "identity",
+        "policy",
+        "integration"
+      ],
+      "delivery_tasks": [
+        "P07",
+        "P12",
+        "P35",
+        "P46"
+      ],
+      "verification_owner": "P46",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "Each ineligible decision is refused using current identity and policy.",
+        "A permitted delegation is scoped and cannot bypass human-required or proposer-separation rules."
+      ]
+    },
+    {
+      "case_id": "Z07.transport_denial",
+      "original_owners": [
+        "reviews",
+        "cli",
+        "mcp",
+        "integration"
+      ],
+      "delivery_tasks": [
+        "P07",
+        "P12",
+        "P35",
+        "P46"
+      ],
+      "verification_owner": "P46",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "CLI cannot bypass the MCP denial.",
+        "An eligible human session can decide through either transport without any claim of proving physical human presence."
+      ]
+    },
+    {
+      "case_id": "Z08.lost_success_response",
+      "original_owners": [
+        "effects",
+        "accounting",
+        "integration"
+      ],
+      "delivery_tasks": [
+        "P12",
+        "P23",
+        "P46"
+      ],
+      "verification_owner": "P46",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "The operation remains outcome_unknown with retained reservation and its original attempt.",
+        "Neither the task result nor the command reports the external write as confirmed successful or safely unsent."
+      ]
+    },
+    {
+      "case_id": "Z08.failed_retry_after_unknown",
+      "original_owners": [
+        "effects",
+        "accounting",
+        "integration"
+      ],
+      "delivery_tasks": [
+        "P12",
+        "P23",
+        "P46"
+      ],
+      "verification_owner": "P46",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "Earlier uncertainty remains attached to the logical operation.",
+        "Failed retry does not erase the earlier attempt, release its unknown reservation or prove no external effect occurred."
+      ]
+    },
+    {
+      "case_id": "Z08.expired_provider_key",
+      "original_owners": [
+        "effects",
+        "integration"
+      ],
+      "delivery_tasks": [
+        "P12",
+        "P23",
+        "P46"
+      ],
+      "verification_owner": "P46",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "The expired key is not treated as proof of safe idempotency.",
+        "Dispatch is blocked unless authoritative nonexecution or another qualified safe contract is established."
+      ]
+    },
+    {
+      "case_id": "Z08.delayed_confirmation",
+      "original_owners": [
+        "effects",
+        "evidence",
+        "accounting",
+        "integration"
+      ],
+      "delivery_tasks": [
+        "P12",
+        "P23",
+        "P46"
+      ],
+      "verification_owner": "P46",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "Non-authoritative not-found does not establish nonexecution.",
+        "Authoritative success settles according to evidence; contradictory evidence creates a visible correction or dispute instead of rewriting history."
+      ]
+    },
+    {
+      "case_id": "Z08.cancel_unknown",
+      "original_owners": [
+        "effects",
+        "tasks",
+        "accounting",
+        "integration"
+      ],
+      "delivery_tasks": [
+        "P12",
+        "P23",
+        "P46"
+      ],
+      "verification_owner": "P46",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "Cancellation records restrictive intent but does not reclassify the possibly sent attempt as unsent.",
+        "Unknown outcomes and reservations remain inspectable until supported evidence resolves them."
+      ]
+    },
+    {
+      "case_id": "Z09.concurrent_reservations",
+      "original_owners": [
+        "accounting",
+        "storage",
+        "tasks",
+        "execution",
+        "integration"
+      ],
+      "delivery_tasks": [
+        "P08",
+        "P16",
+        "P17",
+        "P46"
+      ],
+      "verification_owner": "P46",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "Atomic reservations across all applicable scopes prevent overcommit and use deterministic lock/update order.",
+        "Children and retries consume shared root/ancestor limits rather than independent copies."
+      ]
+    },
+    {
+      "case_id": "Z09.unknown_external_cost",
+      "original_owners": [
+        "accounting",
+        "execution",
+        "integration"
+      ],
+      "delivery_tasks": [
+        "P08",
+        "P16",
+        "P17",
+        "P46"
+      ],
+      "verification_owner": "P46",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "Unenforceable hard-cap mode is refused or explicitly advisory only where policy permits.",
+        "Unknown and advisory usage is reported separately and never treated as zero."
+      ]
+    },
+    {
+      "case_id": "Z09.missing_price",
+      "original_owners": [
+        "accounting",
+        "connections",
+        "responses",
+        "integration"
+      ],
+      "delivery_tasks": [
+        "P08",
+        "P16",
+        "P17",
+        "P46"
+      ],
+      "verification_owner": "P46",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "Admission returns a named prerequisite or budget refusal without a provider call.",
+        "There is no hardcoded account, provider, billing or model fallback."
+      ]
+    },
+    {
+      "case_id": "Z09.settlement_recovery",
+      "original_owners": [
+        "accounting",
+        "effects",
+        "storage",
+        "integration"
+      ],
+      "delivery_tasks": [
+        "P08",
+        "P16",
+        "P17",
+        "P46"
+      ],
+      "verification_owner": "P46",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "Spent, reserved, estimated and unknown values remain distinct and exact without floating-point drift.",
+        "Settlement is atomic and idempotent; unresolved reservations survive restart and are not released twice."
+      ]
+    },
+    {
+      "case_id": "Z10.duplicate_schedule_claim",
+      "original_owners": [
+        "scheduling",
+        "execution",
+        "storage",
+        "integration"
+      ],
+      "delivery_tasks": [
+        "P11",
+        "P14",
+        "P17",
+        "P21",
+        "P22",
+        "P46"
+      ],
+      "verification_owner": "P46",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "The occurrence key admits at most one occurrence according to the configured misfire rule.",
+        "Only one current attempt owner, lease and generation are committed."
+      ]
+    },
+    {
+      "case_id": "Z10.restart_identity",
+      "original_owners": [
+        "execution",
+        "controller",
+        "storage",
+        "integration"
+      ],
+      "delivery_tasks": [
+        "P11",
+        "P14",
+        "P17",
+        "P21",
+        "P22",
+        "P46"
+      ],
+      "verification_owner": "P46",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "Persisted generation advances and recovery uses durable state.",
+        "Task/run history, accepted contract, pinned configuration and checkpoint lineage remain intact; retry creates a distinct attempt."
+      ]
+    },
+    {
+      "case_id": "Z10.stale_heartbeat",
+      "original_owners": [
+        "execution",
+        "tasks",
+        "integration"
+      ],
+      "delivery_tasks": [
+        "P11",
+        "P14",
+        "P17",
+        "P21",
+        "P22",
+        "P46"
+      ],
+      "verification_owner": "P46",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "Stale or mismatched worker/attempt/generation requests cannot mutate current execution or complete the task.",
+        "Lease expiry alone does not assert that the old external process stopped."
+      ]
+    },
+    {
+      "case_id": "Z10.lost_claim_ack",
+      "original_owners": [
+        "execution",
+        "application",
+        "evidence",
+        "integration"
+      ],
+      "delivery_tasks": [
+        "P11",
+        "P14",
+        "P17",
+        "P21",
+        "P22",
+        "P46"
+      ],
+      "verification_owner": "P46",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "The claimant recovers the original attempt/lease disposition.",
+        "No duplicate current owner or replacement attempt is created merely because the acknowledgement was lost."
+      ]
+    },
+    {
+      "case_id": "Z10.cancelled_wake",
+      "original_owners": [
+        "scheduling",
+        "tasks",
+        "messaging",
+        "integration"
+      ],
+      "delivery_tasks": [
+        "P11",
+        "P14",
+        "P17",
+        "P21",
+        "P22",
+        "P46"
+      ],
+      "verification_owner": "P46",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "Wake conditions are checked transactionally.",
+        "Cancelled work is not readmitted; a reply already recorded does not cause duplicate or obsolete wake work."
+      ]
+    },
+    {
+      "case_id": "Z10.conflicting_replacement",
+      "original_owners": [
+        "execution",
+        "effects",
+        "integration"
+      ],
+      "delivery_tasks": [
+        "P11",
+        "P14",
+        "P17",
+        "P21",
+        "P22",
+        "P46"
+      ],
+      "verification_owner": "P46",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "Replacement waits for explicit recovery disposition of conflicting resources and possible effects.",
+        "No unsupported containment or successful stop is inferred from lease expiry."
+      ]
+    },
+    {
+      "case_id": "Z11.exit_zero_missing_output",
+      "original_owners": [
+        "tasks",
+        "execution",
+        "artifacts",
+        "integration"
+      ],
+      "delivery_tasks": [
+        "P09",
+        "P11",
+        "P18",
+        "P20",
+        "P46"
+      ],
+      "verification_owner": "P46",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "Task does not enter succeeded.",
+        "Missing artifacts produce a visible fault and dependents requiring verified success remain blocked."
+      ]
+    },
+    {
+      "case_id": "Z11.tampered_verifier",
+      "original_owners": [
+        "tasks",
+        "configuration",
+        "execution",
+        "integration"
+      ],
+      "delivery_tasks": [
+        "P09",
+        "P11",
+        "P18",
+        "P20",
+        "P46"
+      ],
+      "verification_owner": "P46",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "Verification rejects a mismatched or unapproved verifier/contract.",
+        "A worker cannot weaken the accepted contract during execution; retries retain it."
+      ]
+    },
+    {
+      "case_id": "Z11.worker_assertion",
+      "original_owners": [
+        "tasks",
+        "execution",
+        "evidence",
+        "integration"
+      ],
+      "delivery_tasks": [
+        "P09",
+        "P11",
+        "P18",
+        "P20",
+        "P46"
+      ],
+      "verification_owner": "P46",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "Worker assertions are recorded as observations rather than proof.",
+        "Independent verification or an authorized explicitly manual acceptance is still required."
+      ]
+    },
+    {
+      "case_id": "Z11.failed_child_acceptance",
+      "original_owners": [
+        "tasks",
+        "execution",
+        "integration"
+      ],
+      "delivery_tasks": [
+        "P09",
+        "P11",
+        "P18",
+        "P20",
+        "P46"
+      ],
+      "verification_owner": "P46",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "The parent and dependent tasks do not satisfy verified-success conditions.",
+        "Failed child acceptance and its evidence remain visible."
+      ]
+    },
+    {
+      "case_id": "Z11.manual_acceptance_label",
+      "original_owners": [
+        "tasks",
+        "reviews",
+        "evidence",
+        "integration"
+      ],
+      "delivery_tasks": [
+        "P09",
+        "P11",
+        "P18",
+        "P20",
+        "P46"
+      ],
+      "verification_owner": "P46",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "Acceptance remains explicitly labeled manual.",
+        "The product never presents manual approval as successful independent automated verification."
+      ]
+    },
+    {
+      "case_id": "Z12.delegation_narrows",
+      "original_owners": [
+        "tasks",
+        "policy",
+        "accounting",
+        "integration"
+      ],
+      "delivery_tasks": [
+        "P04",
+        "P08",
+        "P11",
+        "P16",
+        "P46"
+      ],
+      "verification_owner": "P46",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "Each expansion is refused or reduced only through an explicit valid narrowing contract.",
+        "Delegation cannot grant authority absent from its parent or inherited organization policy."
+      ]
+    },
+    {
+      "case_id": "Z12.root_limits_shared",
+      "original_owners": [
+        "tasks",
+        "execution",
+        "accounting",
+        "integration"
+      ],
+      "delivery_tasks": [
+        "P04",
+        "P08",
+        "P11",
+        "P16",
+        "P46"
+      ],
+      "verification_owner": "P46",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "All branches share root budgets and finite limits; limits cannot be reset by making another child.",
+        "Default limits match one worker attempt, four installation attempts, 30 minutes per attempt, 100 steps, eight children, depth three and a 24-hour root deadline where applicable."
+      ]
+    },
+    {
+      "case_id": "Z13.secret_surfaces",
+      "original_owners": [
+        "connections",
+        "identity",
+        "artifacts",
+        "evidence",
+        "cli",
+        "mcp",
+        "integration"
+      ],
+      "delivery_tasks": [
+        "P03",
+        "P06",
+        "P21",
+        "P24",
+        "P46"
+      ],
+      "verification_owner": "P46",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "No planted raw credential is exposed in tool arguments, ordinary flags, CLI/MCP results, logs or organization exports.",
+        "Setup exposes challenge references and metadata; subprocesses do not inherit owner credential environment by default."
+      ]
+    },
+    {
+      "case_id": "Z13.advisory_worker",
+      "original_owners": [
+        "execution",
+        "desktop",
+        "registry",
+        "integration"
+      ],
+      "delivery_tasks": [
+        "P03",
+        "P06",
+        "P21",
+        "P24",
+        "P46"
+      ],
+      "verification_owner": "P46",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "External shell, network and billing limitations are explicitly advisory.",
+        "Lease fencing is described as restricting Zatiti mutations and does not claim the external process is contained or terminated."
+      ]
+    },
+    {
+      "case_id": "Z13.compatibility_not_containment",
+      "original_owners": [
+        "execution",
+        "qualification",
+        "integration"
+      ],
+      "delivery_tasks": [
+        "P03",
+        "P06",
+        "P21",
+        "P24",
+        "P46"
+      ],
+      "verification_owner": "P46",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "Client interoperability grants no implicit launch, sandbox, interruption, cost-enforcement or exact-context-replay guarantees.",
+        "Unsupported executor guarantees fail explicitly instead of being inferred from a client, harness, container or subprocess name."
+      ]
+    },
+    {
+      "case_id": "Z14.atomic_state_event",
+      "original_owners": [
+        "storage",
+        "evidence",
+        "application",
+        "integration"
+      ],
+      "delivery_tasks": [
+        "P09",
+        "P29",
+        "P30",
+        "P31",
+        "P32",
+        "P33",
+        "P46"
+      ],
+      "verification_owner": "P46",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "Neither state without its required event nor an event without its state becomes committed.",
+        "Recovery reads durable records and does not infer success from log text."
+      ]
+    },
+    {
+      "case_id": "Z14.missing_artifact",
+      "original_owners": [
+        "artifacts",
+        "tasks",
+        "installation",
+        "integration"
+      ],
+      "delivery_tasks": [
+        "P09",
+        "P29",
+        "P30",
+        "P31",
+        "P32",
+        "P33",
+        "P46"
+      ],
+      "verification_owner": "P46",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "A visible integrity/artifact fault is returned.",
+        "The missing output is never a successful task result or silently accepted backup; unreferenced staging bytes can be reclaimed separately."
+      ]
+    },
+    {
+      "case_id": "Z14.paused_restore",
+      "original_owners": [
+        "installation",
+        "storage",
+        "platform",
+        "artifacts",
+        "integration"
+      ],
+      "delivery_tasks": [
+        "P09",
+        "P29",
+        "P30",
+        "P31",
+        "P32",
+        "P33",
+        "P46"
+      ],
+      "verification_owner": "P46",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "Restore verifies contents and starts paused with exclusive ownership.",
+        "No pending paid work or effect dispatch resumes automatically; a live-database file copy alone is not accepted as the backup contract."
+      ]
+    },
+    {
+      "case_id": "Z14.outbox_revocation_restore",
+      "original_owners": [
+        "installation",
+        "effects",
+        "accounting",
+        "identity",
+        "memory",
+        "integration"
+      ],
+      "delivery_tasks": [
+        "P09",
+        "P29",
+        "P30",
+        "P31",
+        "P32",
+        "P33",
+        "P46"
+      ],
+      "verification_owner": "P46",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "Unresolved obligations and revocation states are preserved and inspectable.",
+        "Pending effect and memory outcomes require reconciliation; restoring an older database does not claim to undo provider effects."
+      ]
+    },
+    {
+      "case_id": "Z15.canonical_roundtrip",
+      "original_owners": [
+        "configuration",
+        "skills",
+        "integration"
+      ],
+      "delivery_tasks": [
+        "P05",
+        "P06",
+        "P21",
+        "P46"
+      ],
+      "verification_owner": "P46",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "Canonical definition meaning and stable identities round-trip without changing semantic order or skill bytes.",
+        "Duplicate keys, invalid references, unsafe paths, unknown executable fields and cycles are rejected; omission is not deletion."
+      ]
+    },
+    {
+      "case_id": "Z15.cross_installation_rebind",
+      "original_owners": [
+        "configuration",
+        "connections",
+        "identity",
+        "integration"
+      ],
+      "delivery_tasks": [
+        "P05",
+        "P06",
+        "P21",
+        "P46"
+      ],
+      "verification_owner": "P46",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "Foreign credential references do not become live authority automatically.",
+        "Required rebinding is surfaced; authorized activation uses B-specific bindings while preserving portable definition identity semantics."
+      ]
+    },
+    {
+      "case_id": "Z15.export_exclusions",
+      "original_owners": [
+        "configuration",
+        "evidence",
+        "installation",
+        "integration"
+      ],
+      "delivery_tasks": [
+        "P05",
+        "P06",
+        "P21",
+        "P46"
+      ],
+      "verification_owner": "P46",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "Organization export includes versioned definitions but excludes secret values, principal credentials, task history and mutable operation state.",
+        "History export and backup have distinct contracts; required runtime obligations remain in state and backup."
+      ]
+    },
+    {
+      "case_id": "Z16.cli_to_mcp",
+      "original_owners": [
+        "integration",
+        "cli",
+        "mcp",
+        "client"
+      ],
+      "delivery_tasks": [
+        "P12",
+        "P21",
+        "P33",
+        "P34",
+        "P38",
+        "P39",
+        "P40",
+        "P46"
+      ],
+      "verification_owner": "P46",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "The second transport uses the same task, command, review, state and authorization.",
+        "No duplicate controller, scheduler or task is created."
+      ]
+    },
+    {
+      "case_id": "Z16.mcp_to_cli",
+      "original_owners": [
+        "integration",
+        "cli",
+        "mcp",
+        "client"
+      ],
+      "delivery_tasks": [
+        "P12",
+        "P21",
+        "P33",
+        "P34",
+        "P38",
+        "P39",
+        "P40",
+        "P46"
+      ],
+      "verification_owner": "P46",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "Equivalent authorized state and durable identities are preserved across transports.",
+        "No transport-specific prerequisite is required to continue the workflow."
+      ]
+    },
+    {
+      "case_id": "Z16.disconnect_command_lookup",
+      "original_owners": [
+        "application",
+        "evidence",
+        "client",
+        "cli",
+        "mcp",
+        "integration"
+      ],
+      "delivery_tasks": [
+        "P12",
+        "P21",
+        "P33",
+        "P34",
+        "P38",
+        "P39",
+        "P40",
+        "P46"
+      ],
+      "verification_owner": "P46",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "The original disposition is recovered without another business mutation or event.",
+        "JSON-RPC request IDs are not treated as durable submission keys."
+      ]
+    },
+    {
+      "case_id": "Z16.cursor_expiry",
+      "original_owners": [
+        "evidence",
+        "client",
+        "desktop",
+        "cli",
+        "mcp",
+        "integration"
+      ],
+      "delivery_tasks": [
+        "P12",
+        "P21",
+        "P33",
+        "P34",
+        "P38",
+        "P39",
+        "P40",
+        "P46"
+      ],
+      "verification_owner": "P46",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "A named cursor-expiry result requires a fresh authorized snapshot and new replay position.",
+        "The client never presents an unseen event gap as complete history; both transports preserve equivalent scope and freshness."
+      ]
+    },
+    {
+      "case_id": "Z16.interrupted_upload",
+      "original_owners": [
+        "artifacts",
+        "client",
+        "cli",
+        "mcp",
+        "integration"
+      ],
+      "delivery_tasks": [
+        "P12",
+        "P21",
+        "P33",
+        "P34",
+        "P38",
+        "P39",
+        "P40",
+        "P46"
+      ],
+      "verification_owner": "P46",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "Chunk retries do not corrupt content or publish duplicate artifacts; finish verifies the full digest and bounds.",
+        "Partial bytes are not published as completed artifacts; cancellation leaves only reclaimable staging data.",
+        "Neither interface accepts an unrestricted controller filesystem path."
+      ]
+    },
+    {
+      "case_id": "Z16.maintenance_restore_parity",
+      "original_owners": [
+        "installation",
+        "server",
+        "cli",
+        "mcp",
+        "integration"
+      ],
+      "delivery_tasks": [
+        "P12",
+        "P21",
+        "P33",
+        "P34",
+        "P38",
+        "P39",
+        "P40",
+        "P46"
+      ],
+      "verification_owner": "P46",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "Both invoke the same authorized owner operation using opaque backup references.",
+        "No transport-specific admin endpoint is necessary; both restore paused with equivalent preserved obligations."
+      ]
+    },
+    {
+      "case_id": "Z17.atomic_chief_creation",
+      "original_owners": [
+        "configuration",
+        "identity",
+        "memory",
+        "integration"
+      ],
+      "delivery_tasks": [
+        "P03",
+        "P05",
+        "P07",
+        "P08",
+        "P46"
+      ],
+      "verification_owner": "P46",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "Each active organization has exactly one designated chief.",
+        "Organization and chief activate together or neither activates; creating an ordinary worker does not create an organization."
+      ]
+    },
+    {
+      "case_id": "Z17.hierarchy_cycles",
+      "original_owners": [
+        "configuration",
+        "policy",
+        "integration"
+      ],
+      "delivery_tasks": [
+        "P03",
+        "P05",
+        "P07",
+        "P08",
+        "P46"
+      ],
+      "verification_owner": "P46",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "Planning or activation rejects cycles.",
+        "The original hierarchy and inherited limits remain unchanged."
+      ]
+    },
+    {
+      "case_id": "Z17.chief_replacement",
+      "original_owners": [
+        "configuration",
+        "memory",
+        "tasks",
+        "evidence",
+        "integration"
+      ],
+      "delivery_tasks": [
+        "P03",
+        "P05",
+        "P07",
+        "P08",
+        "P46"
+      ],
+      "verification_owner": "P46",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "The organization keeps its identity, memory, obligations and history.",
+        "Exactly one active chief remains; replacement does not silently grant private memories or excess authority."
+      ]
+    },
+    {
+      "case_id": "Z17.inherited_denial",
+      "original_owners": [
+        "policy",
+        "configuration",
+        "integration"
+      ],
+      "delivery_tasks": [
+        "P03",
+        "P05",
+        "P07",
+        "P08",
+        "P46"
+      ],
+      "verification_owner": "P46",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "The inherited denial wins and child policy cannot enlarge the parent ceiling.",
+        "Parent-chief report access does not imply unrestricted access to descendant credentials, data or private memory."
+      ]
+    },
+    {
+      "case_id": "Z17.ancestor_budget_exhaustion",
+      "original_owners": [
+        "accounting",
+        "tasks",
+        "policy",
+        "integration"
+      ],
+      "delivery_tasks": [
+        "P03",
+        "P05",
+        "P07",
+        "P08",
+        "P46"
+      ],
+      "verification_owner": "P46",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "Admission is refused without provider dispatch.",
+        "Every descendant reserves against applicable ancestor budgets and cannot bypass an exhausted aggregate limit."
+      ]
+    },
+    {
+      "case_id": "Z17.scoped_reparenting",
+      "original_owners": [
+        "configuration",
+        "policy",
+        "memory",
+        "tasks",
+        "integration"
+      ],
+      "delivery_tasks": [
+        "P03",
+        "P05",
+        "P07",
+        "P08",
+        "P46"
+      ],
+      "verification_owner": "P46",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "Inherited authority, budgets and memory bindings are rechecked.",
+        "Existing private memories are not silently transferred and active work does not acquire broader authority."
+      ]
+    },
+    {
+      "case_id": "Z18.unauthorized_brain_not_queried",
+      "original_owners": [
+        "memory",
+        "serenity",
+        "policy",
+        "integration"
+      ],
+      "delivery_tasks": [
+        "P15",
+        "P26",
+        "P27",
+        "P28",
+        "P46"
+      ],
+      "verification_owner": "P46",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "The unauthorized brain receives zero read/model requests.",
+        "Filtering occurs before retrieval and model composition; hierarchy alone supplies no private-memory access."
+      ]
+    },
+    {
+      "case_id": "Z18.restricted_project_memory",
+      "original_owners": [
+        "memory",
+        "configuration",
+        "policy",
+        "integration"
+      ],
+      "delivery_tasks": [
+        "P15",
+        "P26",
+        "P27",
+        "P28",
+        "P46"
+      ],
+      "verification_owner": "P46",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "Restricted project content is excluded from the broadly shared brain and model context.",
+        "Promotion cannot disclose it without current source-disclosure and destination-write authority."
+      ]
+    },
+    {
+      "case_id": "Z18.chief_promotion_provenance",
+      "original_owners": [
+        "memory",
+        "serenity",
+        "evidence",
+        "accounting",
+        "integration"
+      ],
+      "delivery_tasks": [
+        "P15",
+        "P26",
+        "P27",
+        "P28",
+        "P46"
+      ],
+      "verification_owner": "P46",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "The new destination claim links source brain, claim/version, supporting artifacts, curator identity and redaction.",
+        "Promotion is scoped admitted work; the copied claim is not independent corroboration of its source."
+      ]
+    },
+    {
+      "case_id": "Z18.promotion_correction",
+      "original_owners": [
+        "memory",
+        "serenity",
+        "installation",
+        "integration"
+      ],
+      "delivery_tasks": [
+        "P15",
+        "P26",
+        "P27",
+        "P28",
+        "P46"
+      ],
+      "verification_owner": "P46",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "Durable lineage obligations cover every affected promoted copy and survive restart.",
+        "Unavailable reconciliation remains visible; forget/retract distinguishes active recall removal from erasure of Git history, backups and previous run artifacts."
+      ]
+    },
+    {
+      "case_id": "Z18.stale_index",
+      "original_owners": [
+        "memory",
+        "serenity",
+        "tasks",
+        "integration"
+      ],
+      "delivery_tasks": [
+        "P15",
+        "P26",
+        "P27",
+        "P28",
+        "P46"
+      ],
+      "verification_owner": "P46",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "Results report source/scope/version/confidence/freshness where available.",
+        "The task waits or receives a named prerequisite failure rather than silently treating stale content as current; failed writes are not presented as remembered knowledge."
+      ]
+    },
+    {
+      "case_id": "Z18.retained_context",
+      "original_owners": [
+        "memory",
+        "execution",
+        "artifacts",
+        "integration"
+      ],
+      "delivery_tasks": [
+        "P15",
+        "P26",
+        "P27",
+        "P28",
+        "P46"
+      ],
+      "verification_owner": "P46",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "The run retains the actual selected memory excerpts and provenance as artifacts.",
+        "Inspection reconstructs what the model received; reads across brains are not falsely described as one atomic snapshot."
+      ]
+    },
+    {
+      "case_id": "Z18.memory_write_unknown",
+      "original_owners": [
+        "memory",
+        "serenity",
+        "effects",
+        "accounting",
+        "integration"
+      ],
+      "delivery_tasks": [
+        "P15",
+        "P26",
+        "P27",
+        "P28",
+        "P46"
+      ],
+      "verification_owner": "P46",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "The prior persisted intent and adapter command identity are reconciled without blind repeat writing.",
+        "Exactly one canonical writer owns each brain; unsupported enforceable recall charge/disclosure bounds make that mode unavailable or explicitly advisory where policy permits."
+      ]
+    },
+    {
+      "case_id": "Z18.revoked_memory_binding",
+      "original_owners": [
+        "memory",
+        "policy",
+        "execution",
+        "integration"
+      ],
+      "delivery_tasks": [
+        "P15",
+        "P26",
+        "P27",
+        "P28",
+        "P46"
+      ],
+      "verification_owner": "P46",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "Subsequent brain retrieval is denied immediately under current authority.",
+        "The system does not claim revocation erases previously disclosed context; historical artifacts remain governed by their own retention/access rules."
+      ]
+    },
+    {
+      "case_id": "Z19.self_promotion",
+      "original_owners": [
+        "policy",
+        "identity",
+        "configuration",
+        "integration"
+      ],
+      "delivery_tasks": [
+        "P18",
+        "P34",
+        "P36",
+        "P46"
+      ],
+      "verification_owner": "P46",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "The worker cannot authorize any of those expansions.",
+        "Without an applicable owner-approved rule, promotion waits for an eligible owner decision."
+      ]
+    },
+    {
+      "case_id": "Z19.unsupported_evidence",
+      "original_owners": [
+        "policy",
+        "evidence",
+        "tasks",
+        "integration"
+      ],
+      "delivery_tasks": [
+        "P18",
+        "P34",
+        "P36",
+        "P46"
+      ],
+      "verification_owner": "P46",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "Insufficient evidence is rejected with an inspectable explanation.",
+        "No grant activates solely from competence narration or a remembered judgment."
+      ]
+    },
+    {
+      "case_id": "Z19.capability_promotion",
+      "original_owners": [
+        "policy",
+        "identity",
+        "reviews",
+        "integration"
+      ],
+      "delivery_tasks": [
+        "P18",
+        "P34",
+        "P36",
+        "P46"
+      ],
+      "verification_owner": "P46",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "Only the exact permitted capability/scope activates within the prior ceiling.",
+        "Unrelated powers remain unavailable; durable events identify the evidence and rule version responsible."
+      ]
+    },
+    {
+      "case_id": "Z19.version_requalification",
+      "original_owners": [
+        "policy",
+        "configuration",
+        "skills",
+        "integration"
+      ],
+      "delivery_tasks": [
+        "P18",
+        "P34",
+        "P36",
+        "P46"
+      ],
+      "verification_owner": "P46",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "Affected qualifications require requalification before qualifying further admission.",
+        "Only qualifications that depended on the changed configuration are invalidated; unsupported prior evidence is not reused silently."
+      ]
+    },
+    {
+      "case_id": "Z19.immediate_demotion",
+      "original_owners": [
+        "policy",
+        "identity",
+        "effects",
+        "integration"
+      ],
+      "delivery_tasks": [
+        "P18",
+        "P34",
+        "P36",
+        "P46"
+      ],
+      "verification_owner": "P46",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "Restriction or demotion commits before any subsequently authorized admission can use the old grant.",
+        "The user can inspect durable reasons and events; no model call or new spending is required to apply restriction."
+      ]
+    },
+    {
+      "case_id": "Z19.human_review_preserved",
+      "original_owners": [
+        "policy",
+        "reviews",
+        "integration"
+      ],
+      "delivery_tasks": [
+        "P18",
+        "P34",
+        "P36",
+        "P46"
+      ],
+      "verification_owner": "P46",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "The human-required decision remains mandatory.",
+        "Only an explicitly authorized owner policy change under existing authority can change the mandatory class."
+      ]
+    },
+    {
+      "case_id": "Z20.scheduled_cycles",
+      "original_owners": [
+        "scheduling",
+        "tasks",
+        "execution",
+        "integration"
+      ],
+      "delivery_tasks": [
+        "P08",
+        "P10",
+        "P11",
+        "P14",
+        "P16",
+        "P17",
+        "P22",
+        "P46"
+      ],
+      "verification_owner": "P46",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "Each admitted cycle is bounded and linked to the responsibility; repeated polls/events do not duplicate task admission.",
+        "Default missed occurrences coalesce once within the configured window and pauses disable new admission."
+      ]
+    },
+    {
+      "case_id": "Z20.reasoning_cycles",
+      "original_owners": [
+        "scheduling",
+        "execution",
+        "tasks",
+        "integration"
+      ],
+      "delivery_tasks": [
+        "P08",
+        "P10",
+        "P11",
+        "P14",
+        "P16",
+        "P17",
+        "P22",
+        "P46"
+      ],
+      "verification_owner": "P46",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "The cycle is an admitted bounded run with accountable outputs and a persisted next-wake decision.",
+        "Proposed work converges on versioned tasks and stays within task-count, scope and spending limits."
+      ]
+    },
+    {
+      "case_id": "Z20.bounded_idle_spend",
+      "original_owners": [
+        "scheduling",
+        "accounting",
+        "execution",
+        "integration"
+      ],
+      "delivery_tasks": [
+        "P08",
+        "P10",
+        "P11",
+        "P14",
+        "P16",
+        "P17",
+        "P22",
+        "P46"
+      ],
+      "verification_owner": "P46",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "The minimum interval prevents a tight reasoning loop.",
+        "Aggregate exhaustion or pause conditions stop new spend; idle reasoning cannot create unlimited tasks or spend indefinitely."
+      ]
+    },
+    {
+      "case_id": "Z20.restart_at_wake",
+      "original_owners": [
+        "scheduling",
+        "controller",
+        "storage",
+        "integration"
+      ],
+      "delivery_tasks": [
+        "P08",
+        "P10",
+        "P11",
+        "P14",
+        "P16",
+        "P17",
+        "P22",
+        "P46"
+      ],
+      "verification_owner": "P46",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "Recovery preserves the correct next-wake decision and occurrence identity.",
+        "Exactly the intended bounded cycle is admitted without loss or duplication."
+      ]
+    },
+    {
+      "case_id": "Z20.mailbox_redelivery",
+      "original_owners": [
+        "messaging",
+        "execution",
+        "storage",
+        "integration"
+      ],
+      "delivery_tasks": [
+        "P08",
+        "P10",
+        "P11",
+        "P14",
+        "P16",
+        "P17",
+        "P22",
+        "P46"
+      ],
+      "verification_owner": "P46",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "Acknowledgement occurs only after durable target admission and message identity deduplicates redelivery.",
+        "Running workers receive the message at a safe step boundary; idle workers can resume.",
+        "Message content is an untrusted observation and cannot replace authority."
+      ]
+    },
+    {
+      "case_id": "Z20.duplicate_assignment_conflict",
+      "original_owners": [
+        "messaging",
+        "tasks",
+        "desktop",
+        "integration"
+      ],
+      "delivery_tasks": [
+        "P08",
+        "P10",
+        "P11",
+        "P14",
+        "P16",
+        "P17",
+        "P22",
+        "P46"
+      ],
+      "verification_owner": "P46",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "One accepted version is authoritative and the conflicting update is surfaced.",
+        "The system does not independently schedule duplicate work from the competing conversations."
+      ]
+    },
+    {
+      "case_id": "Z20.responsibility_pause",
+      "original_owners": [
+        "scheduling",
+        "tasks",
+        "policy",
+        "desktop",
+        "integration"
+      ],
+      "delivery_tasks": [
+        "P08",
+        "P10",
+        "P11",
+        "P14",
+        "P16",
+        "P17",
+        "P22",
+        "P46"
+      ],
+      "verification_owner": "P46",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "Restrictive state commits immediately and prevents new admission for that responsibility.",
+        "Unrelated work is not cancelled; already transmitted effects and unresolved outcomes remain visible."
+      ]
+    },
+    {
+      "case_id": "Z21.first_conversation",
+      "original_owners": [
+        "desktop",
+        "installation",
+        "configuration",
+        "qualification"
+      ],
+      "delivery_tasks": [
+        "P42",
+        "P43",
+        "P44",
+        "P47"
+      ],
+      "verification_owner": "P47",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "First launch opens the pinned personal-chief conversation with a ready composer.",
+        "Returning launch restores the current conversation; no terminal, operation ID or schema knowledge is required."
+      ]
+    },
+    {
+      "case_id": "Z21.two_child_chiefs",
+      "original_owners": [
+        "desktop",
+        "configuration",
+        "messaging",
+        "qualification"
+      ],
+      "delivery_tasks": [
+        "P42",
+        "P43",
+        "P44",
+        "P47"
+      ],
+      "verification_owner": "P47",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "Each chief creation stages and activates its child organization and chief atomically.",
+        "Cards distinguish proposed, awaiting decision and created using committed controller state; ordinary workers do not create organizations.",
+        "Direct and conversational controls operate the same durable objects."
+      ]
+    },
+    {
+      "case_id": "Z21.delegate_work",
+      "original_owners": [
+        "desktop",
+        "tasks",
+        "scheduling",
+        "messaging",
+        "qualification"
+      ],
+      "delivery_tasks": [
+        "P42",
+        "P43",
+        "P44",
+        "P47"
+      ],
+      "verification_owner": "P47",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "The UI exposes durable task/responsibility state, required outputs and acceptance evidence outside message narration.",
+        "Failed checks cannot be represented as successful completion; the responsibility remains independently pausable."
+      ]
+    },
+    {
+      "case_id": "Z21.hierarchy_navigation",
+      "original_owners": [
+        "desktop",
+        "configuration",
+        "qualification"
+      ],
+      "delivery_tasks": [
+        "P42",
+        "P43",
+        "P44",
+        "P47"
+      ],
+      "verification_owner": "P47",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "Organization filtering includes its descendants without forcing an administrative landing page.",
+        "Worker labels and full ancestry disambiguate identities; membership is not conveyed by color alone.",
+        "Displayed hierarchy agrees with controller state."
+      ]
+    },
+    {
+      "case_id": "Z21.exact_decision",
+      "original_owners": [
+        "desktop",
+        "reviews",
+        "effects",
+        "qualification"
+      ],
+      "delivery_tasks": [
+        "P42",
+        "P43",
+        "P44",
+        "P47"
+      ],
+      "verification_owner": "P47",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "The card shows the actual action/destination/content/preconditions and acknowledged disposition with evidence links.",
+        "The stale action cannot reuse approval; Needs you links to unresolved exact decisions.",
+        "A chat assertion does not serve as approval or completion authority."
+      ]
+    },
+    {
+      "case_id": "Z21.reconnect_no_duplicate",
+      "original_owners": [
+        "desktop",
+        "client",
+        "application",
+        "qualification"
+      ],
+      "delivery_tasks": [
+        "P42",
+        "P43",
+        "P44",
+        "P47"
+      ],
+      "verification_owner": "P47",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "Unsent input and stale cached state remain distinguishable until controller acknowledgement.",
+        "Reconnection restores snapshots/replay and command disposition without duplicate tasks or external effects."
+      ]
+    },
+    {
+      "case_id": "Z21.close_client",
+      "original_owners": [
+        "desktop",
+        "controller",
+        "execution",
+        "qualification"
+      ],
+      "delivery_tasks": [
+        "P42",
+        "P43",
+        "P44",
+        "P47"
+      ],
+      "verification_owner": "P47",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "Closing the client does not stop the controller or scheduler.",
+        "Reopened state accurately shows controller progress/results and unresolved effects."
+      ]
+    },
+    {
+      "case_id": "Z21.groups_and_quiet_coordination",
+      "original_owners": [
+        "desktop",
+        "messaging",
+        "memory",
+        "policy",
+        "qualification"
+      ],
+      "delivery_tasks": [
+        "P42",
+        "P43",
+        "P44",
+        "P47"
+      ],
+      "verification_owner": "P47",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "Group membership changes neither worker home organization nor memory/tool authority; attachment sharing remains a governed disclosure.",
+        "Routine coordination does not continually reorder chats, mark them unread or notify the human.",
+        "Reports upward obey explicit reporting/data bindings."
+      ]
+    },
+    {
+      "case_id": "Z21.capability_and_pause_cards",
+      "original_owners": [
+        "desktop",
+        "policy",
+        "reviews",
+        "scheduling",
+        "qualification"
+      ],
+      "delivery_tasks": [
+        "P42",
+        "P43",
+        "P44",
+        "P47"
+      ],
+      "verification_owner": "P47",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "Autonomy is shown as exact capabilities and authority changes with evidence and rule/decision status, not a universal trust score.",
+        "Pause/stop reports controller acknowledgement and unresolved external effects honestly; responsibility creation does not imply expanded authority."
+      ]
+    },
+    {
+      "case_id": "JOURNEY.organization_setup_cli",
+      "original_owners": [
+        "integration",
+        "cli",
+        "configuration",
+        "skills",
+        "connections",
+        "tasks"
+      ],
+      "delivery_tasks": [
+        "P16",
+        "P18",
+        "P20",
+        "P24",
+        "P25",
+        "P28",
+        "P43",
+        "P44",
+        "P46",
+        "P47"
+      ],
+      "verification_owner": "P46",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "The first artifact is independently verified and inspectable.",
+        "Provider secrets never enter agent-visible arguments/results; prerequisite resolution requires no dashboard or source knowledge.",
+        "Retain operation traces, state/event observations and verification artifacts."
+      ]
+    },
+    {
+      "case_id": "JOURNEY.organization_setup_mcp",
+      "original_owners": [
+        "integration",
+        "mcp",
+        "configuration",
+        "skills",
+        "connections",
+        "tasks"
+      ],
+      "delivery_tasks": [
+        "P16",
+        "P18",
+        "P20",
+        "P24",
+        "P25",
+        "P28",
+        "P43",
+        "P44",
+        "P46",
+        "P47"
+      ],
+      "verification_owner": "P46",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "The same authorized product lifecycle and evidence is obtained as through CLI.",
+        "Every prerequisite and long-running operation remains discoverable and inspectable without optional MCP features."
+      ]
+    },
+    {
+      "case_id": "JOURNEY.engineering_cli",
+      "original_owners": [
+        "integration",
+        "cli",
+        "execution",
+        "github",
+        "tasks",
+        "reviews"
+      ],
+      "delivery_tasks": [
+        "P16",
+        "P18",
+        "P20",
+        "P24",
+        "P25",
+        "P28",
+        "P43",
+        "P44",
+        "P46",
+        "P47"
+      ],
+      "verification_owner": "P46",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "Successful acceptance is independently established and publication is governed by exact repository/branch/head/change/automation constraints.",
+        "Failed checks block completion and stale head invalidates applicable review.",
+        "Opening a pull request is not automatically treated as harmless when downstream automation broadens consequences."
+      ]
+    },
+    {
+      "case_id": "JOURNEY.engineering_mcp",
+      "original_owners": [
+        "integration",
+        "mcp",
+        "execution",
+        "github",
+        "tasks",
+        "reviews"
+      ],
+      "delivery_tasks": [
+        "P16",
+        "P18",
+        "P20",
+        "P24",
+        "P25",
+        "P28",
+        "P43",
+        "P44",
+        "P46",
+        "P47"
+      ],
+      "verification_owner": "P46",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "The same verified acceptance and protected-effect lifecycle is observed as through CLI.",
+        "No arbitrary shell invocation exposed as an MCP substitute counts toward operation parity."
+      ]
+    },
+    {
+      "case_id": "JOURNEY.research_drafting_cli",
+      "original_owners": [
+        "integration",
+        "cli",
+        "responses",
+        "httpread",
+        "artifacts",
+        "tasks"
+      ],
+      "delivery_tasks": [
+        "P16",
+        "P18",
+        "P20",
+        "P24",
+        "P25",
+        "P28",
+        "P43",
+        "P44",
+        "P46",
+        "P47"
+      ],
+      "verification_owner": "P46",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "The hosted loop uses governed bounded reads/model calls and retains reconstructable context and source references.",
+        "Artifacts satisfy acceptance and no social publishing adapter is required."
+      ]
+    },
+    {
+      "case_id": "JOURNEY.research_drafting_mcp",
+      "original_owners": [
+        "integration",
+        "mcp",
+        "responses",
+        "httpread",
+        "artifacts",
+        "tasks"
+      ],
+      "delivery_tasks": [
+        "P16",
+        "P18",
+        "P20",
+        "P24",
+        "P25",
+        "P28",
+        "P43",
+        "P44",
+        "P46",
+        "P47"
+      ],
+      "verification_owner": "P46",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "The same scope, disclosure, accounting, context and artifact guarantees are observed as through CLI.",
+        "Long-running work is followed through durable task/command IDs and polling."
+      ]
+    },
+    {
+      "case_id": "JOURNEY.cross_interface_fault_matrix",
+      "original_owners": [
+        "integration",
+        "cli",
+        "mcp",
+        "client",
+        "effects",
+        "installation"
+      ],
+      "delivery_tasks": [
+        "P16",
+        "P18",
+        "P20",
+        "P24",
+        "P25",
+        "P28",
+        "P43",
+        "P44",
+        "P46",
+        "P47"
+      ],
+      "verification_owner": "P46",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "Submission identity, pinned contracts, events and authorization remain equivalent.",
+        "No duplicate protected effect occurs; unknown outcomes remain unknown until qualified reconciliation.",
+        "The evidence names each fault boundary and both starting/continuing transports."
+      ]
+    },
+    {
+      "case_id": "JOURNEY.desktop_daily_work",
+      "original_owners": [
+        "qualification",
+        "desktop",
+        "configuration",
+        "tasks",
+        "scheduling",
+        "reviews",
+        "memory",
+        "policy"
+      ],
+      "delivery_tasks": [
+        "P16",
+        "P18",
+        "P20",
+        "P24",
+        "P25",
+        "P28",
+        "P43",
+        "P44",
+        "P46",
+        "P47"
+      ],
+      "verification_owner": "P46",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "The visible hierarchy and work states match queried controller state rather than model narration.",
+        "Memory scope/lineage and earned autonomy meet their own Z18/Z19 gates.",
+        "Capture executed UI observations for setup and daily results/decisions; mocked view models alone are insufficient."
+      ]
+    },
+    {
+      "case_id": "QUALIFICATION.macos_distribution",
+      "original_owners": [
+        "qualification",
+        "platform",
+        "installation",
+        "desktop",
+        "controller",
+        "serenity"
+      ],
+      "delivery_tasks": [
+        "P13",
+        "P20",
+        "P27",
+        "P45",
+        "P47",
+        "P48"
+      ],
+      "verification_owner": "P47",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "Documented installation commands work from actual artifacts; private socket, secure-store and local-lock behavior are exercised.",
+        "Serenity process packaging and one-writer lifecycle work with the controller/desktop.",
+        "Release evidence identifies exact OS/architecture/artifact/source/tool versions and observed results; compile success is not platform qualification."
+      ]
+    },
+    {
+      "case_id": "QUALIFICATION.linux_distribution",
+      "original_owners": [
+        "qualification",
+        "platform",
+        "installation",
+        "desktop",
+        "controller",
+        "serenity"
+      ],
+      "delivery_tasks": [
+        "P13",
+        "P20",
+        "P27",
+        "P45",
+        "P47",
+        "P48"
+      ],
+      "verification_owner": "P47",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "Documented artifact installation and headless/desktop credential prerequisites work without secret exposure.",
+        "Controller ownership, Serenity lifecycle and desktop continuation are exercised on Linux itself.",
+        "Advertised Linux targets match executed OS/architecture evidence; Windows support is not inferred."
+      ]
+    },
+    {
+      "case_id": "QUALIFICATION.named_agent_clients",
+      "original_owners": [
+        "qualification",
+        "mcp",
+        "client",
+        "integration"
+      ],
+      "delivery_tasks": [
+        "P13",
+        "P20",
+        "P27",
+        "P45",
+        "P47",
+        "P48"
+      ],
+      "verification_owner": "P47",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "Each named client/version has retained executed interoperability evidence.",
+        "Unsupported or untested clients are not advertised as qualified and client compatibility is not an executor-containment claim."
+      ]
+    },
+    {
+      "case_id": "QUALIFICATION.baseline_mcp",
+      "original_owners": [
+        "qualification",
+        "mcp",
+        "registry",
+        "integration"
+      ],
+      "delivery_tasks": [
+        "P13",
+        "P20",
+        "P27",
+        "P45",
+        "P47",
+        "P48"
+      ],
+      "verification_owner": "P47",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "Baseline stdio tools and durable polling provide complete authorized functionality without optional features.",
+        "Input/output schemas, result/error mapping and negotiated protocol behavior match the pinned supported revision."
+      ]
+    },
+    {
+      "case_id": "QUALIFICATION.adapter_bounds",
+      "original_owners": [
+        "qualification",
+        "responses",
+        "github",
+        "httpread",
+        "serenity",
+        "effects",
+        "accounting"
+      ],
+      "delivery_tasks": [
+        "P13",
+        "P20",
+        "P27",
+        "P45",
+        "P47",
+        "P48"
+      ],
+      "verification_owner": "P47",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "Record exact adapter/source/protocol/profile versions and observed physical calls.",
+        "Unsupported hard caps, safe-idempotency windows, continuation/context guarantees or memory operations remain unavailable or explicitly advisory as permitted, never inferred from upstream claims."
+      ]
+    },
+    {
+      "case_id": "QUALIFICATION.release_evidence",
+      "original_owners": [
+        "qualification",
+        "integration",
+        "evidence"
+      ],
+      "delivery_tasks": [
+        "P13",
+        "P20",
+        "P27",
+        "P45",
+        "P47",
+        "P48"
+      ],
+      "verification_owner": "P47",
+      "status": "requires_case_level_evidence",
+      "test_ids": [],
+      "expected": [
+        "Each required passing case records source/config/tool versions, expected and observed results, and retained failure evidence from fault tests.",
+        "Planned tests, skipped suites, golden files alone and a zero process exit do not satisfy release gates.",
+        "README and installation/client/platform claims match executed evidence; public fixtures use synthetic identities and contain no private operational data."
+      ]
+    }
+  ],
+  "requirements": [
+    {
+      "requirement_id": "R1-002",
+      "original_ownership": {
+        "owner": "configuration",
+        "participants": [
+          "installation",
+          "integration"
+        ]
+      },
+      "delivery_tasks": [
+        "P05"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R1-003",
+      "original_ownership": {
+        "owner": "configuration",
+        "participants": [
+          "installation",
+          "integration"
+        ]
+      },
+      "delivery_tasks": [
+        "P05"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R1-004",
+      "original_ownership": {
+        "owner": "configuration",
+        "participants": [
+          "installation",
+          "integration"
+        ]
+      },
+      "delivery_tasks": [
+        "P05"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R1-005",
+      "original_ownership": {
+        "owner": "configuration",
+        "participants": [
+          "installation",
+          "integration"
+        ]
+      },
+      "delivery_tasks": [
+        "P05"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R1-006",
+      "original_ownership": {
+        "owner": "configuration",
+        "participants": [
+          "installation",
+          "integration"
+        ]
+      },
+      "delivery_tasks": [
+        "P05"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R2.1-002",
+      "original_ownership": {
+        "owner": "configuration",
+        "participants": [
+          "identity",
+          "policy",
+          "accounting",
+          "memory",
+          "installation",
+          "desktop"
+        ]
+      },
+      "delivery_tasks": [
+        "P05"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R2.1-003",
+      "original_ownership": {
+        "owner": "configuration",
+        "participants": [
+          "identity",
+          "policy",
+          "accounting",
+          "memory",
+          "installation",
+          "desktop"
+        ]
+      },
+      "delivery_tasks": [
+        "P05"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R2.1-004",
+      "original_ownership": {
+        "owner": "configuration",
+        "participants": [
+          "identity",
+          "policy",
+          "accounting",
+          "memory",
+          "installation",
+          "desktop"
+        ]
+      },
+      "delivery_tasks": [
+        "P05"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R2.1-005",
+      "original_ownership": {
+        "owner": "configuration",
+        "participants": [
+          "identity",
+          "policy",
+          "accounting",
+          "memory",
+          "installation",
+          "desktop"
+        ]
+      },
+      "delivery_tasks": [
+        "P05"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R2.1-006",
+      "original_ownership": {
+        "owner": "configuration",
+        "participants": [
+          "identity",
+          "policy",
+          "accounting",
+          "memory",
+          "installation",
+          "desktop"
+        ]
+      },
+      "delivery_tasks": [
+        "P05"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R2.2-002",
+      "original_ownership": {
+        "owner": "identity",
+        "participants": [
+          "execution",
+          "cli",
+          "mcp",
+          "desktop"
+        ]
+      },
+      "delivery_tasks": [
+        "P03"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R2.2-003",
+      "original_ownership": {
+        "owner": "identity",
+        "participants": [
+          "execution",
+          "cli",
+          "mcp",
+          "desktop"
+        ]
+      },
+      "delivery_tasks": [
+        "P03"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R2.2-004",
+      "original_ownership": {
+        "owner": "identity",
+        "participants": [
+          "execution",
+          "cli",
+          "mcp",
+          "desktop"
+        ]
+      },
+      "delivery_tasks": [
+        "P03"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R2.2-005",
+      "original_ownership": {
+        "owner": "identity",
+        "participants": [
+          "execution",
+          "cli",
+          "mcp",
+          "desktop"
+        ]
+      },
+      "delivery_tasks": [
+        "P03"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R2.3-002",
+      "original_ownership": {
+        "owner": "integration",
+        "participants": [
+          "qualification",
+          "desktop",
+          "installation"
+        ]
+      },
+      "delivery_tasks": [
+        "P46"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R2.3-003",
+      "original_ownership": {
+        "owner": "integration",
+        "participants": [
+          "qualification",
+          "desktop",
+          "installation"
+        ]
+      },
+      "delivery_tasks": [
+        "P46"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R2.3-004",
+      "original_ownership": {
+        "owner": "integration",
+        "participants": [
+          "qualification",
+          "desktop",
+          "installation"
+        ]
+      },
+      "delivery_tasks": [
+        "P46"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R2.4-002",
+      "original_ownership": {
+        "owner": "controller",
+        "participants": [
+          "mcp",
+          "execution",
+          "distribution",
+          "qualification"
+        ]
+      },
+      "delivery_tasks": [
+        "P22",
+        "P23",
+        "P32"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R2.4-003",
+      "original_ownership": {
+        "owner": "controller",
+        "participants": [
+          "mcp",
+          "execution",
+          "distribution",
+          "qualification"
+        ]
+      },
+      "delivery_tasks": [
+        "P22",
+        "P23",
+        "P32"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R3-002",
+      "original_ownership": {
+        "owner": "storage",
+        "participants": [
+          "platform",
+          "application",
+          "controller",
+          "server",
+          "client",
+          "registry",
+          "installation",
+          "artifacts",
+          "serenity",
+          "distribution"
+        ]
+      },
+      "delivery_tasks": [
+        "P29"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R3-003",
+      "original_ownership": {
+        "owner": "storage",
+        "participants": [
+          "platform",
+          "application",
+          "controller",
+          "server",
+          "client",
+          "registry",
+          "installation",
+          "artifacts",
+          "serenity",
+          "distribution"
+        ]
+      },
+      "delivery_tasks": [
+        "P29"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R3-004",
+      "original_ownership": {
+        "owner": "storage",
+        "participants": [
+          "platform",
+          "application",
+          "controller",
+          "server",
+          "client",
+          "registry",
+          "installation",
+          "artifacts",
+          "serenity",
+          "distribution"
+        ]
+      },
+      "delivery_tasks": [
+        "P29"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R3-005",
+      "original_ownership": {
+        "owner": "storage",
+        "participants": [
+          "platform",
+          "application",
+          "controller",
+          "server",
+          "client",
+          "registry",
+          "installation",
+          "artifacts",
+          "serenity",
+          "distribution"
+        ]
+      },
+      "delivery_tasks": [
+        "P29"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R3-006",
+      "original_ownership": {
+        "owner": "storage",
+        "participants": [
+          "platform",
+          "application",
+          "controller",
+          "server",
+          "client",
+          "registry",
+          "installation",
+          "artifacts",
+          "serenity",
+          "distribution"
+        ]
+      },
+      "delivery_tasks": [
+        "P29"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R3-007",
+      "original_ownership": {
+        "owner": "storage",
+        "participants": [
+          "platform",
+          "application",
+          "controller",
+          "server",
+          "client",
+          "registry",
+          "installation",
+          "artifacts",
+          "serenity",
+          "distribution"
+        ]
+      },
+      "delivery_tasks": [
+        "P29"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R3-008",
+      "original_ownership": {
+        "owner": "storage",
+        "participants": [
+          "platform",
+          "application",
+          "controller",
+          "server",
+          "client",
+          "registry",
+          "installation",
+          "artifacts",
+          "serenity",
+          "distribution"
+        ]
+      },
+      "delivery_tasks": [
+        "P29"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R3-009",
+      "original_ownership": {
+        "owner": "storage",
+        "participants": [
+          "platform",
+          "application",
+          "controller",
+          "server",
+          "client",
+          "registry",
+          "installation",
+          "artifacts",
+          "serenity",
+          "distribution"
+        ]
+      },
+      "delivery_tasks": [
+        "P29"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R4-002",
+      "original_ownership": {
+        "owner": "contract",
+        "participants": [
+          "configuration",
+          "identity",
+          "tasks",
+          "execution",
+          "effects",
+          "integration"
+        ]
+      },
+      "delivery_tasks": [
+        "P01"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R4-003",
+      "original_ownership": {
+        "owner": "contract",
+        "participants": [
+          "configuration",
+          "identity",
+          "tasks",
+          "execution",
+          "effects",
+          "integration"
+        ]
+      },
+      "delivery_tasks": [
+        "P01"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R4-004",
+      "original_ownership": {
+        "owner": "contract",
+        "participants": [
+          "configuration",
+          "identity",
+          "tasks",
+          "execution",
+          "effects",
+          "integration"
+        ]
+      },
+      "delivery_tasks": [
+        "P01"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R5-002",
+      "original_ownership": {
+        "owner": "identity",
+        "participants": [
+          "policy",
+          "reviews",
+          "configuration",
+          "effects",
+          "accounting",
+          "installation"
+        ]
+      },
+      "delivery_tasks": [
+        "P03"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R5-003",
+      "original_ownership": {
+        "owner": "identity",
+        "participants": [
+          "policy",
+          "reviews",
+          "configuration",
+          "effects",
+          "accounting",
+          "installation"
+        ]
+      },
+      "delivery_tasks": [
+        "P03"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R5-004",
+      "original_ownership": {
+        "owner": "identity",
+        "participants": [
+          "policy",
+          "reviews",
+          "configuration",
+          "effects",
+          "accounting",
+          "installation"
+        ]
+      },
+      "delivery_tasks": [
+        "P03"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R5-005",
+      "original_ownership": {
+        "owner": "identity",
+        "participants": [
+          "policy",
+          "reviews",
+          "configuration",
+          "effects",
+          "accounting",
+          "installation"
+        ]
+      },
+      "delivery_tasks": [
+        "P03"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R5-006",
+      "original_ownership": {
+        "owner": "identity",
+        "participants": [
+          "policy",
+          "reviews",
+          "configuration",
+          "effects",
+          "accounting",
+          "installation"
+        ]
+      },
+      "delivery_tasks": [
+        "P03"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R5-007",
+      "original_ownership": {
+        "owner": "identity",
+        "participants": [
+          "policy",
+          "reviews",
+          "configuration",
+          "effects",
+          "accounting",
+          "installation"
+        ]
+      },
+      "delivery_tasks": [
+        "P03"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R5-008",
+      "original_ownership": {
+        "owner": "identity",
+        "participants": [
+          "policy",
+          "reviews",
+          "configuration",
+          "effects",
+          "accounting",
+          "installation"
+        ]
+      },
+      "delivery_tasks": [
+        "P03"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R5-009",
+      "original_ownership": {
+        "owner": "identity",
+        "participants": [
+          "policy",
+          "reviews",
+          "configuration",
+          "effects",
+          "accounting",
+          "installation"
+        ]
+      },
+      "delivery_tasks": [
+        "P03"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R5-010",
+      "original_ownership": {
+        "owner": "identity",
+        "participants": [
+          "policy",
+          "reviews",
+          "configuration",
+          "effects",
+          "accounting",
+          "installation"
+        ]
+      },
+      "delivery_tasks": [
+        "P03"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R6-002",
+      "original_ownership": {
+        "owner": "configuration",
+        "participants": [
+          "identity",
+          "connections",
+          "desktop",
+          "integration"
+        ]
+      },
+      "delivery_tasks": [
+        "P05"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R6-003",
+      "original_ownership": {
+        "owner": "configuration",
+        "participants": [
+          "identity",
+          "connections",
+          "desktop",
+          "integration"
+        ]
+      },
+      "delivery_tasks": [
+        "P05"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R6-004",
+      "original_ownership": {
+        "owner": "configuration",
+        "participants": [
+          "identity",
+          "connections",
+          "desktop",
+          "integration"
+        ]
+      },
+      "delivery_tasks": [
+        "P05"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R6-005",
+      "original_ownership": {
+        "owner": "configuration",
+        "participants": [
+          "identity",
+          "connections",
+          "desktop",
+          "integration"
+        ]
+      },
+      "delivery_tasks": [
+        "P05"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R6-006",
+      "original_ownership": {
+        "owner": "configuration",
+        "participants": [
+          "identity",
+          "connections",
+          "desktop",
+          "integration"
+        ]
+      },
+      "delivery_tasks": [
+        "P05"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R6-007",
+      "original_ownership": {
+        "owner": "configuration",
+        "participants": [
+          "identity",
+          "connections",
+          "desktop",
+          "integration"
+        ]
+      },
+      "delivery_tasks": [
+        "P05"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R6-008",
+      "original_ownership": {
+        "owner": "configuration",
+        "participants": [
+          "identity",
+          "connections",
+          "desktop",
+          "integration"
+        ]
+      },
+      "delivery_tasks": [
+        "P05"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R7.1-002",
+      "original_ownership": {
+        "owner": "skills",
+        "participants": [
+          "configuration",
+          "policy"
+        ]
+      },
+      "delivery_tasks": [
+        "P19"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R7.1-003",
+      "original_ownership": {
+        "owner": "skills",
+        "participants": [
+          "configuration",
+          "policy"
+        ]
+      },
+      "delivery_tasks": [
+        "P19"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R7.1-004",
+      "original_ownership": {
+        "owner": "skills",
+        "participants": [
+          "configuration",
+          "policy"
+        ]
+      },
+      "delivery_tasks": [
+        "P19"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R7.2-002",
+      "original_ownership": {
+        "owner": "connections",
+        "participants": [
+          "effects",
+          "execution",
+          "registry",
+          "mcp"
+        ]
+      },
+      "delivery_tasks": [
+        "P06"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R7.2-003",
+      "original_ownership": {
+        "owner": "connections",
+        "participants": [
+          "effects",
+          "execution",
+          "registry",
+          "mcp"
+        ]
+      },
+      "delivery_tasks": [
+        "P06"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R7.3-002",
+      "original_ownership": {
+        "owner": "connections",
+        "participants": [
+          "platform",
+          "effects",
+          "responses",
+          "server",
+          "client"
+        ]
+      },
+      "delivery_tasks": [
+        "P06"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R7.3-003",
+      "original_ownership": {
+        "owner": "connections",
+        "participants": [
+          "platform",
+          "effects",
+          "responses",
+          "server",
+          "client"
+        ]
+      },
+      "delivery_tasks": [
+        "P06"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R7.3-004",
+      "original_ownership": {
+        "owner": "connections",
+        "participants": [
+          "platform",
+          "effects",
+          "responses",
+          "server",
+          "client"
+        ]
+      },
+      "delivery_tasks": [
+        "P06"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R8.1-002",
+      "original_ownership": {
+        "owner": "registry",
+        "participants": [
+          "application",
+          "cli",
+          "mcp",
+          "integration"
+        ]
+      },
+      "delivery_tasks": [
+        "P37"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R8.1-003",
+      "original_ownership": {
+        "owner": "registry",
+        "participants": [
+          "application",
+          "cli",
+          "mcp",
+          "integration"
+        ]
+      },
+      "delivery_tasks": [
+        "P37"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R8.1-004",
+      "original_ownership": {
+        "owner": "registry",
+        "participants": [
+          "application",
+          "cli",
+          "mcp",
+          "integration"
+        ]
+      },
+      "delivery_tasks": [
+        "P37"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R8.1-005",
+      "original_ownership": {
+        "owner": "registry",
+        "participants": [
+          "application",
+          "cli",
+          "mcp",
+          "integration"
+        ]
+      },
+      "delivery_tasks": [
+        "P37"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R8.1-006",
+      "original_ownership": {
+        "owner": "registry",
+        "participants": [
+          "application",
+          "cli",
+          "mcp",
+          "integration"
+        ]
+      },
+      "delivery_tasks": [
+        "P37"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R8.2-002",
+      "original_ownership": {
+        "owner": "cli",
+        "participants": [
+          "client",
+          "zatiti"
+        ]
+      },
+      "delivery_tasks": [
+        "P39"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R8.2-003",
+      "original_ownership": {
+        "owner": "cli",
+        "participants": [
+          "client",
+          "zatiti"
+        ]
+      },
+      "delivery_tasks": [
+        "P39"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R8.2-004",
+      "original_ownership": {
+        "owner": "cli",
+        "participants": [
+          "client",
+          "zatiti"
+        ]
+      },
+      "delivery_tasks": [
+        "P39"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R8.2-005",
+      "original_ownership": {
+        "owner": "cli",
+        "participants": [
+          "client",
+          "zatiti"
+        ]
+      },
+      "delivery_tasks": [
+        "P39"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R8.3-002",
+      "original_ownership": {
+        "owner": "mcp",
+        "participants": [
+          "client",
+          "zatiti",
+          "qualification"
+        ]
+      },
+      "delivery_tasks": [
+        "P40"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R8.3-003",
+      "original_ownership": {
+        "owner": "mcp",
+        "participants": [
+          "client",
+          "zatiti",
+          "qualification"
+        ]
+      },
+      "delivery_tasks": [
+        "P40"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R8.3-004",
+      "original_ownership": {
+        "owner": "mcp",
+        "participants": [
+          "client",
+          "zatiti",
+          "qualification"
+        ]
+      },
+      "delivery_tasks": [
+        "P40"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R8.4-002",
+      "original_ownership": {
+        "owner": "contract",
+        "participants": [
+          "evidence",
+          "application",
+          "server",
+          "client",
+          "cli",
+          "mcp",
+          "artifacts",
+          "installation",
+          "integration"
+        ]
+      },
+      "delivery_tasks": [
+        "P01"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R8.4-003",
+      "original_ownership": {
+        "owner": "contract",
+        "participants": [
+          "evidence",
+          "application",
+          "server",
+          "client",
+          "cli",
+          "mcp",
+          "artifacts",
+          "installation",
+          "integration"
+        ]
+      },
+      "delivery_tasks": [
+        "P01"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R8.4-004",
+      "original_ownership": {
+        "owner": "contract",
+        "participants": [
+          "evidence",
+          "application",
+          "server",
+          "client",
+          "cli",
+          "mcp",
+          "artifacts",
+          "installation",
+          "integration"
+        ]
+      },
+      "delivery_tasks": [
+        "P01"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R8.4-005",
+      "original_ownership": {
+        "owner": "contract",
+        "participants": [
+          "evidence",
+          "application",
+          "server",
+          "client",
+          "cli",
+          "mcp",
+          "artifacts",
+          "installation",
+          "integration"
+        ]
+      },
+      "delivery_tasks": [
+        "P01"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R8.4-006",
+      "original_ownership": {
+        "owner": "contract",
+        "participants": [
+          "evidence",
+          "application",
+          "server",
+          "client",
+          "cli",
+          "mcp",
+          "artifacts",
+          "installation",
+          "integration"
+        ]
+      },
+      "delivery_tasks": [
+        "P01"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R8.4-007",
+      "original_ownership": {
+        "owner": "contract",
+        "participants": [
+          "evidence",
+          "application",
+          "server",
+          "client",
+          "cli",
+          "mcp",
+          "artifacts",
+          "installation",
+          "integration"
+        ]
+      },
+      "delivery_tasks": [
+        "P01"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R8.4-008",
+      "original_ownership": {
+        "owner": "contract",
+        "participants": [
+          "evidence",
+          "application",
+          "server",
+          "client",
+          "cli",
+          "mcp",
+          "artifacts",
+          "installation",
+          "integration"
+        ]
+      },
+      "delivery_tasks": [
+        "P01"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R9-002",
+      "original_ownership": {
+        "owner": "tasks",
+        "participants": [
+          "execution",
+          "scheduling",
+          "messaging",
+          "accounting",
+          "responses",
+          "controller"
+        ]
+      },
+      "delivery_tasks": [
+        "P11"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R9-003",
+      "original_ownership": {
+        "owner": "tasks",
+        "participants": [
+          "execution",
+          "scheduling",
+          "messaging",
+          "accounting",
+          "responses",
+          "controller"
+        ]
+      },
+      "delivery_tasks": [
+        "P11"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R9-004",
+      "original_ownership": {
+        "owner": "tasks",
+        "participants": [
+          "execution",
+          "scheduling",
+          "messaging",
+          "accounting",
+          "responses",
+          "controller"
+        ]
+      },
+      "delivery_tasks": [
+        "P11"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R9-005",
+      "original_ownership": {
+        "owner": "tasks",
+        "participants": [
+          "execution",
+          "scheduling",
+          "messaging",
+          "accounting",
+          "responses",
+          "controller"
+        ]
+      },
+      "delivery_tasks": [
+        "P11"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R9-006",
+      "original_ownership": {
+        "owner": "tasks",
+        "participants": [
+          "execution",
+          "scheduling",
+          "messaging",
+          "accounting",
+          "responses",
+          "controller"
+        ]
+      },
+      "delivery_tasks": [
+        "P11"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R9-007",
+      "original_ownership": {
+        "owner": "tasks",
+        "participants": [
+          "execution",
+          "scheduling",
+          "messaging",
+          "accounting",
+          "responses",
+          "controller"
+        ]
+      },
+      "delivery_tasks": [
+        "P11"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R9-008",
+      "original_ownership": {
+        "owner": "tasks",
+        "participants": [
+          "execution",
+          "scheduling",
+          "messaging",
+          "accounting",
+          "responses",
+          "controller"
+        ]
+      },
+      "delivery_tasks": [
+        "P11"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R9-009",
+      "original_ownership": {
+        "owner": "tasks",
+        "participants": [
+          "execution",
+          "scheduling",
+          "messaging",
+          "accounting",
+          "responses",
+          "controller"
+        ]
+      },
+      "delivery_tasks": [
+        "P11"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R9-010",
+      "original_ownership": {
+        "owner": "tasks",
+        "participants": [
+          "execution",
+          "scheduling",
+          "messaging",
+          "accounting",
+          "responses",
+          "controller"
+        ]
+      },
+      "delivery_tasks": [
+        "P11"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R9-011",
+      "original_ownership": {
+        "owner": "tasks",
+        "participants": [
+          "execution",
+          "scheduling",
+          "messaging",
+          "accounting",
+          "responses",
+          "controller"
+        ]
+      },
+      "delivery_tasks": [
+        "P11"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R9-012",
+      "original_ownership": {
+        "owner": "tasks",
+        "participants": [
+          "execution",
+          "scheduling",
+          "messaging",
+          "accounting",
+          "responses",
+          "controller"
+        ]
+      },
+      "delivery_tasks": [
+        "P11"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R9-013",
+      "original_ownership": {
+        "owner": "tasks",
+        "participants": [
+          "execution",
+          "scheduling",
+          "messaging",
+          "accounting",
+          "responses",
+          "controller"
+        ]
+      },
+      "delivery_tasks": [
+        "P11"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R10-002",
+      "original_ownership": {
+        "owner": "effects",
+        "participants": [
+          "reviews",
+          "accounting",
+          "controller",
+          "github",
+          "httpread",
+          "responses",
+          "serenity"
+        ]
+      },
+      "delivery_tasks": [
+        "P12"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R10-003",
+      "original_ownership": {
+        "owner": "effects",
+        "participants": [
+          "reviews",
+          "accounting",
+          "controller",
+          "github",
+          "httpread",
+          "responses",
+          "serenity"
+        ]
+      },
+      "delivery_tasks": [
+        "P12"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R10-004",
+      "original_ownership": {
+        "owner": "effects",
+        "participants": [
+          "reviews",
+          "accounting",
+          "controller",
+          "github",
+          "httpread",
+          "responses",
+          "serenity"
+        ]
+      },
+      "delivery_tasks": [
+        "P12"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R10-005",
+      "original_ownership": {
+        "owner": "effects",
+        "participants": [
+          "reviews",
+          "accounting",
+          "controller",
+          "github",
+          "httpread",
+          "responses",
+          "serenity"
+        ]
+      },
+      "delivery_tasks": [
+        "P12"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R10-006",
+      "original_ownership": {
+        "owner": "effects",
+        "participants": [
+          "reviews",
+          "accounting",
+          "controller",
+          "github",
+          "httpread",
+          "responses",
+          "serenity"
+        ]
+      },
+      "delivery_tasks": [
+        "P12"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R10-007",
+      "original_ownership": {
+        "owner": "effects",
+        "participants": [
+          "reviews",
+          "accounting",
+          "controller",
+          "github",
+          "httpread",
+          "responses",
+          "serenity"
+        ]
+      },
+      "delivery_tasks": [
+        "P12"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R10-008",
+      "original_ownership": {
+        "owner": "effects",
+        "participants": [
+          "reviews",
+          "accounting",
+          "controller",
+          "github",
+          "httpread",
+          "responses",
+          "serenity"
+        ]
+      },
+      "delivery_tasks": [
+        "P12"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R11-002",
+      "original_ownership": {
+        "owner": "accounting",
+        "participants": [
+          "evidence",
+          "artifacts",
+          "installation",
+          "platform",
+          "storage",
+          "distribution"
+        ]
+      },
+      "delivery_tasks": [
+        "P08"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R11-003",
+      "original_ownership": {
+        "owner": "accounting",
+        "participants": [
+          "evidence",
+          "artifacts",
+          "installation",
+          "platform",
+          "storage",
+          "distribution"
+        ]
+      },
+      "delivery_tasks": [
+        "P08"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R11-004",
+      "original_ownership": {
+        "owner": "accounting",
+        "participants": [
+          "evidence",
+          "artifacts",
+          "installation",
+          "platform",
+          "storage",
+          "distribution"
+        ]
+      },
+      "delivery_tasks": [
+        "P08"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R11-005",
+      "original_ownership": {
+        "owner": "accounting",
+        "participants": [
+          "evidence",
+          "artifacts",
+          "installation",
+          "platform",
+          "storage",
+          "distribution"
+        ]
+      },
+      "delivery_tasks": [
+        "P08"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R11-006",
+      "original_ownership": {
+        "owner": "accounting",
+        "participants": [
+          "evidence",
+          "artifacts",
+          "installation",
+          "platform",
+          "storage",
+          "distribution"
+        ]
+      },
+      "delivery_tasks": [
+        "P08"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R12-002",
+      "original_ownership": {
+        "owner": "integration",
+        "participants": [
+          "qualification"
+        ]
+      },
+      "delivery_tasks": [
+        "P46"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R12-003",
+      "original_ownership": {
+        "owner": "integration",
+        "participants": [
+          "qualification"
+        ]
+      },
+      "delivery_tasks": [
+        "P46"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R12-004",
+      "original_ownership": {
+        "owner": "integration",
+        "participants": [
+          "qualification"
+        ]
+      },
+      "delivery_tasks": [
+        "P46"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R12-005",
+      "original_ownership": {
+        "owner": "integration",
+        "participants": [
+          "qualification"
+        ]
+      },
+      "delivery_tasks": [
+        "P46"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R12-006",
+      "original_ownership": {
+        "owner": "integration",
+        "participants": [
+          "qualification"
+        ]
+      },
+      "delivery_tasks": [
+        "P46"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R12-007",
+      "original_ownership": {
+        "owner": "integration",
+        "participants": [
+          "qualification"
+        ]
+      },
+      "delivery_tasks": [
+        "P46"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R12-008",
+      "original_ownership": {
+        "owner": "integration",
+        "participants": [
+          "qualification"
+        ]
+      },
+      "delivery_tasks": [
+        "P46"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R13-002",
+      "original_ownership": {
+        "owner": "integration",
+        "participants": [
+          "qualification",
+          "ci",
+          "distribution"
+        ]
+      },
+      "delivery_tasks": [
+        "P46"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R13-003",
+      "original_ownership": {
+        "owner": "integration",
+        "participants": [
+          "qualification",
+          "ci",
+          "distribution"
+        ]
+      },
+      "delivery_tasks": [
+        "P46"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R14-002",
+      "original_ownership": {
+        "owner": "distribution",
+        "participants": [
+          "ci",
+          "integration"
+        ]
+      },
+      "delivery_tasks": [
+        "P45"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R14-003",
+      "original_ownership": {
+        "owner": "distribution",
+        "participants": [
+          "ci",
+          "integration"
+        ]
+      },
+      "delivery_tasks": [
+        "P45"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R14-004",
+      "original_ownership": {
+        "owner": "distribution",
+        "participants": [
+          "ci",
+          "integration"
+        ]
+      },
+      "delivery_tasks": [
+        "P45"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R15-002",
+      "original_ownership": {
+        "owner": "memory",
+        "participants": [
+          "serenity",
+          "execution",
+          "policy",
+          "installation",
+          "desktop"
+        ]
+      },
+      "delivery_tasks": [
+        "P26",
+        "P28"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R15-003",
+      "original_ownership": {
+        "owner": "memory",
+        "participants": [
+          "serenity",
+          "execution",
+          "policy",
+          "installation",
+          "desktop"
+        ]
+      },
+      "delivery_tasks": [
+        "P26",
+        "P28"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R15-004",
+      "original_ownership": {
+        "owner": "memory",
+        "participants": [
+          "serenity",
+          "execution",
+          "policy",
+          "installation",
+          "desktop"
+        ]
+      },
+      "delivery_tasks": [
+        "P26",
+        "P28"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R15-005",
+      "original_ownership": {
+        "owner": "memory",
+        "participants": [
+          "serenity",
+          "execution",
+          "policy",
+          "installation",
+          "desktop"
+        ]
+      },
+      "delivery_tasks": [
+        "P26",
+        "P28"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R15-006",
+      "original_ownership": {
+        "owner": "memory",
+        "participants": [
+          "serenity",
+          "execution",
+          "policy",
+          "installation",
+          "desktop"
+        ]
+      },
+      "delivery_tasks": [
+        "P26",
+        "P28"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R15-007",
+      "original_ownership": {
+        "owner": "memory",
+        "participants": [
+          "serenity",
+          "execution",
+          "policy",
+          "installation",
+          "desktop"
+        ]
+      },
+      "delivery_tasks": [
+        "P26",
+        "P28"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R15-008",
+      "original_ownership": {
+        "owner": "memory",
+        "participants": [
+          "serenity",
+          "execution",
+          "policy",
+          "installation",
+          "desktop"
+        ]
+      },
+      "delivery_tasks": [
+        "P26",
+        "P28"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R15-009",
+      "original_ownership": {
+        "owner": "memory",
+        "participants": [
+          "serenity",
+          "execution",
+          "policy",
+          "installation",
+          "desktop"
+        ]
+      },
+      "delivery_tasks": [
+        "P26",
+        "P28"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R16-002",
+      "original_ownership": {
+        "owner": "desktop",
+        "participants": [
+          "messaging",
+          "configuration",
+          "client",
+          "qualification"
+        ]
+      },
+      "delivery_tasks": [
+        "P42",
+        "P43",
+        "P44"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R16-003",
+      "original_ownership": {
+        "owner": "desktop",
+        "participants": [
+          "messaging",
+          "configuration",
+          "client",
+          "qualification"
+        ]
+      },
+      "delivery_tasks": [
+        "P42",
+        "P43",
+        "P44"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R16-004",
+      "original_ownership": {
+        "owner": "desktop",
+        "participants": [
+          "messaging",
+          "configuration",
+          "client",
+          "qualification"
+        ]
+      },
+      "delivery_tasks": [
+        "P42",
+        "P43",
+        "P44"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R16-005",
+      "original_ownership": {
+        "owner": "desktop",
+        "participants": [
+          "messaging",
+          "configuration",
+          "client",
+          "qualification"
+        ]
+      },
+      "delivery_tasks": [
+        "P42",
+        "P43",
+        "P44"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R16-006",
+      "original_ownership": {
+        "owner": "desktop",
+        "participants": [
+          "messaging",
+          "configuration",
+          "client",
+          "qualification"
+        ]
+      },
+      "delivery_tasks": [
+        "P42",
+        "P43",
+        "P44"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R16-007",
+      "original_ownership": {
+        "owner": "desktop",
+        "participants": [
+          "messaging",
+          "configuration",
+          "client",
+          "qualification"
+        ]
+      },
+      "delivery_tasks": [
+        "P42",
+        "P43",
+        "P44"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R16-008",
+      "original_ownership": {
+        "owner": "desktop",
+        "participants": [
+          "messaging",
+          "configuration",
+          "client",
+          "qualification"
+        ]
+      },
+      "delivery_tasks": [
+        "P42",
+        "P43",
+        "P44"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R16-009",
+      "original_ownership": {
+        "owner": "desktop",
+        "participants": [
+          "messaging",
+          "configuration",
+          "client",
+          "qualification"
+        ]
+      },
+      "delivery_tasks": [
+        "P42",
+        "P43",
+        "P44"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R16-010",
+      "original_ownership": {
+        "owner": "desktop",
+        "participants": [
+          "messaging",
+          "configuration",
+          "client",
+          "qualification"
+        ]
+      },
+      "delivery_tasks": [
+        "P42",
+        "P43",
+        "P44"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    },
+    {
+      "requirement_id": "R17-002",
+      "original_ownership": {
+        "owner": "integration",
+        "participants": [
+          "qualification"
+        ]
+      },
+      "delivery_tasks": [
+        "P46"
+      ],
+      "verification_tasks": [
+        "P46",
+        "P47"
+      ],
+      "status": "preserve_and_verify_original_requirement"
+    }
+  ]
+}
