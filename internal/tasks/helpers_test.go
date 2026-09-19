@@ -91,6 +91,10 @@ type fakePorts struct {
 	// peerFaults injects a fault payload for one peer operation, decoded
 	// exactly as a real peer fault would be.
 	peerFaults map[string]*contract.Fault
+	// peerErrors makes a peer call fail on the Go error path, the way the
+	// registry's typed wrapper and the application's nested dispatch deliver
+	// a peer's refusal, or an unclassified failure.
+	peerErrors map[string]error
 
 	// _execution.enqueue: run registry keyed by task/version.
 	enqueueRuns map[string]*peerRun
@@ -103,6 +107,7 @@ func newFakePorts() *fakePorts {
 		policyDecision:  "allow",
 		reviewsEligible: true,
 		peerFaults:      map[string]*contract.Fault{},
+		peerErrors:      map[string]error{},
 		enqueueRuns:     map[string]*peerRun{},
 		inspectLimits: wireLimits{
 			Currency: "USD", SpendMicroUnits: 1_000_000, Concurrency: 8,
@@ -118,6 +123,9 @@ func (p *fakePorts) Call(_ context.Context, _ contract.Unit, inv contract.Invoca
 	p.calls = append(p.calls, inv)
 	if f, ok := p.peerFaults[inv.Operation]; ok {
 		return contract.Payload{Error: f}, nil
+	}
+	if err, ok := p.peerErrors[inv.Operation]; ok {
+		return contract.Payload{}, err
 	}
 	var body any
 	switch inv.Operation {
@@ -510,6 +518,13 @@ func (e *testEnv) artifactFixtureState(name, state string) wireArtifactRef {
 }
 
 // setPeerFault injects a fault response for one peer operation.
+// setPeerError makes op fail on the error path with err.
+func (e *testEnv) setPeerError(op string, err error) {
+	e.ports.mu.Lock()
+	defer e.ports.mu.Unlock()
+	e.ports.peerErrors[op] = err
+}
+
 func (e *testEnv) setPeerFault(op string, f *contract.Fault) {
 	e.ports.mu.Lock()
 	defer e.ports.mu.Unlock()

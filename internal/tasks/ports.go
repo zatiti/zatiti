@@ -3,6 +3,7 @@ package tasks
 import (
 	"context"
 	"encoding/json"
+	"errors"
 
 	"github.com/zatiti/zatiti/internal/contract"
 )
@@ -14,6 +15,15 @@ import (
 
 // callPeer marshals input, invokes the named peer operation at version 1
 // inside the caller's unit, and decodes a completed payload into out.
+//
+// A peer's refusal reaches this package on the error path: the registry's
+// typed handler wrapper returns the handler's *contract.Fault as the Go
+// error and the application's nested dispatch passes it through unchanged
+// (internal/registry/bind.go, internal/application/dispatch.go), so an
+// accounting budget_unavailable or a configuration invalid_input arrives
+// here as that fault, not inside the payload. Its code and message are the
+// caller's answer and propagate as they are; only a failure that carries no
+// named fault at all becomes internal_error.
 func (s *Service) callPeer(ctx context.Context, unit contract.Unit, op string, input any, out any) error {
 	raw, err := json.Marshal(input)
 	if err != nil {
@@ -21,6 +31,14 @@ func (s *Service) callPeer(ctx context.Context, unit contract.Unit, op string, i
 	}
 	payload, err := s.ports.Call(ctx, unit, contract.Invocation{Operation: op, Version: 1, Input: raw})
 	if err != nil {
+		var f *contract.Fault
+		if errors.As(err, &f) && f.Code != "" {
+			fe := &faultError{fault: f}
+			if err != error(f) {
+				fe.err = err
+			}
+			return fe
+		}
 		return faultWrap(&contract.Fault{Code: contract.CodeInternalError, Message: "peer call " + op + " failed"}, err)
 	}
 	if payload.Error != nil {

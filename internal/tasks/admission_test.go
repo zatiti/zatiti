@@ -2,6 +2,8 @@ package tasks
 
 import (
 	"encoding/json"
+	"errors"
+	"strings"
 	"testing"
 
 	"github.com/zatiti/zatiti/internal/contract"
@@ -47,6 +49,54 @@ func TestAdmissionBudgetFaults(t *testing.T) {
 			t.Fatalf("failed admission left %d tasks behind", len(items))
 		}
 	})
+}
+
+// TestPeerFaultsOnTheErrorPathKeepTheirCode: a peer's refusal reaches tasks
+// as a *contract.Fault on the Go error path (the registry's typed wrapper
+// returns the handler's fault as the error and nested dispatch passes it
+// through). The caller must see the peer's own code and message, never an
+// unnamed internal_error, so a user-correctable refusal such as an
+// unconfigured currency is reported as what it is.
+func TestPeerFaultsOnTheErrorPathKeepTheirCode(t *testing.T) {
+	cases := []struct {
+		name string
+		op   string
+		err  error
+		want string
+	}{
+		{"reserve budget_unavailable", "_accounting.reserve",
+			&contract.Fault{Code: contract.CodeBudgetUnavailable, Message: "reserving a positive amount requires an explicitly configured currency"},
+			contract.CodeBudgetUnavailable},
+		{"reserve invalid_input", "_accounting.reserve",
+			&contract.Fault{Code: contract.CodeInvalidInput, Message: "currency mismatch"},
+			contract.CodeInvalidInput},
+		{"inspect prerequisite_missing", "_accounting.inspect",
+			&contract.Fault{Code: contract.CodePrerequisiteMissing, Message: "no budget"},
+			contract.CodePrerequisiteMissing},
+		{"joined internal wrapper keeps the first fault", "_accounting.reserve",
+			errors.Join(&contract.Fault{Code: contract.CodeInternalError, Message: "operation _accounting.reserve failed"}, errors.New("sql: database is locked")),
+			contract.CodeInternalError},
+		{"unclassified error becomes internal_error", "_accounting.reserve",
+			errors.New("connection reset"), contract.CodeInternalError},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			env := newEnv(t)
+			env.setPeerError(tc.op, tc.err)
+			f := env.expectFault("task.create", map[string]any{"scope": env.scope, "definition": env.taskDef()}, tc.want)
+			var peer *contract.Fault
+			if errors.As(tc.err, &peer) && f.Message != peer.Message {
+				t.Fatalf("fault message %q, want the peer's %q", f.Message, peer.Message)
+			}
+			if !errors.As(tc.err, &peer) && !strings.Contains(f.Message, "peer call "+tc.op+" failed") {
+				t.Fatalf("unclassified failure message %q does not name the peer call", f.Message)
+			}
+			items, _ := env.listTasksPage(map[string]any{"scope": env.scope})
+			if len(items) != 0 {
+				t.Fatalf("failed admission left %d tasks behind", len(items))
+			}
+		})
+	}
 }
 
 func TestAdmissionWorkerValidation(t *testing.T) {
