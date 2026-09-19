@@ -929,6 +929,54 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   field and attempt_ids are bare uuids; job.create's frozen input has no
   operation field, so execution reads operation_id from inert input.
 
+- 2026-09-19 02:15 PT -- THE DESKTOP CLIENT TALKED TO A REAL CONTROLLER
+  (f6d87f2, 2f26c0b). apps/desktop/tool/live-proof.sh builds cmd/zatiti,
+  starts serve on a short /tmp state dir, runs init, reads the owner profile
+  (asserting mode 0600 and the "Bearer " prefix, sent verbatim) and drives
+  the Dart transport over the live socket; 14/14 green, and it never skips:
+  a missing binary, a missing socket or a controller that exits is a hard
+  failure with the controller's log attached. The transport increment was
+  correct -- all 11 transport tests passed on the FIRST live run, envelope
+  decoding, fault mapping, submission-key replay, command.get and the
+  uncredentialed refusal all matching with no change. The two real defects
+  were one layer up, and only a live run could find them: (1) mailbox.list
+  is private to its recipient, and that permission_denied propagated out of
+  loadSnapshot, destroying conversations, decisions, tasks and files over an
+  optional inbox read; (2) the controller keeps the client's message_id and
+  returns it as the resource id, but the client keyed its own message on the
+  submission key, so a mailbox copy rendered a second bubble. Lead mutation
+  check: re-throwing the mailbox refusal made "a refused inbox costs the
+  inbox, not the workspace" fail with SourceRefusal(prerequisiteMissing);
+  restored byte-identical. Not verified and stated as such: mutual TLS
+  against the real listener, any surface rendering real records (none can
+  exist yet), Linux, and a launched .app rather than the real widget tree.
+- 2026-09-19 02:20 PT -- PRODUCT DEFECT, top priority, found by the desktop
+  lane driving a real controller and traced by the lead: no task can be
+  created on a fresh installation. task.create returns internal_error "peer
+  call _accounting.reserve failed" at HTTP 500. Mechanism:
+  internal/tasks/ports.go:17-30 callPeer preserves a peer's named fault when
+  it arrives in the payload (payload.Error != nil), but when ports.Call
+  returns a Go error instead, line 24 stamps CodeInternalError over it -- so
+  accounting's legitimate refusal (currency mismatch is invalid_input, an
+  exhausted budget is budget_unavailable) reaches the user as an unnamed
+  crash, and a correctable misconfiguration looks like a bug. Compounding
+  context: a fresh installation's accounting currency is XXX
+  (internal/accounting/limits.go:20) and task.create requires a match, while
+  setting a currency needs configuration.apply, which was itself deadlocked
+  until tonight's reviews fix. Assigned to the cmd lane with instructions to
+  establish whether the second part dissolves once that lands, and to report
+  the exact sequence a user must run to create a first task.
+- 2026-09-19 -- the edge-seams lane's scratch probe found two further review
+  defects that package fakes had hidden, both fixed on its branch: a strict
+  decode of `_reviews.check` against a one-field struct failed a real
+  approved decision as internal_error, and for capability-only review
+  classes the pending review was created INSIDE the gate transaction that
+  then rolled back with the refused mutation, so review.list stayed empty
+  and nothing could ever be decided. The probe is preserved at
+  scratchpad/edge-probe-review-flow.go.txt for the integration lane to adopt
+  as a permanent test; it is the only artefact that walks plan, decide and
+  apply through the real modules.
+
 ## Planned
 
 - Wave 3: controller, desktop, cmd/zatiti, cmd/zatiti-desktop.
