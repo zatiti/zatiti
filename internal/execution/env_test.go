@@ -343,6 +343,11 @@ func newEnv(t *testing.T) *testEnv {
 	if err := db.Migrate(ctx, svc.Migrations()); err != nil {
 		t.Fatalf("migrate execution: %v", err)
 	}
+	// Assembly starts the controller generation once before serving; attempts
+	// and leases bind it, so the fixture starts generation 1.
+	if _, err := db.StartGeneration(ctx); err != nil {
+		t.Fatalf("start generation: %v", err)
+	}
 	env.install = env.ids.New()
 	env.org = env.ids.New()
 	env.project = env.ids.New()
@@ -418,6 +423,27 @@ func (e *testEnv) decode(raw json.RawMessage, out any) {
 	if err := json.Unmarshal(raw, out); err != nil {
 		e.t.Fatalf("decode payload: %v", err)
 	}
+}
+
+// generation returns the persisted controller generation.
+func (e *testEnv) generation() int64 {
+	e.t.Helper()
+	gen, err := e.db.Generation(e.ctx)
+	if err != nil {
+		e.t.Fatalf("generation: %v", err)
+	}
+	return gen
+}
+
+// advanceGeneration simulates a controller restart: assembly advances the
+// persisted generation before the new controller fences and admits.
+func (e *testEnv) advanceGeneration() int64 {
+	e.t.Helper()
+	gen, err := e.db.StartGeneration(e.ctx)
+	if err != nil {
+		e.t.Fatalf("start generation: %v", err)
+	}
+	return gen
 }
 
 // inWrite runs fn inside a write transaction and requires success.
@@ -632,6 +658,18 @@ func (e *testEnv) readRun(id contract.ID) *runRow {
 		return err
 	})
 	return r
+}
+
+// readJob loads one durable job row directly.
+func (e *testEnv) readJob(id contract.ID) *jobRow {
+	e.t.Helper()
+	var j *jobRow
+	e.inWrite(func(unit contract.Unit) error {
+		var err error
+		j, err = loadJob(e.ctx, unit, id)
+		return err
+	})
+	return j
 }
 
 // readObligations reads a resource's unresolved obligations directly.

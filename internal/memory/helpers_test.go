@@ -185,6 +185,26 @@ func (p *fakePorts) opsCalled() []string {
 	return out
 }
 
+// inputsFor returns the raw inputs of every recorded call to one operation.
+func (p *fakePorts) inputsFor(op string) []json.RawMessage {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	var out []json.RawMessage
+	for _, c := range p.calls {
+		if c.Operation == op {
+			out = append(out, c.Input)
+		}
+	}
+	return out
+}
+
+// setExecJobVersion sets the version `_execution.job.create` answers with.
+func (p *fakePorts) setExecJobVersion(v int64) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.execJobVersion = v
+}
+
 func (p *fakePorts) resetCalls() {
 	p.mu.Lock()
 	defer p.mu.Unlock()

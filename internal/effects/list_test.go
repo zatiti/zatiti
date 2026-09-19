@@ -160,6 +160,17 @@ func TestPendingListsActionableOperations(t *testing.T) {
 	env := newEnv(t)
 	staged := env.staged()
 
+	// Admitted but never claimed: the attempt exists, its claim is unconsumed
+	// and its reservation is held. A restarted controller must see it.
+	ready := env.staged()
+	ready = env.admitOp(ready.ID, ready.Version)
+
+	// Claimed but never recorded: the adapter may have been invoked. A
+	// restarted controller must see it to record unknown, never resend.
+	executing := env.staged()
+	executing = env.admitOp(executing.ID, executing.Version)
+	env.claimOp(executing.ID, executing.AttemptIDs[0], env.generation())
+
 	accepted := env.staged()
 	accepted = env.admitOp(accepted.ID, accepted.Version)
 	d := env.claimOp(accepted.ID, accepted.AttemptIDs[0], env.generation())
@@ -177,10 +188,13 @@ func TestPendingListsActionableOperations(t *testing.T) {
 	env.recordOp(done.ID, d3.AttemptID, d3.Generation, env.observation(dispSucceeded))
 
 	pending := env.pendingOp(100)
-	if len(pending) != 3 {
-		t.Fatalf("pending listed %d operations, want 3: %v", len(pending), ids(pending))
+	if len(pending) != 5 {
+		t.Fatalf("pending listed %d operations, want 5: %v", len(pending), ids(pending))
 	}
-	wantStates := []string{opStatePrepared, opStateAwaitingConfirmation, opStateOutcomeUnknown}
+	wantStates := []string{
+		opStatePrepared, opStateReady, opStateExecuting,
+		opStateAwaitingConfirmation, opStateOutcomeUnknown,
+	}
 	for i, o := range pending {
 		if o.State != wantStates[i] {
 			t.Fatalf("pending[%d] is %s (%s), want %s", i, o.ID, o.State, wantStates[i])
@@ -188,6 +202,13 @@ func TestPendingListsActionableOperations(t *testing.T) {
 	}
 	if pending[0].ID != staged.ID {
 		t.Fatalf("pending[0] is %s, want the earliest submission %s", pending[0].ID, staged.ID)
+	}
+	// The listing names the attempt a recovering controller must settle.
+	if pending[1].ID != ready.ID || len(pending[1].AttemptIDs) != 1 || pending[1].AttemptIDs[0] != ready.AttemptIDs[0] {
+		t.Fatalf("pending ready operation %+v does not name attempt %s", pending[1], ready.AttemptIDs[0])
+	}
+	if pending[2].ID != executing.ID || len(pending[2].AttemptIDs) != 1 || pending[2].AttemptIDs[0] != executing.AttemptIDs[0] {
+		t.Fatalf("pending executing operation %+v does not name attempt %s", pending[2], executing.AttemptIDs[0])
 	}
 }
 

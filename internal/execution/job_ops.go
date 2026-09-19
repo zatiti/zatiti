@@ -2,6 +2,7 @@ package execution
 
 import (
 	"context"
+	"encoding/json"
 
 	"github.com/zatiti/zatiti/internal/contract"
 )
@@ -29,6 +30,10 @@ func (s *Service) handleJobCreate(ctx context.Context, unit contract.Unit, in jo
 		return contract.Outcome[jobBody]{}, err
 	}
 	inputHash := sha256Hex(inputJSON)
+	operationID, err := operationIDOf(inputJSON)
+	if err != nil {
+		return contract.Outcome[jobBody]{}, err
+	}
 
 	// Dedup: one job per source identity; the same identity with the same
 	// input replays, with different input conflicts.
@@ -61,6 +66,7 @@ func (s *Service) handleJobCreate(ctx context.Context, unit contract.Unit, in jo
 		SourceID:          in.SourceID,
 		ClaimedGeneration: 0,
 		Requirements:      []wireRequirement{},
+		OperationID:       operationID,
 		CreatedAt:         now,
 		UpdatedAt:         now,
 	}
@@ -69,6 +75,34 @@ func (s *Service) handleJobCreate(ctx context.Context, unit contract.Unit, in jo
 	}
 	return completedOutcome(jobBody{Resource: jobOut(j)})
 }
+
+// operationIDOf reads the effects operation a network job waits on. The
+// frozen job.create input carries no operation field, so an owner that
+// prepared an effect names it as `operation_id` inside the inert input it
+// commits; the job exposes it so the controller can route the effect's
+// recorded outcome back to that owner. Nothing else in the input is read.
+func operationIDOf(input json.RawMessage) (contract.ID, error) {
+	var probe struct {
+		OperationID json.RawMessage `json:"operation_id"`
+	}
+	if err := json.Unmarshal(input, &probe); err != nil {
+		return "", invalidInput("job input is not a JSON object: %v", err)
+	}
+	if len(probe.OperationID) == 0 {
+		return "", nil
+	}
+	if err := contract.ValidateSchema(json.RawMessage(schemaOperationID), probe.OperationID); err != nil {
+		return "", invalidInput("job input operation_id %s is not an operation identity", probe.OperationID)
+	}
+	var id contract.ID
+	if err := json.Unmarshal(probe.OperationID, &id); err != nil {
+		return "", invalidInput("job input operation_id %s is not an operation identity", probe.OperationID)
+	}
+	return id, nil
+}
+
+// schemaOperationID is the identity shape of Job.operation_id.
+const schemaOperationID = `{"type":"string","format":"uuid"}`
 
 // handleJobClaim is the _execution.job.claim boundary: atomically claim one
 // current job owner under a generation. A repeat claim by the same
@@ -84,6 +118,16 @@ func (s *Service) handleJobClaim(ctx context.Context, unit contract.Unit, in job
 			"job %s belongs to another installation", j.ID)
 	}
 
+	if j.OperationID != "" {
+		// A network job waits on its effects operation: the controller
+		// dispatches that operation and delivers its recorded outcome to
+		// the owner, who records the job. Claiming it would hand the job
+		// to a runner that has nothing to run and move the version out
+		// from under the owner's record.
+		return contract.Outcome[jobClaimBody]{}, conflict(
+			"job %s waits on effects operation %s; its owner records the outcome, nothing claims it",
+			j.ID, j.OperationID)
+	}
 	if j.State == "running" {
 		if j.ClaimedGeneration == in.Generation {
 			// Lost acknowledgement: the same owner re-claims its own intent.
@@ -134,14 +178,25 @@ func (s *Service) handleJobPending(ctx context.Context, unit contract.Unit, in j
 }
 
 // handleJobRecord is the _execution.job.record boundary: record the real
-// result of the originating operation. Only the current claim holder may
-// record, and unknown-effect evidence is preserved as obligations.
+// result of the originating operation. A claimed job is recorded only by
+// its current claim holder. An unclaimed job — a network job whose owner
+// records the outcome the controller delivered, or a synchronous local IO
+// the owner finished itself — is recorded under the current generation,
+// which the record then binds; a superseded generation cannot record it.
+// Unknown-effect evidence is preserved as obligations.
 func (s *Service) handleJobRecord(ctx context.Context, unit contract.Unit, in jobRecordInput) (contract.Outcome[jobBody], error) {
 	j, err := loadJobForUpdate(ctx, unit, in.JobID, in.ExpectedVersion)
 	if err != nil {
 		return contract.Outcome[jobBody]{}, err
 	}
-	if j.ClaimedGeneration != in.Generation {
+	switch {
+	case j.ClaimedGeneration == 0:
+		if in.Generation != unit.Generation() {
+			return contract.Outcome[jobBody]{}, conflict(
+				"job %s is unclaimed; its record must bind the current generation %d, not %d",
+				j.ID, unit.Generation(), in.Generation)
+		}
+	case j.ClaimedGeneration != in.Generation:
 		return contract.Outcome[jobBody]{}, conflict(
 			"job claim generation %d does not match the current owner %d",
 			in.Generation, j.ClaimedGeneration)
@@ -151,6 +206,7 @@ func (s *Service) handleJobRecord(ctx context.Context, unit contract.Unit, in jo
 	}
 
 	now := s.now()
+	j.ClaimedGeneration = in.Generation
 	j.State = in.State
 	j.Result = in.Result
 	j.UpdatedAt = now

@@ -99,13 +99,100 @@ func TestLeaseExpiryNoRevival(t *testing.T) {
 		t.Fatalf("run state %q, want waiting after the lease expired", got.State)
 	}
 
-	// A replacement attempt is a fresh generation; the old one stays fenced.
+	// A replacement attempt is a fresh attempt under the same controller
+	// generation — the run's attempt list is the per-run counter — and the
+	// old one stays fenced.
 	replacement := e.claimRun(run.ID, worker)
-	if replacement.Attempt.ID == claim.Attempt.ID || replacement.Attempt.Generation != 2 {
-		t.Fatalf("replacement claim %+v, want a new generation-2 attempt", replacement.Attempt)
+	if replacement.Attempt.ID == claim.Attempt.ID || replacement.Attempt.Generation != e.generation() {
+		t.Fatalf("replacement claim %+v, want a new attempt bound to generation %d", replacement.Attempt, e.generation())
+	}
+	if got := e.readRun(run.ID); len(got.AttemptIDs) != 2 || got.AttemptIDs[1] != replacement.Attempt.ID {
+		t.Fatalf("run attempts %v, want the replacement appended second", got.AttemptIDs)
 	}
 	if got := e.readAttempt(claim.Attempt.ID); got.State != "fenced" {
 		t.Fatalf("expired attempt state %q, the replacement must not revive it", got.State)
+	}
+}
+
+func TestClaimBindsControllerGeneration(t *testing.T) {
+	e := newEnv(t)
+	worker := e.ids.New()
+	e.installWorkerSnapshot(worker, fixtureHostedProfile(worker))
+	gen := e.advanceGeneration()
+	if gen != 2 {
+		t.Fatalf("precondition: generation %d, want 2", gen)
+	}
+	run := e.enqueueTask(worker, nil)
+	claim := e.claimRun(run.ID, worker)
+	if claim.Attempt.Generation != 2 {
+		t.Fatalf("first attempt generation %d, want the persisted controller generation 2", claim.Attempt.Generation)
+	}
+	if lease := e.readLease(claim.Attempt.LeaseID); lease.Generation != 2 {
+		t.Fatalf("lease generation %d, want the persisted controller generation 2", lease.Generation)
+	}
+	// The worker's calls bind that generation, not a per-run ordinal.
+	a := e.readAttempt(claim.Attempt.ID)
+	_ = e.expectFault(opAttemptHeartbeat, heartbeatInput{
+		Scope: e.scope, AttemptID: a.ID, LeaseID: a.LeaseID,
+		Generation: 1, ExpectedVersion: a.Version,
+	}, contract.CodeConflict)
+	e.mustOK(opAttemptHeartbeat, heartbeatInput{
+		Scope: e.scope, AttemptID: a.ID, LeaseID: a.LeaseID,
+		Generation: 2, ExpectedVersion: a.Version,
+	})
+}
+
+func TestFenceMarksOnlyEarlierGenerations(t *testing.T) {
+	e := newEnv(t)
+	worker := e.ids.New()
+	e.installWorkerSnapshot(worker, fixtureHostedProfile(worker))
+
+	// A run whose first attempt expired and was replaced: the replacement is
+	// the run's second attempt but still bound to generation 1, so the
+	// per-run ordinal plays no part in what a fence sweeps.
+	peerRun := e.enqueueTask(worker, nil)
+	peer := e.claimRun(peerRun.ID, worker)
+	e.clock.advance(2 * leaseDuration)
+	e.mustOK(opTick, tickInput{Now: formatStamp(e.clock.Now()), Limit: 100})
+	peerReplacement := e.claimRun(peerRun.ID, worker)
+	if peerReplacement.Attempt.ID == peer.Attempt.ID || peerReplacement.Attempt.Generation != 1 {
+		t.Fatalf("peer replacement %+v, want a second attempt still bound to generation 1", peerReplacement.Attempt)
+	}
+	// A fresh run's first attempt, also generation 1.
+	oldRun := e.enqueueTask(worker, nil)
+	old := e.claimRun(oldRun.ID, worker)
+
+	// Restart: the new controller fences generation 2 and admits under it.
+	gen := e.advanceGeneration()
+	newRun := e.enqueueTask(worker, nil)
+	current := e.claimRun(newRun.ID, worker)
+	if current.Attempt.Generation != gen {
+		t.Fatalf("attempt claimed after the restart carries generation %d, want %d", current.Attempt.Generation, gen)
+	}
+
+	payload := e.mustOK(opFence, fenceInput{Generation: gen, Reason: "restart"})
+	var body fenceBody
+	e.decode(payload.Data, &body)
+	fenced := map[contract.ID]bool{}
+	for _, id := range body.AttemptIDs {
+		fenced[id] = true
+	}
+	if len(fenced) != 2 || !fenced[old.Attempt.ID] || !fenced[peerReplacement.Attempt.ID] {
+		t.Fatalf("fence swept %v, want exactly the generation-1 attempts %s and %s",
+			body.AttemptIDs, old.Attempt.ID, peerReplacement.Attempt.ID)
+	}
+	if got := e.readAttempt(current.Attempt.ID); got.State != "claimed" {
+		t.Fatalf("current-generation attempt state %q, the fence must not touch it", got.State)
+	}
+	if got := e.readAttempt(old.Attempt.ID); got.State != "fenced" || got.RecoveryReason != "restart" {
+		t.Fatalf("old attempt state %q reason %q, want fenced by the restart", got.State, got.RecoveryReason)
+	}
+	// A fence for the generation already running is a no-op: nothing below
+	// it is live any more.
+	payload = e.mustOK(opFence, fenceInput{Generation: gen, Reason: "restart"})
+	e.decode(payload.Data, &body)
+	if len(body.AttemptIDs) != 0 {
+		t.Fatalf("second fence swept %v, want nothing", body.AttemptIDs)
 	}
 }
 

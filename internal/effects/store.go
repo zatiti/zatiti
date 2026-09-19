@@ -603,9 +603,17 @@ func listOpenObligationsForOperation(ctx context.Context, unit contract.Unit, op
 }
 
 // pendingStates are the operation states the controller must act on:
-// staged operations awaiting admission, accepted calls awaiting
-// confirmation and uncertain operations awaiting reconciliation.
-var pendingStates = []string{opStatePrepared, opStateAwaitingConfirmation, opStateOutcomeUnknown}
+// staged operations awaiting admission, admitted operations whose one-use
+// claim is unconsumed, claimed operations whose observation is still owed,
+// accepted calls awaiting confirmation and uncertain operations awaiting
+// reconciliation. Ready and executing are listed so a restarted controller
+// can name every admitted-but-unfinished attempt (attempt_ids) and settle
+// it from its own journal: unclaimed as not sent, claimed as unknown, never
+// as ready for resend.
+var pendingStates = []string{
+	opStatePrepared, opStateReady, opStateExecuting,
+	opStateAwaitingConfirmation, opStateOutcomeUnknown,
+}
 
 // listPendingOperations returns the controller-actionable operations of one
 // installation in submission order.

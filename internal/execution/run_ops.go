@@ -230,11 +230,14 @@ func (s *Service) handleRunClaim(ctx context.Context, unit contract.Unit, in run
 		return contract.Outcome[claimBody]{}, err
 	}
 
-	// Generations count the run's prior attempts: a replacement claim after
-	// a fenced attempt is a new generation and can never revive the old one.
-	gen, err := maxAttemptGeneration(ctx, unit, r.ID)
-	if err != nil {
-		return contract.Outcome[claimBody]{}, err
+	// The attempt binds the persisted controller generation it is claimed
+	// under: a restart advances it and fences everything below. The run's
+	// attempt list is the per-run counter; a replacement claim appends a
+	// fresh attempt there and can never revive a fenced one.
+	gen := unit.Generation()
+	if gen < 1 {
+		return contract.Outcome[claimBody]{}, prerequisiteMissing(
+			"controller generation has not been started; a claim cannot bind generation %d", gen)
 	}
 
 	now := s.now()
@@ -253,7 +256,7 @@ func (s *Service) handleRunClaim(ctx context.Context, unit contract.Unit, in run
 		TaskScopeID:        r.TaskScopeID,
 		WorkerScopeID:      in.WorkerID,
 		Scope:              r.Scope,
-		Generation:         gen + 1,
+		Generation:         gen,
 		LeaseID:            s.newID(),
 		LeaseExpiresAt:     leaseExpiryAt(now, task.Limits.RootDeadline),
 		LastHeartbeat:      now,

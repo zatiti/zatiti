@@ -167,6 +167,110 @@ func TestJobRecordSuccess(t *testing.T) {
 	}
 }
 
+// networkJobCreate commits a job the way memory does: the input names the
+// effects operation the job waits on.
+func networkJobCreate(e *testEnv, source, operation contract.ID) jobCreateInput {
+	return jobCreateInput{
+		Scope:     e.scope,
+		Owner:     "memory",
+		Operation: "memory.recall",
+		Input:     json.RawMessage(`{"job_id":"` + string(e.ids.New()) + `","operation_id":"` + string(operation) + `"}`),
+		SourceID:  source,
+	}
+}
+
+func TestJobCreateExposesEffectsOperation(t *testing.T) {
+	e := newEnv(t)
+	operation := e.ids.New()
+	payload := e.mustOK(opJobCreate, networkJobCreate(e, e.ids.New(), operation))
+	var body jobBody
+	e.decode(payload.Data, &body)
+	if body.Resource.OperationID != operation {
+		t.Fatalf("created job operation_id %q, want the effects operation %s named in the input", body.Resource.OperationID, operation)
+	}
+	// The pending scan carries it too: that is how the controller routes the
+	// effect's outcome back to the owner.
+	payload = e.mustOK(opJobPending, jobPendingInput{Limit: 10})
+	var list jobListBody
+	e.decode(payload.Data, &list)
+	if len(list.Items) != 1 || list.Items[0].OperationID != operation {
+		t.Fatalf("pending items %+v, want the job naming operation %s", list.Items, operation)
+	}
+	// A local job names no operation.
+	payload = e.mustOK(opJobCreate, jobCreateFixture(e, e.ids.New()))
+	var local jobBody
+	e.decode(payload.Data, &local)
+	if local.Resource.OperationID != "" {
+		t.Fatalf("local job carries operation_id %q, want none", local.Resource.OperationID)
+	}
+}
+
+func TestJobCreateRejectsMalformedOperationID(t *testing.T) {
+	e := newEnv(t)
+	in := jobCreateFixture(e, e.ids.New())
+	in.Input = json.RawMessage(`{"operation_id":"not-a-uuid"}`)
+	f := e.expectFault(opJobCreate, in, contract.CodeInvalidInput)
+	if !strings.Contains(f.Message, "operation_id") {
+		t.Fatalf("fault message %q does not name the malformed field", f.Message)
+	}
+	// A present but non-string value is refused, never silently ignored.
+	in = jobCreateFixture(e, e.ids.New())
+	in.Input = json.RawMessage(`{"operation_id":7}`)
+	_ = e.expectFault(opJobCreate, in, contract.CodeInvalidInput)
+}
+
+func TestJobClaimRefusesNetworkJob(t *testing.T) {
+	e := newEnv(t)
+	operation := e.ids.New()
+	payload := e.mustOK(opJobCreate, networkJobCreate(e, e.ids.New(), operation))
+	var body jobBody
+	e.decode(payload.Data, &body)
+	f := e.expectFault(opJobClaim, jobClaimInput{
+		JobID: body.Resource.ID, ExpectedVersion: 1, Generation: e.generation(),
+	}, contract.CodeConflict)
+	if !strings.Contains(f.Message, "waits on effects operation") {
+		t.Fatalf("fault message %q does not name the network job fence", f.Message)
+	}
+	if got := e.readJob(body.Resource.ID); got.State != "pending" || got.Version != 1 || got.ClaimedGeneration != 0 {
+		t.Fatalf("refused claim changed the job: %+v", got)
+	}
+}
+
+func TestJobRecordUnclaimedBindsCurrentGeneration(t *testing.T) {
+	e := newEnv(t)
+	operation := e.ids.New()
+	payload := e.mustOK(opJobCreate, networkJobCreate(e, e.ids.New(), operation))
+	var created jobBody
+	e.decode(payload.Data, &created)
+
+	// The owner records at the version it was handed at create time; the
+	// job has no claim holder, so nothing else has moved the version.
+	f := e.expectFault(opJobRecord, jobRecordInput{
+		JobID: created.Resource.ID, ExpectedVersion: created.Resource.Version, Generation: e.generation() + 1,
+		State: "succeeded", Result: json.RawMessage(`{}`), EvidenceIDs: []contract.ID{},
+	}, contract.CodeConflict)
+	if !strings.Contains(f.Message, "current generation") {
+		t.Fatalf("fault message %q does not name the generation fence", f.Message)
+	}
+	payload = e.mustOK(opJobRecord, jobRecordInput{
+		JobID: created.Resource.ID, ExpectedVersion: created.Resource.Version, Generation: e.generation(),
+		State: "succeeded", Result: json.RawMessage(`{"claims":[]}`), EvidenceIDs: []contract.ID{},
+	})
+	var recorded jobBody
+	e.decode(payload.Data, &recorded)
+	if recorded.Resource.State != "succeeded" || recorded.Resource.Version != created.Resource.Version+1 {
+		t.Fatalf("recorded job %+v, want succeeded at the next version", recorded.Resource)
+	}
+	if got := e.readJob(created.Resource.ID); got.ClaimedGeneration != e.generation() {
+		t.Fatalf("recorded job claimed generation %d, want the recording generation %d", got.ClaimedGeneration, e.generation())
+	}
+	// Terminal: a second record conflicts and nothing is rewritten.
+	_ = e.expectFault(opJobRecord, jobRecordInput{
+		JobID: created.Resource.ID, ExpectedVersion: recorded.Resource.Version, Generation: e.generation(),
+		State: "failed", Result: json.RawMessage(`{}`), EvidenceIDs: []contract.ID{},
+	}, contract.CodeConflict)
+}
+
 func TestJobPendingScanBounds(t *testing.T) {
 	e := newEnv(t)
 	_ = e.expectFault(opJobPending, jobPendingInput{Limit: 0}, contract.CodeInvalidInput)

@@ -379,8 +379,9 @@ func TestFenceSweepsAllLiveAttempts(t *testing.T) {
 	}
 }
 
-// observe dispatches one observation for the attempt's current open
-// operation and returns the operation record id used.
+// observe delivers one observation for the attempt's current open operation
+// the way the controller does — naming the effects operation it dispatched,
+// not this owner's record — and returns the owned record id it closed.
 func observe(e *testEnv, attemptID contract.ID, disposition string) contract.ID {
 	e.t.Helper()
 	op := e.readOpenOperation(attemptID)
@@ -388,7 +389,7 @@ func observe(e *testEnv, attemptID contract.ID, disposition string) contract.ID 
 		e.t.Fatalf("attempt %s has no open operation to observe", attemptID)
 	}
 	e.mustOK(opObservation, observationInput{
-		AttemptID: attemptID, OperationID: op.ID,
+		AttemptID: attemptID, OperationID: contract.ID(op.OperationRef),
 		Observation: wireObservation{
 			Disposition: disposition,
 			Evidence:    json.RawMessage(`{}`),
@@ -396,6 +397,70 @@ func observe(e *testEnv, attemptID contract.ID, disposition string) contract.ID 
 		},
 	})
 	return op.ID
+}
+
+func TestObservationResolvesByEffectsOperation(t *testing.T) {
+	e := newEnv(t)
+	worker := e.ids.New()
+	e.installWorkerSnapshot(worker, fixtureHostedProfile(worker))
+	run := e.enqueueTask(worker, nil)
+	claim := e.claimRun(run.ID, worker)
+	e.pinContext(claim.Attempt.ID, run.ConfigurationRevision)
+	e.mustOK(opTick, tickInput{Now: e.clock.Now().Format(time.RFC3339), Limit: 10})
+	op := e.readOpenOperation(claim.Attempt.ID)
+	prepared := e.ports.PreparedOps()
+	if len(prepared) != 1 || string(prepared[0]) != op.OperationRef {
+		t.Fatalf("open record references %q, want the prepared effects operation %v", op.OperationRef, prepared)
+	}
+
+	// The controller holds the effects operation id (the Dispatch it
+	// claimed) and the attempt id (the action parameters). This owner's
+	// own record id is never handed out, so it does not resolve a delivery.
+	f := e.expectFault(opObservation, observationInput{
+		AttemptID: claim.Attempt.ID, OperationID: op.ID,
+		Observation: wireObservation{
+			Disposition: "succeeded", Evidence: json.RawMessage(`{}`), Usage: wireUsage{Currency: "USD"},
+		},
+	}, contract.CodeNotFound)
+	if !strings.Contains(f.Message, "effects operation") {
+		t.Fatalf("fault message %q does not name the effects operation identity", f.Message)
+	}
+	if got := e.readOperation(op.ID); got.State != "prepared" {
+		t.Fatalf("refused delivery moved the record to %q", got.State)
+	}
+
+	payload := e.mustOK(opObservation, observationInput{
+		AttemptID: claim.Attempt.ID, OperationID: prepared[0],
+		Observation: wireObservation{
+			Disposition: "succeeded", Evidence: json.RawMessage(`{}`), Usage: wireUsage{Currency: "USD"},
+		},
+	})
+	var body attemptBody
+	e.decode(payload.Data, &body)
+	if body.Resource.ID != claim.Attempt.ID {
+		t.Fatalf("observation answered attempt %s, want %s", body.Resource.ID, claim.Attempt.ID)
+	}
+	if got := e.readOperation(op.ID); got.State != "recorded" {
+		t.Fatalf("record state %q after delivery, want recorded", got.State)
+	}
+	if e.readAttempt(claim.Attempt.ID).ModelStepsUsed != 1 {
+		t.Fatalf("delivery did not advance the model step counter")
+	}
+
+	// Duplicate delivery of the same effects operation is refused: the
+	// record is closed and the counter does not move twice.
+	f = e.expectFault(opObservation, observationInput{
+		AttemptID: claim.Attempt.ID, OperationID: prepared[0],
+		Observation: wireObservation{
+			Disposition: "succeeded", Evidence: json.RawMessage(`{}`), Usage: wireUsage{Currency: "USD"},
+		},
+	}, contract.CodeConflict)
+	if !strings.Contains(f.Message, "no pending observation") {
+		t.Fatalf("fault message %q does not name the duplicate delivery fence", f.Message)
+	}
+	if e.readAttempt(claim.Attempt.ID).ModelStepsUsed != 1 {
+		t.Fatalf("duplicate delivery advanced the model step counter")
+	}
 }
 
 func TestObservationBoundedLoop(t *testing.T) {
@@ -498,7 +563,7 @@ func TestObservationPendingFences(t *testing.T) {
 
 	// The closed operation has no pending observation left.
 	f := e.expectFault(opObservation, observationInput{
-		AttemptID: claim.Attempt.ID, OperationID: opID,
+		AttemptID: claim.Attempt.ID, OperationID: contract.ID(e.readOperation(opID).OperationRef),
 		Observation: wireObservation{
 			Disposition: "succeeded",
 			Evidence:    json.RawMessage(`{}`),
@@ -509,7 +574,7 @@ func TestObservationPendingFences(t *testing.T) {
 		t.Fatalf("fault message %q does not name the closed record", f.Message)
 	}
 
-	// An unknown operation id is not found.
+	// An unknown effects operation id is not found.
 	_ = e.expectFault(opObservation, observationInput{
 		AttemptID: claim.Attempt.ID, OperationID: e.ids.New(),
 		Observation: wireObservation{
@@ -519,20 +584,24 @@ func TestObservationPendingFences(t *testing.T) {
 		},
 	}, contract.CodeNotFound)
 
-	// An operation of a different attempt does not serve this loop.
+	// An effects operation dispatched for a different attempt does not
+	// serve this loop: the record is keyed by attempt and effects operation.
 	_, otherClaim, _ := pinnedClaim(e)
 	e.mustOK(opTick, tickInput{Now: e.clock.Now().Format(time.RFC3339), Limit: 10})
 	other := e.readOpenOperation(otherClaim.Attempt.ID)
 	f = e.expectFault(opObservation, observationInput{
-		AttemptID: claim.Attempt.ID, OperationID: other.ID,
+		AttemptID: claim.Attempt.ID, OperationID: contract.ID(other.OperationRef),
 		Observation: wireObservation{
 			Disposition: "succeeded",
 			Evidence:    json.RawMessage(`{}`),
 			Usage:       wireUsage{Currency: "USD"},
 		},
-	}, contract.CodeConflict)
-	if !strings.Contains(f.Message, "does not belong to attempt") {
+	}, contract.CodeNotFound)
+	if !strings.Contains(f.Message, "no operation record for effects operation") {
 		t.Fatalf("fault message %q does not name the operation binding fence", f.Message)
+	}
+	if got := e.readOperation(other.ID); got.State != "prepared" {
+		t.Fatalf("misaddressed delivery moved the other attempt's record to %q", got.State)
 	}
 
 	// A fenced attempt cannot continue its loop at all: the state fence
@@ -544,7 +613,7 @@ func TestObservationPendingFences(t *testing.T) {
 		t.Fatalf("precondition: attempt state %q, want fenced by the bound", a.State)
 	}
 	f = e.expectFault(opObservation, observationInput{
-		AttemptID: claim.Attempt.ID, OperationID: opID,
+		AttemptID: claim.Attempt.ID, OperationID: contract.ID(e.readOperation(opID).OperationRef),
 		Observation: wireObservation{
 			Disposition: "succeeded",
 			Evidence:    json.RawMessage(`{}`),

@@ -524,16 +524,6 @@ func countLiveAttempts(ctx context.Context, unit contract.Unit, column, id strin
 	return n, err
 }
 
-// maxAttemptGeneration reads the highest generation among a run's attempts;
-// a run with no attempts reports zero, so the first claim is generation 1.
-func maxAttemptGeneration(ctx context.Context, unit contract.Unit, runID contract.ID) (int64, error) {
-	row := unit.QueryRowContext(ctx, `SELECT COALESCE(MAX(generation), 0) FROM execution_attempts
-		WHERE run_id = ?`, runID)
-	var n int64
-	err := row.Scan(&n)
-	return n, err
-}
-
 // listAttempts reads attempts matching the conditions, newest first.
 func listAttempts(ctx context.Context, unit contract.Unit, conds []string, args []any, limit int64) ([]*attemptRow, error) {
 	query := `SELECT ` + attemptColumns + ` FROM execution_attempts`
@@ -1012,6 +1002,31 @@ func loadOperationRecord(ctx context.Context, unit contract.Unit, id contract.ID
 		&o.Kind, &o.State, &o.OperationRef, &created)
 	if isNoRows(err) {
 		return nil, notFound("operation record %s does not exist", id)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if o.CreatedAt, err = parseStamp(created); err != nil {
+		return nil, err
+	}
+	return &o, nil
+}
+
+// loadOperationRecordByRef reads the attempt's owned record of one effects
+// operation. The controller delivers by the identity it holds — the attempt
+// from the action parameters and the effects operation it claimed — so the
+// record is keyed by both; this owner's record id is never handed out.
+func loadOperationRecordByRef(ctx context.Context, unit contract.Unit, attemptID contract.ID, ref string) (*operationRow, error) {
+	row := unit.QueryRowContext(ctx, `SELECT id, attempt_id, run_id, installation_id,
+		kind, state, operation_ref, created_at FROM execution_operations
+		WHERE attempt_id = ? AND operation_ref = ?
+		ORDER BY created_at DESC, id DESC LIMIT 1`, attemptID, ref)
+	var o operationRow
+	var created string
+	err := row.Scan(&o.ID, &o.AttemptID, &o.RunID, &o.InstallationID,
+		&o.Kind, &o.State, &o.OperationRef, &created)
+	if isNoRows(err) {
+		return nil, notFound("attempt %s has no operation record for effects operation %s", attemptID, ref)
 	}
 	if err != nil {
 		return nil, err

@@ -183,6 +183,106 @@ func TestRecallProvisionedResolvesContextArtifact(t *testing.T) {
 	}
 }
 
+// TestRecordClosesExecutionJobAsOwner pins the network-job protocol with the
+// execution owner: the job memory opens names the prepared effects
+// operation in its input (execution exposes it as Job.operation_id, which
+// is how the controller routes the effect's outcome back here), nothing
+// claims that job, and memory records it at the version create returned
+// under the current generation — the only claim an unclaimed job binds.
+func TestRecordClosesExecutionJobAsOwner(t *testing.T) {
+	e := newEnv(t)
+	e.ports.setExecJobVersion(4)
+	org, worker := e.ids.New(), e.ids.New()
+	brain := e.provisionedBrain(brainKindWorker, org, worker)
+	e.seedBrain(brain)
+	binding := &bindingRow{ID: e.ids.New(), Version: 1, InstallationID: e.install, OrganizationID: org, WorkerID: worker,
+		BrainID: brain.ID, Permissions: []string{permRead}, Classification: classificationInternal, State: bindingActive,
+		CreatedAt: e.clock.Now(), UpdatedAt: e.clock.Now()}
+	e.seedBinding(binding)
+
+	scope := e.scopeAt(org, worker)
+	payload, err := e.callAs(e.actor, scope, opRecall, recallInput{
+		Scope: wireScope{InstallationID: e.install, OrganizationID: org, WorkerID: worker}, Query: "anything",
+		BindingIDs: []contract.ID{binding.ID}, MinimumFreshness: time.Time{},
+		Limits: wireLimits{Currency: "USD", SpendMicroUnits: 100, Concurrency: 1, ModelSteps: 1, AttemptSeconds: 60, RootDeadline: e.clock.Now().Add(time.Hour)},
+	})
+	if err != nil {
+		t.Fatalf("recall: %v", err)
+	}
+	var out jobResourceOutput
+	e.decodePayload(payload, &out)
+
+	creates := e.ports.inputsFor(opExecutionJobCreate)
+	if len(creates) != 1 {
+		t.Fatalf("job.create called %d times, want once", len(creates))
+	}
+	var created struct {
+		Owner string `json:"owner"`
+		Input struct {
+			OperationID contract.ID `json:"operation_id"`
+			JobID       contract.ID `json:"job_id"`
+		} `json:"input"`
+	}
+	if err := jsonUnmarshal(creates[0], &created); err != nil {
+		t.Fatalf("decode job.create input: %v", err)
+	}
+	if created.Owner != ownerName || created.Input.OperationID != *out.Resource.OperationID || created.Input.JobID != out.Resource.ID {
+		t.Fatalf("job.create input %+v, want owner %s naming operation %s and job %s",
+			created, ownerName, *out.Resource.OperationID, out.Resource.ID)
+	}
+
+	var stored *jobRow
+	err = e.db.Read(e.ctx, e.actor, e.scope, func(unit contract.Unit) error {
+		var err error
+		stored, err = loadJob(e.ctx, unit, out.Resource.ID)
+		return err
+	})
+	if err != nil {
+		t.Fatalf("read job: %v", err)
+	}
+	if stored.ExecutionJobID == "" || stored.ExecutionJobVersion != 4 {
+		t.Fatalf("stored execution job link %s@%d, want the id and version create returned", stored.ExecutionJobID, stored.ExecutionJobVersion)
+	}
+
+	claim := newMemoryClaim(brain.ID, e.ids.New(), 1, true, e.clock.Now())
+	evidence := recallEvidence(brain, "00000000-0000-4000-8000-000000000099", claim, e.clock.Now())
+	generation, err := e.db.Generation(e.ctx)
+	if err != nil {
+		t.Fatalf("generation: %v", err)
+	}
+	if _, err := e.callAs(e.actor, scope, opRecord, recordInput{
+		JobID: stored.ExecutionJobID, OperationID: *out.Resource.OperationID,
+		Observation: wireObservation{Disposition: contract.DispositionSucceeded, Evidence: mustMarshal(t, evidence), Usage: wireUsage{Currency: "USD"}},
+	}); err != nil {
+		t.Fatalf("record success: %v", err)
+	}
+
+	records := e.ports.inputsFor(opExecutionJobRecord)
+	if len(records) != 1 {
+		t.Fatalf("job.record called %d times, want once", len(records))
+	}
+	var recorded executionJobRecordInput
+	if err := jsonUnmarshal(records[0], &recorded); err != nil {
+		t.Fatalf("decode job.record input: %v", err)
+	}
+	if recorded.JobID != stored.ExecutionJobID || recorded.ExpectedVersion != 4 || recorded.Generation != generation || recorded.State != "succeeded" {
+		t.Fatalf("job.record input %+v, want job %s at version 4 under generation %d succeeded",
+			recorded, stored.ExecutionJobID, generation)
+	}
+	if !containsOp(e.ports.opsCalled(), opExecutionJobRecord) || containsOp(e.ports.opsCalled(), "_execution.job.claim") {
+		t.Fatalf("memory calls %v: the owner records its network job and never claims it", e.ports.opsCalled())
+	}
+}
+
+func containsOp(ops []string, want string) bool {
+	for _, op := range ops {
+		if op == want {
+			return true
+		}
+	}
+	return false
+}
+
 // TestRecallDeniedByPolicy proves an explicit policy deny wins before any
 // dispatch: recall never prepares an effect or opens an execution job once
 // `_policy.check` refuses the capability.

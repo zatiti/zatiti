@@ -58,9 +58,10 @@ func (s *Service) handleContext(ctx context.Context, unit contract.Unit, in cont
 }
 
 // handleFence is the _execution.fence boundary: fence every live attempt of
-// this installation whose generation is below the given generation and
-// record recovery obligations. Never asserts that an external process
-// stopped.
+// this installation claimed under a controller generation below the given
+// one and record recovery obligations. A superseded controller can never
+// continue an attempt it claimed; the fence never asserts that its external
+// process stopped.
 func (s *Service) handleFence(ctx context.Context, unit contract.Unit, in fenceInput) (contract.Outcome[fenceBody], error) {
 	rows, err := listAttempts(ctx, unit,
 		[]string{"installation_id = ?", "generation < ?", "state IN " + liveStateSQL()},
@@ -129,13 +130,11 @@ func (s *Service) handleObservation(ctx context.Context, unit contract.Unit, in 
 	if a.State != "claimed" && a.State != "running" && a.State != "waiting" {
 		return contract.Outcome[attemptBody]{}, conflict("attempt is %s and cannot continue its loop", a.State)
 	}
-	op, err := loadOperationRecord(ctx, unit, in.OperationID)
+	// The delivery names the effects operation the controller dispatched;
+	// the owned record is resolved by attempt and that reference.
+	op, err := loadOperationRecordByRef(ctx, unit, a.ID, string(in.OperationID))
 	if err != nil {
 		return contract.Outcome[attemptBody]{}, err
-	}
-	if op.AttemptID != a.ID {
-		return contract.Outcome[attemptBody]{}, conflict(
-			"operation %s does not belong to attempt %s", op.ID, a.ID)
 	}
 	if op.State == "recorded" || op.State == "failed" {
 		return contract.Outcome[attemptBody]{}, conflict(
