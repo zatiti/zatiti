@@ -90,6 +90,7 @@ func runWith(ctx context.Context, args []string, stdin io.Reader, stdout, stderr
 		}
 		return nil
 	}
+	annotateFirstTask(root)
 	root.AddCommand(serveCommand(&cfg, log, diag, opts.serve))
 	root.AddCommand(mcpCommand(&cfg, descriptors, op, streams))
 	root.SetArgs(args)

@@ -41,6 +41,15 @@ func (s *Service) gatherRequirements(ctx context.Context, unit contract.Unit, sc
 			Code:    "prerequisite_missing",
 			Message: "currency and spend limits are not configured; paid execution remains unavailable",
 		})
+		// Until a budget is configured, the only admissible task is a
+		// zero-spend one, and it needs the verifier's capability evidence
+		// published first. The sequence is printed in full: an operator
+		// copies it rather than discovering it refusal by refusal.
+		reqs = append(reqs, wireRequirement{
+			Code: firstTaskRequirementCode,
+			Message: "a first task is possible now as a zero-spend draft; run, in order:\n" +
+				FirstTaskSequence,
+		})
 	}
 	if s.backup == nil {
 		reqs = append(reqs, wireRequirement{
