@@ -11,9 +11,9 @@ import (
 func TestSealAndOpenBundleRoundTrip(t *testing.T) {
 	secrets := newFakeSecrets()
 	install := contract.ID("00000000-0000-4000-8000-000000000001")
-	key, err := ensureBackupKey(context.Background(), secrets, install)
+	key, _, _, err := resolveBackupKey(context.Background(), secrets, install, "")
 	if err != nil {
-		t.Fatalf("ensureBackupKey: %v", err)
+		t.Fatalf("resolveBackupKey: %v", err)
 	}
 	if len(key) != 32 {
 		t.Fatalf("key length = %d, want 32", len(key))
@@ -36,28 +36,33 @@ func TestSealAndOpenBundleRoundTrip(t *testing.T) {
 	}
 }
 
-func TestEnsureBackupKeyIsStableAcrossCalls(t *testing.T) {
+// TestResolveBackupKeyByReference: the store resolves keys only by the
+// reference Put returned. Resolving with that reference yields the same key
+// without minting; resolving with no reference, or with a name, mints and
+// custodies a fresh key and reports its reference.
+func TestResolveBackupKeyByReference(t *testing.T) {
 	secrets := newFakeSecrets()
 	install := contract.ID("00000000-0000-4000-8000-000000000002")
-	k1, err := ensureBackupKey(context.Background(), secrets, install)
-	if err != nil {
-		t.Fatalf("first ensureBackupKey: %v", err)
+	k1, ref, minted, err := resolveBackupKey(context.Background(), secrets, install, "")
+	if err != nil || !minted || ref == "" {
+		t.Fatalf("first resolve: key %d bytes, ref %q, minted %v, err %v", len(k1), ref, minted, err)
 	}
-	k2, err := ensureBackupKey(context.Background(), secrets, install)
-	if err != nil {
-		t.Fatalf("second ensureBackupKey: %v", err)
+	k2, ref2, minted2, err := resolveBackupKey(context.Background(), secrets, install, ref)
+	if err != nil || minted2 || ref2 != ref || !bytes.Equal(k1, k2) {
+		t.Fatalf("resolve by reference: ref %q minted %v equal %v err %v", ref2, minted2, bytes.Equal(k1, k2), err)
 	}
-	if !bytes.Equal(k1, k2) {
-		t.Fatalf("backup key changed across calls for the same installation")
+	k3, ref3, minted3, err := resolveBackupKey(context.Background(), secrets, install, backupKeyName(install))
+	if err != nil || !minted3 || ref3 == ref || bytes.Equal(k1, k3) {
+		t.Fatalf("a name is not a reference: it must mint a new key, got ref %q minted %v err %v", ref3, minted3, err)
 	}
 }
 
 func TestOpenBundleRejectsTamperedCiphertext(t *testing.T) {
 	secrets := newFakeSecrets()
 	install := contract.ID("00000000-0000-4000-8000-000000000003")
-	key, err := ensureBackupKey(context.Background(), secrets, install)
+	key, _, _, err := resolveBackupKey(context.Background(), secrets, install, "")
 	if err != nil {
-		t.Fatalf("ensureBackupKey: %v", err)
+		t.Fatalf("resolveBackupKey: %v", err)
 	}
 	sealed, err := sealBundle(key, []byte("integrity matters"))
 	if err != nil {
@@ -71,13 +76,13 @@ func TestOpenBundleRejectsTamperedCiphertext(t *testing.T) {
 
 func TestOpenBundleRejectsWrongKey(t *testing.T) {
 	secrets := newFakeSecrets()
-	keyA, err := ensureBackupKey(context.Background(), secrets, "00000000-0000-4000-8000-000000000004")
+	keyA, _, _, err := resolveBackupKey(context.Background(), secrets, "00000000-0000-4000-8000-000000000004", "")
 	if err != nil {
-		t.Fatalf("ensureBackupKey A: %v", err)
+		t.Fatalf("resolveBackupKey A: %v", err)
 	}
-	keyB, err := ensureBackupKey(context.Background(), secrets, "00000000-0000-4000-8000-000000000005")
+	keyB, _, _, err := resolveBackupKey(context.Background(), secrets, "00000000-0000-4000-8000-000000000005", "")
 	if err != nil {
-		t.Fatalf("ensureBackupKey B: %v", err)
+		t.Fatalf("resolveBackupKey B: %v", err)
 	}
 	sealed, err := sealBundle(keyA, []byte("for installation A only"))
 	if err != nil {

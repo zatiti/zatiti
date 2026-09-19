@@ -16,20 +16,31 @@ import (
 )
 
 // Backup bundle format (zatiti.backup/v1 bundle framing). A backup artifact
-// is one sealBundle-encrypted frame:
+// is a clear header followed by one sealBundle-encrypted frame:
 //
-//	magic "ZTBK1\n"
-//	uvarint manifest length, manifest JSON (BackupManifest)
-//	uvarint image length, the consistent SQLite image (archive entry
-//	  "state.sqlite", the manifest's database_archive_entry)
+//	header: magic "ZTBH1\n", uvarint reference length, the opaque secret
+//	  store reference the sealing key is custodied under
+//	sealed frame:
+//	  magic "ZTBK1\n"
+//	  uvarint manifest length, manifest JSON (BackupManifest)
+//	  uvarint image length, the consistent SQLite image (archive entry
+//	    "state.sqlite", the manifest's database_archive_entry)
 //
-// The manifest's database_digest and database_size describe exactly the
-// image bytes framed here, as hashed and counted while the DatabaseBackup
-// capability streamed them. The recovery overlay artifact is the same
-// framing with a RecoveryOverlay manifest and an empty image.
+// The header is not secret: the reference is a handle into this
+// installation's own secret store and resolves nothing anywhere else. It
+// travels with the bundle so a restore can resolve the sealing key from
+// the artifact alone, after a restart and after a database rewind, without
+// a name lookup the store does not offer. The manifest's database_digest
+// and database_size describe exactly the image bytes framed here, as hashed
+// and counted while the DatabaseBackup capability streamed them. The
+// recovery overlay artifact is the same layout with a RecoveryOverlay
+// manifest and an empty image.
 
 const (
 	bundleMagic = "ZTBK1\n"
+	headerMagic = "ZTBH1\n"
+	// maxKeyRefBytes bounds the reference a header may carry.
+	maxKeyRefBytes = 1024
 	// databaseArchiveEntry is the manifest's frozen database_archive_entry.
 	databaseArchiveEntry = "state.sqlite"
 	// maxBackupImageBytes bounds the database image a backup buffers before
@@ -113,6 +124,40 @@ func digestImage(ctx context.Context, backup contract.DatabaseBackup) (contract.
 		return "", 0, errors.New("database backup produced no bytes")
 	}
 	return hw.digest(), hw.n, nil
+}
+
+// errBundleWithoutKeyReference names a bundle that carries no clear header:
+// one sealed before key references were custodied, whose key nothing can
+// resolve.
+var errBundleWithoutKeyReference = errors.New("bundle carries no key reference header; it was sealed before key references were custodied and its key cannot be resolved")
+
+// encodeArtifact prefixes a sealed frame with the clear header naming the
+// key reference it was sealed under.
+func encodeArtifact(keyRef string, sealed []byte) []byte {
+	var lens [binary.MaxVarintLen64]byte
+	n := binary.PutUvarint(lens[:], uint64(len(keyRef)))
+	out := make([]byte, 0, len(headerMagic)+n+len(keyRef)+len(sealed))
+	out = append(out, headerMagic...)
+	out = append(out, lens[:n]...)
+	out = append(out, keyRef...)
+	out = append(out, sealed...)
+	return out
+}
+
+// decodeArtifact splits published artifact bytes into the key reference
+// and the sealed frame.
+func decodeArtifact(artifact []byte) (keyRef string, sealed []byte, err error) {
+	if !bytes.HasPrefix(artifact, []byte(headerMagic)) {
+		return "", nil, errBundleWithoutKeyReference
+	}
+	ref, rest, err := readSection(artifact[len(headerMagic):], "key reference")
+	if err != nil {
+		return "", nil, err
+	}
+	if len(ref) == 0 || len(ref) > maxKeyRefBytes {
+		return "", nil, errors.New("bundle key reference header is empty or oversized")
+	}
+	return string(ref), rest, nil
 }
 
 // encodeFrame builds the plaintext frame of a bundle.

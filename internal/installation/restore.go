@@ -212,15 +212,21 @@ func (s *Service) performRestore(ctx context.Context, plan contract.IOPlan) (con
 		return contract.IOResult{Fault: faultOf(prerequisiteMissing("no secret store is configured; the backup key cannot be resolved"))}, nil
 	}
 
-	key, err := s.deps.Secrets.Get(ctx, backupKeyRef(p.InstallationID))
-	if err != nil || len(key) != 32 {
-		return contract.IOResult{Fault: faultOf(prerequisiteMissing(
-			"no backup encryption key is custodied for this installation; it cannot decrypt this artifact"))}, nil
-	}
-
-	sealed, err := readPublished(ctx, s.deps.Blobs, p.BackupArtifact.Digest, p.ArtifactSize)
+	artifact, err := readPublished(ctx, s.deps.Blobs, p.BackupArtifact.Digest, p.ArtifactSize)
 	if err != nil {
 		return contract.IOResult{Fault: faultOf(artifactFault("backup artifact bytes are unavailable: %v", err))}, nil
+	}
+	// The sealing key resolves by the reference the bundle's own clear
+	// header carries: no name lookup, nothing that a restart or a database
+	// rewind could have lost.
+	keyRef, sealed, err := decodeArtifact(artifact)
+	if err != nil {
+		return contract.IOResult{Fault: faultOf(prerequisiteMissing("%v", err))}, nil
+	}
+	key, err := s.deps.Secrets.Get(ctx, keyRef)
+	if err != nil || len(key) != 32 {
+		return contract.IOResult{Fault: faultOf(prerequisiteMissing(
+			"the backup's key reference does not resolve in this installation's secret store; the bundle cannot be decrypted here"))}, nil
 	}
 	manifest, _, err := openBackupBundle(key, sealed, p.InstallationID)
 	if err != nil {
@@ -244,7 +250,7 @@ func (s *Service) performRestore(ctx context.Context, plan contract.IOPlan) (con
 		Schema: recoveryOverlaySchema, InstallationID: p.InstallationID,
 		CapturedAt: formatStamp(s.deps.Clock.Now()), SourceGeneration: p.Generation,
 		SourceDatabaseDigest: sourceDigest, Obligations: p.Obligations,
-		ArtifactEntries: []manifestArtifactEntry{}, KeyPrerequisites: []string{backupKeyRef(p.InstallationID)},
+		ArtifactEntries: []manifestArtifactEntry{}, KeyPrerequisites: []string{keyRef},
 	}
 	if overlay.Obligations == nil {
 		overlay.Obligations = []manifestObligation{}
@@ -257,7 +263,7 @@ func (s *Service) performRestore(ctx context.Context, plan contract.IOPlan) (con
 	if err != nil {
 		return contract.IOResult{Fault: faultOf(err)}, nil
 	}
-	overlayDigest, overlaySize, err := stagePublished(ctx, s.deps.Blobs, sealedOverlay)
+	overlayDigest, overlaySize, err := stagePublished(ctx, s.deps.Blobs, encodeArtifact(keyRef, sealedOverlay))
 	if err != nil {
 		return contract.IOResult{Fault: faultOf(artifactFault("recovery overlay could not be published: %v", err))}, nil
 	}
@@ -265,7 +271,7 @@ func (s *Service) performRestore(ctx context.Context, plan contract.IOPlan) (con
 	if err != nil {
 		return contract.IOResult{Fault: faultOf(artifactFault("published recovery overlay could not be read back: %v", err))}, nil
 	}
-	if _, err := openRecoveryOverlay(key, published, p.InstallationID); err != nil {
+	if _, err := s.openPublishedOverlay(ctx, published, p.InstallationID); err != nil {
 		return contract.IOResult{Fault: faultOf(artifactFault("published recovery overlay failed verification: %v", err))}, nil
 	}
 
@@ -277,6 +283,20 @@ func (s *Service) performRestore(ctx context.Context, plan contract.IOPlan) (con
 		return contract.IOResult{}, fmt.Errorf("installation: encode restore result: %w", err)
 	}
 	return contract.IOResult{Data: raw}, nil
+}
+
+// openPublishedOverlay resolves the key from the overlay artifact's own
+// header and opens it, the path a later merge takes.
+func (s *Service) openPublishedOverlay(ctx context.Context, artifact []byte, installationID contract.ID) (recoveryOverlayDoc, error) {
+	keyRef, sealed, err := decodeArtifact(artifact)
+	if err != nil {
+		return recoveryOverlayDoc{}, err
+	}
+	key, err := s.deps.Secrets.Get(ctx, keyRef)
+	if err != nil || len(key) != 32 {
+		return recoveryOverlayDoc{}, fmt.Errorf("the overlay's key reference does not resolve in this installation's secret store")
+	}
+	return openRecoveryOverlay(key, sealed, installationID)
 }
 
 // openRecoveryOverlay decrypts a sealed overlay bundle and checks its

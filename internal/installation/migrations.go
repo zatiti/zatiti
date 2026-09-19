@@ -93,6 +93,20 @@ const schemaV2 = `
 ALTER TABLE installation_bootstrap_intents ADD COLUMN store_ref TEXT NOT NULL DEFAULT '';
 `
 
+// schemaV3 records the opaque secret-store reference the installation's
+// backup encryption key is custodied under. The store resolves keys only by
+// the reference Put returned, never by name, so the reference is the only
+// durable handle to the key; every bundle also carries it in its clear
+// header, and this row lets successive backups reuse one key.
+const schemaV3 = `
+CREATE TABLE installation_backup_keys (
+	installation_id TEXT PRIMARY KEY,
+	store_ref       TEXT NOT NULL,
+	created_at      TEXT NOT NULL,
+	updated_at      TEXT NOT NULL
+);
+`
+
 // migrations returns the installation-owned migration set. Each body is
 // pinned by SHA-256 so storage can detect any drift from the reviewed
 // schema.
@@ -107,5 +121,10 @@ func migrations() []contract.Migration {
 		Version: 2,
 		SQL:     schemaV2,
 		SHA256:  contract.Hash([]byte(schemaV2)),
+	}, {
+		Owner:   owner,
+		Version: 3,
+		SQL:     schemaV3,
+		SHA256:  contract.Hash([]byte(schemaV3)),
 	}}
 }

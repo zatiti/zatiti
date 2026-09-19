@@ -28,9 +28,9 @@ func TestBackupRequiresInstallationPaused(t *testing.T) {
 }
 
 // Without the capability the operation does every other real piece of the
-// pipeline -- pause required, a durable job created and shadowed, the
-// backup key minted and custodied -- then fails at the exact missing
-// prerequisite by name, never fabricating a digest.
+// pipeline -- pause required, a durable job created and shadowed -- then
+// fails at the exact missing prerequisite by name, custodies no key it
+// could never use, and never fabricates a digest.
 func TestBackupWithoutCapabilityFailsPrerequisiteMissing(t *testing.T) {
 	e := newEnv(t)
 	e.mustBootstrap()
@@ -46,8 +46,8 @@ func TestBackupWithoutCapabilityFailsPrerequisiteMissing(t *testing.T) {
 	if !strings.Contains(payload.Error.Message, "WithDatabaseBackup") {
 		t.Fatalf("fault does not name the capability: %s", payload.Error.Message)
 	}
-	if _, err := e.secrets.Get(e.ctx, backupKeyRef(e.install)); err != nil {
-		t.Fatalf("backup must mint and custody the installation's backup key before hitting the gap: %v", err)
+	if ref := e.backupKeyRef(); ref != "" || len(e.secrets.m) != 1 {
+		t.Fatalf("a backup that cannot run must not custody a key: ref %q, %d secrets (the owner credential only)", ref, len(e.secrets.m))
 	}
 	if len(e.blobs.published) != 0 || len(e.blobs.staged) != 0 {
 		t.Fatalf("nothing may be staged or published without the capability: %d staged, %d published", len(e.blobs.staged), len(e.blobs.published))
@@ -91,8 +91,10 @@ func TestBackupProducesVerifiedBundleWhoseImageRestoresToAWorkingDatabase(t *tes
 	if !backup.Verified || backup.InstallationID != e.install || backup.Artifact.ID == "" || backup.Artifact.Digest == "" {
 		t.Fatalf("backup resource = %+v, want a verified artifact of this installation", backup)
 	}
-	if len(backup.KeyPrerequisites) != 1 || backup.KeyPrerequisites[0] != backupKeyRef(e.install) {
-		t.Fatalf("key prerequisites = %v", backup.KeyPrerequisites)
+	// The key prerequisite is the store reference the sealing key resolves
+	// under: recorded for reuse and carried by the artifact itself.
+	if len(backup.KeyPrerequisites) != 1 || backup.KeyPrerequisites[0] != e.backupKeyRef() || !strings.HasPrefix(backup.KeyPrerequisites[0], fakeRefPrefix) {
+		t.Fatalf("key prerequisites = %v, recorded reference %q", backup.KeyPrerequisites, e.backupKeyRef())
 	}
 	publishes := e.ports.callsOf(peerArtifactsPublish)
 	if len(publishes) != 1 || !strings.Contains(string(publishes[0].Input), string(backup.Artifact.Digest)) {
@@ -105,7 +107,11 @@ func TestBackupProducesVerifiedBundleWhoseImageRestoresToAWorkingDatabase(t *tes
 	if !ok {
 		t.Fatalf("bundle %s was not published to the blob store", backup.Artifact.Digest)
 	}
-	manifest, image, err := openBackupBundle(e.backupKey(), sealed, e.install)
+	ref, key, frame := e.openArtifact(sealed)
+	if ref != backup.KeyPrerequisites[0] {
+		t.Fatalf("artifact header names key reference %q, the backup names %q", ref, backup.KeyPrerequisites[0])
+	}
+	manifest, image, err := openBackupBundle(key, frame, e.install)
 	if err != nil {
 		t.Fatalf("published bundle does not open: %v", err)
 	}
@@ -257,4 +263,78 @@ func TestBackupRefusesWithoutStartedGeneration(t *testing.T) {
 	if len(e.blobs.published) != 0 {
 		t.Fatal("nothing may be published without a generation")
 	}
+}
+
+// TestBackupKeySurvivesByReference: the secret store resolves keys only by
+// the reference Put returned, never by name. A second backup after a
+// service restart reuses the recorded key; a bundle sealed before key
+// references were custodied is refused by name; and a bundle whose
+// reference no longer resolves is refused rather than decrypted with a
+// fresh, wrong key.
+func TestBackupKeySurvivesByReference(t *testing.T) {
+	e := newEnv(t)
+	e.mustBootstrap()
+	e.startGeneration()
+	e.bindBackup(backupOnly{db: e.db})
+	e.mustOK(opPause, versionedScopeInput{Scope: e.scope, ExpectedVersion: 1})
+
+	first := e.backupNow("first")
+	// A restart: a fresh Service over the same database and secret store.
+	e.bindBackup(backupOnly{db: e.db})
+	second := e.backupNow("second")
+	if first.KeyPrerequisites[0] != second.KeyPrerequisites[0] {
+		t.Fatalf("second backup minted a new key %q instead of reusing %q", second.KeyPrerequisites[0], first.KeyPrerequisites[0])
+	}
+	if got := len(e.secrets.m); got != 2 {
+		t.Fatalf("%d secrets custodied, want the owner credential and one backup key", got)
+	}
+	for _, b := range []wireBackup{first, second} {
+		ref, _, _ := e.openArtifact(e.blobs.published[b.Artifact.Digest])
+		if ref != b.KeyPrerequisites[0] {
+			t.Fatalf("bundle header reference %q differs from the backup's %q", ref, b.KeyPrerequisites[0])
+		}
+	}
+
+	// A pre-reference bundle (no header) is refused by name.
+	e.mustOK(opMaintenanceEnter, versionedScopeInput{Scope: e.scope, ExpectedVersion: 2})
+	_, key, frame := e.openArtifact(e.blobs.published[first.Artifact.Digest])
+	_ = key
+	legacy := wireArtifactRef{ID: e.ids.New(), Digest: e.blobs.publishBytes(frame)}
+	setArtifactMetadata(e, legacy, int64(len(frame)), "available")
+	payload, err := e.driveLocalIO(opRestore, restoreInput{Scope: e.scope, BackupArtifact: legacy, ExpectedVersion: 3}, true)
+	if err != nil {
+		t.Fatalf("driveLocalIO(restore legacy): %v", err)
+	}
+	if payload.Status != contract.StatusFailed || payload.Error == nil || payload.Error.Code != contract.CodePrerequisiteMissing ||
+		!strings.Contains(payload.Error.Message, "key reference") {
+		t.Fatalf("legacy bundle restore = %s %v, want prerequisite_missing naming the missing key reference", payload.Status, payload.Error)
+	}
+
+	// A bundle whose reference no longer resolves is refused, not re-keyed.
+	if err := e.secrets.Delete(e.ctx, first.KeyPrerequisites[0]); err != nil {
+		t.Fatalf("delete key: %v", err)
+	}
+	setArtifactMetadata(e, first.Artifact, int64(len(e.blobs.published[first.Artifact.Digest])), "available")
+	payload, err = e.driveLocalIO(opRestore, restoreInput{Scope: e.scope, BackupArtifact: first.Artifact, ExpectedVersion: 3}, true)
+	if err != nil {
+		t.Fatalf("driveLocalIO(restore lost key): %v", err)
+	}
+	if payload.Status != contract.StatusFailed || payload.Error == nil || payload.Error.Code != contract.CodePrerequisiteMissing ||
+		!strings.Contains(payload.Error.Message, "does not resolve") {
+		t.Fatalf("lost-key restore = %s %v, want prerequisite_missing naming the unresolvable reference", payload.Status, payload.Error)
+	}
+}
+
+// backupNow runs one accepted backup and returns its Backup resource.
+func (e *testEnv) backupNow(label string) wireBackup {
+	e.t.Helper()
+	payload, err := e.driveLocalIO(opBackup, scopeInput{Scope: e.scope}, true)
+	if err != nil || payload.Status != contract.StatusAccepted {
+		e.t.Fatalf("%s backup: %v (%s %v)", label, err, payload.Status, payload.Error)
+	}
+	var job resourceOut[wireJob]
+	e.decode(payload.Data, &job)
+	var result resourceOut[wireBackup]
+	e.decode(job.Resource.Result, &result)
+	return result.Resource
 }

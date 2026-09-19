@@ -19,9 +19,9 @@ var fixtureImage = []byte("fixture database image bytes")
 // one, with mutate applied to the manifest before sealing.
 func sealFixtureBackup(t *testing.T, e *testEnv, mutate func(*backupManifestDoc)) (wireArtifactRef, int64) {
 	t.Helper()
-	key, err := ensureBackupKey(e.ctx, e.secrets, e.install)
+	key, keyRef, _, err := resolveBackupKey(e.ctx, e.secrets, e.install, e.backupKeyRef())
 	if err != nil {
-		t.Fatalf("ensureBackupKey: %v", err)
+		t.Fatalf("resolveBackupKey: %v", err)
 	}
 	manifest := fixtureManifest(e.install)
 	if mutate != nil {
@@ -35,8 +35,9 @@ func sealFixtureBackup(t *testing.T, e *testEnv, mutate func(*backupManifestDoc)
 	if err != nil {
 		t.Fatalf("sealBundle: %v", err)
 	}
-	digest := e.blobs.publishBytes(sealed)
-	return wireArtifactRef{ID: e.ids.New(), Digest: digest}, int64(len(sealed))
+	artifact := encodeArtifact(keyRef, sealed)
+	digest := e.blobs.publishBytes(artifact)
+	return wireArtifactRef{ID: e.ids.New(), Digest: digest}, int64(len(artifact))
 }
 
 func fixtureManifest(installation contract.ID) backupManifestDoc {
@@ -45,7 +46,7 @@ func fixtureManifest(installation contract.ID) backupManifestDoc {
 		Generation: 1, CreatedAt: "2026-09-12T00:00:00Z",
 		DatabaseDigest: digestOf(fixtureImage), DatabaseSize: int64(len(fixtureImage)), DatabaseArchiveEntry: databaseArchiveEntry,
 		DatabaseSchemaVersions: []manifestSchemaVersion{}, Artifacts: []manifestArtifactEntry{}, Brains: []manifestBrainEntry{},
-		RetainedObligations: []manifestObligation{}, KeyPrerequisites: []string{backupKeyRef(installation)},
+		RetainedObligations: []manifestObligation{}, KeyPrerequisites: []string{"fixture"},
 		SourceRevision: "fixture", ControllerVersion: "fixture", RequiredProtocolProfiles: []string{}, Paused: true,
 	}
 }
@@ -222,9 +223,9 @@ func TestRestoreRejectsBackupFromAnotherInstallation(t *testing.T) {
 	e.mustOK(opMaintenanceEnter, versionedScopeInput{Scope: e.scope, ExpectedVersion: 1})
 
 	foreignInstall := e.ids.New()
-	key, err := ensureBackupKey(e.ctx, e.secrets, e.install)
+	key, keyRef, _, err := resolveBackupKey(e.ctx, e.secrets, e.install, "")
 	if err != nil {
-		t.Fatalf("ensureBackupKey: %v", err)
+		t.Fatalf("resolveBackupKey: %v", err)
 	}
 	manifest := fixtureManifest(foreignInstall)
 	plaintext, _ := json.Marshal(manifest)
@@ -232,9 +233,10 @@ func TestRestoreRejectsBackupFromAnotherInstallation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("sealBundle: %v", err)
 	}
-	digest := e.blobs.publishBytes(sealed)
+	artifact := encodeArtifact(keyRef, sealed)
+	digest := e.blobs.publishBytes(artifact)
 	ref := wireArtifactRef{ID: e.ids.New(), Digest: digest}
-	setArtifactMetadata(e, ref, int64(len(sealed)), "available")
+	setArtifactMetadata(e, ref, int64(len(artifact)), "available")
 
 	payload, err := e.driveLocalIO(opRestore, restoreInput{Scope: e.scope, BackupArtifact: ref, ExpectedVersion: 2}, true)
 	if err != nil {
@@ -351,7 +353,8 @@ func TestRestorePublishesRecoveryOverlayAndAwaitsTheController(t *testing.T) {
 	if !ok || published.MediaType != overlayMediaType {
 		t.Fatalf("overlay %s (%s) was not published to the blob store", published.Digest, published.MediaType)
 	}
-	overlay, err := openRecoveryOverlay(e.backupKey(), sealed, e.install)
+	_, overlayKey, overlayFrame := e.openArtifact(sealed)
+	overlay, err := openRecoveryOverlay(overlayKey, overlayFrame, e.install)
 	if err != nil {
 		t.Fatalf("published overlay does not open: %v", err)
 	}

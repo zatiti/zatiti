@@ -361,3 +361,33 @@ func listObligationsByJob(ctx context.Context, r contract.Reader, jobID contract
 	}
 	return out, nil
 }
+
+// ---------- installation_backup_keys ----------
+
+// loadBackupKeyRef returns the recorded backup key reference, or "" when
+// no backup has custodied a key yet.
+func loadBackupKeyRef(ctx context.Context, r contract.Reader, installationID contract.ID) (string, error) {
+	var ref string
+	err := r.QueryRowContext(ctx, `SELECT store_ref FROM installation_backup_keys WHERE installation_id = ?`,
+		string(installationID)).Scan(&ref)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("installation: load backup key reference: %w", err)
+	}
+	return ref, nil
+}
+
+// recordBackupKeyRef records or replaces the backup key reference.
+func recordBackupKeyRef(ctx context.Context, unit contract.Unit, installationID contract.ID, ref string, now time.Time) error {
+	_, err := unit.ExecContext(ctx, `
+		INSERT INTO installation_backup_keys (installation_id, store_ref, created_at, updated_at)
+		VALUES (?, ?, ?, ?)
+		ON CONFLICT(installation_id) DO UPDATE SET store_ref = excluded.store_ref, updated_at = excluded.updated_at`,
+		string(installationID), ref, formatStamp(now), formatStamp(now))
+	if err != nil {
+		return fmt.Errorf("installation: record backup key reference: %w", err)
+	}
+	return nil
+}

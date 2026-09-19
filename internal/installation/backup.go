@@ -28,6 +28,9 @@ type backupPlan struct {
 	Generation     int64       `json:"generation"`
 	BrainRevisions []wireRef   `json:"brain_revisions"`
 	CreatedAt      string      `json:"created_at"`
+	// KeyRef is the recorded backup key reference, empty before the first
+	// backup custodied one.
+	KeyRef string `json:"key_ref"`
 }
 
 // backupPerformed is Perform's outcome: the published sealed bundle and the
@@ -37,6 +40,8 @@ type backupPerformed struct {
 	Size           int64           `json:"size"`
 	DatabaseDigest contract.Digest `json:"database_digest"`
 	DatabaseSize   int64           `json:"database_size"`
+	// KeyRef is the reference the bundle's sealing key resolves under.
+	KeyRef string `json:"key_ref"`
 }
 
 // backupManifestDoc is the BackupManifest document (zatiti.backup/v1)
@@ -155,10 +160,14 @@ func (s *Service) prepareBackup(ctx context.Context, unit contract.Unit, inv con
 	if err != nil {
 		return contract.IOPlan{}, err
 	}
+	keyRef, err := loadBackupKeyRef(ctx, unit, in.Scope.InstallationID)
+	if err != nil {
+		return contract.IOPlan{}, err
+	}
 
 	prepared, err := json.Marshal(backupPlan{
 		JobID: job.ID, InstallationID: in.Scope.InstallationID, Generation: unit.Generation(),
-		BrainRevisions: manifest.BrainRevisions, CreatedAt: formatStamp(now),
+		BrainRevisions: manifest.BrainRevisions, CreatedAt: formatStamp(now), KeyRef: keyRef,
 	})
 	if err != nil {
 		return contract.IOPlan{}, fmt.Errorf("installation: encode backup plan: %w", err)
@@ -182,16 +191,16 @@ func (s *Service) performBackup(ctx context.Context, plan contract.IOPlan) (cont
 		return contract.IOResult{Fault: faultOf(prerequisiteMissing(
 			"no blob store is configured; the backup bundle cannot be published"))}, nil
 	}
-	key, err := ensureBackupKey(ctx, s.deps.Secrets, p.InstallationID)
-	if err != nil {
-		return contract.IOResult{Fault: faultOf(prerequisiteMissing("backup encryption key unavailable: %v", err))}, nil
-	}
 	if s.backup == nil {
 		return contract.IOResult{Fault: faultOf(backupCapabilityMissing())}, nil
 	}
 	if p.Generation < 1 {
 		return contract.IOResult{Fault: faultOf(prerequisiteMissing(
 			"backup requires a started controller generation; the manifest pins generation %d", p.Generation))}, nil
+	}
+	key, keyRef, _, err := resolveBackupKey(ctx, s.deps.Secrets, p.InstallationID, p.KeyRef)
+	if err != nil {
+		return contract.IOResult{Fault: faultOf(prerequisiteMissing("backup encryption key unavailable: %v", err))}, nil
 	}
 
 	// One consistent image, hashed and counted as it streams. A failure
@@ -214,7 +223,7 @@ func (s *Service) performBackup(ctx context.Context, plan contract.IOPlan) (cont
 		Artifacts:                []manifestArtifactEntry{},
 		Brains:                   brains,
 		RetainedObligations:      []manifestObligation{},
-		KeyPrerequisites:         []string{backupKeyRef(p.InstallationID)},
+		KeyPrerequisites:         []string{keyRef},
 		SourceRevision:           sourceRevision,
 		ControllerVersion:        controllerVersion,
 		RequiredProtocolProfiles: []string{},
@@ -228,18 +237,20 @@ func (s *Service) performBackup(ctx context.Context, plan contract.IOPlan) (cont
 	if err != nil {
 		return contract.IOResult{Fault: faultOf(err)}, nil
 	}
-	digest, size, err := stagePublished(ctx, s.deps.Blobs, sealed)
+	digest, size, err := stagePublished(ctx, s.deps.Blobs, encodeArtifact(keyRef, sealed))
 	if err != nil {
 		return contract.IOResult{Fault: faultOf(artifactFault("backup bundle could not be published: %v", err))}, nil
 	}
 
-	// Verify the whole published bundle before it is ever reported: read it
-	// back, decrypt it, and check the framed image against the manifest.
+	// Verify the whole published bundle before it is ever reported, the way
+	// a restore will: read it back, resolve the key by the reference in its
+	// own header, decrypt it, and check the framed image against the
+	// manifest.
 	published, err := readPublished(ctx, s.deps.Blobs, digest, size)
 	if err != nil {
 		return contract.IOResult{Fault: faultOf(artifactFault("published backup bundle could not be read back: %v", err))}, nil
 	}
-	verified, verifiedImage, err := openBackupBundle(key, published, p.InstallationID)
+	verified, verifiedImage, err := s.openPublishedBackup(ctx, published, p.InstallationID)
 	if err != nil {
 		return contract.IOResult{Fault: faultOf(artifactFault("published backup bundle failed verification: %v", err))}, nil
 	}
@@ -247,11 +258,26 @@ func (s *Service) performBackup(ctx context.Context, plan contract.IOPlan) (cont
 		return contract.IOResult{Fault: faultOf(artifactFault("published backup bundle does not frame the captured image"))}, nil
 	}
 
-	raw, err := json.Marshal(backupPerformed{Digest: digest, Size: size, DatabaseDigest: imageDigest, DatabaseSize: imageSize})
+	raw, err := json.Marshal(backupPerformed{Digest: digest, Size: size, DatabaseDigest: imageDigest, DatabaseSize: imageSize, KeyRef: keyRef})
 	if err != nil {
 		return contract.IOResult{}, fmt.Errorf("installation: encode backup result: %w", err)
 	}
 	return contract.IOResult{Data: raw}, nil
+}
+
+// openPublishedBackup resolves the sealing key from a published artifact's
+// own clear header and opens the bundle. It is the exact path a restore
+// takes, so a backup verifies its restorability, not just its contents.
+func (s *Service) openPublishedBackup(ctx context.Context, artifact []byte, installationID contract.ID) (backupManifestDoc, []byte, error) {
+	keyRef, sealed, err := decodeArtifact(artifact)
+	if err != nil {
+		return backupManifestDoc{}, nil, err
+	}
+	key, err := s.deps.Secrets.Get(ctx, keyRef)
+	if err != nil || len(key) != 32 {
+		return backupManifestDoc{}, nil, fmt.Errorf("the bundle's key reference does not resolve in this installation's secret store")
+	}
+	return openBackupBundle(key, sealed, installationID)
 }
 
 // openBackupBundle decrypts a sealed bundle, decodes its frame and checks
@@ -332,10 +358,18 @@ func (s *Service) finishBackup(ctx context.Context, unit contract.Unit, plan con
 	if err != nil {
 		return contract.Payload{}, err
 	}
+	if perf.KeyRef == "" {
+		return contract.Payload{}, internalError("backup perform result carries no key reference")
+	}
+	if perf.KeyRef != p.KeyRef {
+		if err := recordBackupKeyRef(ctx, unit, p.InstallationID, perf.KeyRef, now); err != nil {
+			return contract.Payload{}, err
+		}
+	}
 	backup := wireBackup{
 		ID: j.ID, Version: 1, Artifact: artifact, InstallationID: p.InstallationID,
 		CreatedAt: formatStamp(now), BrainRevisions: p.BrainRevisions,
-		KeyPrerequisites: []string{backupKeyRef(p.InstallationID)}, Verified: true,
+		KeyPrerequisites: []string{perf.KeyRef}, Verified: true,
 	}
 	j.State = "succeeded"
 	j.Result = mustMarshal(resourceOut[wireBackup]{Resource: backup})

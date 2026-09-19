@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -46,21 +47,33 @@ func (s *seqIDs) New() contract.ID {
 	return contract.ID(fmt.Sprintf("00000000-0000-4000-8000-%012d", s.n))
 }
 
-// fakeSecrets is an in-memory SecretStore.
+// fakeSecrets is an in-memory SecretStore shaped like the real platform
+// store: Put takes a NAME and returns an opaque reference, and Get resolves
+// ONLY such a reference, never a name. A test double that resolved names
+// would hide exactly the defect that once made every real backup
+// unrestorable.
 type fakeSecrets struct {
-	mu  sync.Mutex
-	m   map[string][]byte
-	err error // when set, every call fails
+	mu   sync.Mutex
+	m    map[string][]byte // reference -> secret
+	next int
+	err  error // when set, every call fails
 }
+
+const fakeRefPrefix = "fake1:"
 
 func newFakeSecrets() *fakeSecrets { return &fakeSecrets{m: map[string][]byte{}} }
 
-func (f *fakeSecrets) Put(_ context.Context, ref string, secret []byte) (string, error) {
+func (f *fakeSecrets) Put(_ context.Context, name string, secret []byte) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.err != nil {
 		return "", f.err
 	}
+	if name == "" || strings.HasPrefix(name, fakeRefPrefix) {
+		return "", fmt.Errorf("fake secrets: Put takes a name, got %q", name)
+	}
+	f.next++
+	ref := fmt.Sprintf("%s%032x", fakeRefPrefix, f.next)
 	f.m[ref] = append([]byte(nil), secret...)
 	return ref, nil
 }
@@ -71,9 +84,12 @@ func (f *fakeSecrets) Get(_ context.Context, ref string) ([]byte, error) {
 	if f.err != nil {
 		return nil, f.err
 	}
+	if !strings.HasPrefix(ref, fakeRefPrefix) {
+		return nil, fmt.Errorf("fake secrets: credential reference is unknown (names do not resolve: %q)", ref)
+	}
 	secret, ok := f.m[ref]
 	if !ok {
-		return nil, fmt.Errorf("fake secrets: %q not found", ref)
+		return nil, fmt.Errorf("fake secrets: credential reference is unknown")
 	}
 	return append([]byte(nil), secret...), nil
 }
@@ -568,12 +584,31 @@ func (e *testEnv) bindBackup(capability contract.DatabaseBackup) {
 	e.svc = svc
 }
 
-// backupKey resolves the installation's custodied backup key.
-func (e *testEnv) backupKey() []byte {
+// backupKeyRef reads the recorded backup key reference, "" if none.
+func (e *testEnv) backupKeyRef() string {
 	e.t.Helper()
-	key, err := e.secrets.Get(e.ctx, backupKeyRef(e.install))
-	if err != nil {
-		e.t.Fatalf("backup key: %v", err)
+	var ref string
+	if err := e.db.Read(e.ctx, e.actor, e.scope.toContract(), func(unit contract.Unit) error {
+		var err error
+		ref, err = loadBackupKeyRef(e.ctx, unit, e.install)
+		return err
+	}); err != nil {
+		e.t.Fatalf("backup key reference: %v", err)
 	}
-	return key
+	return ref
+}
+
+// openArtifact splits a published bundle artifact into its key reference,
+// the key it resolves to and the sealed frame.
+func (e *testEnv) openArtifact(artifact []byte) (string, []byte, []byte) {
+	e.t.Helper()
+	ref, sealed, err := decodeArtifact(artifact)
+	if err != nil {
+		e.t.Fatalf("artifact header: %v", err)
+	}
+	key, err := e.secrets.Get(e.ctx, ref)
+	if err != nil {
+		e.t.Fatalf("key reference %q does not resolve: %v", ref, err)
+	}
+	return ref, key, sealed
 }
