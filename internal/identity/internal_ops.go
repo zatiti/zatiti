@@ -35,6 +35,30 @@ func (s *Service) validate(ctx context.Context, unit contract.Unit, in candidate
 	}})
 }
 
+// requireLiveActor is the caller check for allowlisted internal reads that
+// carry no capability entitlement: the request scope belongs to this
+// installation and the acting principal is registered and unrevoked.
+func (s *Service) requireLiveActor(ctx context.Context, unit contract.Unit, requestScope contract.Scope) error {
+	if requestScope.InstallationID != unit.Scope().InstallationID {
+		return invalidInput("request scope installation %s does not match the transaction scope", requestScope.InstallationID)
+	}
+	actor := unit.Actor()
+	if actor.PrincipalID == "" {
+		return permissionDenied("authentication is required")
+	}
+	caller, found, err := s.loadPrincipal(ctx, unit, actor.PrincipalID)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return permissionDenied("caller principal is not registered in this installation")
+	}
+	if caller.Revoked {
+		return permissionDenied("caller principal is revoked")
+	}
+	return nil
+}
+
 func (s *Service) bootstrap(ctx context.Context, unit contract.Unit, in bootstrapInput) (contract.Payload, error) {
 	// Bootstrap runs before any principal can authenticate: no authorize
 	// call. The registry's caller allowlist gates this operation to the
@@ -145,8 +169,29 @@ func (s *Service) bootstrap(ctx context.Context, unit contract.Unit, in bootstra
 	return completed(resourceOut[principalOut]{Resource: owner.wire()})
 }
 
+// authority implements _identity.authority, the internal read every
+// admission resolves a principal's current standing through.
+//
+// Access control for this operation is its caller allowlist (application,
+// policy, reviews, configuration, execution, effects), which the registry
+// enforces at dispatch; no public operation reaches it. It is deliberately
+// NOT gated on the acting principal's own capabilities: the actor's
+// capabilities are the data this read returns, and requiring the actor to
+// already hold a capability in order to learn its capabilities made every
+// narrowly granted principal fail its first policy check (only the
+// bootstrap wildcard owner and the controller, whose standing grant is
+// exactly this capability, could pass). What remains checked: the request
+// scope is this installation, and the actor is a registered, unrevoked
+// principal — a revoked principal must not learn its former authority.
+//
+// The input names a subject principal, which may differ from the actor:
+// policy reads the actor's own authority, reviews read a reviewer's, effects
+// a worker's. That is safe because only the allowlisted internal modules
+// can ask, on behalf of an admitted request in this installation, and the
+// answer never leaves the transaction as a public result; the public
+// principal.get and grant.list operations keep their own authorization.
 func (s *Service) authority(ctx context.Context, unit contract.Unit, in authorityInput) (contract.Payload, error) {
-	if _, err := s.authorize(ctx, unit, opAuthority, in.Scope); err != nil {
+	if err := s.requireLiveActor(ctx, unit, in.Scope); err != nil {
 		return contract.Payload{}, err
 	}
 	p, found, err := s.loadPrincipal(ctx, unit, in.PrincipalID)

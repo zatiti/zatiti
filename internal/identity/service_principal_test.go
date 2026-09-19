@@ -166,22 +166,27 @@ func TestControllerPrincipalHoldsNothingElse(t *testing.T) {
 // service principal: once the owner revokes it, its very next authority
 // resolution is refused, the Go API refuses to hand it out, the revocation
 // survives close-and-reopen, and revoking only its grant strips the
-// capability without touching the principal.
+// capability without touching the principal or its ability to learn that
+// it now holds nothing.
 func TestControllerPrincipalRevocation(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "controller.db")
 	env := newEnvOnDB(t, path)
 	ctrl := env.controllerActor(t)
 	install := contract.Scope{InstallationID: env.inst}
 
-	// Grant revocation alone: the principal stands but holds nothing, so it
-	// cannot even resolve authority any more.
+	// Grant revocation alone: the principal stands but holds nothing.
+	// _identity.authority is gated by its caller allowlist, not by the
+	// subject's capabilities, so the controller still reads its own
+	// standing — and that standing is now empty, which is what every
+	// admission check sees.
 	view := env.authorityOf(t, ctrl, ctrl.PrincipalID, install)
 	env.mustCall(env.owner, opGrantRevoke, grantRevokeInput{
 		Scope: install, ID: view.Grants[0].ID, ExpectedVersion: 1,
 	})
-	env.wantFault(ctrl, opAuthority, authorityInput{PrincipalID: ctrl.PrincipalID, Scope: install}, contract.CodePermissionDenied)
-	if got := env.authorityOf(t, env.owner, ctrl.PrincipalID, install); len(got.Grants) != 0 || got.Principal.Revoked {
-		t.Fatalf("after grant revoke the controller view = %+v, want no grants and an unrevoked principal", got)
+	for _, asker := range []contract.Actor{ctrl, env.owner} {
+		if got := env.authorityOf(t, asker, ctrl.PrincipalID, install); len(got.Grants) != 0 || got.Principal.Revoked {
+			t.Fatalf("after grant revoke the controller view = %+v, want no grants and an unrevoked principal", got)
+		}
 	}
 	// The Go API still resolves an unrevoked principal; authority is the
 	// dispatcher's concern.
