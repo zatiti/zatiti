@@ -1051,6 +1051,60 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   makes TWO physical calls per model step against a contract that specifies
   exactly one. Both are revision-3 items.
 
+- 2026-09-19 06:30 PT -- FOUR DEFECTS IN ONE CHAIN, each hidden behind the
+  last, all found because a fix let a test reach code no test had reached.
+  The lesson to keep: the skips were load-bearing. Two integration tests had
+  been skipping for a day on the review deadlock; every layer removed
+  exposed the next.
+  1. The review deadlock itself (bf7010c): nothing created the review the
+     policy gate demanded, and for capability-only classes the pending
+     review was created inside the gate transaction that then rolled back
+     with the refused mutation.
+  2. Consumed-plan re-apply (c1ffac8): handleApply had its own "identical
+     retry" branch returning the original revision for an applied plan. Key
+     replay is evidence's job in commandBegin, which runs BEFORE the
+     handler, so that branch could never see a true replay -- every apply
+     reaching it was a new command against a consumed plan. Nothing was
+     activated twice (team.list 1, head unchanged, zero events), but the
+     system minted and retained a COMPLETED command id for work that did not
+     happen. In a system whose premise is that evidence proves what
+     occurred, a false completion record is worse than a duplicate, because
+     it is indistinguishable after the fact from a real one.
+  3. Peer validate envelope (163af15): configuration strict-decoded
+     `_<owner>.validate` replies as {"resource": Validation}; identity
+     returned a bare Validation, contradicting its OWN declared output
+     schema while its own test decoded tolerantly. A tolerant test is how a
+     schema violation survives. The other six validate peers and all eight
+     activate outputs were checked against the catalog and are correct;
+     identity was the only landmine. configuration's fault now names the
+     peer and the decode error instead of "unreadable result".
+  4. THE SEVERE ONE, ruled on by the lead and pending a fix as of this
+     entry: `_identity.authority` gated the internal read on the ACTOR
+     holding a capability literally named "_identity.authority"
+     (identity/internal_ops.go:146, authority.go:336). The gate is
+     circular -- to learn what you may do you must already hold the
+     capability to ask -- and the brief defines this operation's access
+     control as a CALLER allowlist (AGENTS.md:466) which internal/registry
+     already enforces (registry.go:139-140). The clinching evidence: the
+     controller's entire standing capability set is exactly opAuthority
+     (service_principal.go:43), a grant that exists only to work around
+     this. Consequence on main today: only the bootstrap wildcard owner and
+     the controller can pass ANY policy check, so every narrowly granted
+     principal is inert -- in a product whose purpose is delegating bounded
+     authority to agents. Invisible until now because nothing had exercised
+     a narrowly granted principal end to end.
+- 2026-09-19 -- REVISION-3 RULING (lead, under the founder's 16-hour
+  autonomy grant, for his ratification): "_identity.authority is gated by
+  its caller allowlist, not by the subject's own capabilities; a registered
+  unrevoked actor in the transaction's installation may read authority, and
+  the controller's standing grant of that capability becomes redundant."
+  Required with it: the installation-scope match and the revoked-actor
+  refusal stay; the change is confined to authority()'s own call and does
+  not touch s.authorize; whether an actor may read ANOTHER principal's
+  authority is answered in a code comment rather than inferred; and tests
+  pin a narrow-grant agent answered, a revoked actor refused, and an
+  out-of-scope actor refused.
+
 ## Planned
 
 - Wave 3: controller, desktop, cmd/zatiti, cmd/zatiti-desktop.
