@@ -299,11 +299,14 @@ type builtEvidence struct {
 }
 
 // buildEvidence assembles and marshals the zatiti.github.evidence/v1
-// document, plus a standalone marshal of its usage for
-// Observation.Usage.
+// document, plus a standalone marshal of its accounting Usage for
+// Observation.Usage. The controller validates Observation.Usage against
+// $defs/Usage (exactly currency, spent, reserved, estimated, unknown,
+// advisory) and replaces anything else with synthesized unknown billing,
+// so the nested ProviderUsage stays in the evidence only.
 func (a *Adapter) buildEvidence(act *action, physical wirePhysicalCallEvidence, stagedRequest wireStagedOutput, staged *wireStagedOutput, fields evidenceFields) (builtEvidence, error) {
 	usage := noChargeUsage()
-	usageDoc, err := json.Marshal(usage)
+	usageDoc, err := json.Marshal(usage.Accounting)
 	if err != nil {
 		return builtEvidence{}, internalError("encoding github usage failed: %v", err)
 	}

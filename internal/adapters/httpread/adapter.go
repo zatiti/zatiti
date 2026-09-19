@@ -343,10 +343,13 @@ type builtEvidence struct {
 }
 
 // buildEvidence assembles and marshals the zatiti.httpread.evidence/v1
-// document, plus a standalone marshal of its usage for
-// Observation.Usage.
+// document, plus a standalone marshal of its accounting Usage for
+// Observation.Usage. The controller validates Observation.Usage against
+// $defs/Usage (exactly currency, spent, reserved, estimated, unknown,
+// advisory) and replaces anything else with synthesized unknown billing,
+// so the nested ProviderUsage stays in the evidence only.
 func (a *Adapter) buildEvidence(physical wirePhysicalCallEvidence, base wireHTTPReadEvidence) (builtEvidence, error) {
-	usageDoc, err := json.Marshal(base.Usage)
+	usageDoc, err := json.Marshal(base.Usage.Accounting)
 	if err != nil {
 		return builtEvidence{}, internalError("encoding httpread usage failed: %v", err)
 	}
