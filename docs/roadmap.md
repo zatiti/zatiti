@@ -1105,6 +1105,50 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   pin a narrow-grant agent answered, a revoked actor refused, and an
   out-of-scope actor refused.
 
+- 2026-09-19 07:30 PT -- THE PATTERN WORTH KEEPING: a test double more
+  permissive than the thing it stands for. Three instances cost this effort
+  real defects, each of which looked like success until the worst possible
+  moment:
+  1. The owner credential: the fake accepted a value the real header
+     validation would refuse, so nothing could authenticate on a real
+     installation (fixed 2026-09-18, 626d6b1).
+  2. The backup key: internal/installation's fake secret store mapped a NAME
+     to a reference, while the real platform's Get resolves only the opaque
+     reference Put returns. Every backup on a real installation minted a
+     fresh key, custodied it, discarded the only handle, and sealed a bundle
+     nothing could ever decrypt -- while reporting success with a valid,
+     digest-matching artifact. Found by the integration lane wiring the seam
+     to the REAL platform; verified by the lead at
+     contract/stores.go:11 and platform/secret_headless.go:66-71,120-124.
+  3. The artifact metadata fake in internal/tasks echoed EVERY unregistered
+     reference back as an available artifact with the requested digest --
+     which is precisely how the capability_evidence validation hole hid in
+     that package's own tests. Found by the deliberate fake hunt the lead
+     ordered after (2), not by waiting for it to surface.
+  PRACTICE ADOPTED: when a fix touches a seam, make the package's fake
+  behave like the real implementation (refuse what the real one refuses), and
+  verify a produced artifact through the exact path that will later consume
+  it. installation's performBackup now opens its own published bundle
+  through the restore path before reporting success.
+  Still noted, not changed: internal/installation's fakeBlobs.Stage ignores
+  the size bound the real store enforces; no test exercises the bound today.
+- 2026-09-19 07:25 PT -- backup key fix (ff8741c, landing): the sealing key
+  is custodied by the opaque reference Put returns, carried in a clear ZTBH1
+  header on every bundle so a restore resolves it from the artifact alone
+  after a restart or a rewind, and recorded in installation_backup_keys
+  (migration 3) so successive backups reuse one key. A backup refuses to
+  proceed unless the returned reference resolves the key back. Lead mutation
+  check: reverting to name-based custody now makes the BACKUP fail loudly
+  ("backup key reference does not resolve after custody") instead of
+  silently producing an unrestorable bundle -- the failure mode moved from
+  silent data loss to an honest refusal at the moment of the mistake.
+  FOUNDER-FACING: every backup taken before this fix is unrecoverable
+  through the product; on the headless store each re-Put under the same name
+  deleted the previous key file, so all but the most recent per installation
+  are cryptographically lost. Take a fresh backup after this lands. The
+  keychain backend's re-Put behaviour was NOT verified and no claim is made
+  beyond "not recoverable through the product".
+
 ## Planned
 
 - Wave 3: controller, desktop, cmd/zatiti, cmd/zatiti-desktop.
