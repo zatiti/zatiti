@@ -13,13 +13,14 @@ import (
 	"github.com/zatiti/zatiti/internal/registry"
 )
 
-// skipKnownDefect records an observed cross-package defect. The test body
-// has already run and observed the failure; the skip carries the suspected
-// cause so the integration lead can route a fix. A skip is never a pass: the
-// defect list in this package's hand-off report enumerates every call site.
-func skipKnownDefect(t *testing.T, cause, observed string) {
+// failRegressedDefect fails a test that has just re-observed a cross-package
+// defect main already fixed. Each call site once skipped with this evidence
+// while the defect was open; now that every recorded cause is fixed, the
+// evidence branch is a regression report, never a skip, so no case in this
+// package can pass by skipping a path it claims to cover.
+func failRegressedDefect(t *testing.T, cause, observed string) {
 	t.Helper()
-	t.Skipf("KNOWN DEFECT (not a pass). suspected cause: %s. observed: %s", cause, observed)
+	t.Fatalf("REGRESSED DEFECT. original cause: %s. observed: %s", cause, observed)
 }
 
 // descriptorView presents a real module with an edited descriptor list. The
@@ -63,7 +64,7 @@ func realModules(t *testing.T) []contract.Module {
 		t.Fatalf("platform: %v", err)
 	}
 	t.Cleanup(func() { _ = plat.Close() })
-	modules, _, err := buildModules(application.NewPorts(), newStepClock(), plat.Secrets(), plat.Blobs())
+	modules, _, err := buildModules(application.NewPorts(), newStepClock(), plat.Secrets(), plat.Blobs(), nil)
 	if err != nil {
 		t.Fatalf("modules: %v", err)
 	}

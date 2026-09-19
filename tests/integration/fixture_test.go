@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"sync"
@@ -155,7 +156,17 @@ type fixtureOptions struct {
 
 // buildModules constructs every landed domain module with real
 // dependencies and owner-bound ports, in moduleOrder.
-func buildModules(router *application.PortRouter, clock contract.Clock, secrets contract.SecretStore, blobs contract.BlobStore) ([]contract.Module, contract.Authenticator, error) {
+// databaseBackup is the one-method capability the fixture hands to
+// installation through installation.WithDatabaseBackup, exactly as
+// cmd/zatiti does: its method set is Backup alone and it delegates to the
+// opened Database, which is never handed out itself.
+type databaseBackup struct{ db contract.Database }
+
+func (b databaseBackup) Backup(ctx context.Context, w io.Writer) error { return b.db.Backup(ctx, w) }
+
+var _ contract.DatabaseBackup = databaseBackup{}
+
+func buildModules(router *application.PortRouter, clock contract.Clock, secrets contract.SecretStore, blobs contract.BlobStore, backup contract.DatabaseBackup) ([]contract.Module, contract.Authenticator, error) {
 	deps := func(owner string) contract.Dependencies {
 		return contract.Dependencies{
 			Clock: clock, IDs: uuidSource{}, Ports: router.For(owner),
@@ -181,7 +192,9 @@ func buildModules(router *application.PortRouter, clock contract.Clock, secrets 
 		"memory":        func(d contract.Dependencies) (contract.Module, error) { return memory.New(d) },
 		"artifacts":     func(d contract.Dependencies) (contract.Module, error) { return artifacts.New(d) },
 		"evidence":      func(d contract.Dependencies) (contract.Module, error) { return evidence.New(d) },
-		"installation":  func(d contract.Dependencies) (contract.Module, error) { return installation.New(d) },
+		"installation": func(d contract.Dependencies) (contract.Module, error) {
+			return installation.New(d, installation.WithDatabaseBackup(backup))
+		},
 	}
 	modules := []contract.Module{idn}
 	for _, name := range moduleOrder[1:] {
@@ -245,7 +258,7 @@ func assemble(t testing.TB, opts fixtureOptions) (*fixture, error) {
 	}
 
 	router := application.NewPorts()
-	modules, auth, err := buildModules(router, f.clock, f.secrets, plat.Blobs())
+	modules, auth, err := buildModules(router, f.clock, f.secrets, plat.Blobs(), databaseBackup{db: f.db})
 	if err != nil {
 		return nil, err
 	}

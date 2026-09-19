@@ -121,7 +121,7 @@ func TestBootstrapEmitsConfigurationEvidence(t *testing.T) {
 			return
 		}
 	}
-	skipKnownDefect(t,
+	failRegressedDefect(t,
 		"internal/configuration/handlers.go:979 handleBootstrap creates the root organization, chief and revision 1 without Unit.Emit; "+
 			"only the compiler path emits (compiler.go:795 emitRevision)",
 		"bootstrap events carry no configuration.* kind: "+strings.Join(kinds, " "))

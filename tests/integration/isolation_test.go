@@ -153,30 +153,29 @@ func TestPrincipalWithoutGrantsReadsNothing(t *testing.T) {
 // cross-organization reference, Z17 inherited denial): a principal granted
 // read capabilities in a second organization cannot read the root
 // organization's task, events, artifacts or memory bindings, while it can
-// read its own organization. Reaching the grant needs a standing policy
-// that takes grant.create out of the default review class and a second
-// organization, both activated through plan, exact review and apply.
+// read its own organization. The whole path is real: a standing policy
+// taking grant.create out of the default review class and a second
+// organization with its chief are each staged, planned, refused
+// review_required naming the candidate digest, decided by the owner and
+// applied; then the grant is created and exercised.
 func TestForeignOrganizationGrantDoesNotReachPeerOrganization(t *testing.T) {
 	t.Parallel()
 	f := newBootstrappedFixture(t)
 	scope, task, event, binding := f.seedOrganizationState()
 
-	_, err := f.activate("grant-policy", "policy.create", map[string]any{"definition": map[string]any{
+	policy := f.activate("grant-policy", "policy.create", map[string]any{"definition": map[string]any{
 		"scope": f.scope(), "rules": []any{map[string]any{
 			"capability": "grant.create", "effect": "local", "destinations": []string{},
 			"decision": "allow", "human_required": false, "conditions": map[string]any{}}},
 	}})
-	if faultCode(err) == contract.CodeReviewRequired {
-		skipKnownDefect(t, reviewDeadlockCause, err.Error())
-	}
-	if err != nil {
-		t.Fatalf("activating the grant policy: %v", err)
+	if policy.Status != contract.StatusCompleted {
+		t.Fatalf("grant policy activation status %q", policy.Status)
 	}
 	// organization.create stages the organization and its designated chief
 	// as one bundle (frozen input requires scope, definition and chief). The
 	// chief is a real worker definition with no execution profile or limits,
 	// like the bootstrap chief: it exists and cannot run paid work.
-	created, err := f.activate("org-b", "organization.create", map[string]any{
+	created := f.activate("org-b", "organization.create", map[string]any{
 		"definition": map[string]any{"key": "research", "name": "Research"},
 		"chief": map[string]any{
 			"key": "research-chief", "name": "Research Chief",
@@ -185,10 +184,9 @@ func TestForeignOrganizationGrantDoesNotReachPeerOrganization(t *testing.T) {
 			"skill_versions": []any{}, "bindings": []string{}, "profile": nil, "limits": nil,
 		},
 	})
-	if err != nil {
-		t.Fatalf("activating organization B: %v", err)
+	if created.Status != contract.StatusCompleted {
+		t.Fatalf("organization B activation status %q", created.Status)
 	}
-	_ = created
 	orgs := f.must(f.owner, "organization.list", "", map[string]any{"scope": f.scope()})
 	var ol struct {
 		Items []struct {
