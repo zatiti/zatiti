@@ -819,6 +819,37 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   3-minute budget flake (e2e_test.go:39, failed once at 192s under the
   parallel hook run, passed on retry).
 
+- 2026-09-18 evening -- THE PRODUCT RUNS. Descriptor batch B (e3f0a40) and
+  cmd/zatiti's controller-principal fix (bd28bbd) LANDED together; the
+  registry assembles all sixteen real modules unpatched on main. The lead
+  then built the landed binary and brought a controller up by hand, not
+  through any lane's test: `serve` on an empty state directory listens in
+  13s; `init` over the socket returns installation dad54565 at generation
+  1 and writes the owner credential to a 0600 profile; `principal list` as
+  the owner shows exactly the human owner and the `controller` service
+  principal; `principal create` with submission key live-1 completes; the
+  exact re-send returns the same command id and identical data; the same
+  key with changed input is refused 409 submission_conflict (CLI exit 4);
+  the new agent appears in the next list; SIGTERM exits 0 and removes the
+  socket. Authentication verified directly against the live socket: no
+  credential returns verification_failed with HTTP 422 and no data, the
+  owner credential returns the list. Landing gate: race (25m budget), lint
+  and module-wide green, plus the two mutation checks recorded above.
+- 2026-09-18 evening -- DEFECT found by the lead's live bring-up, routed to
+  cmd/zatiti: a state directory whose path is long enough to push the
+  socket past the 104-byte sun_path limit fails with the raw
+  `bind: invalid argument` and no explanation, after the whole assembly has
+  already been built. It must be a named, explanatory startup refusal that
+  states the limit and the offending path length. Reproduced with a state
+  directory under a long temporary path; the same run on a short path
+  succeeded.
+- 2026-09-18 evening -- landing-gate change: land.sh now passes
+  `-timeout 25m` to the per-package race run (RACE_TIMEOUT overrides). The
+  Go default of 10 minutes aborted the cmd/zatiti landing under load, with
+  TestServeRefusesUnknownControllerPrincipalOverride 2m16s in; that package
+  builds a binary and runs real controllers, so it is the slowest in the
+  module and runs on every landing.
+
 ## Planned
 
 - Wave 3: controller, desktop, cmd/zatiti, cmd/zatiti-desktop.
