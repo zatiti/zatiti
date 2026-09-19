@@ -10,6 +10,13 @@
 // and pass its evidence forward as preflight_evidence; this package never
 // performs an unaccounted extra call inside a mutating Invoke.
 //
+// Before any byte is sent, the exact secret-free request record (method,
+// destination, permitted headers and body as sent; never Authorization) is
+// staged through the BlobStore and named by physical_call.request_context
+// as a staged ArtifactLocator with one matching StagedOutput of purpose
+// context. If it cannot be staged, nothing is sent. The record is kept for
+// every disposition, including not_sent and unknown.
+//
 // Return convention: Invoke and Reconcile return a non-nil error (always a
 // *contract.Fault) only when the physical call was never attempted -- an
 // invalid profile/action, a capability outside the qualified v1 surface, or

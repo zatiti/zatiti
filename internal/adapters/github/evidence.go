@@ -3,35 +3,83 @@ package github
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
+	"encoding/json"
+	"net/http"
+	"slices"
+	"strings"
 
 	"github.com/zatiti/zatiti/internal/contract"
 )
 
-// requestContextRef returns the ArtifactRef PhysicalCallEvidence.request_context
-// carries.
-//
-// KNOWN CONTRACT GAP: request_context is typed as a bare ArtifactRef
-// (id+digest), which only exists once the artifacts domain has minted a
-// durable UUID for published bytes. An adapter has no IDSource, cannot mint
-// artifact IDs ("The adapter cannot mint artifact IDs" -- shared foundation
-// contract), and BlobStore.Stage/Publish never return one either. There is
-// therefore no way for this package, using only its declared
-// AdapterDependencies, to honestly produce a fresh, durable ArtifactRef for
-// the wire bytes it builds synchronously inside Invoke/Reconcile.
-// Fabricating a locally-minted UUID would produce a schema-shaped but
-// dangling reference -- exactly the "fake success" the implementation
-// assignment forbids.
-//
-// Pending a contract fix (for example typing request_context as the
-// existing ArtifactLocator, which already has a "staged" variant for
-// exactly this case), this package uses the one durable, non-fabricated
-// ArtifactRef it legitimately holds at call time: the profile's own
-// capability_evidence.artifact. That is not a claim that this artifact
-// contains the literal request bytes; it is the least-misleading value
-// available under the current contract. See the package's delivery report
-// for the integration lead.
-func requestContextRef(profile *githubProfile) wireArtifactRef {
-	return profile.CapabilityEvidence.Artifact
+// requestRecordSchema names the request record document below.
+const requestRecordSchema = "zatiti.adapter.request-record/v1"
+
+// requestRecordHeader is one permitted request header, in sorted order.
+type requestRecordHeader struct {
+	Name   string   `json:"name"`
+	Values []string `json:"values"`
+}
+
+// requestRecord is the exact secret-free record of the one physical request
+// an attempt makes: method, destination, the permitted headers and the body
+// as sent. The Authorization header is added only after the record is
+// built and is never part of it. The body is base64 so the record is exact
+// whatever the body's encoding; GET requests record an empty body.
+type requestRecord struct {
+	Schema      string                `json:"schema"`
+	Method      string                `json:"method"`
+	Destination string                `json:"destination"`
+	Headers     []requestRecordHeader `json:"headers"`
+	BodyDigest  contract.Digest       `json:"body_digest"`
+	BodySize    int64                 `json:"body_size"`
+	BodyBase64  string                `json:"body_base64"`
+}
+
+// stageRequestContext stages the request record before any byte is sent
+// and returns its StagedOutput (purpose context) plus the staged
+// ArtifactLocator that names it as physical_call.request_context. The
+// adapter has no IDSource, so it never fabricates an ArtifactRef and never
+// reuses capability evidence as a stand-in. Any failure here means nothing
+// is sent. A record containing the credential is refused rather than
+// staged.
+func stageRequestContext(ctx context.Context, blobs contract.BlobStore, secret []byte, method, destination string, permitted http.Header, body []byte) (wireStagedOutput, wireStagedLocator, error) {
+	if blobs == nil {
+		return wireStagedOutput{}, wireStagedLocator{}, prerequisiteMissing("github adapter requires a blob store dependency to stage the request context before sending")
+	}
+	record := requestRecord{
+		Schema:      requestRecordSchema,
+		Method:      method,
+		Destination: destination,
+		Headers:     make([]requestRecordHeader, 0, len(permitted)),
+		BodyDigest:  contract.Hash(body),
+		BodySize:    int64(len(body)),
+		BodyBase64:  base64.StdEncoding.EncodeToString(body),
+	}
+	for name, values := range permitted {
+		record.Headers = append(record.Headers, requestRecordHeader{Name: name, Values: values})
+	}
+	slices.SortFunc(record.Headers, func(a, b requestRecordHeader) int { return strings.Compare(a.Name, b.Name) })
+	doc, err := json.Marshal(record)
+	if err != nil {
+		return wireStagedOutput{}, wireStagedLocator{}, internalError("encoding the github request record failed")
+	}
+	if len(secret) > 0 && (bytes.Contains(doc, secret) || bytes.Contains(body, secret)) {
+		return wireStagedOutput{}, wireStagedLocator{}, internalError("the github request record would contain credential material; nothing was staged or sent")
+	}
+	stagingRef, digest, size, err := blobs.Stage(ctx, bytes.NewReader(doc), int64(len(doc)))
+	if err != nil {
+		return wireStagedOutput{}, wireStagedLocator{}, blobFault(err)
+	}
+	staged := wireStagedOutput{
+		StagingRef:     stagingRef,
+		Digest:         digest,
+		Size:           size,
+		MediaType:      "application/json",
+		Classification: "internal",
+		Purpose:        "context",
+	}
+	return staged, wireStagedLocator{Kind: "staged", StagingRef: stagingRef, Digest: digest}, nil
 }
 
 // noChargeUsage is the ProviderUsage this adapter reports: GitHub's

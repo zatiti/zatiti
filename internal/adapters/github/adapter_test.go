@@ -22,6 +22,25 @@ func validateEvidence(t *testing.T, doc json.RawMessage) {
 	if err := contract.ValidateSchema(schema, doc); err != nil {
 		t.Errorf("evidence does not validate against zatiti.github.evidence/v1: %v\ndoc: %s", err, doc)
 	}
+	// Revision 2: request_context is a staged locator matching exactly one
+	// StagedOutput of purpose context, for every disposition.
+	var ev wireGitHubEvidence
+	if err := json.Unmarshal(doc, &ev); err != nil {
+		t.Fatalf("unmarshal evidence: %v", err)
+	}
+	rc := ev.PhysicalCall.RequestContext
+	matches, contexts := 0, 0
+	for _, s := range ev.StagedOutputs {
+		if s.Purpose == "context" {
+			contexts++
+			if s.StagingRef == rc.StagingRef && s.Digest == rc.Digest {
+				matches++
+			}
+		}
+	}
+	if rc.Kind != "staged" || matches != 1 || contexts != 1 {
+		t.Errorf("request_context %+v matches %d of %d context staged outputs, want a staged locator matching exactly 1 of 1", rc, matches, contexts)
+	}
 }
 
 func TestNew_RequiresDependencies(t *testing.T) {
@@ -480,8 +499,9 @@ func TestInvoke_MaxResponseBytesBound(t *testing.T) {
 	if err := json.Unmarshal(obs.Evidence, &ev); err != nil {
 		t.Fatalf("unmarshal evidence: %v", err)
 	}
-	if len(ev.StagedOutputs) != 1 || ev.StagedOutputs[0].Size != 16 {
-		t.Errorf("staged output = %+v, want size bounded to 16", ev.StagedOutputs)
+	// The request context is staged first, then the bounded response.
+	if len(ev.StagedOutputs) != 2 || ev.StagedOutputs[1].Purpose != "provider_response" || ev.StagedOutputs[1].Size != 16 {
+		t.Errorf("staged outputs = %+v, want the provider response bounded to 16", ev.StagedOutputs)
 	}
 }
 

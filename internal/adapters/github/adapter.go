@@ -158,21 +158,36 @@ func (a *Adapter) call(ctx context.Context, dispatch contract.Dispatch, reconcil
 	callCtx, cancel := callContext(ctx, a.deps.Clock, a.profile.Timeout, dispatch.Deadline)
 	defer cancel()
 
+	// permitted is every header this adapter sets except Authorization:
+	// exactly what the secret-free request record carries.
+	permitted := http.Header{}
+	permitted.Set("Accept", "application/vnd.github+json")
+	permitted.Set("X-GitHub-Api-Version", "2022-11-28")
+	permitted.Set("User-Agent", userAgent)
+	if len(body) > 0 {
+		permitted.Set("Content-Type", "application/json")
+	}
+
+	// Stage the exact secret-free request record before any byte is sent.
+	// If it cannot be staged, nothing is sent.
+	stagedRequest, requestContext, err := stageRequestContext(ctx, a.deps.Blobs, secret, method, destination, permitted, body)
+	if err != nil {
+		return contract.Observation{}, err
+	}
+
 	var bodyReader io.Reader
 	if len(body) > 0 {
 		bodyReader = bytes.NewReader(body)
 	}
 	req, err := http.NewRequestWithContext(callCtx, method, destination, bodyReader)
 	if err != nil {
+		_ = a.deps.Blobs.RemoveStaged(ctx, stagedRequest.StagingRef)
 		return contract.Observation{}, internalError("building github request failed: %v", err)
 	}
-	req.Header.Set("Accept", "application/vnd.github+json")
-	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
-	req.Header.Set("User-Agent", userAgent)
-	req.Header.Set("Authorization", "Bearer "+string(secret))
-	if len(body) > 0 {
-		req.Header.Set("Content-Type", "application/json")
+	for name, values := range permitted {
+		req.Header[name] = values
 	}
+	req.Header.Set("Authorization", "Bearer "+string(secret))
 
 	started := a.deps.Clock.Now()
 	resp, doErr := a.client.Do(req)
@@ -188,7 +203,7 @@ func (a *Adapter) call(ctx context.Context, dispatch contract.Dispatch, reconcil
 		CapabilityEvidence:   a.profile.CapabilityEvidence.Artifact,
 		StartedAt:            started,
 		FinishedAt:           finished,
-		RequestContext:       requestContextRef(a.profile),
+		RequestContext:       requestContext,
 	}
 
 	if doErr != nil {
@@ -196,7 +211,7 @@ func (a *Adapter) call(ctx context.Context, dispatch contract.Dispatch, reconcil
 		physical.RequestSent = requestSent
 		physical.Confirmation = confirmation
 		physical.ErrorMessage = truncateText(scrubSecret(secret, doErr.Error()), 2048)
-		built, evErr := a.buildEvidence(act, physical, nil, evidenceFields{})
+		built, evErr := a.buildEvidence(act, physical, stagedRequest, nil, evidenceFields{})
 		if evErr != nil {
 			return contract.Observation{}, evErr
 		}
@@ -239,7 +254,7 @@ func (a *Adapter) call(ctx context.Context, dispatch contract.Dispatch, reconcil
 		physical.Confirmation = fields.confirmation
 	}
 
-	built, evErr := a.buildEvidence(act, physical, staged, fields)
+	built, evErr := a.buildEvidence(act, physical, stagedRequest, staged, fields)
 	if evErr != nil {
 		return contract.Observation{}, evErr
 	}
@@ -286,14 +301,16 @@ type builtEvidence struct {
 // buildEvidence assembles and marshals the zatiti.github.evidence/v1
 // document, plus a standalone marshal of its usage for
 // Observation.Usage.
-func (a *Adapter) buildEvidence(act *action, physical wirePhysicalCallEvidence, staged *wireStagedOutput, fields evidenceFields) (builtEvidence, error) {
+func (a *Adapter) buildEvidence(act *action, physical wirePhysicalCallEvidence, stagedRequest wireStagedOutput, staged *wireStagedOutput, fields evidenceFields) (builtEvidence, error) {
 	usage := noChargeUsage()
 	usageDoc, err := json.Marshal(usage)
 	if err != nil {
 		return builtEvidence{}, internalError("encoding github usage failed: %v", err)
 	}
 
-	stagedOutputs := []wireStagedOutput{}
+	// The request context is staged for every disposition, including
+	// not_sent and unknown; the provider response only when one arrived.
+	stagedOutputs := []wireStagedOutput{stagedRequest}
 	if staged != nil {
 		stagedOutputs = append(stagedOutputs, *staged)
 	}
