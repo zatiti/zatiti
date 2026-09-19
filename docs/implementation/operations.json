@@ -1,5 +1,5 @@
 {
-  "revision": 2,
+  "revision": 3,
   "$defs": {
     "Scope": {
       "type": "object",
@@ -1669,6 +1669,10 @@
         "next_wake": {
           "type": "string",
           "format": "date-time"
+        },
+        "last_cycle_id": {
+          "type": "string",
+          "format": "uuid"
         }
       },
       "required": [
@@ -1965,6 +1969,16 @@
             "compensation",
             "replacement"
           ]
+        },
+        "attempts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/OperationAttempt"
+          },
+          "maxItems": 4096
+        },
+        "callback_route": {
+          "$ref": "#/$defs/CallbackRoute"
         }
       },
       "required": [
@@ -2134,6 +2148,14 @@
         "created_at": {
           "type": "string",
           "format": "date-time"
+        },
+        "source_operation_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "purpose": {
+          "type": "string",
+          "maxLength": 8192
         }
       },
       "required": [
@@ -2439,6 +2461,15 @@
           "type": "boolean"
         },
         "last_meaningful_event": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "caller_unread_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
+        "caller_last_read_marker": {
           "type": "string",
           "format": "date-time"
         }
@@ -2931,6 +2962,9 @@
           "type": "integer",
           "minimum": 1,
           "maximum": 9223372036854775807
+        },
+        "runtime_ready": {
+          "type": "boolean"
         }
       },
       "required": [
@@ -3787,6 +3821,9 @@
         "provider_key": {
           "type": "string",
           "maxLength": 8192
+        },
+        "callback_route": {
+          "$ref": "#/$defs/CallbackRoute"
         }
       },
       "required": [
@@ -5079,45 +5116,13 @@
       "$schema": "https://json-schema.org/draft/2020-12/schema"
     },
     "Adapter_ResponsesParameters": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "schema": {
-          "const": "zatiti.responses.action/v1",
-          "type": "string"
+      "oneOf": [
+        {
+          "$ref": "#/$defs/Adapter_ResponsesPrepareSessionParameters"
         },
-        "kind": {
-          "const": "model_step",
-          "type": "string"
-        },
-        "context_artifact": {
-          "$ref": "#/$defs/Adapter_ArtifactRef"
-        },
-        "max_output_tokens": {
-          "type": "integer",
-          "minimum": 1,
-          "maximum": 1000000
-        },
-        "tool_contract_versions": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/Adapter_VersionRef"
-          },
-          "minItems": 0,
-          "maxItems": 256
-        },
-        "continuation_reference": {
-          "type": "string",
-          "minLength": 0,
-          "maxLength": 1024
+        {
+          "$ref": "#/$defs/Adapter_ResponsesModelStepParameters"
         }
-      },
-      "required": [
-        "schema",
-        "kind",
-        "context_artifact",
-        "max_output_tokens",
-        "tool_contract_versions"
       ],
       "$schema": "https://json-schema.org/draft/2020-12/schema"
     },
@@ -5131,6 +5136,11 @@
         },
         "physical_call": {
           "$ref": "#/$defs/Adapter_PhysicalCallEvidence"
+        },
+        "session_handle": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
         },
         "response_id": {
           "type": "string",
@@ -5160,10 +5170,8 @@
       "required": [
         "schema",
         "physical_call",
-        "response_id",
-        "output",
-        "staged_outputs",
-        "output_artifacts"
+        "session_handle",
+        "staged_outputs"
       ],
       "$schema": "https://json-schema.org/draft/2020-12/schema"
     },
@@ -7631,6 +7639,74 @@
       ],
       "$schema": "https://json-schema.org/draft/2020-12/schema"
     },
+    "Adapter_ResponsesPrepareSessionParameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema": {
+          "const": "zatiti.responses.action/v1",
+          "type": "string"
+        },
+        "kind": {
+          "const": "prepare_session",
+          "type": "string"
+        }
+      },
+      "required": [
+        "schema",
+        "kind"
+      ],
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "Adapter_ResponsesModelStepParameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema": {
+          "const": "zatiti.responses.action/v1",
+          "type": "string"
+        },
+        "kind": {
+          "const": "model_step",
+          "type": "string"
+        },
+        "session_handle": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "context_artifact": {
+          "$ref": "#/$defs/Adapter_ArtifactRef"
+        },
+        "max_output_tokens": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000000
+        },
+        "tool_contract_versions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Adapter_VersionRef"
+          },
+          "minItems": 0,
+          "maxItems": 256
+        },
+        "continuation_reference": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 1024
+        }
+      },
+      "required": [
+        "schema",
+        "kind",
+        "session_handle",
+        "context_artifact",
+        "max_output_tokens",
+        "tool_contract_versions"
+      ],
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
     "Fault": {
       "type": "object",
       "additionalProperties": false,
@@ -7716,6 +7792,532 @@
         "data",
         "error",
         "next_cursor"
+      ]
+    },
+    "TurnSource": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "message",
+            "task",
+            "responsibility",
+            "continuation"
+          ]
+        },
+        "source_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "source_version": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9223372036854775807
+        },
+        "recipient_worker_id": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "required": [
+        "kind",
+        "source_id",
+        "source_version"
+      ]
+    },
+    "WorkerTurn": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "worker_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "principal_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "scope": {
+          "$ref": "#/$defs/Scope"
+        },
+        "source": {
+          "$ref": "#/$defs/TurnSource"
+        },
+        "requester_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9223372036854775807
+        },
+        "configuration_revision": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9223372036854775807
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "claimed",
+            "context_pending",
+            "model_pending",
+            "proposal_pending",
+            "waiting",
+            "reporting",
+            "completed",
+            "failed",
+            "cancelled"
+          ]
+        },
+        "generation": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9223372036854775807
+        },
+        "limits": {
+          "$ref": "#/$defs/Limits"
+        },
+        "root_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "steps_used": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updated_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "conversation_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "task_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "run_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "attempt_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "waiting_reason": {
+          "type": "string",
+          "enum": [
+            "setup",
+            "clarification",
+            "review",
+            "effect",
+            "dependency",
+            "budget",
+            "recovery"
+          ]
+        },
+        "waiting_resource_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "next_wake": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "lease_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "lease_expires_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "context_artifact": {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        "last_observation_id": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "required": [
+        "id",
+        "worker_id",
+        "principal_id",
+        "scope",
+        "source",
+        "requester_id",
+        "version",
+        "configuration_revision",
+        "state",
+        "generation",
+        "limits",
+        "root_id",
+        "steps_used",
+        "created_at",
+        "updated_at"
+      ]
+    },
+    "ProposalRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "turn_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "step_index": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
+        "proposal_id": {
+          "type": "string",
+          "maxLength": 8192
+        },
+        "source_context_digest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "normalized_proposal": {
+          "type": "object",
+          "description": "Inert JSON data bounded by the enclosing size limit; never executable authority."
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "prepared",
+            "recorded",
+            "duplicate",
+            "stale",
+            "superseded"
+          ]
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updated_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "command_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "effect_operation_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "result_artifact": {
+          "$ref": "#/$defs/ArtifactRef"
+        }
+      },
+      "required": [
+        "turn_id",
+        "step_index",
+        "proposal_id",
+        "source_context_digest",
+        "normalized_proposal",
+        "state",
+        "created_at",
+        "updated_at"
+      ]
+    },
+    "CallbackRoute": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "worker_turn",
+            "job",
+            "memory",
+            "skill",
+            "connection"
+          ]
+        },
+        "turn_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "step_index": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
+        "job_id": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "required": [
+        "kind"
+      ]
+    },
+    "OperationAttempt": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "attempt_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "generation": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9223372036854775807
+        }
+      },
+      "required": [
+        "attempt_id",
+        "generation"
+      ]
+    },
+    "WorkItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "claim",
+            "context",
+            "proposal",
+            "resume"
+          ]
+        },
+        "scope": {
+          "$ref": "#/$defs/Scope"
+        },
+        "turn": {
+          "$ref": "#/$defs/WorkerTurn"
+        },
+        "run_id": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "scope",
+        "turn"
+      ]
+    },
+    "ContextPlan": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "turn_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "expected_version": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9223372036854775807
+        },
+        "generation": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9223372036854775807
+        },
+        "refs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ArtifactRef"
+          },
+          "maxItems": 4096
+        },
+        "configuration_revision": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9223372036854775807
+        },
+        "byte_bound": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
+        "token_bound": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        }
+      },
+      "required": [
+        "id",
+        "turn_id",
+        "expected_version",
+        "generation",
+        "refs",
+        "configuration_revision",
+        "byte_bound",
+        "token_bound"
+      ]
+    },
+    "VerifierDescriptor": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 8192
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9223372036854775807
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "artifact",
+            "repository"
+          ]
+        },
+        "classification": {
+          "type": "string",
+          "enum": [
+            "internal",
+            "public",
+            "restricted"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "version",
+        "kind",
+        "classification"
+      ]
+    },
+    "ReplyProposal": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "text": {
+          "type": "string",
+          "maxLength": 8192
+        }
+      },
+      "required": [
+        "text"
+      ]
+    },
+    "ClarifyProposal": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "question": {
+          "type": "string",
+          "maxLength": 8192
+        }
+      },
+      "required": [
+        "question"
+      ]
+    },
+    "ReportOutputsProposal": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "bindings": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "name": {
+                "type": "string",
+                "maxLength": 8192
+              },
+              "artifact": {
+                "$ref": "#/$defs/ArtifactRef"
+              }
+            },
+            "required": [
+              "name",
+              "artifact"
+            ]
+          },
+          "maxItems": 4096
+        }
+      },
+      "required": [
+        "bindings"
+      ]
+    },
+    "CycleDecisionProposal": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "decision": {
+          "type": "string",
+          "enum": [
+            "continue",
+            "wait",
+            "escalate",
+            "done"
+          ]
+        },
+        "reason": {
+          "type": "string",
+          "maxLength": 8192
+        },
+        "next_wake": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "decision",
+        "reason"
+      ]
+    },
+    "LocalDecisionTool": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/ReplyProposal",
+          "description": "reply"
+        },
+        {
+          "$ref": "#/$defs/ClarifyProposal",
+          "description": "clarify"
+        },
+        {
+          "$ref": "#/$defs/ReportOutputsProposal",
+          "description": "report_outputs"
+        },
+        {
+          "$ref": "#/$defs/CycleDecisionProposal",
+          "description": "cycle_decision"
+        }
       ]
     }
   },
@@ -16086,7 +16688,7 @@
           "resource"
         ]
       },
-      "behavior": "Versioned assignment shared by direct user and chief requests; conflicting concurrent assignment fails.",
+      "behavior": "Versioned assignment shared by direct user and chief requests; conflicting concurrent assignment fails. A chief-driven assignment is an ordinary authenticated call under the requesting worker's own scoped actor through the worker operation executor (revision 3), never a domain-internal caller path: this public operation carries no caller allowlist.",
       "cli": [
         "task",
         "assign"
@@ -16094,9 +16696,7 @@
       "mcp": "zatiti_task_assign",
       "submission_key": true,
       "expected_version": true,
-      "callers": [
-        "messaging"
-      ],
+      "callers": [],
       "scope_required": [
         "installation_id"
       ]
@@ -22936,6 +23536,14 @@
           "installation_id": {
             "type": "string",
             "format": "uuid"
+          },
+          "service_credential_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "service_store_ref": {
+            "type": "string",
+            "maxLength": 8192
           }
         },
         "required": [
@@ -22958,7 +23566,7 @@
           "resource"
         ]
       },
-      "behavior": "Create one initial human owner and scoped service identities in exclusive bootstrap transaction. Credential bytes were stored by trusted helper beforehand.",
+      "behavior": "Create one initial human owner and scoped service identities in exclusive bootstrap transaction. Credential bytes were stored by trusted helper beforehand. Optional service_credential_id/service_store_ref provision a credential for the bootstrap-created controller service principal in the same transaction, so an out-of-process controller can authenticate; omitted fields leave the service principal creditalless for an in-process explicit-Actor seam, unchanged from revision 2.",
       "cli": [],
       "mcp": null,
       "submission_key": false,
@@ -24085,6 +24693,14 @@
               "format": "uuid"
             },
             "maxItems": 4096
+          },
+          "cycle_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "turn_id": {
+            "type": "string",
+            "format": "uuid"
           }
         },
         "required": [
@@ -24092,7 +24708,8 @@
           "expected_version",
           "next_wake",
           "outputs",
-          "task_ids"
+          "task_ids",
+          "cycle_id"
         ]
       },
       "output_schema": {
@@ -24107,7 +24724,7 @@
           "resource"
         ]
       },
-      "behavior": "Persist bounded cycle outcome/next-wake, enforce minimum interval and per-cycle plus aggregate limits.",
+      "behavior": "Persist bounded cycle outcome/next-wake, enforce minimum interval and per-cycle plus aggregate limits. cycle_id is the unique replay/conflict fence: an identical result for the same cycle_id replays, a different result for the same cycle_id is submission_conflict. Optional turn_id links the cycle to the WorkerTurn (revision 3) that produced it.",
       "cli": [],
       "mcp": null,
       "submission_key": false,
@@ -24248,6 +24865,11 @@
           },
           "observation": {
             "$ref": "#/$defs/Observation"
+          },
+          "current_generation": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9223372036854775807
           }
         },
         "required": [
@@ -24269,7 +24891,7 @@
           "resource"
         ]
       },
-      "behavior": "Store actual provider observation plus cost settlement/uncertainty atomically. Lost record is recoverable without blind resend. Contradictory late evidence records correction/dispute.",
+      "behavior": "Store actual provider observation plus cost settlement/uncertainty atomically. Lost record is recoverable without blind resend. Contradictory late evidence records correction/dispute. Optional current_generation names the controller generation attempting to resolve a stray attempt whose claim journal spans a generation change: not_sent for an attempt never actually claimed under its recorded generation, outcome_unknown for one claimed but unconfirmed; the attempt is never silently dropped.",
       "cli": [],
       "mcp": null,
       "submission_key": false,
@@ -24347,6 +24969,9 @@
           "source_id": {
             "type": "string",
             "format": "uuid"
+          },
+          "callback_route": {
+            "$ref": "#/$defs/CallbackRoute"
           }
         },
         "required": [
@@ -24367,7 +24992,7 @@
           "resource"
         ]
       },
-      "behavior": "Persist immutable action and logical effect for hosted steps/memory/probes/evaluation; required decisions produce awaiting_review. No physical call here.",
+      "behavior": "Persist immutable action and logical effect for hosted steps/memory/probes/evaluation; required decisions produce awaiting_review. No physical call here. callback_route is an explicit controller-owned routing reference (worker turn/step or job id), persisted alongside the action and returned at claim; adapters never receive it. The controller resolves callback routing from this persisted route, never by inserting an undeclared attempt_id into strict adapter parameters.",
       "cli": [],
       "mcp": null,
       "submission_key": false,
@@ -25367,9 +25992,10 @@
       "submission_key": false,
       "expected_version": false,
       "callers": [
-        "tasks",
+        "application",
+        "controller",
         "scheduling",
-        "application"
+        "tasks"
       ],
       "scope_required": []
     },
@@ -25499,6 +26125,10 @@
           "source_id": {
             "type": "string",
             "format": "uuid"
+          },
+          "operation_id": {
+            "type": "string",
+            "format": "uuid"
           }
         },
         "required": [
@@ -25521,7 +26151,7 @@
           "resource"
         ]
       },
-      "behavior": "Validate owner/operation against catalog and original input schema; deduplicate source identity with canonical input hash. No arbitrary executable jobs.",
+      "behavior": "Validate owner/operation against catalog and original input schema; deduplicate source identity with canonical input hash. No arbitrary executable jobs. Optional operation_id links a network-backed job to its originating effects Operation at creation, so reconciliation resolves it without scanning another owner's table; a job without operation_id is an ordinary local runner.",
       "cli": [],
       "mcp": null,
       "submission_key": false,
@@ -25785,6 +26415,1353 @@
         "controller"
       ],
       "scope_required": []
+    },
+    {
+      "id": "_execution.turn.admit",
+      "version": 1,
+      "owner": "execution",
+      "visibility": "internal",
+      "mode": "mutation",
+      "effect": "local",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "source": {
+            "$ref": "#/$defs/TurnSource"
+          },
+          "worker_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "scope": {
+            "$ref": "#/$defs/Scope"
+          },
+          "requester_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "source",
+          "worker_id",
+          "scope",
+          "requester_id"
+        ]
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "resource": {
+            "$ref": "#/$defs/WorkerTurn"
+          }
+        },
+        "required": [
+          "resource"
+        ]
+      },
+      "behavior": "Admit or return the existing WorkerTurn for its unique source identity; derive requester/limits from the durable source, never from asserted proposal fields. A message arriving during an active turn is admitted as a safe-boundary injection durably linked to that turn, never silently dropped or processed twice. One active decision stream per worker/task lane; different eligible workers may run concurrently within aggregate limits.",
+      "cli": [],
+      "mcp": null,
+      "submission_key": false,
+      "expected_version": false,
+      "callers": [
+        "controller",
+        "scheduling"
+      ]
+    },
+    {
+      "id": "_execution.work.pending",
+      "version": 1,
+      "owner": "execution",
+      "visibility": "internal",
+      "mode": "query",
+      "effect": "local",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          }
+        },
+        "required": [
+          "limit"
+        ]
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/WorkItem"
+            },
+            "maxItems": 100
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "behavior": "Bounded scan of typed claim/context/proposal/resume work items, including ready hosted runs and safely waiting turns; excludes cooperative auto-claims, which continue to use the public run.claim path.",
+      "cli": [],
+      "mcp": null,
+      "submission_key": false,
+      "expected_version": false,
+      "callers": [
+        "controller"
+      ]
+    },
+    {
+      "id": "_execution.work.claim",
+      "version": 1,
+      "owner": "execution",
+      "visibility": "internal",
+      "mode": "mutation",
+      "effect": "local",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "work_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9223372036854775807
+          },
+          "generation": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9223372036854775807
+          }
+        },
+        "required": [
+          "work_id",
+          "expected_version",
+          "generation"
+        ]
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "item": {
+            "$ref": "#/$defs/WorkItem"
+          },
+          "claim_token": {
+            "type": "string",
+            "maxLength": 8192
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9223372036854775807
+          }
+        },
+        "required": [
+          "item",
+          "claim_token",
+          "version"
+        ]
+      },
+      "behavior": "Return the immutable work item plus a claim token/version; a retry against the same key inspects and returns the same claim rather than creating a second one.",
+      "cli": [],
+      "mcp": null,
+      "submission_key": false,
+      "expected_version": true,
+      "callers": [
+        "controller"
+      ]
+    },
+    {
+      "id": "_execution.context.prepare",
+      "version": 1,
+      "owner": "execution",
+      "visibility": "internal",
+      "mode": "mutation",
+      "effect": "local",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "turn_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9223372036854775807
+          },
+          "generation": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9223372036854775807
+          }
+        },
+        "required": [
+          "turn_id",
+          "expected_version",
+          "generation"
+        ]
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "resource": {
+            "$ref": "#/$defs/ContextPlan"
+          }
+        },
+        "required": [
+          "resource"
+        ]
+      },
+      "behavior": "Build a versioned immutable context plan naming exact authorized refs, versions and byte/token bounds inside the transaction; no IO, no provider call and no bytes read here.",
+      "cli": [],
+      "mcp": null,
+      "submission_key": false,
+      "expected_version": true,
+      "callers": [
+        "controller"
+      ]
+    },
+    {
+      "id": "_execution.context.commit",
+      "version": 1,
+      "owner": "execution",
+      "visibility": "internal",
+      "mode": "mutation",
+      "effect": "local",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "plan_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9223372036854775807
+          },
+          "generation": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9223372036854775807
+          },
+          "staged_context": {
+            "$ref": "#/$defs/Adapter_ArtifactLocator"
+          }
+        },
+        "required": [
+          "plan_id",
+          "expected_version",
+          "generation",
+          "staged_context"
+        ]
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "resource": {
+            "$ref": "#/$defs/WorkerTurn"
+          }
+        },
+        "required": [
+          "resource"
+        ]
+      },
+      "behavior": "Publish the plan bytes/metadata and commit the pinned context after rechecking generation, referenced versions and current authority. A stale plan is discarded and rebuilt without spending or sending.",
+      "cli": [],
+      "mcp": null,
+      "submission_key": false,
+      "expected_version": true,
+      "callers": [
+        "controller"
+      ]
+    },
+    {
+      "id": "_execution.proposal.prepare",
+      "version": 1,
+      "owner": "execution",
+      "visibility": "internal",
+      "mode": "mutation",
+      "effect": "local",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "turn_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "step_index": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9223372036854775807
+          },
+          "proposal_id": {
+            "type": "string",
+            "maxLength": 8192
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9223372036854775807
+          }
+        },
+        "required": [
+          "turn_id",
+          "step_index",
+          "proposal_id",
+          "expected_version"
+        ]
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "resource": {
+            "$ref": "#/$defs/ProposalRecord"
+          }
+        },
+        "required": [
+          "resource"
+        ]
+      },
+      "behavior": "Return the typed proposal built only from persisted normalized model evidence; the caller cannot submit substituted proposal bytes.",
+      "cli": [],
+      "mcp": null,
+      "submission_key": false,
+      "expected_version": true,
+      "callers": [
+        "controller"
+      ]
+    },
+    {
+      "id": "_execution.proposal.record",
+      "version": 1,
+      "owner": "execution",
+      "visibility": "internal",
+      "mode": "mutation",
+      "effect": "local",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "proposal_id": {
+            "type": "string",
+            "maxLength": 8192
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9223372036854775807
+          },
+          "command_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "effect_operation_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "result_artifact": {
+            "$ref": "#/$defs/ArtifactRef"
+          }
+        },
+        "required": [
+          "proposal_id",
+          "expected_version"
+        ]
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "resource": {
+            "$ref": "#/$defs/WorkerTurn"
+          }
+        },
+        "required": [
+          "resource"
+        ]
+      },
+      "behavior": "Record the next durable turn disposition and result artifact refs from a committed command or effect outcome; an identical repeat for the same proposal replays, a different result is submission_conflict.",
+      "cli": [],
+      "mcp": null,
+      "submission_key": false,
+      "expected_version": true,
+      "callers": [
+        "controller"
+      ]
+    },
+    {
+      "id": "_execution.report",
+      "version": 1,
+      "owner": "execution",
+      "visibility": "internal",
+      "mode": "mutation",
+      "effect": "local",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "scope": {
+            "$ref": "#/$defs/Scope"
+          },
+          "attempt_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "lease_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "generation": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9223372036854775807
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9223372036854775807
+          },
+          "outputs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/ArtifactRef"
+            },
+            "maxItems": 4096
+          },
+          "observations": {
+            "type": "object",
+            "description": "Inert JSON data bounded by the enclosing size limit; never executable authority."
+          },
+          "usage": {
+            "$ref": "#/$defs/Usage"
+          }
+        },
+        "required": [
+          "scope",
+          "attempt_id",
+          "lease_id",
+          "generation",
+          "expected_version",
+          "outputs",
+          "observations",
+          "usage"
+        ]
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "resource": {
+            "$ref": "#/$defs/Attempt"
+          }
+        },
+        "required": [
+          "resource"
+        ]
+      },
+      "behavior": "Same report/verification transition as the public cooperative attempt.report, driven by the controller on behalf of the current worker subject bound to this turn/attempt/lease/generation; process exit/report never directly succeeds the task.",
+      "cli": [],
+      "mcp": null,
+      "submission_key": false,
+      "expected_version": true,
+      "callers": [
+        "controller"
+      ]
+    },
+    {
+      "id": "_execution.verification.pending",
+      "version": 1,
+      "owner": "execution",
+      "visibility": "internal",
+      "mode": "query",
+      "effect": "local",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          }
+        },
+        "required": [
+          "limit"
+        ]
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/Adapter_VerificationRequest"
+            },
+            "maxItems": 100
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "behavior": "Bounded scan of sealed VerificationRequest work; no worker can claim verifier authority through this scan.",
+      "cli": [],
+      "mcp": null,
+      "submission_key": false,
+      "expected_version": false,
+      "callers": [
+        "controller"
+      ]
+    },
+    {
+      "id": "_execution.verification.claim",
+      "version": 1,
+      "owner": "execution",
+      "visibility": "internal",
+      "mode": "mutation",
+      "effect": "local",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "request_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9223372036854775807
+          },
+          "generation": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9223372036854775807
+          }
+        },
+        "required": [
+          "request_id",
+          "expected_version",
+          "generation"
+        ]
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "request": {
+            "$ref": "#/$defs/Adapter_VerificationRequest"
+          },
+          "claim_token": {
+            "type": "string",
+            "maxLength": 8192
+          }
+        },
+        "required": [
+          "request",
+          "claim_token"
+        ]
+      },
+      "behavior": "Exact version+generation claim of one sealed VerificationRequest for the trusted verifier identity only; lost claim acknowledgement resolves through this same generation-bound token, never by assuming unclaimed.",
+      "cli": [],
+      "mcp": null,
+      "submission_key": false,
+      "expected_version": true,
+      "callers": [
+        "controller"
+      ]
+    },
+    {
+      "id": "task.start",
+      "version": 1,
+      "owner": "tasks",
+      "visibility": "public",
+      "mode": "mutation",
+      "effect": "local",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "scope": {
+            "$ref": "#/$defs/Scope"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9223372036854775807
+          }
+        },
+        "required": [
+          "scope",
+          "id",
+          "expected_version"
+        ]
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "task": {
+            "$ref": "#/$defs/Task"
+          },
+          "run": {
+            "$ref": "#/$defs/Run"
+          }
+        },
+        "required": [
+          "task",
+          "run"
+        ]
+      },
+      "behavior": "Transition an eligible draft/ready task to ready and enqueue its run in the same transaction; existing draft-only task.create stays compatible and task.assign continues to only change worker/version without readying. Reject a task with unresolved required dependencies or missing acceptance/verifier prerequisites; replay of the same submission key returns the original disposition.",
+      "cli": [
+        "task",
+        "start"
+      ],
+      "mcp": "zatiti_task_start",
+      "submission_key": true,
+      "expected_version": true,
+      "callers": []
+    },
+    {
+      "id": "_tasks.evidence.record",
+      "version": 1,
+      "owner": "tasks",
+      "visibility": "internal",
+      "mode": "mutation",
+      "effect": "local",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "attempt_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9223372036854775807
+          },
+          "acceptance_digest": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "verification_artifact": {
+            "$ref": "#/$defs/ArtifactRef"
+          },
+          "output_bindings": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "maxLength": 8192
+                },
+                "artifact": {
+                  "$ref": "#/$defs/ArtifactRef"
+                }
+              },
+              "required": [
+                "name",
+                "artifact"
+              ]
+            },
+            "maxItems": 4096
+          },
+          "verdict": {
+            "type": "string",
+            "enum": [
+              "passed",
+              "failed"
+            ]
+          }
+        },
+        "required": [
+          "task_id",
+          "attempt_id",
+          "expected_version",
+          "acceptance_digest",
+          "verification_artifact",
+          "output_bindings",
+          "verdict"
+        ]
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "resource": {
+            "$ref": "#/$defs/Task"
+          }
+        },
+        "required": [
+          "resource"
+        ]
+      },
+      "behavior": "Record trusted verifier evidence against the pinned acceptance digest and bound named outputs before any task state depends on it; only this recorded lineage, or eligible explicit manual acceptance, can ever establish succeeded.",
+      "cli": [],
+      "mcp": null,
+      "submission_key": false,
+      "expected_version": true,
+      "callers": [
+        "execution"
+      ]
+    },
+    {
+      "id": "_tasks.dependencies.wake",
+      "version": 1,
+      "owner": "tasks",
+      "visibility": "internal",
+      "mode": "mutation",
+      "effect": "local",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "completed_task_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "cursor": {
+            "type": "string",
+            "maxLength": 8192
+          }
+        },
+        "required": [
+          "completed_task_id",
+          "limit"
+        ]
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "dependents": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/Task"
+            },
+            "maxItems": 100
+          },
+          "next_cursor": {
+            "type": "string",
+            "maxLength": 8192
+          }
+        },
+        "required": [
+          "dependents"
+        ]
+      },
+      "behavior": "Bounded scan of dependents blocked on a just-completed task; revalidate current eligibility per dependent and never report success for a dependent whose required child failed.",
+      "cli": [],
+      "mcp": null,
+      "submission_key": false,
+      "expected_version": false,
+      "callers": [
+        "execution",
+        "controller"
+      ]
+    },
+    {
+      "id": "_messaging.ready",
+      "version": 1,
+      "owner": "messaging",
+      "visibility": "internal",
+      "mode": "query",
+      "effect": "local",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          }
+        },
+        "required": [
+          "limit"
+        ]
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/Message"
+            },
+            "maxItems": 500
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "behavior": "Bounded fair scan of admitted messages awaiting a durable worker turn, scoped and ordered without acknowledgment.",
+      "cli": [],
+      "mcp": null,
+      "submission_key": false,
+      "expected_version": false,
+      "callers": [
+        "execution",
+        "controller"
+      ]
+    },
+    {
+      "id": "_messaging.processed",
+      "version": 1,
+      "owner": "messaging",
+      "visibility": "internal",
+      "mode": "mutation",
+      "effect": "local",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "message_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "recipient_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "turn_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "context_artifact": {
+            "$ref": "#/$defs/ArtifactRef"
+          }
+        },
+        "required": [
+          "message_id",
+          "recipient_id",
+          "turn_id"
+        ]
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "resource": {
+            "$ref": "#/$defs/Message"
+          }
+        },
+        "required": [
+          "resource"
+        ]
+      },
+      "behavior": "Record durable delivery disposition sharing the same transaction as turn admission/context commit; replay of the same message/turn pair is idempotent.",
+      "cli": [],
+      "mcp": null,
+      "submission_key": false,
+      "expected_version": false,
+      "callers": [
+        "execution"
+      ]
+    },
+    {
+      "id": "conversation.message.list",
+      "version": 1,
+      "owner": "messaging",
+      "visibility": "public",
+      "mode": "query",
+      "effect": "local",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "scope": {
+            "$ref": "#/$defs/Scope"
+          },
+          "conversation_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "cursor": {
+            "type": "string",
+            "maxLength": 8192
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200
+          }
+        },
+        "required": [
+          "scope",
+          "conversation_id"
+        ]
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/Message"
+            },
+            "maxItems": 500
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "behavior": "Read authorized sent/received message history for a conversation, limited to disclosed membership intervals; joining a group discloses no retroactive restricted history.",
+      "cli": [
+        "conversation",
+        "message",
+        "list"
+      ],
+      "mcp": "zatiti_conversation_message_list",
+      "submission_key": false,
+      "expected_version": false,
+      "callers": []
+    },
+    {
+      "id": "_effects.reconciliation.prepare",
+      "version": 1,
+      "owner": "effects",
+      "visibility": "internal",
+      "mode": "mutation",
+      "effect": "local",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9223372036854775807
+          }
+        },
+        "required": [
+          "operation_id",
+          "expected_version"
+        ]
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "resource": {
+            "$ref": "#/$defs/Operation"
+          }
+        },
+        "required": [
+          "resource"
+        ]
+      },
+      "behavior": "Create a separately admitted, separately authorized and accounted bounded reconciliation read distinct from the original write; no replay of the original action.",
+      "cli": [],
+      "mcp": null,
+      "submission_key": false,
+      "expected_version": true,
+      "callers": [
+        "controller"
+      ]
+    },
+    {
+      "id": "_effects.reconciliation.record",
+      "version": 1,
+      "owner": "effects",
+      "visibility": "internal",
+      "mode": "mutation",
+      "effect": "local",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "attempt_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "generation": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9223372036854775807
+          },
+          "observation": {
+            "$ref": "#/$defs/Observation"
+          }
+        },
+        "required": [
+          "operation_id",
+          "attempt_id",
+          "generation",
+          "observation"
+        ]
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "resource": {
+            "$ref": "#/$defs/Operation"
+          }
+        },
+        "required": [
+          "resource"
+        ]
+      },
+      "behavior": "Merge the qualified reconciliation observation into the original operation uncertainty; retain outcome_unknown until authoritative evidence resolves it, and never overwrite the original action or its history.",
+      "cli": [],
+      "mcp": null,
+      "submission_key": false,
+      "expected_version": false,
+      "callers": [
+        "controller"
+      ]
+    },
+    {
+      "id": "_skills.evaluation.record",
+      "version": 1,
+      "owner": "skills",
+      "visibility": "internal",
+      "mode": "mutation",
+      "effect": "local",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "evaluation_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "job_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9223372036854775807
+          },
+          "verifier_id": {
+            "type": "string",
+            "maxLength": 8192
+          },
+          "verifier_version": {
+            "type": "string",
+            "maxLength": 8192
+          },
+          "evidence_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "maxItems": 4096
+          },
+          "passed": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "evaluation_id",
+          "job_id",
+          "expected_version",
+          "verifier_id",
+          "verifier_version",
+          "evidence_ids",
+          "passed"
+        ]
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "resource": {
+            "$ref": "#/$defs/Job"
+          }
+        },
+        "required": [
+          "resource"
+        ]
+      },
+      "behavior": "Record published verifier evidence against the exact immutable skill version the evaluation names; a skill or evaluator change since evaluation admission invalidates the evaluation instead of recording it.",
+      "cli": [],
+      "mcp": null,
+      "submission_key": false,
+      "expected_version": true,
+      "callers": [
+        "execution",
+        "controller"
+      ]
+    },
+    {
+      "id": "_configuration.export.prepare",
+      "version": 1,
+      "owner": "configuration",
+      "visibility": "internal",
+      "mode": "mutation",
+      "effect": "local",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "scope": {
+            "$ref": "#/$defs/Scope"
+          },
+          "family": {
+            "type": "string",
+            "maxLength": 8192
+          },
+          "resource_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "scope",
+          "family",
+          "resource_id"
+        ]
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "resource": {
+            "$ref": "#/$defs/Job"
+          }
+        },
+        "required": [
+          "resource"
+        ]
+      },
+      "behavior": "Persist an immutable export snapshot/version plan through the durable job ledger before any bytes are staged; no phantom completed job and no blob IO inside this transaction.",
+      "cli": [],
+      "mcp": null,
+      "submission_key": false,
+      "expected_version": false,
+      "callers": [
+        "controller",
+        "application"
+      ]
+    },
+    {
+      "id": "_configuration.export.record",
+      "version": 1,
+      "owner": "configuration",
+      "visibility": "internal",
+      "mode": "mutation",
+      "effect": "local",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "job_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9223372036854775807
+          },
+          "generation": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9223372036854775807
+          },
+          "artifact": {
+            "$ref": "#/$defs/ArtifactRef"
+          }
+        },
+        "required": [
+          "job_id",
+          "expected_version",
+          "generation",
+          "artifact"
+        ]
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "resource": {
+            "$ref": "#/$defs/Job"
+          }
+        },
+        "required": [
+          "resource"
+        ]
+      },
+      "behavior": "Publish the exported Job/Artifact through their owning ports after canonical bytes are staged outside the transaction; replaces the prior handler-local ID minting that had no owner-backed lookup.",
+      "cli": [],
+      "mcp": null,
+      "submission_key": false,
+      "expected_version": true,
+      "callers": [
+        "controller"
+      ]
+    },
+    {
+      "id": "memory.list",
+      "version": 1,
+      "owner": "memory",
+      "visibility": "public",
+      "mode": "query",
+      "effect": "local",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "scope": {
+            "$ref": "#/$defs/Scope"
+          },
+          "binding_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "maxItems": 4096
+          },
+          "cursor": {
+            "type": "string",
+            "maxLength": 8192
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200
+          }
+        },
+        "required": [
+          "scope",
+          "binding_ids"
+        ]
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/Claim"
+            },
+            "maxItems": 500
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "behavior": "List authorized scoped claim refs with source, freshness, lineage and supported actions for brains the caller can access; never lists an unauthorized brain and never performs paid retrieval.",
+      "cli": [
+        "memory",
+        "list"
+      ],
+      "mcp": "zatiti_memory_list",
+      "submission_key": false,
+      "expected_version": false,
+      "callers": []
+    },
+    {
+      "id": "installation.verifier.list",
+      "version": 1,
+      "owner": "installation",
+      "visibility": "public",
+      "mode": "query",
+      "effect": "local",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "scope": {
+            "$ref": "#/$defs/Scope"
+          },
+          "cursor": {
+            "type": "string",
+            "maxLength": 8192
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200
+          }
+        },
+        "required": [
+          "scope"
+        ]
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/VerifierDescriptor"
+            },
+            "maxItems": 500
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "behavior": "Enumerate installed trusted verifier profiles available to name in a task acceptance contract; secret-free, no executable path or argv disclosed.",
+      "cli": [
+        "installation",
+        "verifier",
+        "list"
+      ],
+      "mcp": "zatiti_installation_verifier_list",
+      "submission_key": false,
+      "expected_version": false,
+      "callers": []
     }
   ]
 }
