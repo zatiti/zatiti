@@ -454,6 +454,13 @@ type reviewsCheckCallInput struct {
 	ActionDigest string         `json:"action_digest"`
 }
 
+// reviewsEnsureCallInput is the _reviews.ensure input.
+type reviewsEnsureCallInput struct {
+	Scope       contract.Scope          `json:"scope"`
+	Action      wireAction              `json:"action"`
+	Requirement wireDecisionRequirement `json:"requirement"`
+}
+
 // Peer response shapes. Decoded tolerantly; peers validate their own output
 // against the shared schemas before sending.
 

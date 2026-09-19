@@ -66,10 +66,38 @@ func (a *Application) invokeMutation(
 		return disposition(delivered)
 	}
 
-	// The transaction rolled back. Persist a known refusal in a separate
-	// short transaction so an identical retry replays the same disposition;
-	// concurrent duplicates keep serializing on the same command identity.
+	// The transaction rolled back. A review_required refusal rolled back the
+	// pending review the policy gate ensured, so it is ensured again in its
+	// own transaction: the review is the durable evidence the eligible owner
+	// decides, and without it the refusal could never be resolved.
+	if faultOf(err).Code == contract.CodeReviewRequired {
+		a.persistReviewRequest(ctx, actor, desc, invocation, scope)
+	}
+	// Persist a known refusal in a separate short transaction so an
+	// identical retry replays the same disposition; concurrent duplicates
+	// keep serializing on the same command identity.
 	return a.refused(ctx, actor, desc, submissionKey, digest, scope, err)
+}
+
+// persistReviewRequest re-runs the policy gate for a refused mutation in a
+// separate short transaction so the pending review it ensures survives the
+// rollback of the refused request. The gate is deterministic and its only
+// state change is that ensure, so nothing else is admitted or recorded. A
+// failure here leaves the refusal standing; the next identical request
+// ensures again.
+func (a *Application) persistReviewRequest(ctx context.Context, actor contract.Actor, desc contract.Descriptor, invocation contract.Invocation, scope contract.Scope) {
+	_ = a.db.Write(ctx, actor, scope, func(u contract.Unit) error {
+		wctx := withState(ctx, &dispatchState{chain: []string{desc.ID}, unit: u})
+		if err := a.revalidateAuthority(wctx, u, actor, scope); err != nil {
+			return err
+		}
+		gateErr := a.policyGate(wctx, u, scope, desc.ID, invocation.Input)
+		if faultOf(gateErr).Code == contract.CodeReviewRequired {
+			// The expected outcome: commit the ensured review.
+			return nil
+		}
+		return gateErr
+	})
 }
 
 // disposition pairs a result with its error the one way every path returns

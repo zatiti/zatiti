@@ -73,6 +73,10 @@ type fakePorts struct {
 	workers   map[contract.ID]peerWorker
 	tasks     map[contract.ID]peerTask
 	reviews   map[string]reviewsCheckBody
+	// ensured records the pending reviews _reviews.ensure created, keyed by
+	// action digest, the way the real reviews owner would. A pending review
+	// answers _reviews.check as ineligible until the test approves it.
+	ensured map[string]ensuredReview
 
 	promoteFault  *contract.Fault
 	restrictFault *contract.Fault
@@ -85,8 +89,82 @@ func newFakePorts(ids *seqIDs) *fakePorts {
 		workers: map[contract.ID]peerWorker{},
 		tasks:   map[contract.ID]peerTask{},
 		reviews: map[string]reviewsCheckBody{},
+		ensured: map[string]ensuredReview{},
 		fail:    map[string]*contract.Fault{},
 	}
+}
+
+// ensuredReview is one review the fake reviews owner holds.
+type ensuredReview struct {
+	scope       contract.Scope
+	action      wireAction
+	requirement wireDecisionRequirement
+	proposer    contract.ID
+}
+
+// reviewsEnsureInput mirrors the frozen _reviews.ensure input.
+type reviewsEnsureInput struct {
+	Scope       contract.Scope          `json:"scope"`
+	Action      wireAction              `json:"action"`
+	Requirement wireDecisionRequirement `json:"requirement"`
+}
+
+// reviewsDigest is the reviews owner's own digest rule: the SHA-256 of the
+// canonical JSON of the exact action.
+func reviewsDigest(t *testing.T, action wireAction) string {
+	t.Helper()
+	raw, err := json.Marshal(action)
+	if err != nil {
+		t.Fatalf("marshal action: %v", err)
+	}
+	canon, err := contract.Canonicalize(raw)
+	if err != nil {
+		t.Fatalf("canonicalize action: %v", err)
+	}
+	return string(contract.Hash(canon))
+}
+
+// ensure mirrors the real _reviews.ensure fences: the requirement digest
+// must be the digest of the submitted action, the action scope must match
+// the request scope, and re-ensuring a live review returns it unchanged.
+func (p *fakePorts) ensure(unit contract.Unit, in reviewsEnsureInput) (*contract.Fault, error) {
+	raw, err := json.Marshal(in.Action)
+	if err != nil {
+		return nil, err
+	}
+	canon, err := contract.Canonicalize(raw)
+	if err != nil {
+		return nil, err
+	}
+	if digest := string(contract.Hash(canon)); in.Requirement.ActionDigest != digest {
+		return &contract.Fault{Code: contract.CodeInvalidInput,
+			Message: "requirement action_digest does not match the submitted action"}, nil
+	}
+	if in.Action.Scope != in.Scope {
+		return &contract.Fault{Code: contract.CodeInvalidInput, Message: "action scope does not match the requested scope"}, nil
+	}
+	if in.Scope.InstallationID != unit.Scope().InstallationID {
+		return &contract.Fault{Code: contract.CodeInvalidInput, Message: "scope does not match the current execution scope"}, nil
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if _, exists := p.ensured[in.Requirement.ActionDigest]; !exists {
+		p.ensured[in.Requirement.ActionDigest] = ensuredReview{
+			scope: in.Scope, action: in.Action, requirement: in.Requirement, proposer: unit.Actor().PrincipalID,
+		}
+	}
+	return nil, nil
+}
+
+// approve records an eligible approval for one ensured review.
+func (p *fakePorts) approve(t *testing.T, digest string) {
+	t.Helper()
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if _, ok := p.ensured[digest]; !ok {
+		t.Fatalf("no review was ensured for digest %s", digest)
+	}
+	p.reviews[digest] = reviewsCheckBody{Eligible: true, Decision: &peerDecision{Decision: "approve"}}
 }
 
 func (p *fakePorts) Call(ctx context.Context, unit contract.Unit, inv contract.Invocation) (contract.Payload, error) {
@@ -165,6 +243,23 @@ func (p *fakePorts) Call(ctx context.Context, unit contract.Unit, inv contract.I
 			return contract.Payload{}, err
 		}
 		body = reviews[in.ActionDigest]
+	case "_reviews.ensure":
+		if unit.ReadOnly() {
+			return contract.Payload{}, &contract.Fault{Code: contract.CodePermissionDenied,
+				Message: "mutation operation _reviews.ensure cannot run under a read snapshot"}
+		}
+		var in reviewsEnsureInput
+		if err := contract.DecodeStrict(inv.Input, &in); err != nil {
+			return contract.Payload{}, &contract.Fault{Code: contract.CodeInvalidInput, Message: err.Error()}
+		}
+		fault, err := p.ensure(unit, in)
+		if err != nil {
+			return contract.Payload{}, err
+		}
+		if fault != nil {
+			return contract.Payload{}, fault
+		}
+		body = map[string]any{"resource": map[string]any{"action_digest": in.Requirement.ActionDigest, "state": "pending"}}
 	case "_identity.promote":
 		if promoteFault != nil {
 			return contract.Payload{}, promoteFault

@@ -80,22 +80,6 @@ func canonicalizeChange(change wireChange) ([]byte, error) {
 	return canon, nil
 }
 
-// computeCandidateDigest hashes the canonical forms of every change in
-// staged order into the 64-hex candidate digest. Forms are joined with the
-// ASCII unit separator, which canonical JSON cannot contain.
-func computeCandidateDigest(changes []wireChange) (string, error) {
-	flat := make([]byte, 0, 4096)
-	for _, c := range changes {
-		canon, err := canonicalizeChange(c)
-		if err != nil {
-			return "", err
-		}
-		flat = append(flat, canon...)
-		flat = append(flat, 0x1f)
-	}
-	return string(contract.Hash(flat)), nil
-}
-
 // appendPeerDeps merges peer-reported dependencies, dropping duplicates.
 func appendPeerDeps(dst, src []wireRef) []wireRef {
 	seen := make(map[wireRef]bool, len(dst))

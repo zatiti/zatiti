@@ -589,8 +589,15 @@ func (m *policyModule) Handle(ctx context.Context, u contract.Unit, inv contract
 			ActionDigest: digest, HumanRequired: true, EligiblePrincipals: []string{testPrincipal}, ExpiresAt: &expires,
 		}}
 		var reviewed string
-		if in.CandidateDigest != "" {
-			_ = u.QueryRowContext(ctx, "SELECT decision FROM policy_reviews WHERE action_digest = ?", in.CandidateDigest).Scan(&reviewed)
+		_ = u.QueryRowContext(ctx, "SELECT decision FROM policy_reviews WHERE action_digest = ?", digest).Scan(&reviewed)
+		if reviewed == "" && !u.ReadOnly() {
+			// As the real owner: a standing requirement ensures its pending
+			// review in the caller's transaction so an eligible owner can
+			// decide it.
+			if _, err := u.ExecContext(ctx, "INSERT INTO policy_reviews (action_digest, decision) VALUES (?, 'pending')", digest); err != nil {
+				return contract.Payload{}, err
+			}
+			reviewed = "pending"
 		}
 		switch reviewed {
 		case "approve":
@@ -615,6 +622,17 @@ func (m *policyModule) decideReview(ctx context.Context, db contract.Database, i
 				ON CONFLICT(action_digest) DO UPDATE SET decision = excluded.decision`, digest, decision)
 			return err
 		})
+}
+
+// reviewState reports the recorded state of the review bound to digest, or
+// "" when none was ever ensured.
+func (m *policyModule) reviewState(ctx context.Context, db contract.Database, installation contract.ID, digest string) string {
+	var state string
+	_ = db.Read(ctx, contract.Actor{PrincipalID: "seeder", Kind: contract.KindService},
+		contract.Scope{InstallationID: installation}, func(u contract.Unit) error {
+			return u.QueryRowContext(ctx, "SELECT decision FROM policy_reviews WHERE action_digest = ?", digest).Scan(&state)
+		})
+	return state
 }
 
 // seenCandidates lists "capability=candidate_digest" for every check so far.

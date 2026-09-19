@@ -1,7 +1,8 @@
 package configuration
 
 import (
-	"encoding/json"
+	"context"
+	"fmt"
 	"regexp"
 	"testing"
 
@@ -58,17 +59,23 @@ func TestPeerValidateReceivesSealedCandidateDigest(t *testing.T) {
 	if len(planned[0].Changes) != 1 || planned[0].Changes[0].Kind != kindWorker {
 		t.Fatalf("_identity.validate slice = %+v, want only the worker change", planned[0].Changes)
 	}
-	staged, err := json.Marshal(draft.Changes)
+	// The digest is the reviews digest of the plan's exact apply action,
+	// rebuilt from the sealed plan row and the staged changes.
+	row, err := loadPlanRow(env, plan.ID)
+	if err != nil {
+		t.Fatalf("load plan row: %v", err)
+	}
+	staged, err := draftChanges(row.ChangesJSON)
 	if err != nil {
 		t.Fatalf("draft changes: %v", err)
 	}
-	changes, err := draftChanges(string(staged))
+	action, err := planReviewAction(row, staged)
 	if err != nil {
-		t.Fatalf("draft changes: %v", err)
+		t.Fatalf("planReviewAction: %v", err)
 	}
-	whole, err := computeCandidateDigest(changes)
+	whole, err := reviewActionDigest(action)
 	if err != nil {
-		t.Fatalf("computeCandidateDigest: %v", err)
+		t.Fatalf("reviewActionDigest: %v", err)
 	}
 	if plan.CandidateDigest != whole {
 		t.Fatalf("plan digest %q is not the digest of the complete candidate %q", plan.CandidateDigest, whole)
@@ -106,4 +113,21 @@ func TestCandidateDigestTracksTheCandidate(t *testing.T) {
 	if seen[0].CandidateDigest == seen[1].CandidateDigest {
 		t.Fatalf("two different candidates share digest %q", seen[0].CandidateDigest)
 	}
+}
+
+// loadPlanRow reads one sealed plan row inside a read snapshot.
+func loadPlanRow(env *testEnv, id contract.ID) (*planRow, error) {
+	var row *planRow
+	err := env.db.Read(env.ctx, env.actor, env.scope.toContract(), func(unit contract.Unit) error {
+		p, err := loadPlan(context.Background(), unit, env.install, id)
+		row = p
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	if row == nil {
+		return nil, fmt.Errorf("plan %s not found", id)
+	}
+	return row, nil
 }

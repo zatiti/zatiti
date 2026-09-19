@@ -313,8 +313,8 @@ func TestStandingPolicyShadowing(t *testing.T) {
 	if !req.HumanRequired {
 		t.Fatal("requirement is not human required")
 	}
-	if req.ActionDigest != actionDigest("deploy.render", e.scope) {
-		t.Fatalf("digest %s, want %s", req.ActionDigest, actionDigest("deploy.render", e.scope))
+	if want := exactActionDigest(capabilityAction("deploy.render", e.scope, 7)); req.ActionDigest != want {
+		t.Fatalf("digest %s, want %s", req.ActionDigest, want)
 	}
 	if len(req.EligiblePrincipals) != 1 || req.EligiblePrincipals[0] != e.chief {
 		t.Fatalf("eligible principals %v, want [%s]", req.EligiblePrincipals, e.chief)

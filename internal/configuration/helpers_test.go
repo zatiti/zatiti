@@ -55,18 +55,51 @@ type fakePorts struct {
 	decision  string                    // _policy.check decision (default allow)
 	reasons   []string                  // policy reasons
 	decReqs   []wireDecisionRequirement // decision requirements on review
-	approveOK bool                      // _reviews.check approval outcome
+	approveOK bool                      // _reviews.check approval outcome for any ensured review
 	fail      map[string]*contract.Fault
+
+	// ensured holds the pending reviews _reviews.ensure created, keyed by
+	// action digest, the way the real reviews owner does; decided records
+	// the explicit decisions a test makes over them (approve or reject).
+	// With approveOK false, _reviews.check answers only from decided.
+	ensured map[string]reviewsEnsureInput
+	decided map[string]string
 }
 
 func newFakePorts() *fakePorts {
-	return &fakePorts{decision: "allow", approveOK: true, fail: map[string]*contract.Fault{}}
+	return &fakePorts{
+		decision: "allow", approveOK: true, fail: map[string]*contract.Fault{},
+		ensured: map[string]reviewsEnsureInput{}, decided: map[string]string{},
+	}
+}
+
+// approve records an eligible approval for one ensured review.
+func (p *fakePorts) approve(t *testing.T, digest string) {
+	t.Helper()
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if _, ok := p.ensured[digest]; !ok {
+		t.Fatalf("no review was ensured for digest %s", digest)
+	}
+	p.decided[digest] = "approve"
+}
+
+// ensuredActions returns the ensure inputs recorded so far, keyed by digest.
+func (p *fakePorts) ensuredActions() map[string]reviewsEnsureInput {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	out := make(map[string]reviewsEnsureInput, len(p.ensured))
+	for d, in := range p.ensured {
+		out[d] = in
+	}
+	return out
 }
 
 func (p *fakePorts) Call(ctx context.Context, unit contract.Unit, inv contract.Invocation) (contract.Payload, error) {
 	p.mu.Lock()
 	p.calls = append(p.calls, inv)
-	decision, reasons, decReqs, approveOK := p.decision, p.reasons, p.decReqs, p.approveOK
+	decision, reasons, approveOK := p.decision, p.reasons, p.approveOK
+	decReqs := append([]wireDecisionRequirement(nil), p.decReqs...)
 	injected := p.fail[inv.Operation]
 	p.mu.Unlock()
 	if injected != nil {
@@ -97,14 +130,66 @@ func (p *fakePorts) Call(ctx context.Context, unit contract.Unit, inv contract.I
 	case strings.HasSuffix(inv.Operation, ".activate"):
 		body = versionsOutput{Versions: []wireRef{}}
 	case inv.Operation == "_policy.check":
+		// The real policy owner binds every decision requirement to the
+		// candidate digest the caller passed.
+		var in policyCheckInput
+		_ = json.Unmarshal(inv.Input, &in)
+		for i := range decReqs {
+			if decReqs[i].ActionDigest == "" {
+				decReqs[i].ActionDigest = in.CandidateDigest
+			}
+		}
 		body = policyCheckBody{Resource: policyResult{
 			Decision: decision, Reasons: reasons, Requirements: decReqs,
 		}}
+	case inv.Operation == "_reviews.ensure":
+		// The real reviews owner's fences: the requirement digest is the
+		// canonical digest of the submitted action, the action scope is the
+		// request scope, and a live review is returned unchanged.
+		var in reviewsEnsureInput
+		if err := contract.DecodeStrict(inv.Input, &in); err != nil {
+			return contract.Payload{}, &contract.Fault{Code: contract.CodeInvalidInput, Message: "_reviews.ensure: " + err.Error()}
+		}
+		digest, err := reviewActionDigest(in.Action)
+		if err != nil {
+			return contract.Payload{}, err
+		}
+		if in.Requirement.ActionDigest != digest {
+			return contract.Payload{}, &contract.Fault{Code: contract.CodeInvalidInput,
+				Message: "_reviews.ensure: requirement action_digest does not match the submitted action"}
+		}
+		if in.Action.Scope != in.Scope {
+			return contract.Payload{}, &contract.Fault{Code: contract.CodeInvalidInput,
+				Message: "_reviews.ensure: action scope does not match the requested scope"}
+		}
+		if in.Scope.InstallationID != unit.Scope().InstallationID {
+			return contract.Payload{}, &contract.Fault{Code: contract.CodeInvalidInput,
+				Message: "_reviews.ensure: scope does not match the current execution scope"}
+		}
+		if unit.ReadOnly() {
+			return contract.Payload{}, &contract.Fault{Code: contract.CodePermissionDenied,
+				Message: "_reviews.ensure cannot run under a read snapshot"}
+		}
+		p.mu.Lock()
+		if _, exists := p.ensured[digest]; !exists {
+			p.ensured[digest] = in
+		}
+		p.mu.Unlock()
+		body = map[string]any{"resource": map[string]any{"action_digest": digest, "state": "pending"}}
 	case inv.Operation == "_reviews.check":
-		if !approveOK {
-			body = reviewsCheckBody{Eligible: false}
-		} else {
+		var in reviewsCheckInput
+		_ = json.Unmarshal(inv.Input, &in)
+		p.mu.Lock()
+		verdict, decidedOK := p.decided[in.ActionDigest]
+		_, ensuredOK := p.ensured[in.ActionDigest]
+		p.mu.Unlock()
+		switch {
+		case decidedOK:
+			body = reviewsCheckBody{Eligible: true, Decision: &reviewDecision{Decision: verdict}}
+		case approveOK && ensuredOK:
 			body = reviewsCheckBody{Eligible: true, Decision: &reviewDecision{Decision: "approve"}}
+		default:
+			body = reviewsCheckBody{Eligible: false}
 		}
 	default:
 		return contract.Payload{}, &contract.Fault{

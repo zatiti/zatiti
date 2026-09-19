@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
+	"time"
 
 	"github.com/zatiti/zatiti/internal/contract"
 )
@@ -110,14 +111,23 @@ type reviewsCheckInput struct {
 	ActionDigest string    `json:"action_digest"`
 }
 
-// reviewsCheckBody mirrors the $defs/Decision subset apply rechecks.
+// reviewsCheckBody mirrors the _reviews.check output: eligibility and the
+// complete $defs/Decision when one stands.
 type reviewsCheckBody struct {
 	Eligible bool            `json:"eligible"`
 	Decision *reviewDecision `json:"decision,omitempty"`
 }
 
+// reviewDecision mirrors $defs/Decision.
 type reviewDecision struct {
-	Decision string `json:"decision"`
+	ID            contract.ID `json:"id"`
+	ReviewID      contract.ID `json:"review_id"`
+	ReviewVersion int64       `json:"review_version"`
+	ActionDigest  string      `json:"action_digest"`
+	ReviewerID    contract.ID `json:"reviewer_id"`
+	Decision      string      `json:"decision"`
+	At            time.Time   `json:"at"`
+	Reason        string      `json:"reason"`
 }
 
 // handleStage implements _configuration.stage: validate the typed change,
@@ -332,47 +342,54 @@ func (s *Service) sealPlan(ctx context.Context, unit contract.Unit, scope wireSc
 	if err != nil {
 		return nil, faultOf(err)
 	}
-	// The digest of the complete candidate is fixed before any owner sees
-	// the candidate: every peer validates under the same digest the plan
-	// seals, apply binds and activation delivers.
-	digest, err := computeCandidateDigest(changes)
+	now := s.clock.Now().UTC()
+	plan := &planRow{
+		ID:              s.ids.New(),
+		Version:         1,
+		DraftID:         draft.ID,
+		InstallationID:  scope.InstallationID,
+		OrganizationID:  scope.OrganizationID,
+		BaseRevision:    head,
+		ChangesJSON:     draft.ChangesJSON,
+		CompilerVersion: compilerVersion,
+		SchemaVersion:   schemaVersion,
+		State:           planSealed,
+		CreatedAt:       now,
+		UpdatedAt:       now,
+	}
+	// The candidate digest is fixed before any owner sees the candidate:
+	// it is the reviews digest of the exact apply action (see
+	// review_action.go), so every peer validates, policy gates, the owner
+	// reviews, apply binds and activation delivers one value.
+	action, err := planReviewAction(plan, changes)
 	if err != nil {
 		return nil, err
 	}
-	planID := s.ids.New()
-	validation, err := s.validateCandidate(ctx, unit, scope, planID, head, digest, changes)
+	plan.CandidateDigest, err = reviewActionDigest(action)
+	if err != nil {
+		return nil, err
+	}
+	validation, err := s.validateCandidate(ctx, unit, scope, plan.ID, head, plan.CandidateDigest, changes)
 	if err != nil {
 		return nil, err
 	}
 	// Authority preview runs under old effective state: nothing is activated
 	// yet, so proposed policy cannot authorize its own application. The exact
 	// decision requirements policy demands are sealed into the plan so apply
-	// can verify them verbatim.
-	authority, decisionReqs, err := s.authorityCheck(ctx, unit, scope, "")
+	// can verify them verbatim, and the review each names is ensured now so
+	// an eligible owner can decide it before apply.
+	authority, decisionReqs, err := s.authorityCheck(ctx, unit, scope, plan.CandidateDigest)
 	if err != nil {
 		return nil, err
 	}
-	now := s.clock.Now().UTC()
-	plan := &planRow{
-		ID:              planID,
-		Version:         1,
-		DraftID:         draft.ID,
-		InstallationID:  scope.InstallationID,
-		OrganizationID:  scope.OrganizationID,
-		BaseRevision:    head,
-		CandidateDigest: digest,
-		ChangesJSON:     draft.ChangesJSON,
-		Dependencies:    validation.Dependencies,
-		CompilerVersion: compilerVersion,
-		SchemaVersion:   schemaVersion,
-		AuthorityReqs:   authority,
-		Decisions:       decisionReqs,
-		Diagnostics:     validation.Diagnostics,
-		Requirements:    validation.Requirements,
-		State:           planSealed,
-		CreatedAt:       now,
-		UpdatedAt:       now,
+	if err := s.ensureDecisions(ctx, unit, plan, action, decisionReqs); err != nil {
+		return nil, err
 	}
+	plan.Dependencies = validation.Dependencies
+	plan.AuthorityReqs = authority
+	plan.Decisions = decisionReqs
+	plan.Diagnostics = validation.Diagnostics
+	plan.Requirements = validation.Requirements
 	if err := insertPlan(ctx, unit, plan); err != nil {
 		return nil, err
 	}
@@ -480,9 +497,14 @@ func (s *Service) recheckCandidate(ctx context.Context, unit contract.Unit, scop
 	if err != nil {
 		return faultOf(err)
 	}
-	// The sealed changes must still hash to the sealed digest: the recheck
-	// and the activation that follows run under exactly what was reviewed.
-	digest, err := computeCandidateDigest(changes)
+	// The sealed plan must still rebuild the exact reviewed action: the
+	// recheck and the activation that follows run under exactly what was
+	// reviewed.
+	action, err := planReviewAction(plan, changes)
+	if err != nil {
+		return err
+	}
+	digest, err := reviewActionDigest(action)
 	if err != nil {
 		return err
 	}
@@ -730,9 +752,9 @@ func handleValidate(ctx context.Context, s *Service, unit contract.Unit, inv con
 // validateCandidate runs the owned-slice validation and every peer
 // _<owner>.validate call for the non-owned kinds, merging diagnostics,
 // requirements and dependencies. candidateDigest is the digest of the
-// complete candidate (computeCandidateDigest over every change), not of one
-// owner's slice: each peer receives its slice under the whole-plan digest,
-// the same value activateSlice delivers.
+// complete candidate (reviewActionDigest over the plan's exact apply
+// action), not of one owner's slice: each peer receives its slice under the
+// whole-plan digest, the same value activateSlice delivers.
 func (s *Service) validateCandidate(ctx context.Context, unit contract.Unit, scope wireScope, planID contract.ID, baseRevision int64, candidateDigest string, changes []wireChange) (wireValidation, error) {
 	merged := wireValidation{
 		Diagnostics:  []wireDiagnostic{},

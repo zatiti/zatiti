@@ -306,6 +306,19 @@ func (s *Service) callReviewsCheck(ctx context.Context, unit contract.Unit, scop
 	return body.Eligible, decision, nil
 }
 
+// callReviewsEnsure creates or inspects the exact digest-bound pending
+// review for one action and requirement. The reviews owner records the
+// requirement verbatim and returns a live review unchanged, so repeated
+// gates on the same request converge on one review.
+func (s *Service) callReviewsEnsure(ctx context.Context, unit contract.Unit, scope contract.Scope, action wireAction, requirement wireDecisionRequirement) error {
+	_, err := s.callPeer(ctx, unit, "_reviews.ensure", reviewsEnsureCallInput{
+		Scope:       scope,
+		Action:      action,
+		Requirement: requirement,
+	})
+	return err
+}
+
 // isNotFound reports whether the error is a not_found fault.
 func isNotFound(err error) bool {
 	var f *contract.Fault
@@ -341,31 +354,68 @@ func defaultReviewRequired(capability string) bool {
 	return false
 }
 
-// actionDigest derives the exact review digest for a capability check
-// without a sealed candidate and without an exact action: the SHA-256 of the
-// canonical JSON of the capability and scope.
-func actionDigest(capability string, scope contract.Scope) string {
-	raw, err := json.Marshal(struct {
-		Capability string         `json:"capability"`
-		Scope      contract.Scope `json:"scope"`
-	}{Capability: capability, Scope: scope})
-	if err != nil {
-		// Marshaling two fixed-type fields cannot fail.
-		return ""
+// noObjectRef is the nil UUID at version 1: the frozen Action shape requires
+// tool and connection references, and a capability check names no tool and
+// no connection. The nil UUID is the well-known "no object" value, never a
+// fabricated identity.
+var noObjectRef = wireRef{ID: "00000000-0000-0000-0000-000000000000", Version: 1}
+
+// noCurrency is ISO 4217's code for transactions involving no currency: a
+// capability check has no cost bound of its own.
+const noCurrency = "XXX"
+
+// capabilityAction is the deterministic exact action of a capability check
+// that carries neither a sealed candidate nor an exact action: the
+// capability itself, under the request scope and the configuration
+// revision it was evaluated against. Its reviews digest keys the review an
+// eligible owner decides; the same request evaluated again under the same
+// scope and revision reaches the same review, and a configuration change
+// invalidates it by changing the digest. The timestamps are the zero
+// instant: the action has no time bound of its own, the requirement does.
+func capabilityAction(capability string, scope contract.Scope, revision int64) wireAction {
+	if revision < 1 {
+		revision = 1
 	}
-	return string(contract.Hash(raw))
+	return wireAction{
+		Scope:                 scope,
+		Tool:                  noObjectRef,
+		Connection:            noObjectRef,
+		AccountIdentity:       string(scope.InstallationID),
+		Destination:           capability,
+		Content:               []wireArtifactRef{},
+		NotBefore:             time.Time{}.UTC(),
+		ExpiresAt:             time.Time{}.UTC(),
+		Preconditions:         json.RawMessage(`{}`),
+		ConfigurationRevision: revision,
+		Parameters:            json.RawMessage(`{"capability":` + jsonString(capability) + `}`),
+		CostBound:             wireMoney{Currency: noCurrency, MicroUnit: 0},
+	}
 }
 
-// exactActionDigest derives the exact review digest for one concrete action:
-// the SHA-256 of its canonical struct-ordered JSON. A review created for
-// this digest approves exactly this action.
+// jsonString renders one JSON string literal.
+func jsonString(v string) string {
+	raw, err := json.Marshal(v)
+	if err != nil {
+		return `""`
+	}
+	return string(raw)
+}
+
+// exactActionDigest derives the exact review digest for one concrete action
+// exactly as the reviews owner does: the SHA-256 of the canonical JSON of
+// the action. A review ensured for this digest is the review a later check
+// consults, and it approves exactly this action.
 func exactActionDigest(action wireAction) string {
 	raw, err := json.Marshal(action)
 	if err != nil {
 		// Marshaling a fixed-struct action cannot fail.
 		return ""
 	}
-	return string(contract.Hash(raw))
+	canon, err := contract.Canonicalize(raw)
+	if err != nil {
+		return ""
+	}
+	return string(contract.Hash(canon))
 }
 
 // scopeDims counts the set non-installation scope dimensions; the count is
@@ -409,15 +459,24 @@ func bindingCovers(b peerBinding, req contract.Scope) bool {
 // eligiblePrincipals derives the review-eligible principals from the scope
 // snapshot: the chiefs of every ancestor organization, deduplicated and
 // sorted.
-func eligiblePrincipals(snap scopeSnapshot) []contract.ID {
+func eligiblePrincipals(snap scopeSnapshot, requester peerPrincipal) []contract.ID {
 	seen := map[contract.ID]bool{}
-	out := make([]contract.ID, 0, len(snap.Ancestors))
+	out := make([]contract.ID, 0, len(snap.Ancestors)+1)
 	for _, org := range snap.Ancestors {
 		if org.ChiefID == "" || seen[org.ChiefID] {
 			continue
 		}
 		seen[org.ChiefID] = true
 		out = append(out, org.ChiefID)
+	}
+	// A human whose own authority admitted the request is an eligible
+	// owner of the decision it requires: every review requirement is
+	// human-required, and the reviews owner separately refuses a worker or
+	// agent proposer from deciding its own action. Only a human joins the
+	// eligible class here; a service, worker or agent never makes itself
+	// eligible.
+	if requester.Kind == "human" && requester.ID != "" && !seen[requester.ID] {
+		out = append(out, requester.ID)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
 	return out
@@ -623,40 +682,59 @@ func (s *Service) evaluate(ctx context.Context, unit contract.Unit, scope contra
 	}
 
 	var requirement *wireDecisionRequirement
+	// ensureAction is the exact action whose review this check ensures: a
+	// capability-only request in a review class has no sealed candidate and
+	// no caller action, so the deterministic capability action stands for it.
+	var ensureAction *wireAction
 	if decision == decisionReview {
 		digest := candidateDigest
 		if digest == "" && action != nil {
 			digest = exactActionDigest(*action)
 		}
 		if digest == "" {
-			digest = actionDigest(capability, scope)
+			capAction := capabilityAction(capability, scope, snap.Revision)
+			digest = exactActionDigest(capAction)
+			ensureAction = &capAction
 		}
 		requirement = &wireDecisionRequirement{
 			ActionDigest:       digest,
 			HumanRequired:      true,
-			EligiblePrincipals: eligiblePrincipals(snap),
+			EligiblePrincipals: eligiblePrincipals(snap, authority.Principal),
 			ExpiresAt:          now.Add(reviewRequirementTTL),
 			SeparateProposer:   actor.Kind == "worker" || actor.Kind == "client_agent",
 		}
 	}
 
-	// A sealed candidate digest consults the exact review state: an
-	// approved decision satisfies a review requirement, a rejected one
-	// denies, and a pending or absent review keeps the requirement.
-	if candidateDigest != "" && decision == decisionReview {
-		eligible, state, err := s.callReviewsCheck(ctx, unit, scope, candidateDigest)
+	// A sealed candidate digest or a capability action consults the exact
+	// review state: an approved decision satisfies a review requirement, a
+	// rejected one denies, and a pending or absent review keeps the
+	// requirement.
+	if requirement != nil && (candidateDigest != "" || ensureAction != nil) {
+		eligible, state, err := s.callReviewsCheck(ctx, unit, scope, requirement.ActionDigest)
 		if err != nil {
 			return wirePolicyResult{}, err
 		}
 		switch {
 		case eligible && state == "approve":
 			decision = decisionAllow
-			reasons = []string{fmt.Sprintf("exact review %s is approved", candidateDigest)}
+			reasons = []string{fmt.Sprintf("exact review %s is approved", requirement.ActionDigest)}
 			requirement = nil
 		case eligible && state == "reject":
 			decision = decisionDeny
-			reasons = []string{fmt.Sprintf("exact review %s is rejected", candidateDigest)}
+			reasons = []string{fmt.Sprintf("exact review %s is rejected", requirement.ActionDigest)}
 			requirement = nil
+		}
+	}
+
+	// The requirement stands: ensure the pending review it names exists, so
+	// an eligible owner can decide it through the review flow. Only a
+	// mutation's gate runs under a writable unit; a query's gate reports the
+	// requirement without creating anything. A candidate-bound requirement
+	// is ensured by the owner sealing the candidate, which holds the exact
+	// preview; an explicit exact action is ensured by its own owner.
+	if requirement != nil && ensureAction != nil && !unit.ReadOnly() {
+		if err := s.callReviewsEnsure(ctx, unit, scope, *ensureAction, *requirement); err != nil {
+			return wirePolicyResult{}, err
 		}
 	}
 
