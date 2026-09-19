@@ -1149,6 +1149,41 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   keychain backend's re-Put behaviour was NOT verified and no claim is made
   beyond "not recoverable through the product".
 
+- 2026-09-19 07:50 PT -- acceptance revalidation LANDED (6f2e5ca): admission
+  revalidates the acceptance contract's sealed_inputs and the verifier
+  profile's capability_evidence artifact through the artifacts owner, so a
+  task can no longer be admitted with a verifier profile naming an artifact
+  that does not exist -- in the path that decides whether work counts as
+  done. Lead mutation check: skipping the evidence revalidation made both
+  TestAdmissionRevalidatesAcceptanceArtifacts subcases return completed
+  instead of artifact_fault and invalid_input. Scope finding from the lane's
+  first hook run, correctly resolved: verifier profiles are
+  installation-owned, so their qualification evidence is installation-level;
+  admission resolves it at Scope{installation_id} rather than the task's
+  narrower scope, which the artifacts owner would refuse to match.
+- 2026-09-19 07:55 PT -- THE FINDING THAT IS NOT A DEFECT, and may matter
+  more than any of them. The lead asked the cmd lane, which has driven the
+  product end to end more than once, whether the first-task sequence is
+  something a person could discover from the CLI's own help and errors, or
+  whether it only works because the lane knew the order. Its answer,
+  unprompted and plain: a person could NOT discover it; the founder's first
+  real attempt fails at task.create three or four times and he stops before
+  reaching a draft task. What already helps: every command is in --help,
+  `zatiti capabilities schema` returns each operation's JSON schema, and
+  every refusal is named and specific. What strands him: (1) nothing says a
+  verifier's capability-evidence artifact must be uploaded before the first
+  task, or that it must be at INSTALLATION scope -- the error reads as a bad
+  id; (2) nothing says the unconfigured currency is spelled "XXX" and that
+  only a zero-spend task is admissible until a budget exists; (3) a
+  nine-field definition with a nested verifier profile has no example
+  anywhere in the binary. ROUTED, not filed: a doctor requirement that
+  prints the actual upload sequence when no verifier evidence is published,
+  and a complete runnable example in `task create --help`. Two constraints
+  set by the lead: no refusal may be weakened to make the path easier (the
+  errors are correct, merely unactionable in advance), and every printed
+  example must be executed in a test, because a help example that has rotted
+  is worse than none for someone already struggling.
+
 ## Planned
 
 - Wave 3: controller, desktop, cmd/zatiti, cmd/zatiti-desktop.
