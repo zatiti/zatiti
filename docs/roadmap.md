@@ -1223,6 +1223,26 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   so the anchor was deleted and tidy keeps them. Dropping Fyne also removed
   its transitive testify, go-spew, go-difflib and yaml.v3. Nothing imported
   any of it; the module-wide suite is green without them.
+- 2026-09-19 16:20 PT -- docs/implementation-remediation/ landed on origin/main
+  (96a8f0e, PR #2): a fresh audit against baseline 34d291f found 27 confirmed
+  gaps -- the control plane exists but the durable worker loop that turns an
+  admitted intent into independently verified work does not -- and a P00-P49
+  card plan with wave-gated dependencies and milestones M0-M4. David asked
+  for /loop wrapping /apply --pool at the plan's max parallel sessions.
+  /apply --pool's literal mechanism parses docs/plan.md for `- [ ] T<id>`
+  checkbox lines via the /claim skill; this plan uses P<id> cards in
+  plan.json/assignments/*.md and docs/plan.md does not exist, so a literal
+  invocation finds zero candidates. Driving it instead via the plan's own
+  README dispatch protocol (one isolated worktree per card, one landing
+  owner, R-build-lease for module-wide commands) plus this repo's already-
+  established "Parallel dispatch protocol" ceiling above (8 lanes practical
+  max on this machine). P00-P02 are a serialized gate (contract freeze ->
+  shared types -> dependency reconciliation) before any of the 15 wave-3
+  cards can start; dispatched P00 alone now. The three live wave3/* worktrees
+  (cmd, integration, responses) predate this plan and are NOT remediation
+  cards -- wave3/integration has one commit ahead of main, wave3/responses
+  has uncommitted changes -- they need landing or reconciling before P24/P46/
+  P13 (their eventual owners under the new plan) can be dispatched.
 
 ## Planned
 
