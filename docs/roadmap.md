@@ -1184,6 +1184,46 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   example must be executed in a test, because a help example that has rotted
   is worse than none for someone already struggling.
 
+- 2026-09-19 11:15 PT -- integration slice 3 LANDED (ebb0aa9) and the
+  overnight run's work is complete. THE SKIP LIST IS EMPTY: zero t.Skip and
+  zero skipKnownDefect call sites remain in tests/integration. Every former
+  known-defect branch is now failRegressedDefect, so if any of those defects
+  returns the suite FAILS with the recorded cause instead of quietly
+  skipping. The slice adopts the edge-seams probe as permanent tests: the
+  configuration flow (plan -> review_required naming the candidate digest ->
+  review.list finds the pending review -> decide -> apply under a new key
+  carries the digest -> exact replay -> consumed plan stale under another
+  key) and the grant flow with the client-agent self-grant refusal, plus
+  TestBackupRestoresActualBytes asserting the restore half for real through
+  installation.WithDatabaseBackup.
+  Lead mutation check, and a lesson in how to run one: destroying
+  persistReviewRequest did NOT fail TestOwnerActivatesConfigurationThroughReview,
+  because the configuration flow creates its review at PLAN time via
+  `_reviews.ensure` and never touches the rolled-back capability-gate path.
+  The first mutation was therefore a FALSE PASS, and stopping there would
+  have certified the test on evidence it never provided. Re-run against
+  TestOwnerCreatesGrantThroughReview, which does depend on that path, it
+  failed with "no review bound to digest ... among 0 reviews" -- the exact
+  deadlock that hid behind a skip for a day. When a mutation does not go
+  red, the fence may simply be in the wrong place; assuming the code is
+  unguarded is how weak tests get blessed.
+  Open observations, asserted rather than skipped: principal.list tie order
+  across installations (owner and controller principal share a created_at
+  tick, identity/principal_ops.go:183), handled in parity by same-instance
+  comparison; unknown credential refusals surface as verification_failed 422
+  from identity while the server's own mismatch check is permission_denied
+  403.
+- 2026-09-19 11:20 PT -- supply chain: fyne.io/fyne/v2 REMOVED (fdba444).
+  ADR 002 replaced the native Go desktop with the Flutter client six days
+  earlier, retiring internal/desktop and cmd/zatiti-desktop, but the module
+  still required a GUI toolkit and its cgo windowing stack because a
+  build-tagged root anchor file held it -- a file whose own comment said go
+  mod tidy should replace the mechanism once real imports landed. Cobra, the
+  MCP Go SDK and modernc.org/sqlite are now imported by real package source,
+  so the anchor was deleted and tidy keeps them. Dropping Fyne also removed
+  its transitive testify, go-spew, go-difflib and yaml.v3. Nothing imported
+  any of it; the module-wide suite is green without them.
+
 ## Planned
 
 - Wave 3: controller, desktop, cmd/zatiti, cmd/zatiti-desktop.
