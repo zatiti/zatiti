@@ -163,8 +163,11 @@ func validateResult(r protocolResult, requireState bool) error {
 	if len(r.ResponseID) > maxReferenceChars || len(r.ContinuationReference) > maxReferenceChars {
 		return fmt.Errorf("provider reference exceeds %d bytes", maxReferenceChars)
 	}
-	if len(r.Texts) > maxOutputItems || len(r.ToolCalls) > maxOutputItems {
-		return fmt.Errorf("response carries more than %d outputs of one kind", maxOutputItems)
+	if len(r.Texts) > maxTextOutputs {
+		return fmt.Errorf("response carries more than %d text outputs", maxTextOutputs)
+	}
+	if len(r.ToolCalls) > maxToolCalls {
+		return fmt.Errorf("response carries more than %d tool calls", maxToolCalls)
 	}
 	if r.Usage != nil && (r.Usage.InputTokens < 0 || r.Usage.OutputTokens < 0) {
 		return fmt.Errorf("provider reported negative token usage")

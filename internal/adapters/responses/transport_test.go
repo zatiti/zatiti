@@ -59,8 +59,11 @@ func abandonOnArrival(t *testing.T, s *controlledServer) context.Context {
 	return ctx
 }
 
-func worstCaseOf(ev wireResponsesEvidence) int64 {
-	return ev.StagedOutputs[0].Size*2 + 3500
+// worstCaseOf prices the default action from the recorded request body:
+// one input token per byte at 2 micro-units, 1000 output tokens at 7/2.
+func worstCaseOf(t *testing.T, h *harness, ev wireResponsesEvidence) int64 {
+	t.Helper()
+	return requestRecordOf(t, h, ev).BodySize*2 + 3500
 }
 
 func TestServerObservesExactlyOneRequestOnSuccess(t *testing.T) {
@@ -136,7 +139,7 @@ func TestNoHiddenRetriesAgainstAFaultingServer(t *testing.T) {
 				t.Fatalf("physical call = %+v", ev.PhysicalCall)
 			}
 			u := ev.Output.Usage
-			if u.Billing != "unknown" || u.Accounting.Unknown != worstCaseOf(ev) || u.Accounting.Unknown == 0 {
+			if u.Billing != "unknown" || u.Accounting.Unknown != worstCaseOf(t, h, ev) || u.Accounting.Unknown == 0 {
 				t.Fatalf("reservation not kept: %+v", u)
 			}
 			assertNoSecret(t, h, obs, nil)

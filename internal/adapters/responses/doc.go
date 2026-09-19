@@ -22,6 +22,13 @@
 // and is exercised in this package's tests through a synthetic protocol that
 // makes no claim about any vendor's API.
 //
+// Before anything is sent, the exact secret-free request record (method,
+// destination, permitted headers, body as sent) is staged and named by
+// request_context as a staged ArtifactLocator; if it cannot be staged,
+// nothing is sent. The action's context_artifact is not passed through as
+// the request record, because the translated request adds the profile's
+// model identifier beyond the persisted context.
+//
 // One Invoke is at most one physical HTTP request: redirects are never
 // followed, the request body cannot be rewound (so net/http cannot replay
 // it), and there is no retry, preflight or polling. Model tool proposals

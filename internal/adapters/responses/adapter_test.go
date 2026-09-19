@@ -2,6 +2,7 @@ package responses
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -115,9 +116,6 @@ func TestInvokeSendsExactlyOneExactRequest(t *testing.T) {
 	if pc.ProfileDigest != h.adapter.profile.Digest || pc.CapabilityEvidence != testCapabilityArtifact() {
 		t.Fatalf("profile binding = %s / %+v", pc.ProfileDigest, pc.CapabilityEvidence)
 	}
-	if pc.RequestContext != h.action.ContextArtifact || ev.Output.RequestContext != h.action.ContextArtifact {
-		t.Fatalf("request_context = %+v / %+v, want the action's context artifact", pc.RequestContext, ev.Output.RequestContext)
-	}
 	if pc.RequestSent != "yes" || pc.Confirmation != "authoritative_success" || pc.HTTPStatus != 200 || pc.ErrorCode != "" {
 		t.Fatalf("physical call = %+v", pc)
 	}
@@ -125,10 +123,25 @@ func TestInvokeSendsExactlyOneExactRequest(t *testing.T) {
 		t.Fatalf("finished %s is not after started %s", pc.FinishedAt, pc.StartedAt)
 	}
 
-	// The literal upstream request is staged before dispatch.
+	// The exact secret-free request record is staged before dispatch and
+	// named by request_context (decodeEvidence checks the locator pairing).
 	first := ev.StagedOutputs[0]
-	if first.Purpose != "context" || first.Classification != "internal" || string(h.blobs.stagedBytes(t, first.StagingRef)) != string(h.transport.bodies[0]) {
-		t.Fatalf("staged request = %+v", first)
+	if first.StagingRef != pc.RequestContext.StagingRef || first.Classification != "internal" || first.MediaType != "application/json" {
+		t.Fatalf("staged request context = %+v", first)
+	}
+	record := requestRecordOf(t, h, ev)
+	if record.Schema != requestRecordSchema || record.Method != http.MethodPost || record.Destination != testEndpoint {
+		t.Fatalf("request record = %+v", record)
+	}
+	if len(record.Headers) != 1 || record.Headers[0].Name != "Content-Type" || record.Headers[0].Values[0] != "application/json" {
+		t.Fatalf("request record headers = %+v; only the permitted, secret-free headers belong", record.Headers)
+	}
+	body, err := base64.StdEncoding.DecodeString(record.BodyBase64)
+	if err != nil || string(body) != string(h.transport.bodies[0]) {
+		t.Fatalf("request record body is not the body as sent (%v)", err)
+	}
+	if record.BodySize != int64(len(body)) || record.BodyDigest != contract.Hash(body) {
+		t.Fatalf("request record body size/digest = %d / %s", record.BodySize, record.BodyDigest)
 	}
 	assertNoSecret(t, h, obs, nil)
 }
@@ -356,7 +369,7 @@ func TestReceivedButUnclassifiableResponsesStayUnknown(t *testing.T) {
 		{"unknown finish reason", nil, 200, `{"ref":"r","state":"completed","finish":"vibes"}`, "response_undecodable"},
 		{"negative usage", nil, 200, `{"ref":"r","state":"completed","finish":"completed","tokens":{"in":-1,"out":1}}`, "response_undecodable"},
 		{"oversized reference", nil, 200, `{"ref":"` + strings.Repeat("r", 1025) + `","state":"completed","finish":"completed"}`, "response_undecodable"},
-		{"more text outputs than evidence can carry", nil, 200, `{"ref":"r","state":"completed","finish":"completed","texts":[` + strings.Repeat(`"t",`, 256) + `"t"]}`, "response_undecodable"},
+		{"more text outputs than evidence can carry", nil, 200, `{"ref":"r","state":"completed","finish":"completed","texts":[` + strings.Repeat(`"t",`, 254) + `"t"]}`, "response_undecodable"},
 		{"body beyond max_response_bytes", []harnessOption{small}, 200, completedBody, "max_response_bytes_exceeded"},
 		{"server error cannot rule out execution", nil, 503, `{"error":{"code":"overloaded","message":"try later"}}`, "http_503"},
 		{"gateway timeout cannot rule out execution", nil, 504, `upstream timed out`, "http_504"},
@@ -699,6 +712,40 @@ func TestSecretIsScrubbedFromEveryDiagnostic(t *testing.T) {
 }
 
 // ---------- staging ----------
+
+// The request record must be secret-free. A context that itself quotes the
+// credential would put it in the body, so nothing is staged and nothing is
+// sent.
+func TestRequestRecordContainingTheCredentialIsRefused(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t, respond(200, completedBody), withContext(func(c *wireContextArtifact) {
+		c.Messages[1].Parts = []json.RawMessage{textPart(t, "my key is "+testToken)}
+	}))
+	obs, err := h.adapter.Invoke(context.Background(), h.dispatch)
+	f := mustFault(t, err, contract.CodeInternalError)
+	if !strings.Contains(f.Message, "nothing was staged or sent") {
+		t.Fatalf("message = %q", f.Message)
+	}
+	if h.transport.count() != 0 || h.blobs.stageCount() != 0 {
+		t.Fatalf("calls = %d, stages = %d", h.transport.count(), h.blobs.stageCount())
+	}
+	assertNoSecret(t, h, obs, err)
+}
+
+// 254 text outputs plus the request context and the provider response fill
+// staged_outputs to its 256-item bound exactly.
+func TestMaximumTextOutputsStillFitTheEvidenceSchema(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t, respond(200, `{"ref":"r","state":"completed","finish":"completed","texts":[`+strings.Repeat(`"t",`, 253)+`"t"]}`))
+	obs, err := h.adapter.Invoke(context.Background(), h.dispatch)
+	if err != nil {
+		t.Fatalf("Invoke: %v", err)
+	}
+	ev := decodeEvidence(t, obs)
+	if obs.Disposition != contract.DispositionSucceeded || len(ev.StagedOutputs) != 256 || len(ev.Output.TextOutputs) != 254 {
+		t.Fatalf("disposition %q, staged %d, texts %d", obs.Disposition, len(ev.StagedOutputs), len(ev.Output.TextOutputs))
+	}
+}
 
 func TestRequestStagingFailureMakesNoCall(t *testing.T) {
 	t.Parallel()

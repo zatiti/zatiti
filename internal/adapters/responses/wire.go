@@ -196,22 +196,22 @@ type wireContextArtifact struct {
 // ---------- evidence (Observation.Evidence) body ----------
 
 type wirePhysicalCallEvidence struct {
-	OperationID          contract.ID     `json:"operation_id"`
-	AttemptID            contract.ID     `json:"attempt_id"`
-	AccountIdentity      string          `json:"account_identity"`
-	RequestedDestination string          `json:"requested_destination"`
-	ResolvedDestination  string          `json:"resolved_destination"`
-	ProfileDigest        contract.Digest `json:"profile_digest"`
-	CapabilityEvidence   wireArtifactRef `json:"capability_evidence"`
-	StartedAt            time.Time       `json:"started_at"`
-	FinishedAt           time.Time       `json:"finished_at"`
-	RequestContext       wireArtifactRef `json:"request_context"`
-	RequestSent          string          `json:"request_sent"`
-	Confirmation         string          `json:"confirmation"`
-	HTTPStatus           int64           `json:"http_status,omitempty"`
-	ProviderReference    string          `json:"provider_reference,omitempty"`
-	ErrorCode            string          `json:"error_code,omitempty"`
-	ErrorMessage         string          `json:"error_message,omitempty"`
+	OperationID          contract.ID       `json:"operation_id"`
+	AttemptID            contract.ID       `json:"attempt_id"`
+	AccountIdentity      string            `json:"account_identity"`
+	RequestedDestination string            `json:"requested_destination"`
+	ResolvedDestination  string            `json:"resolved_destination"`
+	ProfileDigest        contract.Digest   `json:"profile_digest"`
+	CapabilityEvidence   wireArtifactRef   `json:"capability_evidence"`
+	StartedAt            time.Time         `json:"started_at"`
+	FinishedAt           time.Time         `json:"finished_at"`
+	RequestContext       wireStagedLocator `json:"request_context"`
+	RequestSent          string            `json:"request_sent"`
+	Confirmation         string            `json:"confirmation"`
+	HTTPStatus           int64             `json:"http_status,omitempty"`
+	ProviderReference    string            `json:"provider_reference,omitempty"`
+	ErrorCode            string            `json:"error_code,omitempty"`
+	ErrorMessage         string            `json:"error_message,omitempty"`
 }
 
 type wireUsage struct {
@@ -243,7 +243,8 @@ type wireStagedOutput struct {
 }
 
 // wireStagedLocator is the "staged" variant of ArtifactLocator, the only
-// variant an adapter can produce: it cannot mint artifact IDs.
+// variant this adapter returns: it cannot mint artifact IDs, and the
+// controller substitutes the artifact variant after publication.
 type wireStagedLocator struct {
 	Kind       string          `json:"kind"`
 	StagingRef string          `json:"staging_ref"`
@@ -253,7 +254,7 @@ type wireStagedLocator struct {
 type wireModelOutput struct {
 	Schema                string                  `json:"schema"`
 	ResponseID            string                  `json:"response_id"`
-	RequestContext        wireArtifactRef         `json:"request_context"`
+	RequestContext        wireStagedLocator       `json:"request_context"`
 	FinishReason          string                  `json:"finish_reason"`
 	TextOutputs           []wireStagedLocator     `json:"text_outputs"`
 	ToolProposals         []wireModelToolProposal `json:"tool_proposals"`

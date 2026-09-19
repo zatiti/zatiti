@@ -619,6 +619,25 @@ func decodeEvidence(t *testing.T, obs contract.Observation) wireResponsesEvidenc
 	if err := contract.DecodeStrict(obs.Evidence, &ev); err != nil {
 		t.Fatalf("decode evidence: %v", err)
 	}
+	// Revision 2: request_context is a staged locator, identical on the
+	// physical call and the model output, matching exactly one StagedOutput
+	// of purpose context -- for every disposition.
+	rc := ev.PhysicalCall.RequestContext
+	if rc.Kind != "staged" || rc != ev.Output.RequestContext {
+		t.Fatalf("request_context = %+v / %+v, want one identical staged locator", rc, ev.Output.RequestContext)
+	}
+	matches, contexts := 0, 0
+	for _, s := range ev.StagedOutputs {
+		if s.Purpose == "context" {
+			contexts++
+		}
+		if s.StagingRef == rc.StagingRef && s.Digest == rc.Digest && s.Purpose == "context" {
+			matches++
+		}
+	}
+	if matches != 1 || contexts != 1 {
+		t.Fatalf("request_context matches %d of %d context staged outputs, want exactly 1 of 1", matches, contexts)
+	}
 	want, err := json.Marshal(ev.Output.Usage)
 	if err != nil {
 		t.Fatalf("marshal usage: %v", err)
@@ -627,6 +646,16 @@ func decodeEvidence(t *testing.T, obs contract.Observation) wireResponsesEvidenc
 		t.Fatalf("Observation.Usage = %s, want the evidence usage %s", obs.Usage, want)
 	}
 	return ev
+}
+
+// requestRecordOf decodes the staged request record an observation names.
+func requestRecordOf(t *testing.T, h *harness, ev wireResponsesEvidence) requestRecord {
+	t.Helper()
+	var record requestRecord
+	if err := contract.DecodeStrict(h.blobs.stagedBytes(t, ev.PhysicalCall.RequestContext.StagingRef), &record); err != nil {
+		t.Fatalf("decode request record: %v", err)
+	}
+	return record
 }
 
 // assertNoSecret fails if the credential appears anywhere an observation or

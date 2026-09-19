@@ -3,7 +3,10 @@ package responses
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
+	"slices"
+	"strings"
 
 	"github.com/zatiti/zatiti/internal/contract"
 )
@@ -23,20 +26,78 @@ const (
 	maxRefusalChars   = 8192
 	maxMessageChars   = 2048
 	maxErrorCodeChars = 128
-	maxOutputItems    = 256
-	textMediaType     = "text/plain; charset=utf-8"
+	maxToolCalls      = 256
+	// maxTextOutputs keeps staged_outputs within its 256-item bound: every
+	// observation also stages the request context and the raw provider
+	// response.
+	maxTextOutputs = 254
+	textMediaType  = "text/plain; charset=utf-8"
 )
 
-// requestContextRef returns the ArtifactRef both PhysicalCallEvidence and
-// ModelOutput carry as request_context. Unlike a sibling adapter that
-// builds its request from scalar action fields, this adapter is handed a
-// real one: the action's context_artifact is the pre-dispatch persisted
-// model-visible request context, which is exactly what request_context
-// "identifies". The adapter additionally stages the literal upstream
-// request body as a StagedOutput of purpose "context", because it cannot
-// mint an artifact ID for those bytes itself.
-func requestContextRef(act *wireResponsesParameters) wireArtifactRef {
-	return act.ContextArtifact
+// requestRecordSchema names the request record document below.
+const requestRecordSchema = "zatiti.adapter.request-record/v1"
+
+// requestRecordHeader is one permitted request header, in sorted order.
+type requestRecordHeader struct {
+	Name   string   `json:"name"`
+	Values []string `json:"values"`
+}
+
+// requestRecord is the exact secret-free record of the one physical request
+// an attempt makes: method, destination, the permitted headers and the body
+// as sent. The credential the wire protocol adds at send time is never part
+// of it. The body is base64 so the record is exact for any upstream
+// encoding; the model identifier and output ceiling the translation adds
+// beyond the persisted context are inside that body.
+type requestRecord struct {
+	Schema      string                `json:"schema"`
+	Method      string                `json:"method"`
+	Destination string                `json:"destination"`
+	Headers     []requestRecordHeader `json:"headers"`
+	BodyDigest  contract.Digest       `json:"body_digest"`
+	BodySize    int64                 `json:"body_size"`
+	BodyBase64  string                `json:"body_base64"`
+}
+
+// stageRequestContext stages the request record before any byte is sent
+// and returns the StagedOutput (purpose context) plus the staged
+// ArtifactLocator that names it as request_context.
+//
+// The action's context_artifact is NOT passed through as kind artifact:
+// that is allowed only when the translated provider request adds nothing
+// model-visible beyond the persisted Action, and this translation adds the
+// profile's model identifier and is shaped by a wire protocol, so the
+// context artifact alone is not the complete request record.
+//
+// A record that contains the credential is refused rather than staged: the
+// wire protocol contract makes encode secret-free, and this is the check
+// that holds it to that.
+func stageRequestContext(ctx context.Context, blobs contract.BlobStore, secret []byte, destination string, call protocolCall, classification string) (wireStagedOutput, wireStagedLocator, error) {
+	record := requestRecord{
+		Schema:      requestRecordSchema,
+		Method:      call.Method,
+		Destination: destination,
+		Headers:     make([]requestRecordHeader, 0, len(call.Header)),
+		BodyDigest:  contract.Hash(call.Body),
+		BodySize:    int64(len(call.Body)),
+		BodyBase64:  base64.StdEncoding.EncodeToString(call.Body),
+	}
+	for name, values := range call.Header {
+		record.Headers = append(record.Headers, requestRecordHeader{Name: name, Values: values})
+	}
+	slices.SortFunc(record.Headers, func(a, b requestRecordHeader) int { return strings.Compare(a.Name, b.Name) })
+	doc, err := json.Marshal(record)
+	if err != nil {
+		return wireStagedOutput{}, wireStagedLocator{}, internalError("encoding the request record failed")
+	}
+	if len(secret) > 0 && (bytes.Contains(doc, secret) || bytes.Contains(call.Body, secret)) {
+		return wireStagedOutput{}, wireStagedLocator{}, internalError("the wire protocol placed credential material in the request record; nothing was staged or sent")
+	}
+	staged, err := stageBytes(ctx, blobs, doc, "application/json", classification, "context")
+	if err != nil {
+		return wireStagedOutput{}, wireStagedLocator{}, err
+	}
+	return staged, wireStagedLocator{Kind: "staged", StagingRef: staged.StagingRef, Digest: staged.Digest}, nil
 }
 
 // stageBytes stages data and describes it as a StagedOutput.

@@ -210,9 +210,9 @@ func (a *Adapter) Invoke(ctx context.Context, dispatch contract.Dispatch) (contr
 		return contract.Observation{}, invalidInput("dispatch deadline has already passed; no call was made")
 	}
 
-	// Persist the literal model-visible upstream request before dispatch.
-	// The body is secret-free by the wireProtocol contract.
-	stagedRequest, err := stageBytes(ctx, a.deps.Blobs, call.Body, "application/octet-stream", doc.Classification, "context")
+	// Persist the exact secret-free request record before dispatch. If it
+	// cannot be staged, nothing is sent.
+	stagedRequest, requestContext, err := stageRequestContext(ctx, a.deps.Blobs, secret, a.profile.Endpoint, call, doc.Classification)
 	if err != nil {
 		return contract.Observation{}, err
 	}
@@ -250,11 +250,11 @@ func (a *Adapter) Invoke(ctx context.Context, dispatch contract.Dispatch) (contr
 		ProfileDigest:        a.profile.Digest,
 		CapabilityEvidence:   a.profile.CapabilityEvidence.Artifact,
 		StartedAt:            started,
-		RequestContext:       requestContextRef(act),
+		RequestContext:       requestContext,
 	}
 	output := wireModelOutput{
 		Schema:         "zatiti.model-output/v1",
-		RequestContext: requestContextRef(act),
+		RequestContext: requestContext,
 		FinishReason:   finishUnknown,
 	}
 
