@@ -504,5 +504,23 @@ void main() {
       expect(_key('credential-field'), findsNothing);
       expect(find.text('Match system'), findsOneWidget);
     });
+
+    testWidgets('it lists the identities the controller authenticates', (
+      t,
+    ) async {
+      final h = await _pump(t);
+      await t.tap(_key('open-settings'));
+      await t.pumpAndSettle();
+      expect(_key('principal-list'), findsOneWidget);
+      for (final p in h.controller.snapshot.principals) {
+        expect(find.text(p.name), findsOneWidget, reason: p.name);
+      }
+      expect(find.text('Controller service'), findsOneWidget);
+      expect(
+        find.textContaining('this app only shows them'),
+        findsOneWidget,
+        reason: 'identity administration is not a desktop surface',
+      );
+    });
   });
 }

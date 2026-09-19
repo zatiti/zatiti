@@ -152,6 +152,47 @@ class InstallationStatus {
   final int version;
 }
 
+/// An identity the controller authenticates. The client never creates one in
+/// the ordinary product flow; it reads principals so a person can see who
+/// holds authority in their installation, and the live proof drives
+/// `principal.create` to exercise submission-key replay end to end.
+class Principal {
+  const Principal({
+    required this.id,
+    required this.version,
+    required this.kind,
+    required this.name,
+    required this.scope,
+    required this.revoked,
+  });
+
+  factory Principal.fromJson(Object? json) {
+    final o = StrictObject(json, 'principal');
+    final p = Principal(
+      id: o.string('id'),
+      version: o.integer('version'),
+      kind: o.string('kind'),
+      name: o.string('name'),
+      scope: Scope.fromJson(o.object('scope')),
+      revoked: o.boolean('revoked'),
+    );
+    o.finish();
+    return p;
+  }
+
+  final String id;
+  final int version;
+
+  /// `human`, `client_agent`, `worker` or `service`, exactly as the
+  /// controller reports it. The client shows the wire value rather than
+  /// guessing a label for a kind it does not know.
+  final String kind;
+
+  final String name;
+  final Scope scope;
+  final bool revoked;
+}
+
 class Organization {
   const Organization({
     required this.id,

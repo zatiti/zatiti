@@ -555,6 +555,26 @@ class DemoWorkspaceSource implements WorkspaceSource {
           reviewId: pending ? pullRequestReview : null,
         ),
       ],
+      principals: const [
+        PrincipalEntry(
+          id: 'demo-principal-owner',
+          name: 'You',
+          kind: 'human',
+          revoked: false,
+        ),
+        PrincipalEntry(
+          id: 'demo-principal-controller',
+          name: 'controller',
+          kind: 'service',
+          revoked: false,
+        ),
+        PrincipalEntry(
+          id: 'demo-principal-desktop',
+          name: 'This desktop client',
+          kind: 'client_agent',
+          revoked: false,
+        ),
+      ],
       spending: const [
         SpendingEntry(
           workerId: quality,

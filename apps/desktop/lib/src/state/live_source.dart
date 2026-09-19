@@ -115,16 +115,18 @@ class LiveWorkspaceSource implements WorkspaceSource {
 
   @override
   PendingSubmission prepareMessage(ConversationId conversation, String body) {
-    final submission = api.prepareMessageSend(
+    final prepared = api.prepareMessageSend(
       conversationId: conversation.value,
       body: body,
     );
     return _LiveSubmission(
-      submission,
+      prepared.submission,
       onAcknowledged: () {
         (_sentThisSession[conversation.value] ??= []).add(
           ChatMessage(
-            id: submission.key,
+            // The controller keeps this id, so a copy of this message that
+            // arrives through the mailbox is recognized and not shown twice.
+            id: prepared.messageId,
             fromUser: true,
             senderName: 'You',
             body: body,
@@ -278,18 +280,33 @@ class LiveWorkspaceSource implements WorkspaceSource {
       wire.Artifact.fromJson,
     );
     final grants = await api.listAll(Operations.grantList, wire.Grant.fromJson);
-    final received = principalId == null
-        ? const <wire.Message>[]
-        : await api.listAll(
-            Operations.mailboxList,
-            wire.Message.fromJson,
-            extra: {'recipient_id': principalId},
-          );
+    final principals = await api.listAll(
+      Operations.principalList,
+      wire.Principal.fromJson,
+    );
+    // The inbox is one surface of the workspace, not the workspace. The
+    // controller keeps a mailbox private to its own recipient, so a
+    // misconfigured principal is refused here; that must cost the person
+    // their inbox, not their conversations, decisions and work.
+    var received = const <wire.Message>[];
+    String? inboxRefusal;
+    if (principalId != null) {
+      try {
+        received = await api.listAll(
+          Operations.mailboxList,
+          wire.Message.fromJson,
+          extra: {'recipient_id': principalId},
+        );
+      } on OperationFailedException catch (e) {
+        inboxRefusal = e.fault.message;
+      }
+    }
     await _baselineEvents();
 
     final workerEntries = _tree(organizations, workers, conversations);
     final workerIds = {for (final w in workerEntries) w.id.value};
     final names = {for (final w in workers) w.id: w.name};
+    final principalNames = {for (final p in principals) p.id: p.name};
 
     final reviewEntries = <ReviewEntry>[];
     for (final r in reviews) {
@@ -324,7 +341,7 @@ class LiveWorkspaceSource implements WorkspaceSource {
       workers: workerEntries,
       conversations: [
         for (final c in conversations)
-          _conversation(c, workerIds, received, names),
+          _conversation(c, workerIds, received, names, inboxRefusal),
       ],
       reviews: reviewEntries,
       tasks: [
@@ -366,13 +383,20 @@ class LiveWorkspaceSource implements WorkspaceSource {
               id: g.id,
               workerId: WorkerId(g.scope.workerId!),
               title: g.capabilities.join(', '),
-              detail: g.destinations.isEmpty
-                  ? 'No external destinations.'
-                  : 'Destinations: ${g.destinations.join(', ')}',
+              detail: _accessDetail(g, principalNames),
               allowed: !g.denied,
             ),
       ],
       spending: spending,
+      principals: [
+        for (final p in principals)
+          PrincipalEntry(
+            id: p.id,
+            name: p.name,
+            kind: p.kind,
+            revoked: p.revoked,
+          ),
+      ]..sort((a, b) => a.name.compareTo(b.name)),
       prerequisites: [
         if (!status.initialized)
           const PrerequisiteNotice(
@@ -394,6 +418,15 @@ class LiveWorkspaceSource implements WorkspaceSource {
           ),
         for (final r in status.requirements)
           PrerequisiteNotice(title: r.code, message: r.message),
+        if (inboxRefusal != null)
+          PrerequisiteNotice(
+            title: 'Your inbox could not be read',
+            message:
+                '$inboxRefusal A mailbox is private to its own recipient, so '
+                'the principal this app is configured with must be your own. '
+                'Conversations, decisions and work are unaffected.',
+            setupPath: 'ZATITI_PRINCIPAL_ID',
+          ),
         const PrerequisiteNotice(
           tab: DetailsTab.memory,
           title: 'Memory cannot be listed yet',
@@ -407,6 +440,19 @@ class LiveWorkspaceSource implements WorkspaceSource {
   });
 
   String _short(String id) => id.length <= 8 ? id : id.substring(0, 8);
+
+  /// What an access card says beneath its capability list. A grant is held by
+  /// a principal, not by the worker whose scope it sits in, so the card names
+  /// that identity. An identity `principal.list` did not return is said to be
+  /// unlisted; it is never guessed at or silently attributed to the worker.
+  String _accessDetail(wire.Grant grant, Map<String, String> principalNames) {
+    final holder =
+        principalNames[grant.principalId] ?? 'an identity that is not listed';
+    final destinations = grant.destinations.isEmpty
+        ? 'No external destinations.'
+        : 'Destinations: ${grant.destinations.join(', ')}';
+    return 'Held by $holder. $destinations';
+  }
 
   /// Builds the organization conversation tree in stable key order: each
   /// organization's chief, then the chiefs of its child organizations and its
@@ -512,6 +558,7 @@ class LiveWorkspaceSource implements WorkspaceSource {
     Set<String> workerIds,
     List<wire.Message> received,
     Map<String, String> names,
+    String? inboxRefusal,
   ) {
     String? workerId;
     if (c.kind == wire.ConversationKind.direct) {
@@ -524,9 +571,14 @@ class LiveWorkspaceSource implements WorkspaceSource {
         }
       }
     }
+    final sent = _sentThisSession[c.id] ?? const <ChatMessage>[];
+    final sentIds = {for (final m in sent) m.id};
     final messages = <ChatMessage>[
       for (final m in received)
-        if (m.conversationId == c.id)
+        // A message this window sent is already listed below under the id it
+        // minted. The controller keeps that id, so a copy delivered back
+        // through the mailbox is the same message, not a second one.
+        if (m.conversationId == c.id && !sentIds.contains(m.id))
           ChatMessage(
             id: m.id,
             fromUser: false,
@@ -534,7 +586,7 @@ class LiveWorkspaceSource implements WorkspaceSource {
             body: m.body,
             at: m.createdAt,
           ),
-      ...?_sentThisSession[c.id],
+      ...sent,
     ]..sort((a, b) => a.at.compareTo(b.at));
     return ConversationEntry(
       id: ConversationId(c.id),
@@ -544,16 +596,24 @@ class LiveWorkspaceSource implements WorkspaceSource {
           : ConversationKind.direct,
       workerId: workerId == null ? null : WorkerId(workerId),
       messages: messages,
-      historyNotice: principalId == null
-          ? 'Earlier messages cannot be shown. The controller offers no '
-                'operation that reads a conversation’s history, and no '
-                'principal is configured for reading your inbox. Messages you '
-                'send from this window appear once the controller '
-                'acknowledges them.'
-          : 'Showing messages delivered to you and messages sent from this '
-                'window. The controller offers no operation that reads a '
-                'conversation’s full history, so your earlier messages are '
-                'not listed.',
+      historyNotice: switch ((principalId, inboxRefusal)) {
+        (null, _) =>
+          'Earlier messages cannot be shown. The controller offers no '
+              'operation that reads a conversation’s history, and no '
+              'principal is configured for reading your inbox. Messages you '
+              'send from this window appear once the controller acknowledges '
+              'them.',
+        (_, final String refusal) =>
+          'Your inbox could not be read, so messages delivered to you are '
+              'not listed: $refusal A mailbox is private to its own '
+              'recipient, so the configured principal must be your own. '
+              'Everything else on this screen is current.',
+        _ =>
+          'Showing messages delivered to you and messages sent from this '
+              'window. The controller offers no operation that reads a '
+              'conversation’s full history, so your earlier messages are not '
+              'listed.',
+      },
     );
   }
 

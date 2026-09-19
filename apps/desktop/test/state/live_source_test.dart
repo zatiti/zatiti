@@ -51,6 +51,20 @@ Map<String, Object?> _worker(String id, String org, String key, String name) =>
       'limits': null,
     };
 
+Map<String, Object?> _principal(
+  String id,
+  String kind,
+  String name, {
+  bool revoked = false,
+}) => {
+  'id': id,
+  'version': 1,
+  'kind': kind,
+  'name': name,
+  'scope': _scope(),
+  'revoked': revoked,
+};
+
 Map<String, Object?> _reviewJson({int version = 3, String state = 'pending'}) =>
     {
       'id': _reviewId,
@@ -92,6 +106,13 @@ class _World {
   String artifactDigest = _contentDigest;
   Reply? decideReply;
   bool decideCommitted = false;
+
+  /// What `mailbox.list` answers. Null means an empty inbox.
+  Reply? mailboxReply;
+
+  /// Messages the fake has accepted through `conversation.message.send`,
+  /// by the `message_id` the client minted.
+  final List<Map<String, Object?>> sentMessages = [];
 
   Reply handle(RecordedRequest r) {
     final op = r.path.substring('/v1/operations/'.length);
@@ -164,6 +185,58 @@ class _World {
             'pinned': true,
           },
         ]);
+      case 'principal.list':
+        return items([
+          _principal(_id(900), 'human', 'You'),
+          _principal(_id(901), 'service', 'controller'),
+          _principal(
+            _id(902),
+            'client_agent',
+            'Retired importer',
+            revoked: true,
+          ),
+        ]);
+      case 'grant.list':
+        return items([
+          {
+            'id': _id(950),
+            'version': 1,
+            'principal_id': _id(902),
+            'scope': _scope(_reviewer),
+            'capabilities': ['pull_request.create'],
+            'destinations': ['github.com/example/website'],
+            'denied': false,
+          },
+          {
+            'id': _id(951),
+            'version': 1,
+            'principal_id': _id(999),
+            'scope': _scope(_reviewer),
+            'capabilities': ['repository.read'],
+            'destinations': <Object?>[],
+            'denied': false,
+          },
+        ]);
+      case 'conversation.message.send':
+        // The controller keeps the client's message_id and returns it as the
+        // message's own id; the live proof observes exactly this.
+        final message = {
+          'id': r.input['message_id'],
+          'version': 1,
+          'sender_id': _id(900),
+          'recipient_ids': [_chief],
+          'scope': _scope(),
+          'task_ids': <Object?>[],
+          'body': r.input['body'],
+          'attachments': <Object?>[],
+          'state': 'admitted',
+          'created_at': '2026-09-18T12:00:00Z',
+          'conversation_id': r.input['conversation_id'],
+        };
+        sentMessages.add(message);
+        return completed(jsonEncode({'resource': message}));
+      case 'mailbox.list':
+        return mailboxReply ?? items([]);
       case 'review.list':
         return items([_reviewJson(version: reviewVersion, state: reviewState)]);
       case 'review.get':
@@ -399,6 +472,94 @@ void main() {
       expect(fake.requestsFor('review.decide'), isEmpty);
     },
   );
+
+  test('the snapshot carries the controller’s identities', () {
+    expect(fake.requestsFor('principal.list'), isNotEmpty);
+    final principals = c.snapshot.principals;
+    expect(
+      principals.map((p) => p.name),
+      ['Retired importer', 'You', 'controller'],
+      reason: 'identities are listed in stable name order',
+    );
+    expect(principals.map((p) => p.kindLabel), [
+      'Client application',
+      'Person',
+      'Controller service',
+    ]);
+    expect(principals.singleWhere((p) => p.revoked).name, 'Retired importer');
+  });
+
+  test('an access card names the identity that holds the grant', () {
+    final access = c.accessFor(WorkerId(_reviewer));
+    expect(
+      access.firstWhere((a) => a.title == 'pull_request.create').detail,
+      'Held by Retired importer. Destinations: github.com/example/website',
+    );
+    expect(
+      access.firstWhere((a) => a.title == 'repository.read').detail,
+      'Held by an identity that is not listed. No external destinations.',
+      reason: 'an unlisted principal is said to be unlisted, never invented',
+    );
+  });
+
+  group('the inbox', () {
+    /// A source that reads an inbox, built on the same fake controller.
+    LiveWorkspaceSource inboxSource() => LiveWorkspaceSource(
+      ControllerClient(
+        endpoint: LocalSocketEndpoint(fake.socketPath),
+        installationId: testInstallationId,
+        credentials: () async => 'Bearer test-fixture-credential',
+        timeout: const Duration(seconds: 5),
+      ),
+      principalId: _id(900),
+      clock: () => now,
+    );
+
+    test('a refused inbox costs the inbox, not the workspace', () async {
+      world.mailboxReply = fault(
+        403,
+        'permission_denied',
+        'mailbox listing is private to the recipient',
+      );
+      final snapshot = await inboxSource().loadSnapshot();
+
+      expect(
+        snapshot.workers,
+        isNotEmpty,
+        reason: 'the rest of the workspace still loads',
+      );
+      expect(snapshot.reviews, isNotEmpty);
+      expect(
+        snapshot.prerequisites.map((p) => p.title),
+        contains('Your inbox could not be read'),
+      );
+      expect(
+        snapshot.conversations.single.historyNotice,
+        contains('private to its own recipient'),
+      );
+    });
+
+    test('a message this window sent is never shown twice', () async {
+      final source = inboxSource();
+      await source.loadSnapshot();
+
+      final pending = source.prepareMessage(
+        ConversationId(_conversation),
+        'Create a marketing chief.',
+      );
+      await source.submit(pending);
+
+      // The controller now delivers that same message back through the
+      // mailbox, under the id the client minted.
+      world.mailboxReply = completed(jsonEncode({'items': world.sentMessages}));
+      final after = await source.loadSnapshot();
+
+      expect(after.conversations.single.messages.map((m) => m.body), [
+        'Create a marketing chief.',
+      ]);
+      expect(after.conversations.single.messages.single.fromUser, isTrue);
+    });
+  });
 
   test('a fixture with a field the client does not know is refused', () async {
     fake.script = (r) => r.path.endsWith('installation.status')

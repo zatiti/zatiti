@@ -294,6 +294,36 @@ class AccessEntry {
   final ReviewId? reviewId;
 }
 
+/// One identity the controller authenticates: the person using this client,
+/// the controller's own service identity, each worker, and any other client
+/// application that holds a credential. Installation-wide, not per worker.
+class PrincipalEntry {
+  const PrincipalEntry({
+    required this.id,
+    required this.name,
+    required this.kind,
+    required this.revoked,
+  });
+
+  final String id;
+  final String name;
+
+  /// The controller's own word for what this identity is.
+  final String kind;
+
+  final bool revoked;
+
+  /// A readable name for [kind], or the wire value itself when this build
+  /// does not know the kind. A label is never guessed.
+  String get kindLabel => switch (kind) {
+    'human' => 'Person',
+    'client_agent' => 'Client application',
+    'worker' => 'Worker',
+    'service' => 'Controller service',
+    _ => kind,
+  };
+}
+
 class SpendingEntry {
   const SpendingEntry({
     required this.workerId,
@@ -355,6 +385,7 @@ class WorkspaceSnapshot {
     this.memory = const [],
     this.access = const [],
     this.spending = const [],
+    this.principals = const [],
     this.prerequisites = const [],
     this.workspaceName = '',
   });
@@ -380,6 +411,10 @@ class WorkspaceSnapshot {
   final List<MemoryEntry> memory;
   final List<AccessEntry> access;
   final List<SpendingEntry> spending;
+
+  /// Every identity the controller authenticates, in stable name order.
+  final List<PrincipalEntry> principals;
+
   final List<PrerequisiteNotice> prerequisites;
   final String workspaceName;
 

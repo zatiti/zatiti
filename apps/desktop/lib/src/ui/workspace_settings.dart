@@ -167,6 +167,9 @@ class _WorkspaceSettingsState extends State<WorkspaceSettings> {
                 style: text.bodySmall!.copyWith(fontSize: 13),
               ),
               const SizedBox(height: Space.xl),
+              const SectionLabel('Who holds authority here'),
+              _Principals(widget.controller),
+              const SizedBox(height: Space.xl),
               const SectionLabel('Connection'),
               Text(widget.controller.source.label, style: text.bodyMedium),
               const SizedBox(height: Space.sm),
@@ -221,4 +224,60 @@ class _WorkspaceSettingsState extends State<WorkspaceSettings> {
       ),
     );
   }
+}
+
+/// The identities the controller authenticates, from `principal.list`. The
+/// client reads them and never creates, changes or revokes one: identity
+/// administration is not a desktop surface.
+class _Principals extends StatelessWidget {
+  const _Principals(this.controller);
+
+  final WorkspaceController controller;
+
+  @override
+  Widget build(BuildContext context) => ListenableBuilder(
+    listenable: controller,
+    builder: (context, _) {
+      final text = Theme.of(context).textTheme;
+      final principals = controller.snapshot.principals;
+      if (principals.isEmpty) {
+        return Text(
+          'No identities have been read from your controller yet.',
+          style: text.bodySmall,
+        );
+      }
+      return Column(
+        key: const ValueKey('principal-list'),
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          for (final p in principals)
+            Padding(
+              padding: const EdgeInsets.only(bottom: Space.sm),
+              child: Semantics(
+                label:
+                    '${p.name}, ${p.kindLabel}'
+                    '${p.revoked ? ', revoked' : ''}',
+                child: ExcludeSemantics(
+                  child: Row(
+                    children: [
+                      Expanded(child: Text(p.name, style: text.bodyMedium)),
+                      Text(
+                        p.revoked ? '${p.kindLabel} · revoked' : p.kindLabel,
+                        style: text.bodySmall,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          const SizedBox(height: Space.sm),
+          Text(
+            'Identities come from your controller. Add, change or revoke one '
+            'on the machine that runs it; this app only shows them.',
+            style: text.bodySmall,
+          ),
+        ],
+      );
+    },
+  );
 }

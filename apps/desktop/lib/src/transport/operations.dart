@@ -36,6 +36,10 @@ abstract final class Operations {
   static const commandGet = OperationDescriptor.query('command.get');
   static const eventList = OperationDescriptor.query('event.list');
 
+  /// Who holds authority in this installation. Read-only: this client never
+  /// creates, updates or revokes an identity.
+  static const principalList = OperationDescriptor.query('principal.list');
+
   static const organizationList = OperationDescriptor.query(
     'organization.list',
   );
@@ -77,6 +81,7 @@ abstract final class Operations {
     installationStatus,
     commandGet,
     eventList,
+    principalList,
     organizationList,
     workerList,
     conversationList,

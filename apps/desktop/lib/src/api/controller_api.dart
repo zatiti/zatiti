@@ -10,6 +10,15 @@ import 'models.dart';
 /// Pages a list operation reads at most, so one snapshot stays bounded.
 const int maxListPages = 25;
 
+/// One message that has been rendered but not yet sent, with the identity it
+/// will carry once the controller acknowledges it.
+class PreparedMessage {
+  const PreparedMessage({required this.messageId, required this.submission});
+
+  final String messageId;
+  final Submission submission;
+}
+
 class ControllerApi {
   ControllerApi(this.client);
 
@@ -125,17 +134,26 @@ class ControllerApi {
   });
 
   /// A message with its identity fixed now, so a retry cannot duplicate it.
-  Submission prepareMessageSend({
+  /// The controller keeps the `message_id` the client mints and returns it as
+  /// the message's own id, so the caller holds the identity its message will
+  /// have and can recognize it if it comes back from a mailbox.
+  PreparedMessage prepareMessageSend({
     required String conversationId,
     required String body,
-  }) => client.prepare(Operations.conversationMessageSend, {
-    'scope': client.scope(),
-    'conversation_id': conversationId,
-    'message_id': newUuidV4(),
-    'body': body,
-    'attachments': const <Object?>[],
-    'task_ids': const <Object?>[],
-  });
+  }) {
+    final messageId = newUuidV4();
+    return PreparedMessage(
+      messageId: messageId,
+      submission: client.prepare(Operations.conversationMessageSend, {
+        'scope': client.scope(),
+        'conversation_id': conversationId,
+        'message_id': messageId,
+        'body': body,
+        'attachments': const <Object?>[],
+        'task_ids': const <Object?>[],
+      }),
+    );
+  }
 
   Submission prepareResponsibilityPause({
     required String id,
