@@ -19,10 +19,6 @@ directories. Behavior against a real binary, a real Flutter build, a real
 `launchd` or `systemd`, and a real keychain is qualification work. See
 [QUALIFICATION.md](QUALIFICATION.md).
 
-Installing the desktop bundle is not in this revision. `PlanInstallation`
-refuses a desktop manifest with `capability_unsupported`; the controller
-lifecycle below is complete.
-
 ## What the package provides
 
 | File | Responsibility |
@@ -32,11 +28,13 @@ lifecycle below is complete.
 | `licenses.go` | License notice audit: the license entries and the SBOM must describe the same components |
 | `signature.go` | Detached Ed25519 manifest signature, verified against caller-supplied trusted keys |
 | `service.go`, `templates/` | The macOS LaunchAgent and the Linux user `systemd` unit |
-| `layout.go`, `plan.go`, `apply.go` | Controller install, upgrade, and uninstall planning and execution |
+| `layout.go`, `plan.go`, `apply.go` | Install, upgrade, and uninstall planning and execution |
 | `servicemanager.go` | `launchctl` and `systemctl --user` drivers behind the `ServiceManager` interface |
 | `masterkey.go` | Headless master key provisioning |
 | `audit.go` | Installed permission, symlink, and integrity audit |
-| `desktop.go` | Everything specific to the Flutter desktop client |
+| `desktop.go` | The desktop distribution's manifest rules |
+| `desktop_bundle.go` | Deterministic bundle archive assembly, extraction, and verification |
+| `desktop_install.go` | Desktop layout, install, upgrade, uninstall, audit, and the Linux launcher entry |
 
 ## Release manifest
 
@@ -172,6 +170,37 @@ change the path they run.
 `Apply` treats a plan as untrusted data. It re-validates the layout, refuses
 any step outside the layout, refuses to write through a symlinked directory,
 and refuses a plan built against a different active release.
+
+### Desktop distribution
+
+The desktop client installs into its own layout, disjoint from the
+controller's and from the state directory:
+
+```text
+<desktop distribution>/versions/<version>/   the release tree with its manifest
+<desktop distribution>/current               symlink to the active release
+<desktop distribution>/bundles/<version>/    the unpacked application bundle
+<desktop distribution>/current-bundle        symlink to the active bundle
+~/.local/share/applications/dev.zatiti.zatiti_desktop.desktop   Linux launcher entry
+~/Applications/<Name>.app                    macOS link into the active bundle
+```
+
+`AssembleBundle` turns a `flutter build` output directory into one `tar.gz`
+with sorted entries, zero timestamps and ownership, and only the owner
+execute bit preserved, so the same build always produces the same bytes.
+Relative symlinks that stay inside the bundle are kept (a macOS `.app` needs
+them); absolute or escaping links, hard links, special files, and names that
+look like state or key material are refused. Extraction applies the same
+rules, checks the archive against the manifest digest while reading it,
+writes links last so nothing is written through one, and confirms the
+declared executable is a regular executable file. `VerifyBundle` compares an
+unpacked bundle with its archive entry by entry.
+
+Install, upgrade, and uninstall follow the controller's shape without any
+service action. Uninstall removes the launcher and the distribution;
+credentials and drafts in operating-system secure storage are not touched.
+The Linux launcher entry is written unescaped, so a path with a character
+the `Exec` key would interpret is refused rather than escaped.
 
 ## Secret and key provisioning
 

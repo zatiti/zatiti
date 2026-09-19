@@ -23,6 +23,11 @@
 //   - Plan and apply install, upgrade and uninstall of the controller
 //     distribution over a per-user layout. State is never touched unless the
 //     operator requests removal and confirms the exact state directory.
+//   - Archive a built Flutter bundle deterministically, and plan and apply
+//     install, upgrade and uninstall of the desktop distribution into its
+//     own layout: the bundle is unpacked under path, link, mode and size
+//     rules, and reached through a freedesktop launcher entry on Linux or an
+//     application link on macOS. No service is involved.
 //   - Provision the headless master key file without the key ever passing
 //     through flags, chat or an inherited environment.
 //   - Audit installed permissions and license notices.
@@ -38,11 +43,9 @@
 //   - Behavior against a real launchd or systemd, a real built binary, a
 //     real Flutter build, and a real keychain is qualification work. See
 //     QUALIFICATION.md.
-//   - Installing the desktop bundle (unpacking the archive, placing the
-//     application, the freedesktop launcher entry) is not in this revision;
-//     PlanInstallation refuses a desktop manifest with capability_unsupported.
 //
-// Everything specific to the desktop client lives in desktop.go and
-// desktop_test.go so that a change of desktop framework replaces those files
-// without touching the controller, service or helper lifecycle.
+// Everything specific to the desktop client lives in desktop.go,
+// desktop_bundle.go and desktop_install.go (and their tests) so that a change
+// of desktop framework replaces those files without touching the controller,
+// service or helper lifecycle.
 package packaging

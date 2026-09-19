@@ -33,9 +33,16 @@ type Layout struct {
 	Versions string
 	// Current is a symlink to the active release directory. Launchers
 	// reference binaries through it, so an upgrade does not rewrite them.
-	Current  string
+	Current string
+	// UnitDir holds the launchers: LaunchAgents or systemd user units for a
+	// controller layout, the applications directory for a desktop layout.
 	UnitDir  string
 	StateDir string
+	// Bundles and CurrentBundle are set on a desktop layout only: one
+	// unpacked application bundle per release, and a symlink to the active
+	// one.
+	Bundles       string
+	CurrentBundle string
 }
 
 const (
@@ -96,7 +103,16 @@ func (l Layout) validate() error {
 			return errf(CodeInvalidInput, "layout paths must be clean absolute paths")
 		}
 	}
-	if l.Manager != ManagerLaunchd && l.Manager != ManagerSystemdUser {
+	switch l.Manager {
+	case ManagerLaunchd, ManagerSystemdUser:
+		if l.Bundles != "" || l.CurrentBundle != "" {
+			return errf(CodeInvalidInput, "a controller layout holds no application bundles")
+		}
+	case ManagerNone:
+		if l.Bundles != filepath.Join(l.DistRoot, dirNameBundles) || l.CurrentBundle != filepath.Join(l.DistRoot, linkNameBundle) {
+			return errf(CodeInvalidInput, "the bundle directories must sit directly under the distribution directory")
+		}
+	default:
 		return errf(CodeCapabilityUnsupported, "the layout names no supported service manager")
 	}
 	if l.Versions != filepath.Join(l.DistRoot, dirNameVersions) || l.Current != filepath.Join(l.DistRoot, linkNameCurrent) {

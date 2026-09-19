@@ -2,6 +2,7 @@ package packaging
 
 import (
 	"errors"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -20,32 +21,9 @@ func AuditInstalled(l Layout, labels []string) error {
 	if inst.Current == "" {
 		return errf(CodeNotFound, "no release is installed in this layout")
 	}
-	var findings []Finding
-	walkErr := filepath.WalkDir(l.DistRoot, func(p string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		rel, err := filepath.Rel(l.DistRoot, p)
-		if err != nil {
-			return err
-		}
-		rel = filepath.ToSlash(rel)
-		info, err := d.Info()
-		if err != nil {
-			return err
-		}
-		switch {
-		case info.Mode()&fs.ModeSymlink != 0:
-			if p != l.Current {
-				findings = append(findings, Finding{Path: rel, Problem: "unexpected symlink"})
-			}
-		case info.Mode().Perm()&0o022 != 0:
-			findings = append(findings, Finding{Path: rel, Problem: "entry is group or world writable"})
-		}
-		return nil
-	})
-	if walkErr != nil {
-		return errWrap(CodeInternalError, "the installation could not be read", walkErr)
+	findings, err := auditWritable(l.DistRoot, map[string]bool{l.Current: true}, "")
+	if err != nil {
+		return err
 	}
 	for _, label := range labels {
 		name := unitFileName(l.Manager, label)
@@ -63,7 +41,7 @@ func AuditInstalled(l Layout, labels []string) error {
 	}
 
 	versionDir := l.VersionDir(inst.Current)
-	raw, err := os.ReadFile(filepath.Join(versionDir, ManifestFileName))
+	raw, err := readSmallFile(filepath.Join(versionDir, ManifestFileName))
 	if err != nil {
 		findings = append(findings, Finding{Path: ManifestFileName, Problem: "the active release has no manifest"})
 	} else if m, err := Decode(raw); err != nil {
@@ -80,4 +58,59 @@ func AuditInstalled(l Layout, labels []string) error {
 		return errFindings("the installation does not pass its audit", findings)
 	}
 	return nil
+}
+
+// auditWritable walks root and reports every group- or world-writable entry
+// and every symlink not in allowedLinks. The subtree at skip, when set, is
+// not entered: an unpacked application bundle has its own audit.
+func auditWritable(root string, allowedLinks map[string]bool, skip string) ([]Finding, error) {
+	var findings []Finding
+	walkErr := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if skip != "" && p == skip {
+			return filepath.SkipDir
+		}
+		rel, err := filepath.Rel(root, p)
+		if err != nil {
+			return err
+		}
+		rel = filepath.ToSlash(rel)
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		switch {
+		case info.Mode()&fs.ModeSymlink != 0:
+			if !allowedLinks[p] {
+				findings = append(findings, Finding{Path: rel, Problem: "unexpected symlink"})
+			}
+		case info.Mode().Perm()&0o022 != 0:
+			findings = append(findings, Finding{Path: rel, Problem: "entry is group or world writable"})
+		}
+		return nil
+	})
+	if walkErr != nil {
+		return nil, errWrap(CodeInternalError, "the installation could not be read", walkErr)
+	}
+	return findings, nil
+}
+
+// readSmallFile reads a file this package wrote, bounded by the manifest
+// size limit.
+func readSmallFile(p string) ([]byte, error) {
+	f, err := os.Open(p)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = f.Close() }()
+	raw, err := io.ReadAll(io.LimitReader(f, maxManifestBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(raw) > maxManifestBytes {
+		return nil, errf(CodeInvalidInput, "document exceeds %d bytes", maxManifestBytes)
+	}
+	return raw, nil
 }

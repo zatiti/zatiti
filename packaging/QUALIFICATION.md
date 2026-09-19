@@ -36,7 +36,8 @@ Qualification must prove the rest:
 | `launchd` resolves the `current` symlink at each start | Depends on the OS |
 | The controller binary accepts `serve` and the arguments the launcher passes | No release build of `cmd/zatiti` has been packaged |
 | The Serenity runtime starts from its launcher and holds one writer per brain | The Serenity pin is unresolved |
-| The Flutter bundle from `flutter build` unpacks to the declared executable, starts with the declared native dependencies present, and fails clearly without them | `apps/desktop` has no release build; the SDK and plugin pins are not in the lock report |
+| A real `flutter build` output archives and unpacks under the bundle rules, starts from the unpacked location, and fails clearly without the declared native dependencies | `apps/desktop` has no release build; the SDK and plugin pins are not in the lock report; the bundle tests use synthetic trees shaped like a build |
+| The desktop launcher entry is picked up by the desktop environment, and Finder and Launchpad open the linked `.app` | Needs a real desktop session |
 | The desktop bundle holds no state, driver, or credential | The manifest rules check names; only the built bundle can be inspected |
 | The keychain helper at the manifest's path stores and returns secrets | Needs a real keychain |
 | Code signature and notarization evidence | Needs a real developer identity, which this repository never holds |
@@ -46,7 +47,9 @@ Qualification must prove the rest:
 1. Build the controller from a recorded source revision with the pinned
    toolchain. Build the desktop client with the pinned Flutter SDK
    (`flutter build macos` or `flutter build linux`, release mode) and archive
-   the resulting bundle as `tar.gz`, preserving its symlinks.
+   the resulting bundle with `AssembleBundle`. Expect two builds of the same
+   revision to produce the same archive digest only if the Flutter build
+   itself is reproducible; record the observed digests either way.
 2. Resolve the Serenity pin in the dependency lock report. Without it,
    `Build` returns `prerequisite_missing` and qualification cannot start.
 3. Generate the SBOM for each distribution and collect a notice file for
@@ -70,8 +73,9 @@ On a host with no prior installation:
 
 ## 2. Controller survives desktop close
 
-1. Unpack the desktop bundle, start the desktop client, and confirm it is
-   connected over the private socket.
+1. Plan and apply a desktop install, expect `AuditDesktopInstalled` to pass,
+   start the desktop client from the launcher entry or application link, and
+   confirm it is connected over the private socket.
 2. Quit the desktop client. Then end the desktop client process with a
    signal.
 3. Expect the controller process ID to be unchanged in both cases, and expect

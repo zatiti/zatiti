@@ -154,8 +154,7 @@ func TestDesktopDistributionRejections(t *testing.T) {
 	}
 }
 
-// The controller installer never installs a desktop distribution, and a
-// controller release loads no service other than its own.
+// The controller installer never installs a desktop distribution.
 func TestDesktopDistributionIsNotAControllerInstall(t *testing.T) {
 	t.Parallel()
 	l := testLayout(t, "linux")

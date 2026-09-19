@@ -27,6 +27,10 @@ const (
 	ActionSwapLink   = "swap_link"
 	ActionRemoveFile = "remove_file"
 	ActionRemoveTree = "remove_tree"
+	// ActionExtractBundle unpacks a verified bundle archive (Source, with
+	// SHA256 and Size) into Path, checks the executable named by Content,
+	// and publishes the result at Target.
+	ActionExtractBundle = "extract_bundle"
 )
 
 // Service verbs. A ServiceManager must make both idempotent: loading a
@@ -143,6 +147,9 @@ func PlanInstallation(in InstallInput) (Plan, error) {
 	if err := l.validate(); err != nil {
 		return Plan{}, err
 	}
+	if l.Manager == ManagerNone {
+		return Plan{}, errf(CodeInvalidInput, "the controller distribution installs into a controller layout, not a desktop layout")
+	}
 	if err := VerifyTree(m, in.SourceRoot); err != nil {
 		return Plan{}, err
 	}
@@ -159,8 +166,37 @@ func PlanInstallation(in InstallInput) (Plan, error) {
 	if err != nil {
 		return Plan{}, err
 	}
-	plan := Plan{Kind: PlanInstall, Layout: l, Version: m.Version, PreviousVersion: in.Installed.Current}
-	if prev := in.Installed.Current; prev != "" {
+	plan, err := planRelease(l, m, in.SourceRoot, in.Installed)
+	if err != nil {
+		return Plan{}, err
+	}
+	plan.Prepare = append(plan.Prepare, Step{Action: ActionEnsureDir, Path: l.UnitDir, Mode: 0o755})
+	plan.Steps = append(plan.Steps, Step{Action: ActionSwapLink, Path: l.Current, Target: filepath.Join(dirNameVersions, m.Version)})
+	for _, u := range units {
+		unitPath := filepath.Join(l.UnitDir, u.FileName)
+		if plan.Kind == PlanUpgrade {
+			plan.Before = append(plan.Before, ServiceAction{Verb: VerbUnload, Label: u.Label, UnitPath: unitPath})
+		}
+		plan.Steps = append(plan.Steps, Step{Action: ActionWriteFile, Path: unitPath, Content: u.Content, Mode: u.Mode})
+		plan.After = append(plan.After, ServiceAction{Verb: VerbLoad, Label: u.Label, UnitPath: unitPath})
+	}
+	plan.Notices = append(plan.Notices, "The state directory is not read or written by this plan.")
+	if plan.Kind == PlanUpgrade {
+		plan.Notices = append(plan.Notices, "Release "+plan.PreviousVersion+" stays on disk next to the new release.")
+	}
+	if l.Manager == ManagerSystemdUser {
+		plan.Notices = append(plan.Notices, "A user systemd service stops at logout unless the operator enables lingering for the account.")
+	}
+	return plan, nil
+}
+
+// planRelease is the part of an install or upgrade plan both distributions
+// share: decide install versus upgrade, then stage every artifact and the
+// manifest into a partial directory and publish it as the release
+// directory. The active link is left to the caller.
+func planRelease(l Layout, m Manifest, sourceRoot string, installed Installed) (Plan, error) {
+	plan := Plan{Kind: PlanInstall, Layout: l, Version: m.Version, PreviousVersion: installed.Current}
+	if prev := installed.Current; prev != "" {
 		switch c := compareVersions(m.Version, prev); {
 		case c == 0:
 			return Plan{}, errf(CodeConflict, "release %s is already the active release", m.Version)
@@ -169,13 +205,11 @@ func PlanInstallation(in InstallInput) (Plan, error) {
 		}
 		plan.Kind = PlanUpgrade
 	}
-
 	partial := filepath.Join(l.Versions, "."+m.Version+".partial")
 	final := l.VersionDir(m.Version)
 	plan.Prepare = append(plan.Prepare,
 		Step{Action: ActionEnsureDir, Path: l.DistRoot, Mode: 0o755},
 		Step{Action: ActionEnsureDir, Path: l.Versions, Mode: 0o755},
-		Step{Action: ActionEnsureDir, Path: l.UnitDir, Mode: 0o755},
 		// A stale partial or an unpublished copy of this release is left
 		// over from an interrupted run. Neither is the active release.
 		Step{Action: ActionRemoveTree, Path: final},
@@ -199,7 +233,7 @@ func PlanInstallation(in InstallInput) (Plan, error) {
 		plan.Prepare = append(plan.Prepare, Step{
 			Action: ActionCopyFile,
 			Path:   filepath.Join(partial, filepath.FromSlash(a.Path)),
-			Source: filepath.Join(in.SourceRoot, filepath.FromSlash(a.Path)),
+			Source: filepath.Join(sourceRoot, filepath.FromSlash(a.Path)),
 			SHA256: a.SHA256, Size: a.Size, Mode: mode,
 		})
 	}
@@ -211,22 +245,6 @@ func PlanInstallation(in InstallInput) (Plan, error) {
 		Step{Action: ActionWriteFile, Path: filepath.Join(partial, ManifestFileName), Content: manifestBytes, Mode: 0o644},
 		Step{Action: ActionPublishDir, Path: partial, Target: final},
 	)
-	plan.Steps = append(plan.Steps, Step{Action: ActionSwapLink, Path: l.Current, Target: filepath.Join(dirNameVersions, m.Version)})
-	for _, u := range units {
-		unitPath := filepath.Join(l.UnitDir, u.FileName)
-		if plan.Kind == PlanUpgrade {
-			plan.Before = append(plan.Before, ServiceAction{Verb: VerbUnload, Label: u.Label, UnitPath: unitPath})
-		}
-		plan.Steps = append(plan.Steps, Step{Action: ActionWriteFile, Path: unitPath, Content: u.Content, Mode: u.Mode})
-		plan.After = append(plan.After, ServiceAction{Verb: VerbLoad, Label: u.Label, UnitPath: unitPath})
-	}
-	plan.Notices = append(plan.Notices, "The state directory is not read or written by this plan.")
-	if plan.Kind == PlanUpgrade {
-		plan.Notices = append(plan.Notices, "Release "+plan.PreviousVersion+" stays on disk next to the new release.")
-	}
-	if l.Manager == ManagerSystemdUser {
-		plan.Notices = append(plan.Notices, "A user systemd service stops at logout unless the operator enables lingering for the account.")
-	}
 	return plan, nil
 }
 
@@ -296,6 +314,9 @@ func PlanUninstallation(in UninstallInput) (Plan, error) {
 		return Plan{}, errf(CodeInvalidInput, "state removal must be confirmed with the exact state directory")
 	case !in.RemoveState && in.ConfirmStateDir != "":
 		return Plan{}, errf(CodeInvalidInput, "a state directory confirmation was given without a state removal request")
+	}
+	if l.Manager == ManagerNone {
+		return Plan{}, errf(CodeInvalidInput, "the controller distribution uninstalls from a controller layout, not a desktop layout")
 	}
 	plan := Plan{Kind: PlanUninstall, Layout: l, RemovesState: in.RemoveState}
 	seen := map[string]bool{}

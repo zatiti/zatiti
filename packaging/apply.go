@@ -98,6 +98,9 @@ func checkPlan(plan Plan) error {
 		return errf(CodeInvalidInput, "only an uninstall may remove state")
 	}
 	for _, action := range append(append([]ServiceAction{}, plan.Before...), plan.After...) {
+		if l.Manager == ManagerNone {
+			return errf(CodeInvalidInput, "a desktop layout runs no service")
+		}
 		if action.Verb != VerbLoad && action.Verb != VerbUnload {
 			return errf(CodeInvalidInput, "the plan holds an unknown service verb")
 		}
@@ -122,7 +125,20 @@ func checkPlan(plan Plan) error {
 		case ActionPublishDir:
 			ok = filepath.Dir(step.Path) == l.Versions && cleanAbs(step.Target) && filepath.Dir(step.Target) == l.Versions
 		case ActionSwapLink:
-			ok = step.Path == l.Current && filepath.Dir(step.Target) == dirNameVersions && versionPattern.MatchString(filepath.Base(step.Target))
+			version := versionPattern.MatchString(filepath.Base(step.Target))
+			switch {
+			case step.Path == l.Current:
+				ok = filepath.Dir(step.Target) == dirNameVersions && version
+			case l.CurrentBundle != "" && step.Path == l.CurrentBundle:
+				ok = filepath.Dir(step.Target) == dirNameBundles && version
+			case l.Manager == ManagerNone && isUnit:
+				// The application link in the applications directory
+				// points into the active bundle.
+				ok = cleanAbs(step.Target) && pathWithin(step.Target, l.CurrentBundle) && step.Target != l.CurrentBundle
+			}
+		case ActionExtractBundle:
+			ok = l.Bundles != "" && filepath.Dir(step.Path) == l.Bundles && cleanAbs(step.Target) && filepath.Dir(step.Target) == l.Bundles &&
+				cleanAbs(step.Source) && pathWithin(step.Source, l.Versions) && validateRelPath(string(step.Content)) == nil
 		case ActionRemoveTree:
 			ok = inDist || (plan.RemovesState && step.Path == l.StateDir)
 		}
@@ -164,6 +180,12 @@ func runStep(ctx context.Context, l Layout, step Step) error {
 		}
 	case ActionSwapLink:
 		err = swapLink(step.Path, step.Target)
+	case ActionExtractBundle:
+		if err = extractBundle(step.Source, step.Path, step.SHA256, step.Size, string(step.Content)); err == nil {
+			if err = os.Rename(step.Path, step.Target); err == nil {
+				err = syncDir(filepath.Dir(step.Target))
+			}
+		}
 	case ActionRemoveFile:
 		err = removeFile(step.Path)
 	case ActionRemoveTree:
