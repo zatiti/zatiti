@@ -45,10 +45,7 @@ func runServe(ctx context.Context, cfg config, log *slog.Logger, opts serveOptio
 		return err
 	}
 	defer h.close()
-	log.Info("installation opened", "generation", h.generation, "backup_capability_bound", installationBackupBound)
-	if !installationBackupBound {
-		log.Warn("installation backup capability is not bound: installation.WithDatabaseBackup is pending on internal/installation; installation.backup and installation.restore report prerequisite_missing")
-	}
+	log.Info("installation opened", "generation", h.generation)
 
 	adapters, missing, err := loadAdapters(cfg.adaptersDir(), adapterDependencies(h))
 	if err != nil {

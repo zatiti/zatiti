@@ -24,7 +24,7 @@ func TestBackupWrapperMethodSetIsExactlyBackup(t *testing.T) {
 		}
 		t.Fatalf("databaseBackup exposes %v, want exactly [Backup]", names)
 	}
-	var capability backupCapability = databaseBackup{}
+	var capability contract.DatabaseBackup = databaseBackup{}
 	if _, wider := capability.(contract.Database); wider {
 		t.Fatal("the backup capability must not widen to contract.Database")
 	}

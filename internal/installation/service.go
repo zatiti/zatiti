@@ -77,6 +77,21 @@ type Service struct {
 	deps        contract.Dependencies
 	catalog     map[string]contract.Descriptor
 	descriptors []contract.Descriptor
+	// backup is the consistent-backup capability entrypoint assembly binds
+	// with WithDatabaseBackup. It is called only from LocalIO.Perform, never
+	// inside a Unit, and is never type-asserted to anything wider.
+	backup contract.DatabaseBackup
+}
+
+// Option configures New beyond the common domain dependencies.
+type Option func(*Service)
+
+// WithDatabaseBackup binds the consistent SQLite backup capability. Without
+// it installation.backup and installation.restore fail prerequisite_missing
+// naming the capability; every other operation is unaffected and doctor
+// reports the gap.
+func WithDatabaseBackup(backup contract.DatabaseBackup) Option {
+	return func(s *Service) { s.backup = backup }
 }
 
 // Compile-time proof that *Service implements the shared Module contract and
@@ -92,8 +107,9 @@ var (
 // bootstrap to custody the owner credential; Ports is required for every
 // operation that composes peer owners (bootstrap, maintenance, backup,
 // restore) but is checked at call time so a Ports-less construction still
-// serves doctor/status/job.get against purely local state.
-func New(deps contract.Dependencies) (*Service, error) {
+// serves doctor/status/job.get against purely local state. Options bind the
+// capabilities the common Dependencies deliberately do not carry.
+func New(deps contract.Dependencies, opts ...Option) (*Service, error) {
 	if deps.Clock == nil {
 		return nil, internalError("installation requires a clock")
 	}
@@ -103,6 +119,11 @@ func New(deps contract.Dependencies) (*Service, error) {
 	s := &Service{
 		deps:    deps,
 		catalog: make(map[string]contract.Descriptor, len(opMetas)),
+	}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(s)
+		}
 	}
 	descs, err := s.buildDescriptors()
 	if err != nil {

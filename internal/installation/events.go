@@ -16,6 +16,7 @@ const (
 	eventPaused           = "installation.state.paused"
 	eventResumed          = "installation.state.resumed"
 	eventBackupFailed     = "installation.backup.failed"
+	eventBackupCompleted  = "installation.backup.completed"
 	eventRestoreRequested = "installation.restore.requested"
 	eventRestoreRecorded  = "installation.restore.recorded"
 )

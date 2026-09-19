@@ -58,3 +58,11 @@ type Database interface {
 	Backup(ctx context.Context, w io.Writer) error
 	Close() error
 }
+
+// DatabaseBackup is a narrow capability, not database access: one consistent
+// backup image streamed to w. Database satisfies it structurally. Entrypoint
+// assembly supplies it to installation only, as a wrapper whose method set is
+// exactly Backup, never the Database value itself.
+type DatabaseBackup interface {
+	Backup(ctx context.Context, w io.Writer) error
+}

@@ -307,6 +307,34 @@ func (s *Service) artifactsMetadata(ctx context.Context, unit contract.Unit, sco
 	return out.Artifacts, nil
 }
 
+// ---------- _artifacts.publish ----------
+
+const peerArtifactsPublish = "_artifacts.publish"
+
+type artifactsPublishInput struct {
+	Scope          wireScope       `json:"scope"`
+	Digest         contract.Digest `json:"digest"`
+	Size           int64           `json:"size"`
+	MediaType      string          `json:"media_type"`
+	Classification string          `json:"classification"`
+	Encrypted      bool            `json:"encrypted"`
+}
+
+// artifactsPublish registers already-published bundle bytes as a restricted,
+// encrypted artifact of the installation and returns its reference.
+func (s *Service) artifactsPublish(ctx context.Context, unit contract.Unit, scope wireScope, digest contract.Digest, size int64, mediaType string) (wireArtifactRef, error) {
+	var out resourceOut[peerArtifact]
+	if err := callPeer(ctx, s, unit, peerArtifactsPublish, artifactsPublishInput{
+		Scope: scope, Digest: digest, Size: size, MediaType: mediaType, Classification: backupClass, Encrypted: true,
+	}, &out); err != nil {
+		return wireArtifactRef{}, err
+	}
+	if out.Resource.ID == "" || out.Resource.Digest != digest {
+		return wireArtifactRef{}, internalError("artifacts owner published %s as %s/%s", digest, out.Resource.ID, out.Resource.Digest)
+	}
+	return wireArtifactRef{ID: out.Resource.ID, Digest: out.Resource.Digest}, nil
+}
+
 // ---------- _execution.job.create / _execution.job.record ----------
 
 const (

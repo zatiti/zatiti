@@ -242,6 +242,16 @@ func (p *fakePorts) Call(_ context.Context, _ contract.Unit, inv contract.Invoca
 		})
 	case peerArtifactsMetadata:
 		return okPayload(artifactsMetadataOutput{Artifacts: []peerArtifact{}})
+	case peerArtifactsPublish:
+		var in artifactsPublishInput
+		if err := contract.DecodeStrict(inv.Input, &in); err != nil {
+			return contract.Payload{}, err
+		}
+		return okPayload(resourceOut[peerArtifact]{Resource: peerArtifact{
+			ID: p.ids.New(), Version: 1, Scope: in.Scope, Digest: in.Digest, Size: in.Size,
+			MediaType: in.MediaType, Classification: in.Classification, Encrypted: in.Encrypted,
+			State: "available", CreatedAt: "2026-09-12T00:00:00Z",
+		}})
 	case peerExecutionJobCreate:
 		var in executionJobCreateInput
 		if err := contract.DecodeStrict(inv.Input, &in); err != nil {
@@ -503,4 +513,67 @@ func (e *testEnv) driveLocalIOScope(op string, in any, scope contract.Scope, mut
 
 func (e *testEnv) driveLocalIO(op string, in any, mutation bool) (contract.Payload, error) {
 	return e.driveLocalIOScope(op, in, e.scope.toContract(), mutation)
+}
+
+// backupOnly is the test's one-method DatabaseBackup over the real storage
+// database, shaped exactly like the wrapper entrypoint assembly passes.
+type backupOnly struct{ db contract.Database }
+
+func (b backupOnly) Backup(ctx context.Context, w io.Writer) error { return b.db.Backup(ctx, w) }
+
+// recordingBackup wraps a capability and remembers the digest of every image
+// it streamed, so a test can check a manifest against the exact bytes the
+// capability produced for that call.
+type recordingBackup struct {
+	inner   contract.DatabaseBackup
+	mu      sync.Mutex
+	digests []contract.Digest
+}
+
+func (r *recordingBackup) Backup(ctx context.Context, w io.Writer) error {
+	hw := newHashingWriter(w)
+	err := r.inner.Backup(ctx, hw)
+	r.mu.Lock()
+	r.digests = append(r.digests, hw.digest())
+	r.mu.Unlock()
+	return err
+}
+
+func (r *recordingBackup) last() contract.Digest {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if len(r.digests) == 0 {
+		return ""
+	}
+	return r.digests[len(r.digests)-1]
+}
+
+// startGeneration advances the controller generation the way entrypoint
+// assembly does before serving; manifests pin it.
+func (e *testEnv) startGeneration() {
+	e.t.Helper()
+	if _, err := e.db.StartGeneration(e.ctx); err != nil {
+		e.t.Fatalf("start generation: %v", err)
+	}
+}
+
+// bindBackup rebuilds the service with the capability bound, keeping every
+// other dependency.
+func (e *testEnv) bindBackup(capability contract.DatabaseBackup) {
+	e.t.Helper()
+	svc, err := New(contract.Dependencies{Clock: e.clock, IDs: e.ids, Ports: e.ports, Secrets: e.secrets, Blobs: e.blobs}, WithDatabaseBackup(capability))
+	if err != nil {
+		e.t.Fatalf("installation.New with backup capability: %v", err)
+	}
+	e.svc = svc
+}
+
+// backupKey resolves the installation's custodied backup key.
+func (e *testEnv) backupKey() []byte {
+	e.t.Helper()
+	key, err := e.secrets.Get(e.ctx, backupKeyRef(e.install))
+	if err != nil {
+		e.t.Fatalf("backup key: %v", err)
+	}
+	return key
 }

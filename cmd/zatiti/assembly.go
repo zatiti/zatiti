@@ -41,49 +41,27 @@ type randomIDs struct{}
 
 func (randomIDs) New() contract.ID { return contract.NewID() }
 
-// backupCapability is the one-method consistent-backup seam the shared
-// contract names contract.DatabaseBackup. The landed internal/contract does
-// not declare it yet (the seam is a pending revision-2 follow-up), so the
-// entrypoint declares the identical method set locally; when the contract
-// type lands this alias is replaced by it without changing any caller.
-type backupCapability interface {
-	Backup(ctx context.Context, w io.Writer) error
-}
-
 // databaseBackup is the one-method capability entrypoint assembly hands to
-// installation. Its method set is exactly Backup: installation can never
-// widen it into query, write, migration, event-feed or file-path access, and
-// no other module, adapter, server or client ever receives it.
+// installation through installation.WithDatabaseBackup. Its method set is
+// exactly Backup: installation can never widen it into query, write,
+// migration, event-feed or file-path access, and no other module, adapter,
+// server or client ever receives it.
 type databaseBackup struct{ db contract.Database }
 
 func (b databaseBackup) Backup(ctx context.Context, w io.Writer) error {
 	return b.db.Backup(ctx, w)
 }
 
-var _ backupCapability = databaseBackup{}
+var _ contract.DatabaseBackup = databaseBackup{}
 
-// installationBackupBound reports whether the assembly binds the consistent
-// backup capability into installation. The contract seam
-// (installation.WithDatabaseBackup) is a pending follow-up on the landed
-// installation package: until it exists the capability stays unbound,
-// installation.backup and installation.restore report prerequisite_missing
-// by the installation package's own rule, and serve logs the gap at startup.
-const installationBackupBound = false
-
-// bindInstallationBackup constructs the installation module with the backup
-// capability. It is the single place the seam is wired; when
-// installation.WithDatabaseBackup lands, this becomes
-//
-//	return installation.New(deps, installation.WithDatabaseBackup(backup))
-//
-// and installationBackupBound flips to true. The wrapper is built and
-// type-checked either way so the seam cannot regress to passing the
-// Database value.
-func bindInstallationBackup(deps contract.Dependencies, backup backupCapability) (contract.Module, error) {
+// bindInstallationBackup constructs the installation module with the
+// consistent-backup capability bound. It is the single place the seam is
+// wired; the wrapper, never the Database value, crosses it.
+func bindInstallationBackup(deps contract.Dependencies, backup contract.DatabaseBackup) (contract.Module, error) {
 	if backup == nil {
 		return nil, errors.New("installation backup capability wrapper is nil")
 	}
-	return installation.New(deps)
+	return installation.New(deps, installation.WithDatabaseBackup(backup))
 }
 
 // moduleOrder is the frozen assembly and migration order: identity first
@@ -100,7 +78,7 @@ var moduleOrder = []string{
 // is the application's authenticator and resolves the controller principal. No constructor queries a peer or starts
 // a goroutine, so this is safe before Bind and safe in a descriptor-only
 // process.
-func modules(router *application.PortRouter, clock contract.Clock, ids contract.IDSource, secrets contract.SecretStore, blobs contract.BlobStore, backup backupCapability) ([]contract.Module, *identity.Service, error) {
+func modules(router *application.PortRouter, clock contract.Clock, ids contract.IDSource, secrets contract.SecretStore, blobs contract.BlobStore, backup contract.DatabaseBackup) ([]contract.Module, *identity.Service, error) {
 	deps := func(owner string) contract.Dependencies {
 		return contract.Dependencies{Clock: clock, IDs: ids, Ports: router.For(owner), Secrets: secrets, Blobs: blobs}
 	}

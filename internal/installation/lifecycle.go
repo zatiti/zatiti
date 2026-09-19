@@ -42,6 +42,12 @@ func (s *Service) gatherRequirements(ctx context.Context, unit contract.Unit, sc
 			Message: "currency and spend limits are not configured; paid execution remains unavailable",
 		})
 	}
+	if s.backup == nil {
+		reqs = append(reqs, wireRequirement{
+			Code:    "prerequisite_missing",
+			Message: "no database backup capability is bound; installation.backup and installation.restore are unavailable",
+		})
+	}
 	if reqs == nil {
 		reqs = []wireRequirement{}
 	}

@@ -20,12 +20,16 @@
 //
 // Backup and restore are local IO operations (Prepare validates and records
 // intent inside the caller's transaction; Perform performs the untransacted
-// work; Finish commits the disposition). Both need a consistent point-in-time
-// digest of the installation's own SQLite database, which this package
-// cannot obtain: contract.Dependencies (internal/contract/module.go) carries
-// no contract.Database handle and this package's frozen outgoing call list
-// carries no operation that produces one. Every code path that needs that
-// digest returns a named prerequisite_missing fault instead of fabricating
-// one; see backup.go and restore.go for the exact seam and doc.go's sibling
-// AGENTS.md for the acceptance language this satisfies.
+// work; Finish commits the disposition). Both need a consistent SQLite image
+// of the installation's own database, which contract.Dependencies
+// deliberately does not carry: entrypoint assembly binds the one-method
+// contract.DatabaseBackup capability through WithDatabaseBackup, and this
+// package calls it only from Perform, streaming through a hashing writer so
+// the manifest's digest and size describe exactly the bytes it framed and
+// sealed (bundle.go). Without the option every path that needs the image
+// fails prerequisite_missing naming the capability and never fabricates a
+// digest. Restore verifies the bundle and publishes the encrypted recovery
+// overlay of the current installation; the file-level rewind itself belongs
+// to the controller, which reports its disposition through
+// _installation.restore.record.
 package installation
