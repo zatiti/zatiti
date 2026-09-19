@@ -141,6 +141,10 @@ type fixture struct {
 	// Set by bootstrap.
 	installationID contract.ID
 	owner          contract.Actor
+
+	// The verifier capability-evidence artifact, published on first use.
+	evidenceOnce sync.Once
+	evidence     artifactRef
 }
 
 // fixtureOptions reuses an existing state directory (restart cases).

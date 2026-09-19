@@ -1,6 +1,7 @@
 package integration_test
 
 import (
+	"encoding/base64"
 	"strings"
 
 	"github.com/zatiti/zatiti/internal/contract"
@@ -66,16 +67,74 @@ func (f *fixture) eventKinds() []string {
 // syntheticDigest is a well-formed SHA-256 hex digest of nothing real.
 var syntheticDigest = strings.Repeat("ab", 32)
 
+// artifactRef names a published artifact by identity and digest.
+type artifactRef struct {
+	ID     contract.ID `json:"id"`
+	Digest string      `json:"digest"`
+}
+
+// uploadArtifact publishes body through the real artifact path, the way a
+// client does: upload.begin, one chunk, upload.finish.
+func (f *fixture) uploadArtifact(label string, body []byte, mediaType string) artifactRef {
+	f.t.Helper()
+	digest := string(contract.Hash(body))
+	begun := f.must(f.owner, "artifact.upload.begin", label+"-begin", map[string]any{
+		"scope": f.scope(), "size": len(body), "digest": digest, "media_type": mediaType, "classification": "internal",
+	})
+	var upload struct {
+		Resource struct {
+			ID      contract.ID `json:"id"`
+			Version int64       `json:"version"`
+		} `json:"resource"`
+	}
+	decode(f.t, begun.Data, &upload)
+	chunk := f.must(f.owner, "artifact.upload.chunk", label+"-chunk", map[string]any{
+		"scope": f.scope(), "upload_id": upload.Resource.ID, "offset": 0,
+		"bytes_base64": base64.StdEncoding.EncodeToString(body), "chunk_digest": digest,
+	})
+	decode(f.t, chunk.Data, &upload)
+	finished := f.must(f.owner, "artifact.upload.finish", label+"-finish", map[string]any{
+		"scope": f.scope(), "upload_id": upload.Resource.ID, "expected_version": upload.Resource.Version,
+	})
+	var out struct {
+		Resource artifactRef `json:"resource"`
+	}
+	decode(f.t, finished.Data, &out)
+	if out.Resource.Digest != digest {
+		f.t.Fatalf("published artifact digest %s, uploaded %s", out.Resource.Digest, digest)
+	}
+	return out.Resource
+}
+
+// capabilityEvidence is the verifier profile's capability-evidence
+// artifact, published once per fixture through the real artifact path so
+// the reference resolves through _artifacts.metadata at task admission.
+// This is the real first-task sequence: qualification evidence is uploaded
+// before any task can name the verifier that relies on it.
+func (f *fixture) capabilityEvidence() artifactRef {
+	f.t.Helper()
+	f.evidenceOnce.Do(func() {
+		f.evidence = f.uploadArtifact("capability-evidence", []byte(
+			`{"schema":"zatiti.capability-evidence/v1","verifier":"artifact-contract","version":"1",`+
+				`"qualified_checks":["presence"],"note":"synthetic qualification record for the integration fixture"}`),
+			"application/json")
+	})
+	return f.evidence
+}
+
 // taskDefinition is a complete task.create definition for the bootstrap
-// chief: independent artifact acceptance under a synthetic pinned verifier
-// profile, in the given currency.
-func taskDefinition(scope contract.Scope, owner, worker contract.ID, currency string) map[string]any {
+// chief: independent artifact acceptance under a pinned verifier profile
+// whose capability evidence is a real published artifact, in the given
+// currency.
+func (f *fixture) taskDefinition(scope contract.Scope, owner, worker contract.ID, currency string) map[string]any {
+	f.t.Helper()
+	evidence := f.capabilityEvidence()
 	profile := map[string]any{
 		"schema": "zatiti.verifier-profile/v1", "kind": "artifact_contract",
 		"id": "artifact-contract", "version": "1", "code_digest": syntheticDigest,
 		"supported_checks": []string{"presence"}, "max_bytes": 1024, "timeout_seconds": 30,
 		"capability_evidence": map[string]any{
-			"artifact":        map[string]any{"id": "00000000-0000-4000-8000-0000000000a1", "digest": syntheticDigest},
+			"artifact":        map[string]any{"id": evidence.ID, "digest": evidence.Digest},
 			"adapter_version": "1", "source_revision": "r1", "protocol_revision": "p1",
 			"profile_digest": syntheticDigest, "qualified_at": "2026-01-01T00:00:00Z",
 			"capabilities": []string{}, "limitations": []string{},

@@ -54,10 +54,12 @@ func TestPeerRefusalRollsBackEveryOwner(t *testing.T) {
 	f := newBootstrappedFixture(t)
 	org, chief := f.rootOrganization()
 	scope := contract.Scope{InstallationID: f.installationID, OrganizationID: org}
+	// No budget is configured, so accounting refuses a task priced in USD.
+	// The definition (and the capability-evidence artifact it names) exists
+	// before the baseline is taken.
+	input := map[string]any{"scope": scope, "definition": f.taskDefinition(scope, f.owner.PrincipalID, chief, "USD")}
 	before := f.observe()
 
-	// No budget is configured, so accounting refuses a task priced in USD.
-	input := map[string]any{"scope": scope, "definition": taskDefinition(scope, f.owner.PrincipalID, chief, "USD")}
 	_, err := f.invoke(f.owner, "task.create", "atomic-peer-1", input)
 	if err == nil {
 		t.Fatal("task.create in an unconfigured currency succeeded")
@@ -110,11 +112,11 @@ func TestLateEventFailureRollsBackStateAndEvents(t *testing.T) {
 	f := newBootstrappedFixture(t)
 	org, chief := f.rootOrganization()
 	narrow := contract.Scope{InstallationID: f.installationID, OrganizationID: org}
+	lateInput := map[string]any{
+		"scope": f.scope(), "definition": f.taskDefinition(narrow, f.owner.PrincipalID, chief, unconfiguredCurrency),
+	}
 	before := f.observe()
 
-	lateInput := map[string]any{
-		"scope": f.scope(), "definition": taskDefinition(narrow, f.owner.PrincipalID, chief, unconfiguredCurrency),
-	}
 	_, refusal := f.invoke(f.owner, "task.create", "atomic-event-1", lateInput)
 	if faultCode(refusal) != contract.CodeInvalidInput {
 		t.Fatalf("task.create with a mismatched event scope: %v, want invalid_input", refusal)
@@ -153,7 +155,7 @@ func TestLateEventFailureRollsBackStateAndEvents(t *testing.T) {
 	// The same definition under its own scope commits state, run admission
 	// and events together.
 	created := f.must(f.owner, "task.create", "atomic-event-2", map[string]any{
-		"scope": narrow, "definition": taskDefinition(narrow, f.owner.PrincipalID, chief, unconfiguredCurrency),
+		"scope": narrow, "definition": f.taskDefinition(narrow, f.owner.PrincipalID, chief, unconfiguredCurrency),
 	})
 	after := f.observe()
 	if after.tasks != before.tasks+1 || after.events <= before.events {
@@ -266,4 +268,30 @@ func TestConcurrentDuplicateSubmissionsSerialize(t *testing.T) {
 		t.Fatalf("concurrent duplicates resolved to %d commands, want one: %v", len(commands), commands)
 	}
 	f.expectPrincipals("concurrent-agent")
+}
+
+// TestTaskDefinitionNamesPublishedCapabilityEvidence: the verifier profile
+// every fixture task pins names a capability-evidence artifact that really
+// exists, available and with the digest the profile carries, so admission's
+// _artifacts.metadata revalidation of the profile resolves it.
+func TestTaskDefinitionNamesPublishedCapabilityEvidence(t *testing.T) {
+	t.Parallel()
+	f := newBootstrappedFixture(t)
+	org, chief := f.rootOrganization()
+	scope := contract.Scope{InstallationID: f.installationID, OrganizationID: org}
+	def := f.taskDefinition(scope, f.owner.PrincipalID, chief, unconfiguredCurrency)
+	named := def["acceptance"].(map[string]any)["profile"].(map[string]any)["capability_evidence"].(map[string]any)["artifact"].(map[string]any)
+	res := f.must(f.owner, "artifact.get", "", map[string]any{"scope": f.scope(), "id": named["id"]})
+	var out struct {
+		Resource struct {
+			ID     contract.ID `json:"id"`
+			Digest string      `json:"digest"`
+			State  string      `json:"state"`
+		} `json:"resource"`
+	}
+	decode(t, res.Data, &out)
+	if out.Resource.ID != named["id"] || out.Resource.Digest != named["digest"] || out.Resource.State != "available" {
+		t.Fatalf("capability evidence %+v, the profile names %v", out.Resource, named)
+	}
+	f.must(f.owner, "task.create", "evidence-task", map[string]any{"scope": scope, "definition": def})
 }

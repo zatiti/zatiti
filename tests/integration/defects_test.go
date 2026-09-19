@@ -41,10 +41,16 @@ type planRef struct {
 	CandidateDigest string      `json:"candidate_digest"`
 }
 
-// stage runs one typed definition operation and returns its draft.
-func (f *fixture) stage(op, key string, definition map[string]any) draftRef {
+// stage runs one typed definition operation and returns its draft. input
+// carries the operation's top-level fields other than scope (definition,
+// and for organization.create the chief).
+func (f *fixture) stage(op, key string, input map[string]any) draftRef {
 	f.t.Helper()
-	staged := f.must(f.owner, op, key, map[string]any{"scope": f.scope(), "definition": definition})
+	full := map[string]any{"scope": f.scope()}
+	for k, v := range input {
+		full[k] = v
+	}
+	staged := f.must(f.owner, op, key, full)
 	var out struct {
 		Draft draftRef `json:"draft"`
 	}
@@ -103,9 +109,9 @@ func (f *fixture) apply(key string, plan planRef) (contract.Result, error) {
 // activate stages, plans, decides the plan's review and applies, the full
 // journey-1 "activate a plan" path. It returns the apply result or its
 // refusal.
-func (f *fixture) activate(label, op string, definition map[string]any) (contract.Result, error) {
+func (f *fixture) activate(label, op string, input map[string]any) (contract.Result, error) {
 	f.t.Helper()
-	draft := f.stage(op, label+"-stage", definition)
+	draft := f.stage(op, label+"-stage", input)
 	plan := f.plan(label+"-plan", draft)
 	f.decidePlanReview(label+"-decide", plan)
 	return f.apply(label+"-apply", plan)
@@ -120,7 +126,7 @@ func TestOwnerActivatesConfiguration(t *testing.T) {
 	f := newBootstrappedFixture(t)
 	org, _ := f.rootOrganization()
 	team := map[string]any{"organization_id": org, "key": "engineering", "name": "Engineering", "worker_ids": []string{}}
-	draft := f.stage("team.create", "activate-stage", team)
+	draft := f.stage("team.create", "activate-stage", map[string]any{"definition": team})
 	plan := f.plan("activate-plan", draft)
 	if n := f.count("team.list", map[string]any{"scope": f.scope()}); n != 0 {
 		t.Fatalf("a staged, unapplied team is already effective (%d teams)", n)

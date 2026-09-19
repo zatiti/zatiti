@@ -49,7 +49,7 @@ func (f *fixture) seedOrganizationState() (scope contract.Scope, task, event con
 	org, chief := f.rootOrganization()
 	scope = contract.Scope{InstallationID: f.installationID, OrganizationID: org}
 	created := f.must(f.owner, "task.create", "seed-task", map[string]any{
-		"scope": scope, "definition": taskDefinition(scope, f.owner.PrincipalID, chief, unconfiguredCurrency),
+		"scope": scope, "definition": f.taskDefinition(scope, f.owner.PrincipalID, chief, unconfiguredCurrency),
 	})
 	var t struct {
 		Resource struct {
@@ -139,7 +139,7 @@ func TestPrincipalWithoutGrantsReadsNothing(t *testing.T) {
 	}
 	// A refused caller also cannot mutate: no task appears in either scope.
 	_, err := f.invoke(foreign.actor, "task.create", "foreign-task", map[string]any{
-		"scope": scope, "definition": taskDefinition(scope, foreign.id, task, unconfiguredCurrency),
+		"scope": scope, "definition": f.taskDefinition(scope, foreign.id, task, unconfiguredCurrency),
 	})
 	if faultCode(err) != contract.CodePermissionDenied {
 		t.Errorf("foreign task.create: %v, want permission_denied", err)
@@ -161,18 +161,30 @@ func TestForeignOrganizationGrantDoesNotReachPeerOrganization(t *testing.T) {
 	f := newBootstrappedFixture(t)
 	scope, task, event, binding := f.seedOrganizationState()
 
-	_, err := f.activate("grant-policy", "policy.create", map[string]any{
+	_, err := f.activate("grant-policy", "policy.create", map[string]any{"definition": map[string]any{
 		"scope": f.scope(), "rules": []any{map[string]any{
 			"capability": "grant.create", "effect": "local", "destinations": []string{},
 			"decision": "allow", "human_required": false, "conditions": map[string]any{}}},
-	})
+	}})
 	if faultCode(err) == contract.CodeReviewRequired {
 		skipKnownDefect(t, reviewDeadlockCause, err.Error())
 	}
 	if err != nil {
 		t.Fatalf("activating the grant policy: %v", err)
 	}
-	created, err := f.activate("org-b", "organization.create", map[string]any{"key": "research", "name": "Research"})
+	// organization.create stages the organization and its designated chief
+	// as one bundle (frozen input requires scope, definition and chief). The
+	// chief is a real worker definition with no execution profile or limits,
+	// like the bootstrap chief: it exists and cannot run paid work.
+	created, err := f.activate("org-b", "organization.create", map[string]any{
+		"definition": map[string]any{"key": "research", "name": "Research"},
+		"chief": map[string]any{
+			"key": "research-chief", "name": "Research Chief",
+			"purpose":        "Chief of the research organization",
+			"instructions":   "Coordinate research tasks within the research organization only.",
+			"skill_versions": []any{}, "bindings": []string{}, "profile": nil, "limits": nil,
+		},
+	})
 	if err != nil {
 		t.Fatalf("activating organization B: %v", err)
 	}
