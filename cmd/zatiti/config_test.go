@@ -61,6 +61,41 @@ func TestFinalizeRejections(t *testing.T) {
 	}
 }
 
+// TestFinalizeRefusesLongSocketPath pins the early, named refusal of a
+// socket path the OS could not bind: the resolved path counts, after the
+// default and environment substitution, so a long state directory with the
+// default socket is refused too.
+func TestFinalizeRefusesLongSocketPath(t *testing.T) {
+	t.Parallel()
+	long := "/tmp/" + strings.Repeat("d", 100)
+	cases := []struct {
+		name string
+		cfg  config
+	}{
+		{"explicit socket", config{StateDir: "/tmp/s", SocketPath: long + "/z.sock", Profile: "owner"}},
+		{"default socket under a long state dir", config{StateDir: long, Profile: "owner"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			cfg := tc.cfg
+			err := cfg.finalize()
+			if err == nil {
+				t.Fatal("finalize accepted an unbindable socket path")
+			}
+			for _, want := range []string{"socket path", "bytes", "103", "--socket", "--state-dir"} {
+				if !strings.Contains(err.Error(), want) {
+					t.Fatalf("refusal %q does not name %q", err, want)
+				}
+			}
+		})
+	}
+	short := config{StateDir: "/tmp/s", Profile: "owner"}
+	if err := short.finalize(); err != nil {
+		t.Fatalf("a short default socket path was refused: %v", err)
+	}
+}
+
 func TestValidateServe(t *testing.T) {
 	t.Parallel()
 	cases := []struct {

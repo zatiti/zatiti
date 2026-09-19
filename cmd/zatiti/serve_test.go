@@ -21,6 +21,25 @@ import (
 // under the race detector on a loaded machine has taken over 30 seconds.
 const startupBudget = 120 * time.Second
 
+// exitBudget bounds every wait for serve to exit after its trigger (a
+// cancelled context, a lost lock, a refusal): a serve that does not exit is
+// a defect that must turn red in seconds, never hang to the package
+// timeout.
+const exitBudget = shutdownGrace + 10*time.Second
+
+// awaitExit waits for serve's verdict within exitBudget and fails with a
+// named message otherwise.
+func awaitExit(t *testing.T, done <-chan error, what string, logs *lockedBuffer) error {
+	t.Helper()
+	select {
+	case err := <-done:
+		return err
+	case <-time.After(exitBudget):
+		t.Fatalf("serve kept running for %s after %s; it must have exited (logs:\n%s)", exitBudget, what, logs.String())
+		return nil
+	}
+}
+
 // serveInBackground runs runServe and returns the result channel once the
 // socket is bound.
 func serveInBackground(t *testing.T, ctx context.Context, cfg config) (<-chan error, *lockedBuffer) {
@@ -67,12 +86,12 @@ func TestServeRestartsOnInitializedInstallation(t *testing.T) {
 		t.Fatalf("a restart must not complete bootstrap again (logs:\n%s)", logs.String())
 	}
 	cancel()
-	if err := <-done; err != nil {
+	if err := awaitExit(t, done, "context cancellation", logs); err != nil {
 		t.Fatalf("serve = %v on shutdown", err)
 	}
 }
 
-// TestServeRefusesUninitializedControllerPrincipalOverride: an explicit
+// TestServeRefusesUnknownControllerPrincipalOverride: an explicit
 // --controller-principal that identity does not know fails the controller
 // closed at its first internal call instead of scheduling as nobody.
 func TestServeRefusesUnknownControllerPrincipalOverride(t *testing.T) {
@@ -82,8 +101,10 @@ func TestServeRefusesUnknownControllerPrincipalOverride(t *testing.T) {
 	h.close()
 	cfg.ControllerPrincipal = string(contract.NewID())
 
-	logs := &lockedBuffer{}
-	err := runServe(context.Background(), cfg, newLogger(logs, slog.LevelInfo), serveOptions{pollInterval: 20 * time.Millisecond})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done, logs := serveInBackground(t, ctx, cfg)
+	err := awaitExit(t, done, "an unknown --controller-principal that the controller must refuse", logs)
 	if faultCode(err) != contract.CodePermissionDenied {
 		t.Fatalf("serve = %v, want permission_denied for an unknown controller principal (logs:\n%s)", err, logs.String())
 	}
@@ -95,15 +116,10 @@ func TestServeRefusesUnknownControllerPrincipalOverride(t *testing.T) {
 func TestServeStopsOnContextCancel(t *testing.T) {
 	cfg := serveConfig(t)
 	ctx, cancel := context.WithCancel(context.Background())
-	done, _ := serveInBackground(t, ctx, cfg)
+	done, logs := serveInBackground(t, ctx, cfg)
 	cancel()
-	select {
-	case err := <-done:
-		if err != nil {
-			t.Fatalf("serve = %v, want nil on orderly shutdown", err)
-		}
-	case <-time.After(shutdownGrace + 5*time.Second):
-		t.Fatal("serve did not stop after cancel")
+	if err := awaitExit(t, done, "context cancellation", logs); err != nil {
+		t.Fatalf("serve = %v, want nil on orderly shutdown", err)
 	}
 	if _, err := os.Stat(cfg.SocketPath); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("socket not removed on shutdown: %v", err)
@@ -121,13 +137,8 @@ func TestServeStopsWhenOwnershipIsLost(t *testing.T) {
 	if err := os.Remove(filepath.Join(cfg.StateDir, "controller.lock")); err != nil {
 		t.Fatalf("removing the lock file: %v", err)
 	}
-	select {
-	case err := <-done:
-		if faultCode(err) != contract.CodeControllerUnavailable {
-			t.Fatalf("serve = %v, want controller_unavailable after lock loss (logs:\n%s)", err, logs.String())
-		}
-	case <-time.After(10 * time.Second):
-		t.Fatalf("serve kept running after lock loss (logs:\n%s)", logs.String())
+	if err := awaitExit(t, done, "lock loss", logs); faultCode(err) != contract.CodeControllerUnavailable {
+		t.Fatalf("serve = %v, want controller_unavailable after lock loss (logs:\n%s)", err, logs.String())
 	}
 }
 
@@ -195,7 +206,7 @@ func TestServeCompletesBootstrapOverTheSocket(t *testing.T) {
 		t.Fatalf("controller did not start after bootstrap (logs:\n%s)", logs.String())
 	}
 	cancel()
-	if err := <-done; err != nil {
+	if err := awaitExit(t, done, "context cancellation", logs); err != nil {
 		t.Fatalf("serve = %v on shutdown", err)
 	}
 }

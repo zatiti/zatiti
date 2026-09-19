@@ -36,8 +36,19 @@ func TestEndToEndBinary(t *testing.T) {
 	stateDir := filepath.Join(root, "state")
 	socket := filepath.Join(root, "s.sock")
 	masterKey := writeMasterKey(t, root)
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	// The budget covers a build plus a dozen real subprocesses under the
+	// race detector on a loaded machine; the lead's landing runs the module
+	// with a 25-minute package timeout and this must fit well inside it.
+	serveLog := &lockedBuffer{}
+	ctx, cancel := context.WithTimeout(context.Background(), endToEndBudget)
 	defer cancel()
+	started := time.Now()
+	step := func(name string) {
+		t.Helper()
+		if ctx.Err() != nil {
+			t.Fatalf("end-to-end budget of %s exceeded at step %q after %s\nserve log:\n%s", endToEndBudget, name, time.Since(started).Round(time.Second), serveLog.String())
+		}
+	}
 
 	// A credential must never arrive through the environment: the CLI
 	// subprocesses get only the configuration variables.
@@ -48,7 +59,6 @@ func TestEndToEndBinary(t *testing.T) {
 
 	serve := exec.CommandContext(ctx, bin, "serve", "--credential-backend", "headless", "--master-key", masterKey, "--tick-interval", "100ms")
 	serve.Env = env
-	serveLog := &lockedBuffer{}
 	serve.Stdout = &failOnWrite{t: t, name: "serve stdout"}
 	serve.Stderr = serveLog
 	if err := serve.Start(); err != nil {
@@ -72,11 +82,13 @@ func TestEndToEndBinary(t *testing.T) {
 	})
 
 	cli := func(args ...string) cliResult {
+		step("zatiti " + strings.Join(args, " "))
 		cmd := exec.CommandContext(ctx, bin, args...)
 		cmd.Env = env
 		var out, errb bytes.Buffer
 		cmd.Stdout, cmd.Stderr = &out, &errb
 		err := cmd.Run()
+		step("zatiti " + strings.Join(args, " ") + " (exit)")
 		code := 0
 		var exit *exec.ExitError
 		if errors.As(err, &exit) {
@@ -146,6 +158,7 @@ func TestEndToEndBinary(t *testing.T) {
 		t.Fatalf("unknown profile: exit %d %s", r.code, r.err)
 	}
 
+	step("mcp serve")
 	// 4. MCP over stdio with the official client: a second controller is
 	// never started, tools are the catalog, a call is the same operation.
 	mcpCmd := exec.CommandContext(ctx, bin, "mcp", "serve")
@@ -193,6 +206,7 @@ func TestEndToEndBinary(t *testing.T) {
 		t.Fatalf("mcp diagnostics leaked a credential: %s", mcpLog.String())
 	}
 
+	step("SIGTERM shutdown")
 	// 5. Signal shutdown: serve exits 0 and removes its socket.
 	if err := serve.Process.Signal(syscall.SIGTERM); err != nil {
 		t.Fatalf("signalling serve: %v", err)
@@ -213,6 +227,9 @@ func TestEndToEndBinary(t *testing.T) {
 		t.Fatalf("serve log lacks the bootstrap and controller lines:\n%s", log)
 	}
 }
+
+// endToEndBudget bounds the whole binary journey.
+const endToEndBudget = 8 * time.Minute
 
 // cliResult is one CLI subprocess outcome.
 type cliResult struct {

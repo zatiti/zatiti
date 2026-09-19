@@ -28,6 +28,10 @@ const (
 	profilesDirName    = "profiles"
 	adaptersDirName    = "adapters"
 	defaultMaxBodySize = 2 << 20 // artifact.upload.chunk's 2 MiB encoded cap
+	// maxSocketPathBytes is the Unix-domain sun_path bound (104 bytes on
+	// darwin, 108 on Linux, NUL included); a longer path fails at bind time
+	// with an unactionable "invalid argument", so it is refused by name here.
+	maxSocketPathBytes = 104
 	defaultTimeout     = 60 * time.Second
 	shutdownGrace      = 15 * time.Second
 )
@@ -112,6 +116,10 @@ func (c *config) finalize() error {
 			return fmt.Errorf("resolving socket path: %w", err)
 		}
 		c.SocketPath = abs
+	}
+	if len(c.SocketPath) >= maxSocketPathBytes {
+		return fmt.Errorf("socket path %q is %d bytes; Unix sockets allow at most %d including the terminator: pass a shorter --socket (or %s) or a shorter --state-dir",
+			c.SocketPath, len(c.SocketPath), maxSocketPathBytes-1, envSocket)
 	}
 	if err := validateProfileName(c.Profile); err != nil {
 		return err

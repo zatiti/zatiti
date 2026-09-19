@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -16,7 +17,12 @@ import (
 func execRun(t *testing.T, args []string, opts runOptions) (int, string, string) {
 	t.Helper()
 	if opts.env == nil {
-		opts.env = mapEnv(map[string]string{envStateDir: filepath.Join(t.TempDir(), "state")})
+		// t.TempDir paths exceed the socket length bound on macOS; the socket
+		// is never bound by these tests but its resolved path is validated.
+		opts.env = mapEnv(map[string]string{
+			envStateDir: filepath.Join(t.TempDir(), "state"),
+			envSocket:   filepath.Join(shortTempDir(t), "s.sock"),
+		})
 	}
 	if opts.catalog == nil {
 		opts.catalog = syntheticCatalog
@@ -136,5 +142,26 @@ func TestMCPBootstrapEnderRefusesOtherOperations(t *testing.T) {
 	}
 	if !ended || !e.completed() {
 		t.Fatal("completed bootstrap did not end the session")
+	}
+}
+
+// TestServeRefusesUnbindableSocketPathBeforeAssembly: a socket path the OS
+// cannot bind is refused by name before any storage or assembly work, with
+// the resolved path, its length and the remedy in the diagnostic.
+func TestServeRefusesUnbindableSocketPathBeforeAssembly(t *testing.T) {
+	long := filepath.Join(t.TempDir(), strings.Repeat("d", 100))
+	code, out, errb := execRun(t, []string{"serve", "--credential-backend", "headless", "--master-key", "file:/nonexistent"}, runOptions{
+		env: mapEnv(map[string]string{envStateDir: long}),
+	})
+	if code != 2 || out != "" {
+		t.Fatalf("exit %d out %q err %q", code, out, errb)
+	}
+	for _, want := range []string{"socket path", strconv.Itoa(len(filepath.Join(long, socketFileName))), "--socket", "--state-dir"} {
+		if !strings.Contains(errb, want) {
+			t.Fatalf("diagnostic %q does not name %q", errb, want)
+		}
+	}
+	if strings.Contains(errb, "installation opened") || strings.Contains(errb, "adapter") {
+		t.Fatalf("assembly ran before the socket path refusal: %q", errb)
 	}
 }
