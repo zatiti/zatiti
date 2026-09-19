@@ -5,7 +5,6 @@ go 1.26.0
 toolchain go1.26.2
 
 require (
-	fyne.io/fyne/v2 v2.8.1
 	github.com/modelcontextprotocol/go-sdk v1.7.0
 	github.com/spf13/cobra v1.10.2
 	modernc.org/sqlite v1.58.0

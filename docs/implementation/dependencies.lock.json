@@ -3,9 +3,9 @@
   "module": "github.com/zatiti/zatiti",
   "go_directive": "1.26.0",
   "toolchain": "go1.26.2",
-  "recorded": "2026-09-09",
+  "recorded": "2026-09-19",
   "owner": "integration (serialized root-file exception per ADR 001)",
-  "scope_note": "Dependency resolution and upstream qualification only. This file records resolved pins and observed evidence; it does not claim upstream behavior beyond what was executed. Regenerate via the named commands when changing any pin; do not edit go.mod pins independently of this report.",
+  "scope_note": "Dependency resolution and upstream qualification only. This file records resolved pins and observed evidence; it does not claim upstream behavior beyond what was executed. Regenerate via the named commands when changing any pin; do not edit go.mod pins independently of this report. fyne.io/fyne/v2 was removed on 2026-09-19: ADR 002 replaced the native Go desktop with the Flutter client at apps/desktop, retiring internal/desktop and cmd/zatiti-desktop, so nothing imported it. The root anchor file tools_deps.go was deleted with it, since cobra, the MCP Go SDK and modernc.org/sqlite are now imported by real package source and go mod tidy keeps them on its own. Dropping it also removed its transitive testify, go-spew, go-difflib and yaml.v3.",
   "direct_modules": [
     {
       "module": "github.com/spf13/cobra",
@@ -36,21 +36,6 @@
         "gaps": [
           "Negotiation may land on 2026-07-28 when the client offers it; internal/mcp must pin the offered/requested version to 2025-11-25 if strict single-version operation is wanted, and must verify _meta behaviors that branch on the higher version.",
           "Optional extensions (sampling/elicitation/resources/prompts/task) are present in the SDK but disabled during qualification per the internal/mcp brief; leaving them unconfigured is the adapter's responsibility, not the SDK's default in every path."
-        ]
-      }
-    },
-    {
-      "module": "fyne.io/fyne/v2",
-      "version": "v2.8.1",
-      "sum": "h1:EztGuE2W3Qhd0cWVmU+h5rkzNezUD1To6UqsoLQYUIM=",
-      "license": "BSD-3-Clause",
-      "role": "Native Go desktop workspace (internal/desktop, cmd/zatiti-desktop)",
-      "qualified": true,
-      "protocol": {
-        "evidence": "Minimal Fyne program compiled AND linked on darwin/amd64 with Apple clang 17.0.0, CGO_ENABLED=1, go1.26.2 (cgo windowing toolchain exercised end to end). Build-only proof; no GUI behavior executed.",
-        "gaps": [
-          "darwin/arm64 untested on this machine (darwin/amd64 host); CI or qualification must cover the release targets.",
-          "Real GUI/platform journeys are tests/qualification scope, not this report."
         ]
       }
     },
