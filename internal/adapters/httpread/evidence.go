@@ -3,35 +3,69 @@ package httpread
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"net/http"
+	"sort"
 
 	"github.com/zatiti/zatiti/internal/contract"
 )
 
-// requestContextRef returns the ArtifactRef PhysicalCallEvidence.request_context
-// carries.
-//
-// KNOWN CONTRACT GAP (already identified by the github adapter package,
-// internal/adapters/github/evidence.go): request_context is typed as a bare
-// ArtifactRef (id+digest), which only exists once the artifacts domain has
-// minted a durable UUID for published bytes. An adapter has no IDSource,
-// cannot mint artifact IDs ("The adapter cannot mint artifact IDs" -- shared
-// foundation contract), and BlobStore.Stage/Publish never return one
-// either. There is therefore no way for this package, using only its
-// declared AdapterDependencies, to honestly produce a fresh, durable
-// ArtifactRef for the request bytes it builds synchronously inside
-// Invoke/Reconcile (here, simply the GET's requested URL and headers).
-// Fabricating a locally-minted UUID would produce a schema-shaped but
-// dangling reference -- exactly the "fake success" the implementation
-// assignment forbids.
-//
-// Following the same precedent the github package established, this
-// package uses the one durable, non-fabricated ArtifactRef it legitimately
-// holds at call time: the profile's own capability_evidence.artifact. That
-// is not a claim that this artifact contains the literal request bytes; it
-// is the least-misleading value available under the current contract. See
-// this package's delivery report for the integration lead.
-func requestContextRef(profile *httpreadProfile) wireArtifactRef {
-	return profile.CapabilityEvidence.Artifact
+// requestRecord is the exact secret-free record of the one GET this adapter
+// is about to send: method, requested URL, the headers as sent (action
+// validation already excludes Authorization, Cookie and raw credentials, so
+// nothing here is redacted after the fact) and the validated address the
+// connection is pinned to. It is staged before any request byte is written
+// and named by physical_call.request_context.
+type requestRecord struct {
+	Schema        string           `json:"schema"`
+	Method        string           `json:"method"`
+	URL           string           `json:"url"`
+	Headers       []wireReadHeader `json:"headers"`
+	PinnedAddress string           `json:"pinned_address"`
+}
+
+const requestRecordSchema = "zatiti.httpread.request/v1"
+
+// stageRequestRecord stages the request record and returns the staged
+// locator physical_call.request_context carries together with its one
+// matching StagedOutput (purpose context). Unlike the response body, this
+// staging is not best-effort: the shared contract requires the request
+// record to be persisted before sending, so a nil BlobStore or a Stage
+// failure is a fault and the caller must send nothing.
+func stageRequestRecord(ctx context.Context, blobs contract.BlobStore, req *http.Request, record requestRecord) (wireArtifactLocator, wireStagedOutput, error) {
+	if blobs == nil {
+		return wireArtifactLocator{}, wireStagedOutput{}, prerequisiteMissing("httpread adapter requires a blob store dependency to stage the request record before sending")
+	}
+	for name, values := range req.Header {
+		for _, v := range values {
+			record.Headers = append(record.Headers, wireReadHeader{Name: name, Value: v})
+		}
+	}
+	sort.Slice(record.Headers, func(i, j int) bool {
+		if record.Headers[i].Name == record.Headers[j].Name {
+			return record.Headers[i].Value < record.Headers[j].Value
+		}
+		return record.Headers[i].Name < record.Headers[j].Name
+	})
+	if record.Headers == nil {
+		record.Headers = []wireReadHeader{}
+	}
+	data, err := json.Marshal(record)
+	if err != nil {
+		return wireArtifactLocator{}, wireStagedOutput{}, internalError("encoding httpread request record failed: %v", err)
+	}
+	stagingRef, digest, size, err := blobs.Stage(ctx, bytes.NewReader(data), int64(len(data)))
+	if err != nil {
+		return wireArtifactLocator{}, wireStagedOutput{}, blobFault(err)
+	}
+	return wireArtifactLocator{Kind: "staged", StagingRef: stagingRef, Digest: digest}, wireStagedOutput{
+		StagingRef:     stagingRef,
+		Digest:         digest,
+		Size:           size,
+		MediaType:      "application/json",
+		Classification: "internal",
+		Purpose:        "context",
+	}, nil
 }
 
 // noChargeUsage is the ProviderUsage this adapter reports: a bounded public

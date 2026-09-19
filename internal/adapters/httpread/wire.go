@@ -64,23 +64,34 @@ type wireHTTPReadParameters struct {
 
 // ---------- evidence (Observation.Evidence) body ----------
 
+// wireArtifactLocator is the ArtifactLocator oneOf: kind "staged" names
+// bytes this adapter staged (staging_ref + digest) and kind "artifact" a
+// published ArtifactRef. This adapter only ever emits the staged variant,
+// for the request record it stages before sending.
+type wireArtifactLocator struct {
+	Kind       string           `json:"kind"`
+	Artifact   *wireArtifactRef `json:"artifact,omitempty"`
+	StagingRef string           `json:"staging_ref,omitempty"`
+	Digest     contract.Digest  `json:"digest,omitempty"`
+}
+
 type wirePhysicalCallEvidence struct {
-	OperationID          contract.ID     `json:"operation_id"`
-	AttemptID            contract.ID     `json:"attempt_id"`
-	AccountIdentity      string          `json:"account_identity"`
-	RequestedDestination string          `json:"requested_destination"`
-	ResolvedDestination  string          `json:"resolved_destination"`
-	ProfileDigest        contract.Digest `json:"profile_digest"`
-	CapabilityEvidence   wireArtifactRef `json:"capability_evidence"`
-	StartedAt            time.Time       `json:"started_at"`
-	FinishedAt           time.Time       `json:"finished_at"`
-	RequestContext       wireArtifactRef `json:"request_context"`
-	RequestSent          string          `json:"request_sent"`
-	Confirmation         string          `json:"confirmation"`
-	HTTPStatus           int64           `json:"http_status,omitempty"`
-	ProviderReference    string          `json:"provider_reference,omitempty"`
-	ErrorCode            string          `json:"error_code,omitempty"`
-	ErrorMessage         string          `json:"error_message,omitempty"`
+	OperationID          contract.ID         `json:"operation_id"`
+	AttemptID            contract.ID         `json:"attempt_id"`
+	AccountIdentity      string              `json:"account_identity"`
+	RequestedDestination string              `json:"requested_destination"`
+	ResolvedDestination  string              `json:"resolved_destination"`
+	ProfileDigest        contract.Digest     `json:"profile_digest"`
+	CapabilityEvidence   wireArtifactRef     `json:"capability_evidence"`
+	StartedAt            time.Time           `json:"started_at"`
+	FinishedAt           time.Time           `json:"finished_at"`
+	RequestContext       wireArtifactLocator `json:"request_context"`
+	RequestSent          string              `json:"request_sent"`
+	Confirmation         string              `json:"confirmation"`
+	HTTPStatus           int64               `json:"http_status,omitempty"`
+	ProviderReference    string              `json:"provider_reference,omitempty"`
+	ErrorCode            string              `json:"error_code,omitempty"`
+	ErrorMessage         string              `json:"error_message,omitempty"`
 }
 
 type wireRationalRate struct {

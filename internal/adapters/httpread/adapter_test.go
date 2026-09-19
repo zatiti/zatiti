@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/zatiti/zatiti/internal/contract"
@@ -205,12 +206,16 @@ func TestInvoke_Succeeds(t *testing.T) {
 	if ev.ContentSize == nil || *ev.ContentSize != int64(len(body)) {
 		t.Errorf("content_size = %v", ev.ContentSize)
 	}
-	if len(ev.StagedOutputs) != 1 {
-		t.Fatalf("staged_outputs = %v, want exactly one", ev.StagedOutputs)
+	if len(ev.StagedOutputs) != 2 {
+		t.Fatalf("staged_outputs = %v, want the request record and the body", ev.StagedOutputs)
 	}
-	if ev.StagedOutputs[0].Purpose != "public_source" || ev.StagedOutputs[0].Classification != "public" {
-		t.Errorf("staged output = %+v", ev.StagedOutputs[0])
+	if ev.StagedOutputs[0].Purpose != "context" {
+		t.Errorf("first staged output = %+v, want the request record", ev.StagedOutputs[0])
 	}
+	if ev.StagedOutputs[1].Purpose != "public_source" || ev.StagedOutputs[1].Classification != "public" {
+		t.Errorf("second staged output = %+v", ev.StagedOutputs[1])
+	}
+	assertRequestContext(t, blobs, ev, "https://example.test/data", "93.184.216.34:443")
 	if ev.PhysicalCall.Confirmation != "authoritative_success" {
 		t.Errorf("confirmation = %q", ev.PhysicalCall.Confirmation)
 	}
@@ -226,8 +231,8 @@ func TestInvoke_Succeeds(t *testing.T) {
 	if len(ev.ValidatedDialAddresses) != 1 || ev.ValidatedDialAddresses[0] != "93.184.216.34" {
 		t.Errorf("validated_dial_addresses = %v", ev.ValidatedDialAddresses)
 	}
-	if blobs.stagedCount() != 1 {
-		t.Errorf("staged count = %d, want exactly 1 (no hidden retry)", blobs.stagedCount())
+	if blobs.stagedCount() != 2 {
+		t.Errorf("staged count = %d, want exactly 2: request record and body (no hidden retry)", blobs.stagedCount())
 	}
 	if transport.count() != 1 {
 		t.Errorf("physical calls = %d, want exactly 1 (Z06 no hidden retries)", transport.count())
@@ -355,8 +360,8 @@ func TestInvoke_MaxBytesExceeded(t *testing.T) {
 	if ev.ContentDigest != "" {
 		t.Error("expected no content_digest to be recorded for a bound-violating body")
 	}
-	if len(ev.StagedOutputs) != 0 {
-		t.Error("expected no staged output for a bound-violating body")
+	if len(ev.StagedOutputs) != 1 || ev.StagedOutputs[0].Purpose != "context" {
+		t.Errorf("staged_outputs = %v, want only the request record for a bound-violating body", ev.StagedOutputs)
 	}
 }
 
@@ -553,5 +558,122 @@ func TestInvoke_ProductionAdapterRefusesLoopback(t *testing.T) {
 	}
 	if f := mustFault(t, err); f.Code != contract.CodePermissionDenied {
 		t.Errorf("fault code = %q, want permission_denied", f.Code)
+	}
+}
+
+// assertRequestContext checks physical_call.request_context is a staged
+// locator matching exactly one StagedOutput of purpose context, and that the
+// staged bytes are the request record actually sent: method, URL, headers as
+// sent and the pinned dial address, with no credential carrier.
+func assertRequestContext(t *testing.T, blobs *fakeBlobStore, ev wireHTTPReadEvidence, url, pinned string) {
+	t.Helper()
+	rc := ev.PhysicalCall.RequestContext
+	if rc.Kind != "staged" || rc.Artifact != nil || rc.StagingRef == "" || rc.Digest == "" {
+		t.Fatalf("request_context = %+v, want a staged locator", rc)
+	}
+	matches := 0
+	for _, so := range ev.StagedOutputs {
+		if so.StagingRef == rc.StagingRef {
+			matches++
+			if so.Digest != rc.Digest || so.Purpose != "context" || so.MediaType != "application/json" {
+				t.Errorf("staged output for the request context = %+v", so)
+			}
+		}
+	}
+	if matches != 1 {
+		t.Fatalf("request_context matches %d staged outputs, want exactly 1", matches)
+	}
+	body, err := blobs.Open(context.Background(), rc.Digest, 0, 0)
+	if err != nil {
+		t.Fatalf("open staged request record: %v", err)
+	}
+	var record requestRecord
+	if err := json.NewDecoder(body).Decode(&record); err != nil {
+		t.Fatalf("decode staged request record: %v", err)
+	}
+	if record.Schema != requestRecordSchema || record.Method != "GET" || record.URL != url || record.PinnedAddress != pinned {
+		t.Errorf("request record = %+v", record)
+	}
+	sawUserAgent := false
+	for _, h := range record.Headers {
+		if h.Name == "Authorization" || h.Name == "Cookie" {
+			t.Errorf("request record carries a credential header %q", h.Name)
+		}
+		if h.Name == "User-Agent" {
+			sawUserAgent = true
+		}
+	}
+	if !sawUserAgent {
+		t.Errorf("request record omits the User-Agent header actually sent: %+v", record.Headers)
+	}
+}
+
+func TestInvoke_RequestRecordCarriesHeadersAsSent(t *testing.T) {
+	var sent http.Header
+	blobs := newFakeBlobStore()
+	a := newTestAdapter(t, roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		sent = req.Header.Clone()
+		return jsonResponse(200, "application/json", `{}`), nil
+	}), blobs, fixedLookup("93.184.216.34"), defaultProfileJSON(t, "https://example.test", "application/json"))
+	d := testDispatch(t, readAction("https://example.test/data", "application/json",
+		wireReadHeader{Name: "Accept-Language", Value: "en"}, wireReadHeader{Name: "If-None-Match", Value: `"v1"`}))
+	obs, err := a.Invoke(context.Background(), d)
+	if err != nil {
+		t.Fatalf("Invoke: %v", err)
+	}
+	var ev wireHTTPReadEvidence
+	_ = json.Unmarshal(obs.Evidence, &ev)
+	assertRequestContext(t, blobs, ev, "https://example.test/data", "93.184.216.34:443")
+	body, _ := blobs.Open(context.Background(), ev.PhysicalCall.RequestContext.Digest, 0, 0)
+	var record requestRecord
+	_ = json.NewDecoder(body).Decode(&record)
+	got := http.Header{}
+	for _, h := range record.Headers {
+		got.Add(h.Name, h.Value)
+	}
+	for name, values := range sent {
+		if strings.Join(got.Values(name), ",") != strings.Join(values, ",") {
+			t.Errorf("record header %s = %v, sent %v", name, got.Values(name), values)
+		}
+	}
+	if len(got) != len(sent) {
+		t.Errorf("record has %d headers, sent %d", len(got), len(sent))
+	}
+}
+
+func TestInvoke_RequestRecordStagingFailureSendsNothing(t *testing.T) {
+	transport := &countingTransport{fn: func(*http.Request) (*http.Response, error) {
+		return jsonResponse(200, "application/json", `{}`), nil
+	}}
+	blobs := newFakeBlobStore()
+	blobs.stageErr = errors.New("disk full")
+	a := newTestAdapter(t, transport, blobs, fixedLookup("93.184.216.34"), defaultProfileJSON(t, "https://example.test", "application/json"))
+	d := testDispatch(t, readAction("https://example.test/data", "application/json"))
+	obs, err := a.Invoke(context.Background(), d)
+	f := mustFault(t, err)
+	if f.Code != contract.CodeInternalError || strings.Contains(f.Message, "disk full") {
+		t.Errorf("fault = %+v, want an internal_error that does not leak the store's message", f)
+	}
+	if obs.Evidence != nil || obs.Disposition != "" {
+		t.Errorf("a refusal must carry no observation: %+v", obs)
+	}
+	if transport.count() != 0 {
+		t.Errorf("physical calls = %d, want 0: nothing is sent when the request record cannot be staged", transport.count())
+	}
+}
+
+func TestInvoke_NoBlobStoreSendsNothing(t *testing.T) {
+	transport := &countingTransport{fn: func(*http.Request) (*http.Response, error) {
+		return jsonResponse(200, "application/json", `{}`), nil
+	}}
+	a := newTestAdapter(t, transport, nil, fixedLookup("93.184.216.34"), defaultProfileJSON(t, "https://example.test", "application/json"))
+	d := testDispatch(t, readAction("https://example.test/data", "application/json"))
+	_, err := a.Invoke(context.Background(), d)
+	f := mustFault(t, err)
+	if f.Code != contract.CodePrerequisiteMissing {
+		t.Errorf("fault code = %q, want prerequisite_missing", f.Code)
+	}
+	if transport.count() != 0 {
+		t.Errorf("physical calls = %d, want 0", transport.count())
 	}
 }

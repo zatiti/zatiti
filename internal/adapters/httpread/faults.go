@@ -30,6 +30,10 @@ func capabilityUnsupported(format string, args ...any) *contract.Fault {
 	return fault(contract.CodeCapabilityUnsupported, format, args...)
 }
 
+func prerequisiteMissing(format string, args ...any) *contract.Fault {
+	return fault(contract.CodePrerequisiteMissing, format, args...)
+}
+
 func internalError(format string, args ...any) *contract.Fault {
 	return fault(contract.CodeInternalError, format, args...)
 }

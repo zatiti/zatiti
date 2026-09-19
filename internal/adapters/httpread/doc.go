@@ -16,12 +16,20 @@
 // redirect_location, so a caller wanting the redirected resource issues a
 // new, explicit read action for it.
 //
+// Before any request byte is written, the adapter stages the exact
+// secret-free request record (method, URL, headers as sent, pinned dial
+// address) through the BlobStore and names it in
+// physical_call.request_context as a staged ArtifactLocator, with one
+// matching StagedOutput of purpose context in the same observation. The
+// controller publishes it; this package never mints an ArtifactRef and never
+// substitutes an unrelated artifact for the request record.
+//
 // Return convention: Invoke and Reconcile return a non-nil error (always a
 // *contract.Fault) when the physical HTTP request was never sent -- an
 // invalid profile/action, a destination outside the profile's allowed
 // origins/media types, a destination that resolves to a disallowed address,
-// or any transport failure that occurs before an HTTP response line is
-// received. This package's own evidence schema (unlike a sibling mutation
+// a request record that could not be staged before sending, or any
+// transport failure that occurs before an HTTP response line is received. This package's own evidence schema (unlike a sibling mutation
 // adapter's) requires a real HTTP status on every recorded evidence
 // document, so a failure with no status to honestly report is never encoded
 // as a fabricated Observation; because a GET has no side effect to protect,

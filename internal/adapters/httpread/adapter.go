@@ -127,8 +127,9 @@ func buildContractDocument() (json.RawMessage, error) {
 // physical HTTP GET: no hidden retry, no unaccounted preflight read. A
 // non-nil error means no physical request was sent -- invalid input, a
 // destination outside the profile's allowed origins/media types, a
-// destination resolving only to disallowed addresses, or a transport
-// failure before any response line arrived (see classifyPreResponseFailure
+// destination resolving only to disallowed addresses, a request record that
+// could not be staged before sending, or a transport failure before any
+// response line arrived (see classifyPreResponseFailure
 // and this package's doc.go for why the latter cannot be reported as an
 // Observation). Once a response line is received, the outcome is always
 // reported through Observation with a nil error.
@@ -185,6 +186,15 @@ func (a *Adapter) call(ctx context.Context, dispatch contract.Dispatch) (contrac
 		req.Header.Set("User-Agent", defaultUserAgent)
 	}
 
+	// The exact request record is persisted before any request byte is
+	// written; if it cannot be, nothing is sent.
+	requestContext, requestStaged, err := stageRequestRecord(ctx, a.deps.Blobs, req, requestRecord{
+		Schema: requestRecordSchema, Method: http.MethodGet, URL: act.URL, PinnedAddress: pinnedAddr,
+	})
+	if err != nil {
+		return contract.Observation{}, err
+	}
+
 	started := a.deps.Clock.Now()
 	resp, doErr := a.client.Do(req)
 	if doErr != nil {
@@ -201,7 +211,7 @@ func (a *Adapter) call(ctx context.Context, dispatch contract.Dispatch) (contrac
 		ProfileDigest:        a.profile.Digest,
 		CapabilityEvidence:   a.profile.CapabilityEvidence.Artifact,
 		StartedAt:            started,
-		RequestContext:       requestContextRef(a.profile),
+		RequestContext:       requestContext,
 		RequestSent:          "yes",
 		HTTPStatus:           int64(resp.StatusCode),
 	}
@@ -214,8 +224,8 @@ func (a *Adapter) call(ctx context.Context, dispatch contract.Dispatch) (contrac
 		Status:                 int64(resp.StatusCode),
 		MediaType:              parseMediaType(resp.Header.Get("Content-Type")),
 		Usage:                  noChargeUsage(),
-		StagedOutputs:          []wireStagedOutput{},
-		OutputArtifacts:        []wireArtifactRef{}, // the adapter cannot mint artifact IDs; see requestContextRef
+		StagedOutputs:          []wireStagedOutput{requestStaged}, // the request record; the controller publishes it
+		OutputArtifacts:        []wireArtifactRef{},               // the adapter cannot mint artifact IDs
 		ETag:                   resp.Header.Get("ETag"),
 		LastModified:           resp.Header.Get("Last-Modified"),
 	}
@@ -316,7 +326,7 @@ func (a *Adapter) recordBoundedRead(ctx context.Context, act *action, physical w
 		return contract.Observation{}, stageErr
 	}
 	if staged != nil {
-		base.StagedOutputs = []wireStagedOutput{*staged}
+		base.StagedOutputs = append(base.StagedOutputs, *staged)
 	}
 
 	built, evErr := a.buildEvidence(physical, base)
