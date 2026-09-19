@@ -1166,45 +1166,13 @@
       "$schema": "https://json-schema.org/draft/2020-12/schema"
     },
     "ResponsesParameters": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "schema": {
-          "const": "zatiti.responses.action/v1",
-          "type": "string"
+      "oneOf": [
+        {
+          "$ref": "#/$defs/ResponsesPrepareSessionParameters"
         },
-        "kind": {
-          "const": "model_step",
-          "type": "string"
-        },
-        "context_artifact": {
-          "$ref": "#/$defs/ArtifactRef"
-        },
-        "max_output_tokens": {
-          "type": "integer",
-          "minimum": 1,
-          "maximum": 1000000
-        },
-        "tool_contract_versions": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/VersionRef"
-          },
-          "minItems": 0,
-          "maxItems": 256
-        },
-        "continuation_reference": {
-          "type": "string",
-          "minLength": 0,
-          "maxLength": 1024
+        {
+          "$ref": "#/$defs/ResponsesModelStepParameters"
         }
-      },
-      "required": [
-        "schema",
-        "kind",
-        "context_artifact",
-        "max_output_tokens",
-        "tool_contract_versions"
       ],
       "$schema": "https://json-schema.org/draft/2020-12/schema"
     },
@@ -1218,6 +1186,11 @@
         },
         "physical_call": {
           "$ref": "#/$defs/PhysicalCallEvidence"
+        },
+        "session_handle": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
         },
         "response_id": {
           "type": "string",
@@ -1247,10 +1220,8 @@
       "required": [
         "schema",
         "physical_call",
-        "response_id",
-        "output",
-        "staged_outputs",
-        "output_artifacts"
+        "session_handle",
+        "staged_outputs"
       ],
       "$schema": "https://json-schema.org/draft/2020-12/schema"
     },
@@ -3717,6 +3688,74 @@
         "key_prerequisites"
       ],
       "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "ResponsesPrepareSessionParameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema": {
+          "const": "zatiti.responses.action/v1",
+          "type": "string"
+        },
+        "kind": {
+          "const": "prepare_session",
+          "type": "string"
+        }
+      },
+      "required": [
+        "schema",
+        "kind"
+      ],
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "ResponsesModelStepParameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema": {
+          "const": "zatiti.responses.action/v1",
+          "type": "string"
+        },
+        "kind": {
+          "const": "model_step",
+          "type": "string"
+        },
+        "session_handle": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "context_artifact": {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        "max_output_tokens": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000000
+        },
+        "tool_contract_versions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/VersionRef"
+          },
+          "minItems": 0,
+          "maxItems": 256
+        },
+        "continuation_reference": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 1024
+        }
+      },
+      "required": [
+        "schema",
+        "kind",
+        "session_handle",
+        "context_artifact",
+        "max_output_tokens",
+        "tool_contract_versions"
+      ],
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
     }
   },
   "adapter_mapping": {
@@ -3762,6 +3801,7 @@
     "Verification profiles are installation-owned and pinned before task execution. command_id, runner_profile and environment_profile resolve only to prequalified local verifiers; no request supplies executable paths or argv. ArtifactVerifierProfile runs presence/digest/schema checks; RepositoryVerifierProfile runs the pinned controlled patch/check profile outside Unit. A worker cannot alter profile bytes, accepted inputs or result authority.",
     "VerificationResult.independent=true is necessary structure, not trust evidence: only the trusted runner may submit that result through its internal admission identity. Match task/attempt, acceptance digest, verifier identity/version/digest and request artifact before accepting. Passed requires all sealed expected checks observed as required; unavailable, interrupted, worker assertion and process exit zero alone cannot succeed a task. Manual acceptance uses the separate task operation and never fabricates an independent result.",
     "BackupManifest is inside an authenticated encrypted bundle; it never includes decrypting master keys. archive_entry values are normalized relative entries with no traversal, absolute paths, symlinks, duplicate/case collisions or devices. Verify database/artifact/brain digests and qualified revision exports before marking backup verified. Large manifests stream through bounded artifact IO, not public JSON request bodies.",
-    "Restore starts paused under exclusive maintenance, validates installation binding and key prerequisites, and retains current recovery overlay before rewinding. Merge revocations, durable command identities, claimed/unknown effects, reservations and memory obligations monotonically via their owners; fail closed on conflict and retain the overlay. Overlay record artifacts must be included/pinned and encrypted. No database/brain rewind is represented as undoing an external effect."
+    "Restore starts paused under exclusive maintenance, validates installation binding and key prerequisites, and retains current recovery overlay before rewinding. Merge revocations, durable command identities, claimed/unknown effects, reservations and memory obligations monotonically via their owners; fail closed on conflict and retain the overlay. Overlay record artifacts must be included/pinned and encrypted. No database/brain rewind is represented as undoing an external effect.",
+    "Revision 3 splits ResponsesParameters/ResponsesEvidence by the kind discriminator into prepare_session (creates the provider conversation, returns session_handle, no model-visible content and no context_artifact) and model_step (names the persisted session_handle and sends context_artifact/max_output_tokens/tool_contract_versions). Each is exactly one physical call per Invoke; the adapter never performs both requests inside one Invoke. A prepare_session timeout after the request was sent leaves the session unknown, not absent, and must not be resent; a model_step timeout after bytes were sent is outcome_unknown and an empty item list is equally consistent with never ran and still running, so nonexecution is never assumed and no automatic fresh call follows."
   ]
 }
