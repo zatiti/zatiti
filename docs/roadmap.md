@@ -759,6 +759,37 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   exec-seams, integration, edge-seams, responses. packaging, ci and
   serenity wait for the 16:03 PT resume to keep the lease queue short.
 
+- 2026-09-18 evening -- REVISION-3 RULING, verified by the lead before
+  landing: "the human principal whose current authority admitted a
+  review-class request is an eligible reviewer of that exact request;
+  services, workers and agents never are, and proposer separation stays
+  mandatory for them." Raised by edge-seams while fixing the review
+  deadlock (the bootstrap owner could never activate configuration or
+  create a grant, because the eligible set named only ancestor chiefs,
+  which bootstrap creates as workers, while every policy requirement is
+  human-required -- so no principal could decide any review, ever). The
+  contract does not settle it: policy/AGENTS.md:352 and reviews:332 say
+  "an eligible owner's decision" without defining eligible owner, and
+  separation of proposer and reviewer is optional except for workers and
+  agents. Lead verification, not taken on the lane's word: only
+  `requester.Kind == "human"` joins the eligible set (policy/authority.go
+  eligiblePrincipals, after the entitlement and revocation fences);
+  `SeparateProposer = worker || client_agent` is unchanged from main
+  (authority.go:639, no staged diff on that line); and the reviews owner
+  re-verifies independently at decide time (reviews/decide.go:120-127
+  refuses a non-human reviewer and a proposer-reviewer collision). A
+  narrower revision-3 reading (only holders of the installation wildcard)
+  is confined to that one eligibility line plus its test.
+- 2026-09-18 evening -- lease queue is the bottleneck, by design: seven
+  commits waited on R-build-lease at once, each running the whole-module
+  suite through the pre-commit hook (cmd, responses, packaging, httpread,
+  edge-seams, exec-seams, ci, plus the lead's integration landing). Load
+  reached 509 but the machine is I/O-bound, not CPU-bound (about 1,250
+  disk transactions per second with two Go processes running), so raising
+  concurrency would make it worse; the queue is the correct behavior and
+  was left alone. One lease-economy ruling issued: exec-seams collapsed
+  three commits into one, saving two module-wide runs.
+
 ## Planned
 
 - Wave 3: controller, desktop, cmd/zatiti, cmd/zatiti-desktop.
