@@ -242,8 +242,22 @@ func TestActivateAndValidateNoops(t *testing.T) {
 	}
 
 	vpayload := env.mustCall(env.owner, opValidate, in)
-	var validation validationOut
-	decode(t, vpayload, &validation)
+	// The frozen _identity.validate output is {"resource": Validation}, the
+	// shape the configuration compiler strict-decodes from every owner.
+	var body resourceOut[validationOut]
+	if err := contract.DecodeStrict(vpayload.Data, &body); err != nil {
+		t.Fatalf("validate output is not the frozen {\"resource\": Validation} shape: %v (%s)", err, vpayload.Data)
+	}
+	for op, data := range map[string]json.RawMessage{opValidate: vpayload.Data, opActivate: payload.Data} {
+		schema, err := mergeSchema(wireSchemas[op].Output)
+		if err != nil {
+			t.Fatalf("%s output schema: %v", op, err)
+		}
+		if err := contract.ValidateSchema(schema, data); err != nil {
+			t.Fatalf("%s output %s does not satisfy its declared output schema: %v", op, data, err)
+		}
+	}
+	validation := body.Resource
 	if validation.Diagnostics == nil || validation.Requirements == nil || validation.Dependencies == nil {
 		t.Fatalf("validate returned nil slices: %+v", validation)
 	}

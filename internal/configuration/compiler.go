@@ -778,7 +778,8 @@ func (s *Service) validateCandidate(ctx context.Context, unit contract.Unit, sco
 		if len(slice) == 0 {
 			continue
 		}
-		raw, err := s.callOwner(ctx, unit, "_"+owner+".validate", candidateEnvelope{Candidate: candidate{
+		op := "_" + owner + ".validate"
+		raw, err := s.callOwner(ctx, unit, op, candidateEnvelope{Candidate: candidate{
 			PlanID:          planID,
 			BaseRevision:    baseRevision,
 			CandidateDigest: candidateDigest,
@@ -790,7 +791,7 @@ func (s *Service) validateCandidate(ctx context.Context, unit contract.Unit, sco
 		}
 		var body validateOutputBody
 		if err := contract.DecodeStrict(raw, &body); err != nil {
-			return merged, faultWrap(internalError("peer validation returned an unreadable result"), err)
+			return merged, faultWrap(internalError("peer %s returned a result that is not the frozen {\"resource\": Validation} shape: %v", op, err), err)
 		}
 		merged.Diagnostics = append(merged.Diagnostics, body.Resource.Diagnostics...)
 		merged.Requirements = append(merged.Requirements, body.Resource.Requirements...)

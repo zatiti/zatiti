@@ -25,12 +25,14 @@ func (s *Service) activate(ctx context.Context, unit contract.Unit, in candidate
 func (s *Service) validate(ctx context.Context, unit contract.Unit, in candidateInput) (contract.Payload, error) {
 	// Identity owns no compiler-draftable kind: every candidate change is
 	// outside this domain, so the validation is empty and carries no
-	// diagnostics, requirements or dependencies.
-	return completed(validationOut{
+	// diagnostics, requirements or dependencies. The frozen _identity.validate
+	// output wraps the Validation as {"resource": ...}, like every other
+	// owner's validate; the compiler strict-decodes exactly that.
+	return completed(resourceOut[validationOut]{Resource: validationOut{
 		Diagnostics:  []diagnosticOut{},
 		Requirements: []requirementOut{},
 		Dependencies: []refOut{},
-	})
+	}})
 }
 
 func (s *Service) bootstrap(ctx context.Context, unit contract.Unit, in bootstrapInput) (contract.Payload, error) {
