@@ -887,6 +887,48 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   (not started). A recurring two-hourly cron re-enters the standing plan in
   scratchpad/autonomous-run.md so the run survives the stop.
 
+- 2026-09-19 00:20 PT -- exec-seams LANDED (50a0f3d), four cross-package
+  seams the controller hit driving the real modules. Lead mutation check:
+  dropping ready and executing from pendingStates (internal/effects/
+  store.go:605-616) made TestPendingListsActionableOperations report 3
+  operations where 5 were owed; restored byte-identical. The pending-
+  visibility fix is the consequential one: an operation the controller had
+  admitted (ready) or claimed (executing) before it stopped was invisible on
+  restart, so its attempt and reservation were stranded with no call that
+  could name them. Also: `_execution.observation` is keyed by the effects
+  operation id rather than the owned record id; `_execution.fence` compares
+  controller generations instead of a per-run attempt counter; and a
+  network job is never claimed, so memory can record its outcome at
+  create's version without a version race.
+- 2026-09-19 00:35 PT -- packaging LANDED (a54e59b): release manifests for
+  the controller and the Flutter desktop bundle, detached signatures over
+  caller-supplied keys, macOS LaunchAgent and Linux user systemd templates,
+  install/upgrade/uninstall over a per-user layout, and an installed-tree
+  audit. Lead mutation check: stopping VerifyTree comparing SHA-256 digests
+  (packaging/tree.go) made TestVerifyTreeReportsEveryDefect fail with no
+  digest finding for a tampered binary; restored byte-identical. 35 of 36
+  package roots now have verified code on main.
+- 2026-09-19 00:40 PT -- third gate repair: the pre-commit hook's
+  golangci-lint now passes --allow-parallel-runners AND distinguishes "could
+  not run, another run holds the lock" from "found issues". The old branch
+  reported a lock collision as a lint failure, so a commit whose code was
+  fine was rejected and a build-lease hold was burned. Found by the
+  exec-seams lane, which had already worked around it on its own lint.
+- 2026-09-19 -- follow-ups raised by exec-seams, not yet assigned:
+  (a) internal/controller settle.go settleAdmission still strands an
+  unacknowledged admit; with ready now listed it can take the last
+  attempt_id plus its own journal generation and record not_sent.
+  (b) `_effects.record` cannot close an old-generation attempt without that
+  generation, so a lost journal leaves it unrecordable; a successor-
+  generation rule (not_sent for a never-claimed attempt, unknown for a
+  claimed one) is a spec-revision item.
+  (c) internal/controller tick.go backoff bookkeeping keys on the listed
+  set, so listed-but-inadmissible operations never expire their backoff
+  entries. Harmless today.
+  (d) REVISION-3: the frozen Operation type has no per-attempt generation
+  field and attempt_ids are bare uuids; job.create's frozen input has no
+  operation field, so execution reads operation_id from inert input.
+
 ## Planned
 
 - Wave 3: controller, desktop, cmd/zatiti, cmd/zatiti-desktop.
