@@ -27,7 +27,6 @@ const (
 	databaseFileName   = "zatiti.db"
 	profilesDirName    = "profiles"
 	adaptersDirName    = "adapters"
-	identityFileName   = "controller-identity.json"
 	defaultMaxBodySize = 2 << 20 // artifact.upload.chunk's 2 MiB encoded cap
 	defaultTimeout     = 60 * time.Second
 	shutdownGrace      = 15 * time.Second
@@ -151,4 +150,3 @@ func (c *config) adaptersDir() string { return filepath.Join(c.StateDir, adapter
 func (c *config) databasePath() string {
 	return filepath.Join(c.StateDir, databaseFileName)
 }
-func (c *config) identityPath() string { return filepath.Join(c.StateDir, identityFileName) }

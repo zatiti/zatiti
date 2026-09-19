@@ -82,7 +82,6 @@ func TestCatalogIsTheFrozenPublicCatalog(t *testing.T) {
 	t.Parallel()
 	descs, err := catalog()
 	if err != nil {
-		skipOnKnownDrift(t, err)
 		t.Fatalf("catalog: %v", err)
 	}
 	if len(descs) != 197 {

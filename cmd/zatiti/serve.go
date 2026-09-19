@@ -146,29 +146,21 @@ func superviseController(ctx context.Context, h *installationHandle, adapters ma
 	if err != nil {
 		return err
 	}
-	bootstrappedHere := false
 	if installationID == "" {
 		log.Info("installation is not initialized; serving bootstrap only until `zatiti init` completes")
 		if installationID, err = awaitInitialized(ctx, h, poll); err != nil {
 			return err
 		}
-		bootstrappedHere = true
-	}
-
-	identity, ok, err := resolveControllerIdentity(h.cfg, installationID)
-	if err != nil {
-		return err
-	}
-	if !ok {
-		if _, custodied := h.secrets.latest(); !custodied && !bootstrappedHere {
-			return missingIdentityFault()
-		}
-		outcome, err := completeBootstrap(ctx, h, installationID)
+		profile, err := handOverOwnerCredential(ctx, h)
 		if err != nil {
 			return fmt.Errorf("completing bootstrap: %w", err)
 		}
-		identity = outcome.Identity
-		log.Info("bootstrap completed", "installation_id", installationID, "controller_principal", identity.PrincipalID, "owner_profile", outcome.Profile)
+		log.Info("bootstrap completed", "installation_id", installationID, "owner_profile", profile)
+	}
+
+	identity, err := resolveControllerIdentity(ctx, h, installationID)
+	if err != nil {
+		return err
 	}
 
 	ctl, err := controller.New(controller.Config{StateDir: h.cfg.StateDir, TickInterval: h.cfg.TickInterval}, h.app, h.db, h.own, adapters, h.clock)

@@ -10,7 +10,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -18,6 +17,7 @@ import (
 	gosdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/zatiti/zatiti/internal/contract"
+	"github.com/zatiti/zatiti/internal/identity"
 )
 
 // TestEndToEndBinary is the wave milestone: the real binary, as a human runs
@@ -60,11 +60,10 @@ func TestEndToEndBinary(t *testing.T) {
 		_ = serve.Process.Signal(syscall.SIGKILL)
 		<-serveExit
 	})
-	waitFor(t, 30*time.Second, "the controller socket", func() bool {
+	waitFor(t, startupBudget, "the controller socket", func() bool {
 		select {
 		case err := <-serveExit:
 			serveExit <- err
-			skipOnKnownDrift(t, errors.New(serveLog.String()))
 			t.Fatalf("serve exited before listening: %v\n%s", err, serveLog.String())
 		default:
 		}
@@ -138,7 +137,7 @@ func TestEndToEndBinary(t *testing.T) {
 
 	// 3. A query as the owner.
 	listed := envelope("principal list", cli("principal", "list", "--json", "--input", `{"scope":`+scope+`}`))
-	if !strings.Contains(string(listed.Data), "e2e-agent") || !strings.Contains(string(listed.Data), controllerPrincipalName) {
+	if !strings.Contains(string(listed.Data), "e2e-agent") || !strings.Contains(string(listed.Data), identity.ControllerPrincipalName) {
 		t.Fatalf("principal list lacks the created and controller principals: %s", listed.Data)
 	}
 	// An unknown profile authenticates nothing and never reaches the socket
@@ -231,24 +230,6 @@ func buildBinary(t *testing.T, dir string) string {
 		t.Fatalf("go build: %v\n%s", err, out)
 	}
 	return bin
-}
-
-// lockedBuffer is a concurrency-safe bytes.Buffer for subprocess output.
-type lockedBuffer struct {
-	mu  sync.Mutex
-	buf bytes.Buffer
-}
-
-func (b *lockedBuffer) Write(p []byte) (int, error) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.buf.Write(p)
-}
-
-func (b *lockedBuffer) String() string {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.buf.String()
 }
 
 // failOnWrite fails the test if a byte is ever written: serve's stdout must

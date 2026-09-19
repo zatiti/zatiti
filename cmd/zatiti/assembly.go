@@ -96,11 +96,11 @@ var moduleOrder = []string{
 }
 
 // modules constructs the sixteen landed domain modules with owner-bound
-// ports, in assembly order. The identity module is returned separately as
-// the application's authenticator. No constructor queries a peer or starts
+// ports, in assembly order. The identity module is returned separately: it
+// is the application's authenticator and resolves the controller principal. No constructor queries a peer or starts
 // a goroutine, so this is safe before Bind and safe in a descriptor-only
 // process.
-func modules(router *application.PortRouter, clock contract.Clock, ids contract.IDSource, secrets contract.SecretStore, blobs contract.BlobStore, backup backupCapability) ([]contract.Module, contract.Authenticator, error) {
+func modules(router *application.PortRouter, clock contract.Clock, ids contract.IDSource, secrets contract.SecretStore, blobs contract.BlobStore, backup backupCapability) ([]contract.Module, *identity.Service, error) {
 	deps := func(owner string) contract.Dependencies {
 		return contract.Dependencies{Clock: clock, IDs: ids, Ports: router.For(owner), Secrets: secrets, Blobs: blobs}
 	}
@@ -219,6 +219,7 @@ type installationHandle struct {
 	db         contract.Database
 	app        *application.Application
 	reg        *registry.Registry
+	identity   *identity.Service
 	secrets    *custodySecrets
 	clock      contract.Clock
 	generation int64
@@ -251,10 +252,11 @@ func openInstallation(ctx context.Context, cfg config) (_ *installationHandle, e
 
 	h.secrets = &custodySecrets{SecretStore: plat.Secrets()}
 	router := application.NewPorts()
-	mods, auth, err := modules(router, h.clock, randomIDs{}, h.secrets, plat.Blobs(), databaseBackup{db: h.db})
+	mods, idn, err := modules(router, h.clock, randomIDs{}, h.secrets, plat.Blobs(), databaseBackup{db: h.db})
 	if err != nil {
 		return nil, err
 	}
+	h.identity = idn
 	var migrations []contract.Migration
 	for _, m := range mods {
 		migrations = append(migrations, m.Migrations()...)
@@ -268,7 +270,7 @@ func openInstallation(ctx context.Context, cfg config) (_ *installationHandle, e
 	if h.reg, err = registry.New(mods); err != nil {
 		return nil, fmt.Errorf("registry over the landed modules: %w", err)
 	}
-	if h.app, err = application.New(h.db, h.reg, auth, h.clock, randomIDs{}); err != nil {
+	if h.app, err = application.New(h.db, h.reg, idn, h.clock, randomIDs{}); err != nil {
 		return nil, fmt.Errorf("application: %w", err)
 	}
 	if err = router.Bind(h.app); err != nil {

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -14,14 +13,20 @@ import (
 
 	"github.com/zatiti/zatiti/internal/client"
 	"github.com/zatiti/zatiti/internal/contract"
+	"github.com/zatiti/zatiti/internal/identity"
 )
+
+// startupBudget bounds how long a test waits for serve to bind its socket:
+// assembling the registry validates every schema of every module, which
+// under the race detector on a loaded machine has taken over 30 seconds.
+const startupBudget = 120 * time.Second
 
 // serveInBackground runs runServe and returns the result channel once the
 // socket is bound.
-func serveInBackground(t *testing.T, ctx context.Context, cfg config) (<-chan error, *bytes.Buffer) {
+func serveInBackground(t *testing.T, ctx context.Context, cfg config) (<-chan error, *lockedBuffer) {
 	t.Helper()
-	var logs bytes.Buffer
-	log := newLogger(&logs, slog.LevelInfo)
+	logs := &lockedBuffer{}
+	log := newLogger(logs, slog.LevelInfo)
 	listening := make(chan struct{})
 	done := make(chan error, 1)
 	go func() {
@@ -30,25 +35,57 @@ func serveInBackground(t *testing.T, ctx context.Context, cfg config) (<-chan er
 	select {
 	case <-listening:
 	case err := <-done:
-		skipOnKnownDrift(t, err)
 		t.Fatalf("serve ended before listening: %v", err)
-	case <-time.After(30 * time.Second):
+	case <-time.After(startupBudget):
 		t.Fatal("serve did not start listening")
 	}
-	return done, &logs
+	return done, logs
 }
 
-func TestServeRefusesInitializedInstallationWithoutControllerIdentity(t *testing.T) {
+// TestServeRestartsOnInitializedInstallation: a fresh process over an
+// already bootstrapped state directory custodies nothing and resolves the
+// controller principal bootstrap created through the identity module, then
+// runs the controller without any bootstrap step.
+func TestServeRestartsOnInitializedInstallation(t *testing.T) {
 	cfg := serveConfig(t)
 	h := openTestInstallation(t, cfg)
 	bootstrapInstallation(t, h)
 	h.close()
 
-	// A fresh process custodied nothing and finds no identity record.
-	var logs bytes.Buffer
-	err := runServe(context.Background(), cfg, newLogger(&logs, slog.LevelInfo), serveOptions{pollInterval: 20 * time.Millisecond})
-	if faultCode(err) != contract.CodePrerequisiteMissing || !strings.Contains(err.Error(), "--controller-principal") {
-		t.Fatalf("serve = %v, want prerequisite_missing naming the controller identity gap", err)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done, logs := serveInBackground(t, ctx, cfg)
+	waitFor(t, 15*time.Second, "the controller to run", func() bool {
+		select {
+		case err := <-done:
+			t.Fatalf("serve exited: %v (logs:\n%s)", err, logs.String())
+		default:
+		}
+		return strings.Contains(logs.String(), "controller running")
+	})
+	if strings.Contains(logs.String(), "bootstrap completed") {
+		t.Fatalf("a restart must not complete bootstrap again (logs:\n%s)", logs.String())
+	}
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatalf("serve = %v on shutdown", err)
+	}
+}
+
+// TestServeRefusesUninitializedControllerPrincipalOverride: an explicit
+// --controller-principal that identity does not know fails the controller
+// closed at its first internal call instead of scheduling as nobody.
+func TestServeRefusesUnknownControllerPrincipalOverride(t *testing.T) {
+	cfg := serveConfig(t)
+	h := openTestInstallation(t, cfg)
+	bootstrapInstallation(t, h)
+	h.close()
+	cfg.ControllerPrincipal = string(contract.NewID())
+
+	logs := &lockedBuffer{}
+	err := runServe(context.Background(), cfg, newLogger(logs, slog.LevelInfo), serveOptions{pollInterval: 20 * time.Millisecond})
+	if faultCode(err) != contract.CodePermissionDenied {
+		t.Fatalf("serve = %v, want permission_denied for an unknown controller principal (logs:\n%s)", err, logs.String())
 	}
 	if _, statErr := os.Stat(cfg.SocketPath); !errors.Is(statErr, os.ErrNotExist) {
 		t.Fatalf("socket left behind after refusal: %v", statErr)
@@ -126,20 +163,15 @@ func TestServeCompletesBootstrapOverTheSocket(t *testing.T) {
 	}
 
 	store := profileStore{dir: cfg.profilesDir()}
-	waitFor(t, 15*time.Second, "the owner profile and controller identity record", func() bool {
+	waitFor(t, 15*time.Second, "the owner profile and the running controller", func() bool {
 		select {
 		case err := <-done:
 			t.Fatalf("serve exited during bootstrap completion: %v (logs:\n%s)", err, logs.String())
 		default:
 		}
 		ok, _ := store.exists(defaultProfile)
-		_, found, _ := readControllerIdentity(cfg.identityPath())
-		return ok && found
+		return ok && strings.Contains(logs.String(), "controller running")
 	})
-	rec, _, err := readControllerIdentity(cfg.identityPath())
-	if err != nil || rec.InstallationID != out.Resource.InstallationID {
-		t.Fatalf("identity record %+v, %v; want installation %s", rec, err, out.Resource.InstallationID)
-	}
 
 	owner, err := client.New(client.Config{SocketPath: cfg.SocketPath, Timeout: 10 * time.Second}, profileCredential{store: store, name: defaultProfile})
 	if err != nil {
@@ -150,7 +182,7 @@ func TestServeCompletesBootstrapOverTheSocket(t *testing.T) {
 	if err != nil {
 		t.Fatalf("principal.list as the owner: %v", err)
 	}
-	if !strings.Contains(string(listed.Data), controllerPrincipalName) {
+	if !strings.Contains(string(listed.Data), identity.ControllerPrincipalName) {
 		t.Fatalf("principal.list does not show the controller principal: %s", listed.Data)
 	}
 	if _, err := anon.Call(ctx, bootstrapOperation, contract.Request{

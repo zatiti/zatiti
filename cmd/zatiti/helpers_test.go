@@ -1,11 +1,12 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -118,38 +119,11 @@ func serveConfig(t *testing.T) config {
 	return cfg
 }
 
-// knownDriftSignatures are the registry refusals the domain lanes are
-// correcting on their side (descriptor mappings and flags that disagree with
-// the frozen catalog). Nothing else is a known drift.
-var knownDriftSignatures = []string{
-	"CLI mapping", "completion schema", "scope requirements", "submission-key requirement",
-	"expected-version requirement", "does not resolve",
-}
-
-// skipOnKnownDrift skips the test with the full registry error when the
-// landed modules fail to assemble on a known descriptor drift, and fails
-// loudly on any other registry refusal. Delete once the drift has landed so
-// the assembly proves itself again.
-func skipOnKnownDrift(t *testing.T, err error) {
-	t.Helper()
-	if err == nil || !strings.Contains(err.Error(), "registry over the landed modules") {
-		return
-	}
-	for _, sig := range knownDriftSignatures {
-		if strings.Contains(err.Error(), sig) {
-			t.Skipf("KNOWN DESCRIPTOR DRIFT (domain-side, not this lane): %v", err)
-		}
-	}
-	t.Fatalf("registry refused the landed modules on something other than the known drift: %v", err)
-}
-
-// openTestInstallation opens a real installation over temp storage,
-// skipping with evidence on the known descriptor drift.
+// openTestInstallation opens a real installation over temp storage.
 func openTestInstallation(t *testing.T, cfg config) *installationHandle {
 	t.Helper()
 	h, err := openInstallation(context.Background(), cfg)
 	if err != nil {
-		skipOnKnownDrift(t, err)
 		t.Fatalf("openInstallation: %v", err)
 	}
 	t.Cleanup(h.close)
@@ -177,6 +151,14 @@ func bootstrapInstallation(t *testing.T, h *installationHandle) contract.ID {
 		t.Fatalf("installation.init data %s: %v", res.Data, err)
 	}
 	return out.Resource.InstallationID
+}
+
+func faultCode(err error) string {
+	var f *contract.Fault
+	if errors.As(err, &f) {
+		return f.Code
+	}
+	return ""
 }
 
 // waitFor polls cond until it holds or the deadline passes.
@@ -207,4 +189,22 @@ func openPlatformLock(cfg config) (func(), error) {
 		_ = own.Close()
 		_ = plat.Close()
 	}, nil
+}
+
+// lockedBuffer is a concurrency-safe bytes.Buffer for subprocess output.
+type lockedBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
 }
