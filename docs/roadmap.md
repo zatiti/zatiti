@@ -1008,6 +1008,49 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   review flow have fixes in flight; and memory stays offline until Serenity
   ships what its adapter needs.
 
+- 2026-09-19 04:30 PT -- the OpenAI Responses wire protocol LANDED (30f102f)
+  with github's revision-2 conversion (fff218c), and integration slice 2
+  (f927692), which deletes the test-local catalog so the suite assembles
+  over the REAL registry. The protocol is pinned to the published OpenAPI
+  document by commit ddface9b and sha256, revision string
+  openai-openapi/2.3.0@ddface9b, not to a prose docs page; the pricing page
+  refused an automated fetch and its tier text is cited as the founder's
+  quote, explicitly not re-verified. Conversation-first: POST /v1/conversations
+  mints a client-known handle and the step's request record names it before
+  POST /v1/responses is sent, so a timed-out call has something to reconcile
+  against. Caching disabled and service_tier pinned to default so the
+  profile's two rates are exact; any deviation records tokens and leaves the
+  amount unknown. Input ceiling refused above 272,000 tokens. Lead mutation
+  checks: removing that ceiling let a profile be created that would
+  under-reserve on long prompts; accepting a cursor whose MAC does not
+  verify let a cursor survive a controller restart. Both restored.
+- 2026-09-19 04:45 PT -- LIVE DEFECT on main, found by the responses lane
+  reading the controller's contract rather than each adapter's own tests,
+  verified by the lead, fixed and landing: internal/controller/perform.go
+  validUsage accepts EXACTLY the six $defs/Usage fields and rejects any
+  other shape, but github and httpread both returned the nested
+  ProviderUsage document. So perform.go:70-72 discarded their real
+  no-charge usage and synthesized unknown advisory billing for EVERY GitHub
+  call and every web read, corrupting spend records for all non-model work.
+  It survived two landings because every test asserted the call succeeded
+  rather than what Observation.Usage contained. Lead mutation check:
+  restoring the ProviderUsage document made the new
+  TestObservationUsageIsTheAccountingDocument fail on success, provider
+  failure and not-sent.
+- 2026-09-19 -- CORRECTION the lead owes the founder: recommending OpenAI
+  over OpenRouter, the lead said the conversation-first pattern lets the
+  adapter prove what happened after a timeout. Half of that is wrong. It can
+  confirm a call DID execute (items appear), but cannot prove one did not:
+  an empty item list is equally consistent with "never ran" and "still
+  running", and the API documents no list or search of conversations, so a
+  step lost before its response arrives is unknown forever. A reconciled
+  success also cannot recover usage, since conversation items carry no token
+  counts, so the worst-case reservation stays outstanding. OpenAI remains
+  the right choice -- OpenRouter cannot find the call at all -- but
+  "reconcilable" was too strong. Also accepted knowingly: conversation-first
+  makes TWO physical calls per model step against a contract that specifies
+  exactly one. Both are revision-3 items.
+
 ## Planned
 
 - Wave 3: controller, desktop, cmd/zatiti, cmd/zatiti-desktop.
