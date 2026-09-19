@@ -1,0 +1,318 @@
+# Continuous integration for pull requests and main.
+#
+# Read-only: this workflow holds no secret, requests no write permission, and
+# publishes nothing. Its rules are enforced by .github/workflows/cigate
+# (go run ./.github/workflows/cigate lint); see README.md in this directory
+# before changing a pin, a trigger, or a permission.
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  PYTHONDONTWRITEBYTECODE: "1"
+
+jobs:
+  spec:
+    name: specification drift
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out the source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Check the generated specification first
+        run: python3 tools/specgen/render.py --check
+      - name: Install the pinned Go toolchain
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Verify the toolchain and dependency lock
+        env:
+          GOTOOLCHAIN: local
+        run: |
+          evidence="$RUNNER_TEMP/evidence"
+          echo "EVIDENCE=$evidence" >> "$GITHUB_ENV"
+          echo "GOTOOLCHAIN=local" >> "$GITHUB_ENV"
+          go run ./.github/workflows/cigate lock -go-version "$(go env GOVERSION)"
+          go run ./.github/workflows/cigate environ -go-version "$(go env GOVERSION)" -out "$evidence/environment.json"
+      - name: Run the specification integrity tests
+        run: |
+          python3 --version
+          python3 -m unittest discover -s tools/specgen -p 'test_*.py'
+      - name: Regenerate from a clean checkout and require no drift
+        run: |
+          python3 tools/specgen/render.py
+          go run ./.github/workflows/cigate drift
+      - name: Retain evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ci-evidence-spec
+          path: ${{ runner.temp }}/evidence/
+          if-no-files-found: error
+          retention-days: 14
+
+  workflows:
+    name: workflow validation
+    needs: spec
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out the source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install the pinned Go toolchain
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Verify the toolchain and dependency lock
+        env:
+          GOTOOLCHAIN: local
+        run: |
+          evidence="$RUNNER_TEMP/evidence"
+          echo "EVIDENCE=$evidence" >> "$GITHUB_ENV"
+          echo "GOTOOLCHAIN=local" >> "$GITHUB_ENV"
+          go run ./.github/workflows/cigate lock -go-version "$(go env GOVERSION)"
+          go run ./.github/workflows/cigate environ -go-version "$(go env GOVERSION)" -out "$evidence/environment.json"
+      - name: Install the pinned workflow linter
+        run: |
+          go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+      - name: Validate the workflows
+        env:
+          ZATITI_REQUIRE_ACTIONLINT: "1"
+        run: |
+          go run ./.github/workflows/cigate lint -dir .github/workflows
+          go vet ./.github/workflows/...
+          go run ./.github/workflows/cigate gotest -name workflows -out-dir "$EVIDENCE" -- -timeout 20m -race ./.github/workflows/...
+      - name: Retain evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ci-evidence-workflows
+          path: ${{ runner.temp }}/evidence/
+          if-no-files-found: error
+          retention-days: 14
+
+  static:
+    name: static checks
+    needs: spec
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out the source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install the pinned Go toolchain
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Restore the lock-bound Go caches
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: go-static-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('go.mod', 'go.sum', 'docs/implementation/dependencies.lock.json') }}
+      - name: Verify the toolchain and dependency lock
+        env:
+          GOTOOLCHAIN: local
+        run: |
+          evidence="$RUNNER_TEMP/evidence"
+          echo "EVIDENCE=$evidence" >> "$GITHUB_ENV"
+          echo "GOTOOLCHAIN=local" >> "$GITHUB_ENV"
+          go run ./.github/workflows/cigate lock -go-version "$(go env GOVERSION)"
+          go run ./.github/workflows/cigate environ -go-version "$(go env GOVERSION)" -out "$evidence/environment.json"
+          go mod verify
+          go mod tidy -diff
+      - name: Verify the license text
+        run: go run ./.github/workflows/cigate notices -license LICENSE
+      - name: Check formatting
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "gofmt must print nothing, but lists:"
+            echo "$unformatted"
+            exit 1
+          fi
+      - name: Vet
+        run: go vet ./... ./.github/workflows/...
+      - name: Lint
+        run: |
+          go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.11.3
+          "$(go env GOPATH)/bin/golangci-lint" run --max-same-issues=0 ./... ./.github/workflows/...
+      - name: Retain evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ci-evidence-static
+          path: ${{ runner.temp }}/evidence/
+          if-no-files-found: error
+          retention-days: 14
+
+  test:
+    name: build and test
+    needs: spec
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-24.04
+          - macos-15
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - name: Check out the source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install the pinned Go toolchain
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Restore the lock-bound Go caches
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+            ~/Library/Caches/go-build
+          key: go-test-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('go.mod', 'go.sum', 'docs/implementation/dependencies.lock.json') }}
+      - name: Verify the toolchain and dependency lock
+        env:
+          GOTOOLCHAIN: local
+        run: |
+          evidence="$RUNNER_TEMP/evidence"
+          echo "EVIDENCE=$evidence" >> "$GITHUB_ENV"
+          echo "GOTOOLCHAIN=local" >> "$GITHUB_ENV"
+          go run ./.github/workflows/cigate lock -go-version "$(go env GOVERSION)"
+          go run ./.github/workflows/cigate environ -go-version "$(go env GOVERSION)" -out "$evidence/environment.json"
+          go mod verify
+      - name: Build
+        run: go build ./... ./.github/workflows/...
+      - name: Test, including the command-line entrypoint end to end and tests/integration
+        env:
+          TMPDIR: /tmp/zt
+        run: |
+          mkdir -p /tmp/zt
+          go run ./.github/workflows/cigate gotest -name unit -out-dir "$EVIDENCE" -- -timeout 30m ./...
+      - name: Test with the race detector
+        env:
+          TMPDIR: /tmp/zt
+        run: |
+          mkdir -p /tmp/zt
+          go run ./.github/workflows/cigate gotest -name race -out-dir "$EVIDENCE" -- -timeout 40m -race ./...
+      - name: Retain evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ci-evidence-test-${{ matrix.os }}
+          path: ${{ runner.temp }}/evidence/
+          if-no-files-found: error
+          retention-days: 14
+
+  flutter:
+    name: flutter desktop client
+    needs: spec
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-24.04
+          - macos-15
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - name: Check out the source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install the pinned Go toolchain
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Verify the toolchain and dependency lock
+        env:
+          GOTOOLCHAIN: local
+        run: |
+          evidence="$RUNNER_TEMP/evidence"
+          echo "EVIDENCE=$evidence" >> "$GITHUB_ENV"
+          echo "GOTOOLCHAIN=local" >> "$GITHUB_ENV"
+          go run ./.github/workflows/cigate lock -go-version "$(go env GOVERSION)"
+          go run ./.github/workflows/cigate environ -go-version "$(go env GOVERSION)" -out "$evidence/environment.json"
+      - name: Resolve the pinned Flutter SDK
+        id: pin
+        run: go run ./.github/workflows/cigate flutterpin -out "$EVIDENCE/flutter-pin.json"
+      - name: Install Linux desktop prerequisites
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends clang cmake ninja-build pkg-config libgtk-3-dev libstdc++-12-dev libsecret-1-dev libsecret-1-0 xvfb
+      - name: Restore the lock-bound pub cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.pub-cache
+          key: pub-${{ runner.os }}-${{ runner.arch }}-${{ steps.pin.outputs.version }}-${{ hashFiles('apps/desktop/pubspec.lock') }}
+      - name: Install the pinned Flutter SDK from its tagged commit
+        env:
+          FLUTTER_VERSION: ${{ steps.pin.outputs.version }}
+        run: |
+          git clone --quiet --depth 1 --branch "$FLUTTER_VERSION" https://github.com/flutter/flutter.git "$RUNNER_TEMP/flutter"
+          echo "$RUNNER_TEMP/flutter/bin" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/flutter/bin/flutter" config --no-analytics
+          "$RUNNER_TEMP/flutter/bin/flutter" --version --machine > "$EVIDENCE/flutter-version.json"
+          go run ./.github/workflows/cigate flutterverify -version-file "$EVIDENCE/flutter-version.json"
+      - name: Get dependencies with the lock enforced
+        run: go run ./.github/workflows/cigate bounded -name pub-get -out-dir "$EVIDENCE" -dir apps/desktop -- flutter pub get --enforce-lockfile
+      - name: Check Dart formatting
+        run: go run ./.github/workflows/cigate bounded -name dart-format -out-dir "$EVIDENCE" -dir apps/desktop -- dart format --output=none --set-exit-if-changed .
+      - name: Analyze
+        run: go run ./.github/workflows/cigate bounded -name flutter-analyze -out-dir "$EVIDENCE" -dir apps/desktop -- flutter analyze
+      - name: Run the unit and widget tests, including the operation-catalog digest drift check
+        run: go run ./.github/workflows/cigate fluttertest -name flutter-test -out-dir "$EVIDENCE" -dir apps/desktop
+      - name: Build the release-mode Linux application
+        if: runner.os == 'Linux'
+        run: go run ./.github/workflows/cigate bounded -name flutter-build -out-dir "$EVIDENCE" -dir apps/desktop -- flutter build linux --release
+      - name: Build the release-mode macOS application
+        if: runner.os == 'macOS'
+        run: go run ./.github/workflows/cigate bounded -name flutter-build -out-dir "$EVIDENCE" -dir apps/desktop -- flutter build macos --release
+      - name: Record which optional application parts exist
+        id: layout
+        run: go run ./.github/workflows/cigate flutterlayout -out "$EVIDENCE/flutter-layout.json"
+      - name: Run integration_test on Linux under a virtual display
+        if: runner.os == 'Linux' && steps.layout.outputs.integration_test == 'true'
+        run: go run ./.github/workflows/cigate fluttertest -prefix "xvfb-run --auto-servernum" -name integration-test-linux -out-dir "$EVIDENCE" -dir apps/desktop -- integration_test -d linux
+      - name: Run integration_test on macOS
+        if: runner.os == 'macOS' && steps.layout.outputs.integration_test == 'true'
+        run: go run ./.github/workflows/cigate fluttertest -name integration-test-macos -out-dir "$EVIDENCE" -dir apps/desktop -- integration_test -d macos
+      - name: Retain evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ci-evidence-flutter-${{ matrix.os }}
+          path: ${{ runner.temp }}/evidence/
+          if-no-files-found: error
+          retention-days: 14
