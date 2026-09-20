@@ -115,6 +115,25 @@ func (s *Service) loadContract(ctx context.Context, unit contract.Unit, id contr
 	return r, true, nil
 }
 
+// loadContractByName resolves a built-in tool contract by its stable name
+// (connections_contracts_name_idx is unique), the connections-local
+// provider-to-adapter selection key.
+func (s *Service) loadContractByName(ctx context.Context, unit contract.Unit, name string) (contractRow, bool, error) {
+	row := unit.QueryRowContext(ctx, `
+		SELECT id, version, name, input_schema, output_schema, effect, destinations_json,
+		       credential_kind, cost_bound_json, timeout_seconds, idempotency,
+		       key_retention_seconds, confirmation, reconciliation, adapter
+		FROM connections_contracts WHERE name = ?`, name)
+	r, err := scanContract(row.Scan)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return contractRow{}, false, nil
+		}
+		return contractRow{}, false, err
+	}
+	return r, true, nil
+}
+
 func (s *Service) listContracts(ctx context.Context, unit contract.Unit, limit int) ([]contractRow, error) {
 	rows, err := unit.QueryContext(ctx, `
 		SELECT id, version, name, input_schema, output_schema, effect, destinations_json,
@@ -402,6 +421,63 @@ func (s *Service) insertAppliedPlan(ctx context.Context, unit contract.Unit, r a
 		string(r.PlanID), r.CandidateDigest, r.BaseRevision, string(raw), formatStamp(r.AppliedAt))
 	if err != nil {
 		return fmt.Errorf("connections: insert applied plan: %w", err)
+	}
+	return nil
+}
+
+// pendingProbeRow is the callback-ownership record linking one outstanding
+// connection.validate/connection.rotate job to the connection it probes.
+// _connections.validation.record consumes it to complete the execution-side
+// job once the observation lands (implementation assignment step 4).
+type pendingProbeRow struct {
+	ConnectionID contract.ID
+	JobID        contract.ID
+	JobVersion   int64
+	Kind         string
+}
+
+// recordPendingProbe upserts the callback-ownership row for connectionID. A
+// second validate/rotate issued before the first completes replaces the
+// pointer: only the most recently admitted job is completed by a later
+// observation, the same single-live-item discipline liveChallengeExists
+// enforces for setup challenges.
+func (s *Service) recordPendingProbe(ctx context.Context, unit contract.Unit, r pendingProbeRow, now time.Time) error {
+	_, err := unit.ExecContext(ctx, `
+		INSERT INTO connections_pending_probes (connection_id, job_id, job_version, kind, created_at)
+		VALUES (?, ?, ?, ?, ?)
+		ON CONFLICT(connection_id) DO UPDATE SET
+			job_id = excluded.job_id, job_version = excluded.job_version,
+			kind = excluded.kind, created_at = excluded.created_at`,
+		string(r.ConnectionID), string(r.JobID), r.JobVersion, r.Kind, formatStamp(now))
+	if err != nil {
+		return fmt.Errorf("connections: record pending probe: %w", err)
+	}
+	return nil
+}
+
+// loadPendingProbe reads the callback-ownership row for connectionID, if any.
+func (s *Service) loadPendingProbe(ctx context.Context, unit contract.Unit, connectionID contract.ID) (pendingProbeRow, bool, error) {
+	var r pendingProbeRow
+	err := unit.QueryRowContext(ctx, `
+		SELECT connection_id, job_id, job_version, kind
+		FROM connections_pending_probes WHERE connection_id = ?`, string(connectionID)).
+		Scan(&r.ConnectionID, &r.JobID, &r.JobVersion, &r.Kind)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return pendingProbeRow{}, false, nil
+		}
+		return pendingProbeRow{}, false, fmt.Errorf("connections: load pending probe: %w", err)
+	}
+	return r, true, nil
+}
+
+// deletePendingProbe clears the callback-ownership row once its job has been
+// completed, so a later observation for the same connection cannot replay a
+// completion against a terminal job.
+func (s *Service) deletePendingProbe(ctx context.Context, unit contract.Unit, connectionID contract.ID) error {
+	if _, err := unit.ExecContext(ctx,
+		`DELETE FROM connections_pending_probes WHERE connection_id = ?`, string(connectionID)); err != nil {
+		return fmt.Errorf("connections: delete pending probe: %w", err)
 	}
 	return nil
 }

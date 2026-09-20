@@ -73,10 +73,13 @@ func (s *seqIDs) New() contract.ID {
 	return contract.ID(fmt.Sprintf("00000000-0000-4000-8000-%012d", s.n))
 }
 
-// fakePorts serves the two peer calls connections makes — _configuration.stage
-// and _execution.job.create — with injectable faults, recording every call.
-// The stage fake mirrors configuration's contract: a draft carrying the
-// echoed change. The job fake mirrors execution's: a pending governed job.
+// fakePorts serves the peer calls connections makes — _configuration.stage,
+// _execution.job.create and _execution.job.record — with injectable faults,
+// recording every call. The stage fake mirrors configuration's contract: a
+// draft carrying the echoed change. The job.create fake mirrors execution's:
+// a pending governed job. The job.record fake mirrors execution's completion:
+// it echoes the caller's state/result onto the Job resource, exactly what a
+// package-scoped test can assert without a real job.get.
 type fakePorts struct {
 	mu    sync.Mutex
 	calls []contract.Invocation
@@ -145,6 +148,23 @@ func (p *fakePorts) Call(ctx context.Context, unit contract.Unit, inv contract.I
 			ID: minted, Version: 1, Kind: "probe", State: "pending",
 			Requirements: []wireRequirement{},
 			Owner:        in.Owner, Operation: in.Operation,
+		}}
+
+	case "_execution.job.record":
+		var in struct {
+			JobID           contract.ID     `json:"job_id"`
+			ExpectedVersion int64           `json:"expected_version"`
+			Generation      int64           `json:"generation"`
+			State           string          `json:"state"`
+			Result          json.RawMessage `json:"result"`
+			EvidenceIDs     []contract.ID   `json:"evidence_ids"`
+		}
+		if err := json.Unmarshal(inv.Input, &in); err != nil {
+			return contract.Payload{}, &contract.Fault{Code: contract.CodeInternalError, Message: "fake job record: bad input"}
+		}
+		body = jobOut{Resource: wireJob{
+			ID: in.JobID, Version: in.ExpectedVersion + 1, Kind: "probe", State: in.State,
+			Requirements: []wireRequirement{}, Owner: ownerName, Result: in.Result,
 		}}
 
 	default:

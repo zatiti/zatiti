@@ -539,5 +539,39 @@ func handleValidationRecord(ctx context.Context, s *Service, unit contract.Unit,
 	if !found {
 		return contract.Payload{}, internalError("connection %s disappeared during observation recording", row.ID)
 	}
+	// Step 4: complete the execution-side job callback-owned by whichever
+	// connection.validate/connection.rotate probe this observation answers,
+	// if one is still outstanding. A terminal disposition (succeeded/failed)
+	// completes the job with the domain-corrected Connection result; an
+	// accepted/unknown/not_sent disposition establishes no terminal truth,
+	// so the job stays open for a later observation to complete, except
+	// unknown itself is preserved as the job's own outcome_unknown state
+	// per the never-silently-dropped uncertainty rule.
+	if pending, pfound, perr := s.loadPendingProbe(ctx, unit, row.ID); perr != nil {
+		return contract.Payload{}, perr
+	} else if pfound {
+		var jobState string
+		switch in.Observation.Disposition {
+		case obsSucceeded:
+			if scopeSubset {
+				jobState = "succeeded"
+			} else {
+				jobState = "failed"
+			}
+		case obsFailed:
+			jobState = "failed"
+		case obsUnknown:
+			jobState = "outcome_unknown"
+		}
+		if jobState != "" {
+			if err := s.completeJob(ctx, unit, pending.JobID, pending.JobVersion, jobState,
+				resourceOut{Resource: updated.wire()}); err != nil {
+				return contract.Payload{}, err
+			}
+			if err := s.deletePendingProbe(ctx, unit, row.ID); err != nil {
+				return contract.Payload{}, err
+			}
+		}
+	}
 	return s.completed(resourceOut{Resource: updated.wire()})
 }
