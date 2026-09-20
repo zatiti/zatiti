@@ -1896,6 +1896,26 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   discipline, and explicit "do not self-commit, do not self-poll"
   instructions given the recurring self-poll anti-pattern documented in
   docs/lore.md.
+- 2026-09-20 16:51 PT -- P39 LANDED (PR #26, 4b22d907). Independently
+  reviewed: internal/cli's command generation was already fully
+  descriptor-driven (`New` walks whatever []contract.Descriptor it's
+  handed, no per-operation code), so every new revision-3 operation
+  already got a correct CLI command once P37/P38 landed the full catalog
+  -- confirmed by reading cli.go directly, not just trusting the report.
+  The one real gap: `humanStatus` collapsed the four "blocked" fault
+  codes (prerequisite_missing/external_action_required/
+  budget_unavailable/capability_unsupported, CLI exit 5) and
+  controller_unavailable (exit 6) into a generic "failed" bucket, short
+  of the card's "accepted versus completed versus blocked/unknown
+  distinctly" requirement -- fixed in render.go, cross-checked against
+  contract.CLIExit's own test table for the exact code-to-exit mapping.
+  All 4 new testdata fixtures independently re-validated with `jsonschema`
+  against their operation's real input_schema in
+  docs/implementation/operations.json. go test ./internal/cli: 34 tests,
+  zero failures. CI's build-and-test failures on the PR were confirmed
+  to be exactly the pre-existing expected-red set (internal/application,
+  internal/installation, internal/mcp, internal/scheduling, cmd/zatiti,
+  etc.) -- internal/cli itself was not among them.
 
 ## Planned
 
