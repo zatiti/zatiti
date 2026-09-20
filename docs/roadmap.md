@@ -1487,11 +1487,33 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   all pre-commit failures traced only to the already-tracked
   `_identity.activate` issue -- nothing new. internal/artifacts is not
   itself on expected-red.txt (never was).
-  P10 landing now: hit a real merge conflict in expected-red.txt during
-  rebase (its own pre-reboot removal of `internal/messaging` vs. P37's
-  removal of `internal/registry` from the same list position) -- resolved
-  by dropping both lines (both are now correctly fixed), not by picking
-  one side blindly.
+  P10 LANDED (PR #9, 929435d) -- conflict resolved as above, `go test
+  ./internal/messaging` confirmed fully green before trusting its own
+  expected-red.txt removal.
+  P06 LANDED (PR #10, 9d0f077) -- no conflicts, no shared-defs issues in
+  this package, clean first-try commit.
+  P03 LANDED (PR #11, 5e15bea) -- the two findings from the 2026-09-19
+  18:20 PT entry (missing identity.current/_identity.worker.resolve
+  contract, the by-id scope authorization bug fix) shipped in this
+  commit as originally planned. ALSO fixed a related but separate issue
+  discovered while landing: internal/identity/schemas.go's wireDefs
+  constant was itself still revision-2-shaped (missing CallbackRoute/
+  OperationAttempt, stale Operation/Responsibility) -- this, not
+  anything in P03's own card text, is what was actually causing every
+  `_identity.activate`-triggered failure across cmd/zatiti/tests/
+  integration/tests/qualification. Fixed by replacing wireDefs verbatim
+  from internal/identity/AGENTS.md's "Local schema definitions" block,
+  verified by parsing both as JSON and diffing programmatically (not
+  just gofmt-clean) -- confirmed exact match. This is a GENERAL pattern
+  worth watching for in every remaining card: any package with its own
+  schemas.go-style embedded wireDefs copy may have the same staleness,
+  independent of that card's own described scope. Confirmed present in
+  internal/configuration too (`_configuration.activate` showed the
+  identical error pattern once `_identity.activate`'s was fixed) --
+  P05's landing needs the same check-and-fix.
+  P07 first commit attempt correctly refused for hitting
+  internal/platform's known flake (docs/lore.md) -- not a real problem,
+  internal/policy itself was clean. Retrying.
 
 ## Planned
 
