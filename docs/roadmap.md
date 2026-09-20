@@ -1666,6 +1666,25 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   category as P03/P05. Fixed before the report went out.
   P30 cleared next (rebase first, then commit) -- its security fix gets
   a careful manual diff review before merging, not just a report-trust.
+- 2026-09-20 14:23-14:32 PT -- P30 LANDED (PR #19, 4645b41), the security
+  fix, after a full manual diff review (not just trusting the agent's
+  report): read socket.go's actual fix line by line -- confirmed
+  EvalSymlinks now resolves only dir's parent, never dir itself, so
+  mkdirPrivate's os.Lstat+ModeSymlink check genuinely sees the real leaf
+  path; confirmed mkdirPrivate's check is real (files.go:36-65); read the
+  three tamper-test fixture changes and confirmed the security assertion
+  itself (wantCode expects the fault) is unchanged, the fix only makes
+  the tamper reliably real (XOR-flip vs fixed-byte overwrite) instead of
+  a 1/256 coin-flip, and one test gained a STRONGER assertion (object not
+  consumed by a refused republish); confirmed blob.go/blobformat.go's new
+  code (inventory, decryptChunksInto refactor, decryptForeignFile) reuses
+  the existing audited verification path byte-for-byte rather than a
+  parallel crypto implementation. Then ran both named tests 5x each
+  myself -- clean. docs/lore.md's symlink-defect entry updated (not just
+  appended) to record the fix, superseding the earlier correction entry.
+  THIS COMPLETES WAVE 3 -- all 15 cards (P03, P05, P06, P07, P08, P09,
+  P10, P11, P12, P13, P26, P29, P30, P34, P37) now landed, pending only
+  P12's own commit (cleared, in flight).
 
 ## Planned
 
