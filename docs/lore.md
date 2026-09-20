@@ -67,3 +67,49 @@ currently holds exactly the 13 structural packages above (not
 internal/platform). **When a card lands and its package goes green, remove
 that package from expected-red.txt in the same commit** -- the list must
 shrink to empty by M1, not calcify into a permanent exception.
+
+## [implementation-remediation] R-build-lease is advisory only -- the pre-commit hook does NOT enforce it, 2026-09-19
+
+**The hook does not check who holds R-build-lease before running its full
+`go test -p 2 -timeout 30m ./...`.** The lease is a pure convention: every
+agent is TOLD to acquire it before a heavy multi-package command, but
+nothing stops `git commit` from triggering the hook's full-module test
+regardless of lease state. Confirmed live during wave 3's first 8-lane
+dispatch: P37 held the lease and was correctly running its commit-time test,
+while P10 (resumed with "acquire the lease and proceed") committed
+concurrently without actually holding it, and P09 nearly became a third
+concurrent full-module run before self-aborting (killed its own hook
+process and lease-retry loop on noticing load 115-165). Two simultaneous
+full-module test runs (each spawning the real controller binary, tests/
+integration, tests/qualification, etc.) drove 1-minute load from ~26 to
+150+ in under 10 minutes -- matching, and nearly exceeding, the exact
+failure threshold docs/roadmap.md's "Parallel dispatch protocol" section
+documents from the 2026-09-18 incident (10 lanes exhausted the session
+limit at load ~130). Neither P37's nor P10's commit actually landed --
+both attempts failed or were interrupted under the load spike, leaving
+real uncommitted work in both worktrees (recovered afterward, nothing
+lost).
+
+**A second, independent failure mode compounded this**: multiple agents,
+once done coding, stopped their turn to "wait for load to drop" or claimed
+"a background monitor is watching," but had no actual live background
+watcher -- each such stop generates a task-notification, and if resumed
+naively (or if the agent resumes itself), it re-polls in a tight ~30-90s
+loop, each poll re-paying that agent's full accumulated context cost
+(300-400K+ tokens per poll observed). This is expensive even when harmless,
+and outright dangerous when the poll itself involves spawning a "retry
+lease" background loop that starts extra work.
+
+**Until the hook is fixed to actually enforce the lease (or another
+mechanism does), the safe protocol for a lead dispatching multiple
+concurrent lanes is: serialize the commit step yourself.** Let every lane
+finish its coding and package-scoped tests in parallel (cheap, safe,
+what wave-based dispatch is for), but once a lane reports "ready to
+commit," explicitly clear ONE lane at a time by name, wait for its actual
+landing (PR open or a real, understood failure) before clearing the next.
+Never resume multiple stalled/waiting agents in the same message with an
+instruction like "proceed regardless of load" -- that is exactly what
+caused this incident. Never let an agent's own "I'll wait for a monitor"
+report go unaddressed for more than one tick; either it has genuinely
+stopped (resume it explicitly, one at a time) or it's about to spawn a
+wasteful poll loop (tell it to stop and wait for you by name instead).
