@@ -3,6 +3,7 @@ package memory
 import (
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/zatiti/zatiti/internal/contract"
 )
@@ -124,6 +125,110 @@ func TestBindingUpdateStaleVersion(t *testing.T) {
 		if op == opConfigStage {
 			t.Fatalf("stale update still staged a configuration change")
 		}
+	}
+}
+
+// TestRevokedBindingExcludesFutureContextButRetainsPastContext proves the
+// Z18.revoked_memory_binding shape: once the sole binding authorizing a
+// brain is archived, a brand new recall against that binding is denied
+// immediately (future context excluded), but the claim and job result an
+// earlier, already-completed recall produced under the binding while it was
+// still active are neither deleted nor mutated by the archive -- revocation
+// blocks subsequent retrieval, it does not erase already disclosed context
+// (R15-006). job.get in particular carries no binding-authorization check at
+// all (only an installation-scope check), so it is exactly the retained,
+// already-disclosed record R15-006 describes, not a fresh retrieval gated by
+// current authority.
+func TestRevokedBindingExcludesFutureContextButRetainsPastContext(t *testing.T) {
+	e := newEnv(t)
+	org, worker := e.ids.New(), e.ids.New()
+	brain := e.provisionedBrain(brainKindWorker, org, worker)
+	e.seedBrain(brain)
+	binding := &bindingRow{ID: e.ids.New(), Version: 1, InstallationID: e.install, OrganizationID: org, WorkerID: worker,
+		BrainID: brain.ID, Permissions: []string{permRead}, Classification: classificationInternal, State: bindingActive,
+		CreatedAt: e.clock.Now(), UpdatedAt: e.clock.Now()}
+	e.seedBinding(binding)
+
+	scope := e.scopeAt(org, worker)
+	wireCallerScope := wireScope{InstallationID: e.install, OrganizationID: org, WorkerID: worker}
+
+	// While the binding is active, run one recall through to completion:
+	// a cached claim and a job result naming a real context artifact.
+	payload, err := e.callAs(e.actor, scope, opRecall, recallInput{
+		Scope: wireCallerScope, Query: "anything", BindingIDs: []contract.ID{binding.ID}, MinimumFreshness: time.Time{},
+		Limits: wireLimits{Currency: "USD", SpendMicroUnits: 100, Concurrency: 1, ModelSteps: 1, AttemptSeconds: 60, RootDeadline: e.clock.Now().Add(time.Hour)},
+	})
+	if err != nil {
+		t.Fatalf("recall while the binding is active: %v", err)
+	}
+	var out jobResourceOutput
+	e.decodePayload(payload, &out)
+
+	claim := newMemoryClaim(brain.ID, e.ids.New(), 1, true, e.clock.Now())
+	evidence := recallEvidence(brain, "00000000-0000-4000-8000-000000000099", claim, e.clock.Now())
+	recordPayload, err := e.callAs(e.actor, scope, opRecord, recordInput{
+		JobID: out.Resource.ID, OperationID: *out.Resource.OperationID,
+		Observation: wireObservation{Disposition: contract.DispositionSucceeded, Evidence: mustMarshal(t, evidence), Usage: wireUsage{Currency: "USD"}},
+	})
+	if err != nil {
+		t.Fatalf("record recall success: %v", err)
+	}
+	var recorded jobResourceOutput
+	e.decodePayload(recordPayload, &recorded)
+	if recorded.Resource.State != jobSucceeded || recorded.Resource.ResultArtifact == nil {
+		t.Fatalf("completed recall = %+v, want succeeded with a context artifact", recorded.Resource)
+	}
+
+	// Revoke the only binding on this brain: archive it directly (this test
+	// exercises the downstream authorization effect, not the staged
+	// create/archive/activate lifecycle TestBindingCreateActivateArchive
+	// already covers).
+	if err := e.db.Write(e.ctx, e.actor, e.scope, func(unit contract.Unit) error {
+		return setBindingState(e.ctx, unit, binding, bindingArchived, e.clock.Now())
+	}); err != nil {
+		t.Fatalf("archive binding: %v", err)
+	}
+
+	// Future context is excluded immediately: a new recall against the same,
+	// now-archived binding is denied before any dispatch.
+	e.ports.resetCalls()
+	_, err = e.callAs(e.actor, scope, opRecall, recallInput{
+		Scope: wireCallerScope, Query: "anything", BindingIDs: []contract.ID{binding.ID}, MinimumFreshness: time.Time{},
+		Limits: wireLimits{Currency: "USD", SpendMicroUnits: 100, Concurrency: 1, ModelSteps: 1, AttemptSeconds: 60, RootDeadline: e.clock.Now().Add(time.Hour)},
+	})
+	if f := decodeFault(err); f == nil || f.Code != contract.CodePermissionDenied {
+		t.Fatalf("recall against a revoked binding: got err=%v, want permission_denied", err)
+	}
+	for _, op := range e.ports.opsCalled() {
+		if op == opEffectsPrepare || op == opExecutionJobCreate {
+			t.Fatalf("recall against a revoked binding called %s; a revoked binding must never dispatch", op)
+		}
+	}
+
+	// The retained job result from before revocation is unchanged: same
+	// state, same context artifact, same cached claim.
+	jobPayload, err := e.callAs(e.actor, scope, opJobGet, jobGetInput{Scope: wireCallerScope, ID: out.Resource.ID})
+	if err != nil {
+		t.Fatalf("job.get after binding revocation: %v", err)
+	}
+	var afterRevocation jobResourceOutput
+	e.decodePayload(jobPayload, &afterRevocation)
+	if afterRevocation.Resource.State != jobSucceeded ||
+		afterRevocation.Resource.ResultArtifact == nil ||
+		*afterRevocation.Resource.ResultArtifact != *recorded.Resource.ResultArtifact {
+		t.Fatalf("retained job result after revocation = %+v, want unchanged from %+v", afterRevocation.Resource, recorded.Resource)
+	}
+
+	var stillCached *claimRow
+	if err := e.db.Read(e.ctx, e.actor, e.scope, func(unit contract.Unit) error {
+		var err error
+		stillCached, err = loadLatestClaim(e.ctx, unit, brain.ID, claim.ID)
+		return err
+	}); err != nil {
+		t.Fatalf("read cached claim after revocation: %v", err)
+	}
+	if stillCached.Text != claim.Text || stillCached.Version != claim.Version {
+		t.Fatalf("cached claim after revocation = %+v, want unchanged text/version from the pre-revocation recall", stillCached)
 	}
 }
 

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/zatiti/zatiti/internal/contract"
@@ -690,6 +691,48 @@ func loadLatestClaim(ctx context.Context, unit contract.Unit, brainID, claimID c
 	row := unit.QueryRowContext(ctx, `SELECT `+claimColumns+` FROM memory_claims
 		WHERE brain_id = ? AND id = ? ORDER BY version DESC LIMIT 1`, string(brainID), string(claimID))
 	return scanClaim(row.Scan)
+}
+
+// listClaimsByBrains returns one keyset page of the latest cached version of
+// every claim across the named brains -- memory.list's local read facade
+// (R15-007/P00-017): never a Serenity call, so unauthorized brains are
+// excluded entirely by the caller never naming them here, and retracted
+// claims remain listed with active=false rather than disappearing (R15-006).
+// Ordering and the (recorded_at, id) keyset mirror handleBindingList's
+// pagination convention.
+func listClaimsByBrains(ctx context.Context, unit contract.Unit, brainIDs []contract.ID, afterRecorded time.Time, afterID contract.ID, limit int64) ([]*claimRow, error) {
+	if len(brainIDs) == 0 {
+		return nil, nil
+	}
+	placeholders := make([]string, len(brainIDs))
+	args := make([]any, 0, len(brainIDs)+4)
+	for i, id := range brainIDs {
+		placeholders[i] = "?"
+		args = append(args, string(id))
+	}
+	query := `SELECT ` + claimColumns + ` FROM memory_claims c
+		WHERE c.brain_id IN (` + strings.Join(placeholders, ",") + `)
+		AND c.version = (SELECT MAX(c2.version) FROM memory_claims c2 WHERE c2.brain_id = c.brain_id AND c2.id = c.id)
+		AND (c.recorded_at > ? OR (c.recorded_at = ? AND c.id > ?))
+		ORDER BY c.recorded_at, c.id LIMIT ?`
+	args = append(args, formatStamp(afterRecorded), formatStamp(afterRecorded), string(afterID), limit)
+	rows, err := unit.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []*claimRow
+	for rows.Next() {
+		c, err := scanClaim(rows.Scan)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 // promotionRow is one memory_promotions record: a destination claim's

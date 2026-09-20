@@ -41,6 +41,7 @@ const (
 	opBindingUpdate  = "memory.binding.update"
 	opInspect        = "memory.inspect"
 	opJobGet         = "memory.job.get"
+	opList           = "memory.list"
 	opPromote        = "memory.promote"
 	opRecall         = "memory.recall"
 	opRemember       = "memory.remember"
@@ -69,6 +70,22 @@ type opMeta struct {
 	expected   bool
 	callers    []string
 	cli        string // CLI tokens below the root command, space separated; empty for internal operations
+
+	// noScopeRequired overrides the derived scope_required for one operation
+	// to empty even though its input schema requires "scope". It exists for
+	// exactly one confirmed drift in the frozen catalog of record
+	// (docs/implementation/operations.json): memory.list requires scope in
+	// its input schema like every sibling memory.* operation, but its frozen
+	// descriptor entry omits scope_required entirely, unlike every one of
+	// them (including internal operations with an empty scope_required
+	// array). TestDescriptorsMatchFrozenCatalog pins this package to that
+	// frozen entry field by field, and the shared registry refuses to
+	// assemble a module whose descriptor surface drifts from it, so this
+	// package matches the frozen (apparently mistaken) entry rather than the
+	// general rule -- the same precedent internal/messaging recorded for
+	// conversation.message.list. Reported upstream at landing rather than
+	// silently invented around.
+	noScopeRequired bool
 }
 
 // opMetas lists every owned operation: internal first, then the public
@@ -102,6 +119,8 @@ var opMetas = []opMeta{
 		cli: "memory inspect"},
 	{id: opJobGet, visibility: "public", mode: "query",
 		cli: "memory job get"},
+	{id: opList, visibility: "public", mode: "query",
+		cli: "memory list", noScopeRequired: true},
 	{id: opPromote, visibility: "public", mode: "mutation", submission: true,
 		effect: contract.EffectExternalMutation, cli: "memory promote"},
 	{id: opRecall, visibility: "public", mode: "mutation", submission: true,
@@ -193,6 +212,10 @@ func (s *Service) assemble() error {
 		if err != nil {
 			return fmt.Errorf("memory: operation %s output schema: %w", m.id, err)
 		}
+		scopeRequired := scopeRequirement(inputSchema)
+		if m.noScopeRequired {
+			scopeRequired = nil
+		}
 		d := contract.Descriptor{
 			ID:              m.id,
 			Version:         1,
@@ -202,7 +225,7 @@ func (s *Service) assemble() error {
 			Effect:          effect,
 			InputSchema:     inputSchema,
 			OutputSchema:    outputSchema,
-			ScopeRequired:   scopeRequirement(inputSchema),
+			ScopeRequired:   scopeRequired,
 			Callers:         m.callers,
 			ExpectedVersion: m.expected,
 			SubmissionKey:   m.submission,
@@ -274,6 +297,8 @@ func (s *Service) bindHandler(d contract.Descriptor) (contract.Handler, error) {
 		return bind(d, s.handleInspect)
 	case opJobGet:
 		return bind(d, s.handleJobGet)
+	case opList:
+		return bind(d, s.handleList)
 	case opPromote:
 		return bind(d, s.handlePromote)
 	case opRecall:
