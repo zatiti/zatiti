@@ -57,6 +57,81 @@ func TestDecideRecordsImmutableApproval(t *testing.T) {
 	if data.DecisionID != decision.ID || data.Decision != decideApprove || data.ReviewerID != human {
 		t.Fatalf("decided event data = %+v", data)
 	}
+	if data.ActionDigest != review.ActionDigest || data.Scope != review.Scope {
+		t.Fatalf("decided event carries digest/scope = %s/%+v, want %s/%+v",
+			data.ActionDigest, data.Scope, review.ActionDigest, review.Scope)
+	}
+}
+
+// TestDecideWakeCorrelationOnlyAfterCommit proves the review-decided event —
+// the sole signal a downstream turn-wake consumer can use, since reviews has
+// no outgoing call into execution/scheduling — carries the exact task/worker
+// scope and action digest needed to identify the waiting turn, and that this
+// wake signal is produced only on the transaction that actually commits a
+// decision: a refused, stale-version or ineligible attempt against a live
+// task/worker-scoped review leaves the pending review pending and emits no
+// decided event at all, so no turn is ever woken for a non-committed
+// outcome.
+func TestDecideWakeCorrelationOnlyAfterCommit(t *testing.T) {
+	e := newEnv(t)
+	human := e.principal(contract.KindHuman)
+	outsider := e.principal(contract.KindHuman)
+	worker := e.principal(contract.KindWorker)
+	turnScope := contract.Scope{InstallationID: e.install, WorkerID: worker, TaskID: e.ids.New()}
+
+	proposer := e.actorFor(e.principal(contract.KindClientAgent))
+	action := actionFixture(turnScope, "https://api.example.com/v1/turn-effect")
+	req := requirementFixture([]contract.ID{human}, true)
+	review, fault := e.ensureFor(proposer, turnScope, ensureInputFor(t, turnScope, action, req))
+	if fault != nil {
+		t.Fatalf("ensure: %v", fault)
+	}
+
+	// An ineligible principal's attempt is refused and commits nothing: the
+	// review stays pending and no wake signal is emitted for it. The
+	// transactional scope stays the environment's default; checkGate only
+	// requires the request's installation to match, which turnScope shares.
+	_ = e.expectFaultAs(e.actorFor(outsider), opDecide, wireDecideInput{
+		Scope: turnScope, ID: review.ID, ExpectedVersion: review.Version,
+		ActionDigest: review.ActionDigest, Decision: decideApprove, Reason: "not eligible",
+	}, contract.CodePermissionDenied)
+	if got := len(e.eventsOfKind(eventReviewDecided)); got != 0 {
+		t.Fatalf("refused decide produced %d decided events, want 0 (no wake before commit)", got)
+	}
+
+	// The eligible human decides: exactly one decided event commits with the
+	// review's own scope (carrying worker_id/task_id) and exact digest, so a
+	// consumer can wake the correct turn from this event alone.
+	decision, fault := e.decideAs(e.actorFor(human), wireDecideInput{
+		Scope: turnScope, ID: review.ID, ExpectedVersion: review.Version,
+		ActionDigest: review.ActionDigest, Decision: decideApprove, Reason: "turn effect approved",
+	})
+	if fault != nil {
+		t.Fatalf("decide: %v", fault)
+	}
+	evs := e.eventsOfKind(eventReviewDecided)
+	if len(evs) != 1 {
+		t.Fatalf("decided events after commit = %d, want 1", len(evs))
+	}
+	var data eventDecidedData
+	if err := json.Unmarshal(evs[0].Data, &data); err != nil {
+		t.Fatalf("decode event data: %v", err)
+	}
+	if data.Scope != turnScope || data.ActionDigest != review.ActionDigest || data.DecisionID != decision.ID {
+		t.Fatalf("wake correlation data = %+v, want scope %+v digest %s decision %s",
+			data, turnScope, review.ActionDigest, decision.ID)
+	}
+
+	// A second decide attempt against the now-decided review is a conflict
+	// and produces no additional wake signal: duplicate decisions never
+	// re-trigger dispatch.
+	_ = e.expectFaultAs(e.actorFor(human), opDecide, wireDecideInput{
+		Scope: turnScope, ID: review.ID, ExpectedVersion: review.Version + 1,
+		ActionDigest: review.ActionDigest, Decision: decideApprove, Reason: "duplicate",
+	}, contract.CodeConflict)
+	if got := len(e.eventsOfKind(eventReviewDecided)); got != 1 {
+		t.Fatalf("decided events after duplicate attempt = %d, want 1 (still)", got)
+	}
 }
 
 func TestDecideIsIdempotentRefusal(t *testing.T) {
