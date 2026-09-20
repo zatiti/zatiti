@@ -1701,6 +1701,29 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   Opening wave 4 next (P04, P14, P27, P35, P38, P41 per the wave table)
   -- verifying actual dependencies before dispatching each rather than
   assuming wave completion implies readiness.
+- 2026-09-20 14:45 PT -- WAVE 4 OPENED. Verified all six cards' actual
+  depends_on in plan.json (not just wave-table membership) before
+  dispatching: P04 needs P03,P02 (landed); P14 needs
+  P03,P05,P08,P10,P11,P02 (all landed); P27 needs P26,P02 (landed); P35
+  needs P07,P12,P02 (landed); P38 needs P37,P34,P02 (landed); P41 needs
+  P37,P02 (landed). All six genuinely ready, all six independent roots
+  (no two touch the same package), dispatched together as parallel
+  coding-only subagents: P04 internal/application (agent
+  a059bb99a65d5d725), P14 internal/execution (agent aa37ce56f3f7175ce --
+  THE critical-path card: "the unavoidable serialized critical path (P14
+  -> P15 -> P16 -> P18 -> P20 -> P21)" per the plan's own README, and the
+  actual start of the durable worker loop the original audit found
+  missing entirely -- given briefed extra reading time (messaging's and
+  tasks' landed seams it calls into) since a shortcut here poisons five
+  more cards), P27 internal/adapters/serenity (agent a0336131f61d190df --
+  briefed clearly that success here likely means a precise, evidenced
+  "stays refused" handoff, not a working integration, given the upstream
+  protocol limitation P26 already confirmed), P35 internal/reviews
+  (agent ab70b563b11b02009), P38 internal/client (agent
+  a4775bea738d3e29e), P41 internal/server (agent a8c8e6269294626c9). Same
+  discipline as wave 3's last batch: report ready, wait for lead
+  clearance, proactive schemaDefs check, rebase before commit given main
+  will keep moving.
 
 ## Planned
 
