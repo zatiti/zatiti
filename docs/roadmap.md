@@ -14,12 +14,20 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
 - One heavy run machine-wide at a time. Every module-wide command, every
   `go test -race` (package-level included), every `flutter test` /
   `flutter build`, and every `git commit` (the hook runs module-wide
-  tests) goes through the lease wrapper as ONE foreground command:
-  `with-lease.sh "<lane>: <what>" <command>`. It claims `R-build-lease`,
-  runs, and always releases. Never call claim.sh directly and never claim
-  from a monitor or background task: a lane's monitor once held the lease
-  idle for 21 minutes while everything queued behind it. `-p 2` on every
-  go invocation.
+  tests) goes through the lease as ONE foreground command.
+  **CORRECTION, 2026-09-20 (confirmed independently by two agents, P04
+  and P41): `with-lease.sh` does not exist anywhere on this machine --
+  checked PATH, ~/.claude/skills, repo root, .claude/. The canonical
+  primitive is `~/.claude/skills/claim/scripts/claim.sh claim
+  R-build-lease --purpose "<what>"`, run the command, then `claim.sh
+  release R-build-lease <sha>` immediately after -- exactly what every
+  card in this remediation plan has actually been doing successfully.**
+  The underlying warning below is still real and still applies: never
+  claim from a monitor or background task -- a lane's monitor once held
+  the lease idle for 21 minutes while everything queued behind it; claim
+  in the SAME foreground command sequence that runs the heavy work and
+  releases it, never detach the claim from the command it's protecting.
+  `-p 2` on every go invocation.
 - The "hold when 1-minute load > 10" rule in the founder's global
   instructions is written for the Mac mini. On the laptop the lease is the
   throttle (founder-confirmed for the wave-3 push, 2026-09-18). Agents
@@ -1795,6 +1803,32 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   end-to-end by its own agent again, including correctly falling back to
   `git merge --ff-only` when rebase refused on its dirty zero-commits
   tree, same pattern P38 established. P04 cleared next.
+- 2026-09-20 15:19-15:30 PT -- P04 LANDED (PR #24, 3a1b596), after a full
+  manual security review (read the actual worker.go diff, not just the
+  report -- this implements a new authorization boundary,
+  contract.WorkerOperator). Confirmed the real check ordering matches
+  the card exactly: structural validation -> WorkerID/Scope.WorkerID
+  assertion -> installation match -> allowlist+Visibility check (public
+  operations only, BEFORE identity is ever consulted) -> version check
+  -> scope intersection (scopeWithin, documented as unset-dimension =
+  unconstrained, relying on each domain's own authorization for
+  anything scope doesn't pin -- a disclosed design choice, not a gap)
+  -> actor resolution through identity's revalidateAuthority (never a
+  caller-supplied Actor -- WorkerRequest has no Actor field at all) ->
+  deterministic submission key (sha256 of turn+proposal id) -> delegates
+  to the existing, already-proven a.Invoke path. No new transaction
+  machinery invented; internal operations categorically excluded via
+  the Visibility check regardless of allowlist contents (defense in
+  depth). Ran all 7 WorkerOperator tests myself, all pass.
+  ALSO FIXED, confirmed independently by both P04 and P41: the
+  "Parallel dispatch protocol" section above referenced `with-lease.sh`
+  as the canonical build-lease wrapper; it doesn't exist anywhere on
+  this machine. Corrected the reference to claim.sh directly (which is
+  what every single card in this remediation plan has actually used
+  successfully) while preserving the real underlying warning (never
+  claim from a monitor/background task).
+  WAVE 4'S OTHER 5 CARDS (P04, P27, P35, P38, P41) ARE ALL LANDED. Only
+  P14 (critical path) remains to close wave 4 entirely -- still working.
 
 ## Planned
 
