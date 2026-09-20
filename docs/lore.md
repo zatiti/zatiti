@@ -44,15 +44,36 @@ artifacts against the new revision-3 catalog:
 A package's parity test going green is a real, verifiable signal that card
 landed correctly -- use it as a spot-check when reviewing that card's PR.
 
-**Unrelated to P00**: the same CI run showed
+**CORRECTION, 2026-09-20: this is a real security defect, NOT a flake --
+the paragraph below this one is wrong and kept only so the mistake is
+visible.** P30's card (docs/implementation-remediation/assignments/P30.md)
+cites a specific CI run (35473210732) where
+`internal/platform.TestListenPrivateRefusesSymlinkedRunDirectory` accepted
+a symlinked run directory on both Linux and macOS, and
+`TestBlobTamperedObjectFailsPublishOverExisting` accepted tampered content
+on macOS -- a symlink-defense bypass and a tamper-detection bypass, found
+by the original P00 audit, not by this session. P30 exists specifically
+to reproduce and fix both with filesystem fixtures before touching
+implementation or fixture assumptions. Local reproduction attempts in
+this session passed clean, which is NOT evidence of a flake -- it likely
+means the local environment doesn't trigger the same condition (timing,
+specific filesystem behavior, or something CI-environment-specific).
+Do not casually retry past a `internal/platform` test failure again;
+read P30's card and investigate properly.
+
+Original (WRONG) entry, 2026-09-19: "the same CI run showed
 `internal/platform.TestListenPrivateRefusesSymlinkedRunDirectory` failing.
-Verified 2026-09-19: this test passes clean against baseline `main` (pre-P00)
-run locally, and a later full untruncated `go test ./...` run didn't
-reproduce it either -- it's a flake (likely CI-runner symlink/TMPDIR
-environment specific), not a P00 regression. If it recurs, investigate the
-CI environment, not the P00 diff. It is deliberately NOT on
-docs/implementation-remediation/expected-red.txt (below) -- that list is for
-structural contract-drift only, never for a flake.
+Verified 2026-09-19: this test passes clean against baseline `main`
+(pre-P00) run locally, and a later full untruncated `go test ./...` run
+didn't reproduce it either -- it's a flake ... not a P00 regression."
+This reasoning was too hasty: passing locally is weak evidence against a
+CI-run-cited, audit-documented defect with a specific repro command in a
+real card. Two commits in this session (P07, P08 -- see docs/roadmap.md)
+retried past an `internal/platform` failure assuming it was this same
+"flake" without re-reading P30's card first; neither retry investigated
+whether the retry was masking the real defect versus hitting unrelated
+noise. Worth re-checking those retries' actual failure output against
+P30's two named tests specifically once P30 lands.
 
 **The local pre-commit hook (`hooks/pre-commit`, installed to
 `.git/hooks/pre-commit`) now tolerates this.** As originally written it ran

@@ -1556,6 +1556,28 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   internal/effects, P26 internal/memory both map directly to entries
   still on this list; P29 internal/storage, P30 internal/platform, P34
   internal/evidence do not).
+- 2026-09-20 13:40 PT -- IMPORTANT CORRECTION: the 2026-09-19 lore.md entry
+  calling internal/platform's TestListenPrivateRefusesSymlinkedRunDirectory
+  a flake was WRONG. P30's own card cites CI run 35473210732 where that
+  test AND TestBlobTamperedObjectFailsPublishOverExisting both accepted
+  what they should have refused (a symlink-defense bypass and a
+  tamper-detection bypass) -- real, documented security defects from the
+  original P00 audit, not noise. Local reproduction passing clean was not
+  evidence of a flake. Corrected in docs/lore.md with a visible
+  correction (kept the wrong original text so the mistake is legible).
+  P07 and P08 (already landed) each retried past an internal/platform
+  failure once without investigating whether it was this same defect --
+  worth re-checking once P30 lands and fixes it for real.
+  Dispatched wave 3's last 5 cards as parallel subagents (coding only,
+  NOT the commit step): P12 internal/effects (agent aba10c50ef448185c),
+  P26 internal/memory (agent a3912f5e25d6d8f1d), P29 internal/storage
+  (agent a2a045e8a64018112), P30 internal/platform (agent
+  aded361f03e758072, explicitly briefed on the corrected security-defect
+  context above), P34 internal/evidence (agent a59ea35c67b7075c9). Each
+  told to proactively check for the schemaDefs staleness pattern and fix
+  it within its own package's scope, then report ready and WAIT for the
+  lead to clear it by name before running any real (hook-gated) commit --
+  the lead lands each one serially, same discipline as the first 12.
 
 ## Planned
 
