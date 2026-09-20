@@ -107,14 +107,23 @@ func (s *Service) insertPrincipal(ctx context.Context, unit contract.Unit, p pri
 }
 
 func (s *Service) principalGet(ctx context.Context, unit contract.Unit, in principalGetInput) (contract.Payload, error) {
-	if _, err := s.authorize(ctx, unit, opPrincipalGet, in.Scope); err != nil {
+	env, err := s.authorize(ctx, unit, opPrincipalGet, in.Scope)
+	if err != nil {
 		return contract.Payload{}, err
 	}
 	p, found, err := s.loadPrincipal(ctx, unit, in.ID)
 	if err != nil {
 		return contract.Payload{}, err
 	}
-	if !found {
+	if !found || !env.coversScope(p.Scope) {
+		// `in.Scope` authorizes the request; it says nothing about the
+		// principal named by `in.ID`, which the caller controls
+		// independently. Without also checking the loaded principal's own
+		// scope against the envelope, a narrowly granted caller could name
+		// any principal in the installation -- the owner included -- by ID
+		// and read it back, as long as its OWN request scope happened to fit
+		// its envelope. not_found either way: existence outside the caller's
+		// envelope is not disclosed.
 		return contract.Payload{}, notFound("principal %s is unknown in this installation", in.ID)
 	}
 	return completed(resourceOut[principalOut]{Resource: p.wire()})
@@ -224,7 +233,9 @@ func (s *Service) principalUpdate(ctx context.Context, unit contract.Unit, in pr
 	if err != nil {
 		return contract.Payload{}, err
 	}
-	if !found {
+	if !found || !env.coversScope(p.Scope) {
+		// See principalGet: `in.ID` is caller-controlled independently of
+		// `in.Scope`, so the target's own scope must also fit the envelope.
 		return contract.Payload{}, notFound("principal %s is unknown in this installation", in.ID)
 	}
 	if in.ExpectedVersion != contract.Version(p.Version) {
@@ -282,14 +293,18 @@ func (s *Service) updatePrincipal(ctx context.Context, unit contract.Unit, p pri
 }
 
 func (s *Service) principalRevoke(ctx context.Context, unit contract.Unit, in principalRevokeInput) (contract.Payload, error) {
-	if _, err := s.authorize(ctx, unit, opPrincipalRevoke, in.Scope); err != nil {
+	env, err := s.authorize(ctx, unit, opPrincipalRevoke, in.Scope)
+	if err != nil {
 		return contract.Payload{}, err
 	}
 	p, found, err := s.loadPrincipal(ctx, unit, in.ID)
 	if err != nil {
 		return contract.Payload{}, err
 	}
-	if !found {
+	if !found || !env.coversScope(p.Scope) {
+		// See principalGet: without this, a caller holding principal.revoke
+		// at any narrow scope of its own could revoke any principal in the
+		// installation by ID, the owner included.
 		return contract.Payload{}, notFound("principal %s is unknown in this installation", in.ID)
 	}
 	if p.Revoked {

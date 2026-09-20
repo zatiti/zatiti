@@ -79,6 +79,15 @@ func (s *Service) bootstrap(ctx context.Context, unit contract.Unit, in bootstra
 	if in.Name == ControllerPrincipalName {
 		return contract.Payload{}, invalidInput("the owner cannot take the reserved controller principal name %q", ControllerPrincipalName)
 	}
+	// Revision 3: service_credential_id and service_store_ref are optional
+	// together, for the out-of-process controller's credential. Presenting
+	// only one half is a malformed request, not a silent partial bootstrap.
+	if (in.ServiceCredentialID == nil) != (in.ServiceStoreRef == nil) {
+		return contract.Payload{}, invalidInput("service_credential_id and service_store_ref must both be present or both be absent")
+	}
+	if in.ServiceCredentialID != nil && *in.ServiceCredentialID == in.CredentialID {
+		return contract.Payload{}, invalidInput("service_credential_id must differ from the owner's credential_id")
+	}
 	if err := s.assertNameUnique(ctx, unit, in.Name); err != nil {
 		return contract.Payload{}, err
 	}
@@ -93,6 +102,16 @@ func (s *Service) bootstrap(ctx context.Context, unit contract.Unit, in bootstra
 	}
 	if dupOwner > 0 || dupCred > 0 {
 		return contract.Payload{}, conflict("bootstrap identity references already exist")
+	}
+	if in.ServiceCredentialID != nil {
+		var dupServiceCred int64
+		if err := unit.QueryRowContext(ctx,
+			`SELECT COUNT(*) FROM identity_credentials WHERE id = ?`, string(*in.ServiceCredentialID)).Scan(&dupServiceCred); err != nil {
+			return contract.Payload{}, fmt.Errorf("identity: check service credential id: %w", err)
+		}
+		if dupServiceCred > 0 {
+			return contract.Payload{}, conflict("bootstrap service credential reference already exists")
+		}
 	}
 	digest, err := s.resolveTokenDigest(ctx, in.StoreRef)
 	if err != nil {
@@ -159,8 +178,9 @@ func (s *Service) bootstrap(ctx context.Context, unit contract.Unit, in bootstra
 	}
 	// The scoped service identity the brief assigns to the same exclusive
 	// transaction: the controller's principal and its standing authority
-	// (see service_principal.go).
-	if err := s.createControllerPrincipal(ctx, unit, in.InstallationID, now); err != nil {
+	// (see service_principal.go). Revision 3's optional service credential
+	// fields ride along unchanged when absent.
+	if err := s.createControllerPrincipal(ctx, unit, in.InstallationID, now, in.ServiceCredentialID, in.ServiceStoreRef); err != nil {
 		return contract.Payload{}, err
 	}
 	if err := emitTransition(ctx, unit, eventBootstrap, owner.ID, 1); err != nil {

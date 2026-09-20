@@ -184,14 +184,19 @@ func (s *Service) insertGrant(ctx context.Context, unit contract.Unit, g grantRo
 }
 
 func (s *Service) grantGet(ctx context.Context, unit contract.Unit, in grantGetInput) (contract.Payload, error) {
-	if _, err := s.authorize(ctx, unit, opGrantGet, in.Scope); err != nil {
+	env, err := s.authorize(ctx, unit, opGrantGet, in.Scope)
+	if err != nil {
 		return contract.Payload{}, err
 	}
 	g, found, err := s.loadGrant(ctx, unit, in.ID)
 	if err != nil {
 		return contract.Payload{}, err
 	}
-	if !found {
+	if !found || !env.coversScope(g.Scope) {
+		// `in.Scope` authorizes the request only; `in.ID` names the grant
+		// independently, so the loaded grant's own scope must also fit the
+		// caller's envelope -- otherwise a narrowly granted caller could
+		// read any grant in the installation by ID.
 		return contract.Payload{}, notFound("grant %s is unknown in this installation", in.ID)
 	}
 	return completed(resourceOut[grantOut]{Resource: g.wire()})
@@ -302,7 +307,9 @@ func (s *Service) grantUpdate(ctx context.Context, unit contract.Unit, in grantU
 	if err != nil {
 		return contract.Payload{}, err
 	}
-	if !found {
+	if !found || !env.coversScope(g.Scope) {
+		// See grantGet: the target grant's own scope must fit the caller's
+		// envelope, independent of the request's own `in.Scope` field.
 		return contract.Payload{}, notFound("grant %s is unknown in this installation", in.ID)
 	}
 	if g.Revoked {
@@ -378,14 +385,18 @@ func (s *Service) updateGrant(ctx context.Context, unit contract.Unit, g grantRo
 }
 
 func (s *Service) grantRevoke(ctx context.Context, unit contract.Unit, in grantRevokeInput) (contract.Payload, error) {
-	if _, err := s.authorize(ctx, unit, opGrantRevoke, in.Scope); err != nil {
+	env, err := s.authorize(ctx, unit, opGrantRevoke, in.Scope)
+	if err != nil {
 		return contract.Payload{}, err
 	}
 	g, found, err := s.loadGrant(ctx, unit, in.ID)
 	if err != nil {
 		return contract.Payload{}, err
 	}
-	if !found {
+	if !found || !env.coversScope(g.Scope) {
+		// See grantGet: without this, a caller holding grant.revoke at any
+		// narrow scope of its own could revoke any grant in the
+		// installation by ID, stripping any principal's authority.
 		return contract.Payload{}, notFound("grant %s is unknown in this installation", in.ID)
 	}
 	if g.Revoked {
