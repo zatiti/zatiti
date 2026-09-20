@@ -101,6 +101,8 @@ type fakeScope struct {
 	InstallationID string `json:"installation_id"`
 	OrganizationID string `json:"organization_id,omitempty"`
 	ProjectID      string `json:"project_id,omitempty"`
+	WorkerID       string `json:"worker_id,omitempty"`
+	TaskID         string `json:"task_id,omitempty"`
 }
 
 type fakeFault struct {
@@ -504,7 +506,7 @@ func (m *identityModule) Handle(ctx context.Context, u contract.Unit, inv contra
 	out := fakeAuthorityOut{}
 	out.Resource.Principal = fakePrincipal{
 		ID: in.PrincipalID, Version: 1, Kind: kind, Name: "principal-" + in.PrincipalID,
-		Scope: fakeScope{InstallationID: in.Scope.InstallationID}, Revoked: revoked == 1,
+		Scope: in.Scope, Revoked: revoked == 1,
 	}
 	out.Resource.Grants = []fakeGrant{}
 	out.Resource.Restrictions = []string{}
