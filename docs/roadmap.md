@@ -1742,6 +1742,25 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   host) is an environment/credential blocker already logged since
   2026-09-10, not something this package can close. Claim released,
   worktree already self-cleaned (nothing to commit).
+- 2026-09-20 14:55-15:00 PT -- P35 and P38 both reported ready. Both
+  found the same pattern P13/P27 hit: their packages already carried
+  substantial pre-existing revision-2/3-aligned work from before this
+  session's dispatch (reviews' b1516e2 review-deadlock bugfix; client's
+  d1e6774/ef85ddf scaffolding), so the real gap was narrower than the
+  card's full step list suggested. P35 (internal/reviews) closed two
+  genuine gaps: a missing P00-015 acceptance test for the exact mixed
+  eligible-list shape AGENTS.md names, and turn-wake correlation solved
+  by enriching the already-atomic `reviews.review.decided` event with
+  action_digest+scope rather than inventing an outgoing call to
+  execution that doesn't exist yet (P14 isn't landed). P38
+  (internal/client) added bounded Lookup/Poll reconnect helpers (16 new
+  tests) and flagged, not invented around, a real ambiguity: the frozen
+  contract has no explicit server/protocol-version wire concept, so
+  "version negotiation" is satisfied structurally by the client's
+  existing opaque-payload design rather than a new mechanism -- worth a
+  second look but not blocking. Both confirmed no schemaDefs staleness
+  (client owns no operation-catalog $defs at all, confirmed not
+  assumed). P35 cleared first (was ready first); P38 queued right behind.
 
 ## Planned
 
