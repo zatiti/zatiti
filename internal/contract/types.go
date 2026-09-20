@@ -43,6 +43,17 @@ type Actor struct {
 	CredentialID ID     `json:"credential_id"`
 }
 
+// ArtifactRef is a stable pointer to one immutable published artifact: its
+// ID and exact content digest. Every owner's local ArtifactRef mirror (the
+// $defs/ArtifactRef schema embedded in each generated prompt) has this same
+// shape; it is centralized here because revision 3 seams (RestoreCoordinator,
+// ReportOutputsProposal bindings) reference it directly at the contract
+// package boundary rather than through a domain schema type.
+type ArtifactRef struct {
+	ID     ID     `json:"id"`
+	Digest Digest `json:"digest"`
+}
+
 // Request is the common operation request envelope (zatiti.request/v1).
 type Request struct {
 	Schema        string          `json:"schema"` // zatiti.request/v1
