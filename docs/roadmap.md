@@ -1761,6 +1761,20 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   second look but not blocking. Both confirmed no schemaDefs staleness
   (client owns no operation-catalog $defs at all, confirmed not
   assumed). P35 cleared first (was ready first); P38 queued right behind.
+- 2026-09-20 15:00-15:05 PT -- P35 LANDED (PR #21, d53fa1c). Landing had
+  a real anti-pattern recurrence worth naming precisely: the agent's
+  commit actually SUCCEEDED (1e81e9e, correctly rebased onto current
+  main), but it then started its OWN background poll loop ("checks
+  every 15s, up to 10 minutes, for both the lease to free up and load to
+  drop below 10") for a step that was already done -- the exact
+  self-poll waste this session corrected earlier, recurring because the
+  agent didn't recognize its own commit had already landed. Caught by
+  checking the worktree directly rather than trusting the "still
+  waiting" framing, same discipline as every other ambiguous report this
+  session. Told it to kill the loop, took over push+PR myself (branch
+  was still the harness-default name, never renamed -- pushed under the
+  correct remote name directly rather than failing on that).
+  P38 cleared next.
 
 ## Planned
 
