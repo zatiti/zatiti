@@ -37,6 +37,9 @@ func newImportDest(t *testing.T, e *testEnv) *testEnv {
 	if err := db.Migrate(ctx, svc.Migrations()); err != nil {
 		t.Fatalf("migrate destination: %v", err)
 	}
+	if _, err := db.StartGeneration(ctx); err != nil {
+		t.Fatalf("start destination generation: %v", err)
+	}
 	clone := &testEnv{
 		t: t, ctx: ctx, db: db, svc: svc,
 		ports: e.ports, blobs: e.blobs, clock: e.clock, ids: e.ids,
@@ -400,14 +403,11 @@ func TestCanonicalRoundtripAcrossInstallations(t *testing.T) {
 	env.applyChange(createChange(kindProject, projectID, newProjectDef(projectID, orgID, "portable-project")))
 	env.createBinding(orgID, w1)
 
-	payload := env.mustOK("organization.export", getInput{Scope: env.scope, ID: orgID})
-	var exported struct {
-		Job wireJob `json:"job"`
-	}
-	env.decode(payload.Data, &exported)
+	job := env.exportJob(kindOrganization, orgID)
+	artifact := env.runExportJob(job)
 
 	dest := newImportDest(t, env)
-	payload = dest.mustOK("organization.import", importRequest(dest, exported.Job.ResultArtifact, nil))
+	payload := dest.mustOK("organization.import", importRequest(dest, &artifact, nil))
 	var imported struct {
 		Draft       wireDraft        `json:"draft"`
 		Diagnostics []wireDiagnostic `json:"diagnostics"`
@@ -418,20 +418,16 @@ func TestCanonicalRoundtripAcrossInstallations(t *testing.T) {
 	}
 	dest.applyDraft(imported.Draft)
 
-	payload = dest.mustOK("organization.export", getInput{Scope: dest.scope, ID: orgID})
-	var reExported struct {
-		Job wireJob `json:"job"`
-	}
-	dest.decode(payload.Data, &reExported)
-	if reExported.Job.ResultArtifact.Digest != exported.Job.ResultArtifact.Digest {
-		t.Fatalf("roundtrip digest drift: %s vs %s",
-			exported.Job.ResultArtifact.Digest, reExported.Job.ResultArtifact.Digest)
+	reJob := dest.exportJob(kindOrganization, orgID)
+	reArtifact := dest.runExportJob(reJob)
+	if reArtifact.Digest != artifact.Digest {
+		t.Fatalf("roundtrip digest drift: %s vs %s", artifact.Digest, reArtifact.Digest)
 	}
 	var before, after exportBundle
-	if err := contract.DecodeStrict(env.blobs.published[exported.Job.ResultArtifact.Digest], &before); err != nil {
+	if err := contract.DecodeStrict(env.blobs.published[artifact.Digest], &before); err != nil {
 		t.Fatalf("source bundle decode: %v", err)
 	}
-	if err := contract.DecodeStrict(env.blobs.published[reExported.Job.ResultArtifact.Digest], &after); err != nil {
+	if err := contract.DecodeStrict(env.blobs.published[reArtifact.Digest], &after); err != nil {
 		t.Fatalf("destination bundle decode: %v", err)
 	}
 	if got := after.Teams[0].WorkerIDs; len(got) != 3 || got[0] != w2 || got[1] != w1 || got[2] != childChief {
@@ -461,17 +457,14 @@ func TestCrossInstallationImportRequiresRebinding(t *testing.T) {
 	def.Profile = &profile
 	env.applyChange(createChange(kindWorker, wid, def))
 
-	payload := env.mustOK("organization.export", getInput{Scope: env.scope, ID: orgID})
-	var exported struct {
-		Job wireJob `json:"job"`
-	}
-	env.decode(payload.Data, &exported)
+	job := env.exportJob(kindOrganization, orgID)
+	artifact := env.runExportJob(job)
 
 	dest := newImportDest(t, env)
-	_ = dest.expectFault("organization.import", importRequest(dest, exported.Job.ResultArtifact, nil),
+	_ = dest.expectFault("organization.import", importRequest(dest, &artifact, nil),
 		contract.CodeInvalidInput)
 
-	payload = dest.mustOK("organization.import", importRequest(dest, exported.Job.ResultArtifact,
+	payload := dest.mustOK("organization.import", importRequest(dest, &artifact,
 		[]importRebinding{{SourceRef: string(connSource), DestinationRef: string(connDest)}}))
 	var imported struct {
 		Draft       wireDraft        `json:"draft"`

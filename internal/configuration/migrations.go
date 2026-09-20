@@ -179,6 +179,30 @@ CREATE TABLE configuration_head (
 INSERT INTO configuration_head (id, revision) VALUES (1, 0);
 `
 
+// Revision 3: the durable export job ledger (P00-008, jobs.go). One row per
+// job _execution.job.create minted for organization.export/team.export/
+// project.export or _configuration.export.prepare, finalized in place by
+// _configuration.export.record once canonical bytes are staged outside the
+// owning transaction. job_id is the identity execution's own ledger minted
+// -- never a locally invented one -- so this table only ever records a job
+// this owner actually asked execution to create.
+const migrationV2 = `
+CREATE TABLE configuration_export_jobs (
+	job_id          TEXT PRIMARY KEY,
+	version         INTEGER NOT NULL CHECK (version >= 1),
+	installation_id TEXT NOT NULL,
+	family          TEXT NOT NULL,
+	resource_id     TEXT NOT NULL,
+	state           TEXT NOT NULL CHECK (state IN ('pending', 'succeeded', 'failed')),
+	artifact_id     TEXT,
+	artifact_digest TEXT,
+	created_at      TEXT NOT NULL,
+	updated_at      TEXT NOT NULL
+);
+CREATE INDEX configuration_export_jobs_install_idx
+	ON configuration_export_jobs (installation_id, resource_id);
+`
+
 // Migrations returns the owned migration set. Bodies are pinned by digest so
 // storage refuses any later byte change.
 func configurationMigrations() []contract.Migration {
@@ -187,6 +211,11 @@ func configurationMigrations() []contract.Migration {
 		Version: 1,
 		SQL:     migrationV1,
 		SHA256:  contract.Digest(hashHex(migrationV1)),
+	}, {
+		Owner:   "configuration",
+		Version: 2,
+		SQL:     migrationV2,
+		SHA256:  contract.Digest(hashHex(migrationV2)),
 	}}
 }
 

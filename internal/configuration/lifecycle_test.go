@@ -362,27 +362,21 @@ func TestExportImportRoundtripSameInstallation(t *testing.T) {
 	orgID, _ := env.createOrg(&env.org, "portable")
 	workerID := env.createWorker(orgID, "exported")
 
-	payload := env.mustOK("organization.export", getInput{Scope: env.scope, ID: orgID})
-	var exported struct {
-		Job wireJob `json:"job"`
-	}
-	env.decode(payload.Data, &exported)
-	if exported.Job.State != "succeeded" || exported.Job.ResultArtifact == nil {
-		t.Fatalf("export job mismatch: %+v", exported.Job)
-	}
+	job := env.exportJob(kindOrganization, orgID)
+	artifact := env.runExportJob(job)
 
-	// the bundle is canonical: a second export carries the same digest
-	payload = env.mustOK("organization.export", getInput{Scope: env.scope, ID: orgID})
-	var again struct {
-		Job wireJob `json:"job"`
+	// the bundle is canonical: a second export -- a fresh durable job, run
+	// through the same job-ledger pipeline -- carries the same digest
+	again := env.exportJob(kindOrganization, orgID)
+	if again.ID == job.ID {
+		t.Fatalf("_execution.job.create must mint a distinct job identity per export, got %s twice", job.ID)
 	}
-	env.decode(payload.Data, &again)
-	if again.Job.ResultArtifact.Digest != exported.Job.ResultArtifact.Digest {
-		t.Fatalf("export digest not stable: %s vs %s",
-			exported.Job.ResultArtifact.Digest, again.Job.ResultArtifact.Digest)
+	artifactAgain := env.runExportJob(again)
+	if artifactAgain.Digest != artifact.Digest {
+		t.Fatalf("export digest not stable: %s vs %s", artifact.Digest, artifactAgain.Digest)
 	}
 	var bundle exportBundle
-	if err := contract.DecodeStrict(env.blobs.published[exported.Job.ResultArtifact.Digest], &bundle); err != nil {
+	if err := contract.DecodeStrict(env.blobs.published[artifact.Digest], &bundle); err != nil {
 		t.Fatalf("bundle decode: %v", err)
 	}
 	if bundle.Format != exportFormat || bundle.Organization == nil || bundle.Organization.ID != orgID {
@@ -401,7 +395,7 @@ func TestExportImportRoundtripSameInstallation(t *testing.T) {
 	// importing the same bundle stages duplicate creates: the plan seals with
 	// the identity collisions recorded and apply refuses, so live state never
 	// changes
-	payload = env.mustOK("organization.import", importRequest(env, exported.Job.ResultArtifact, nil))
+	payload := env.mustOK("organization.import", importRequest(env, &artifact, nil))
 	var imported struct {
 		Draft       wireDraft        `json:"draft"`
 		Diagnostics []wireDiagnostic `json:"diagnostics"`
@@ -446,13 +440,10 @@ func TestExportExcludesArchivedObjectsAndSecretMaterial(t *testing.T) {
 	env.decode(payload.Data, &out)
 	env.applyDraft(out.Draft)
 
-	payload = env.mustOK("organization.export", getInput{Scope: env.scope, ID: orgID})
-	var exported struct {
-		Job wireJob `json:"job"`
-	}
-	env.decode(payload.Data, &exported)
+	job := env.exportJob(kindOrganization, orgID)
+	artifact := env.runExportJob(job)
 	var bundle exportBundle
-	if err := contract.DecodeStrict(env.blobs.published[exported.Job.ResultArtifact.Digest], &bundle); err != nil {
+	if err := contract.DecodeStrict(env.blobs.published[artifact.Digest], &bundle); err != nil {
 		t.Fatalf("bundle decode: %v", err)
 	}
 	if len(bundle.Projects) != 0 {
@@ -461,7 +452,7 @@ func TestExportExcludesArchivedObjectsAndSecretMaterial(t *testing.T) {
 	if len(bundle.Workers) != 1 || bundle.Workers[0].ID != chiefID {
 		t.Fatalf("export must carry exactly the active chief worker: %+v", bundle.Workers)
 	}
-	raw := string(env.blobs.published[exported.Job.ResultArtifact.Digest])
+	raw := string(env.blobs.published[artifact.Digest])
 	for _, banned := range []string{"\"secret", "credential_value", "\"task", "run_history"} {
 		if strings.Contains(raw, banned) {
 			t.Fatalf("export bundle carries %s: %s", banned, raw)

@@ -1,7 +1,6 @@
 package configuration
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"io"
@@ -1179,9 +1178,12 @@ type exportBundle struct {
 
 const exportFormat = "zatiti.organization/v1"
 
-// handleExport creates the bounded artifact job for one resource. The bundle
-// is canonical JSON staged and published through the blob store; the job
-// carries the result artifact reference for job.get completion.
+// handleExport registers a durable export job for one resource through the
+// execution job ledger and returns it pending (jobs.go's buildExportJob):
+// revision 3 moves this off the query transaction and stops inventing a
+// synchronously "succeeded" job/artifact pair. The bundle's canonical bytes
+// stage and publish outside any transaction when the job is claimed and run
+// (Service.RunJob); job.get later inspects the established result.
 func handleExport(kind string) handlerFunc {
 	return func(ctx context.Context, s *Service, unit contract.Unit, inv contract.Invocation) (contract.Payload, error) {
 		in, err := decodeInto[getInput](s, kind+".export", inv.Input)
@@ -1194,71 +1196,11 @@ func handleExport(kind string) handlerFunc {
 		if s.blobs == nil {
 			return contract.Payload{}, internalError("export requires a blob store")
 		}
-		install := in.Scope.InstallationID
-		bundle := &exportBundle{Format: exportFormat}
-		switch kind {
-		case kindOrganization:
-			row, err := fetchOrgByID(ctx, unit, install, in.ID)
-			if err != nil {
-				return contract.Payload{}, faultOf(err)
-			}
-			if row == nil {
-				return contract.Payload{}, notFound("organization %s not found", in.ID)
-			}
-			bundle.Organization = ptrOf(orgDef(row))
-			if err := s.exportOrganizationScope(ctx, unit, install, in.ID, bundle); err != nil {
-				return contract.Payload{}, err
-			}
-		case kindTeam:
-			row, err := fetchTeamByID(ctx, unit, install, in.ID)
-			if err != nil {
-				return contract.Payload{}, faultOf(err)
-			}
-			if row == nil {
-				return contract.Payload{}, notFound("team %s not found", in.ID)
-			}
-			bundle.Teams = []wireTeam{teamDef(row)}
-		case kindProject:
-			row, err := fetchProjectByID(ctx, unit, install, in.ID)
-			if err != nil {
-				return contract.Payload{}, faultOf(err)
-			}
-			if row == nil {
-				return contract.Payload{}, notFound("project %s not found", in.ID)
-			}
-			bundle.Projects = []wireProject{projectDef(row)}
-		default:
-			return contract.Payload{}, invalidInput("unsupported export kind %s", kind)
-		}
-		raw, err := json.Marshal(bundle)
-		if err != nil {
-			return contract.Payload{}, internalError("export bundle encoding failed")
-		}
-		canon, err := contract.Canonicalize(raw)
-		if err != nil {
-			return contract.Payload{}, invalidInput("export bundle is not canonicalizable: %v", err)
-		}
-		stagingRef, digest, _, err := s.blobs.Stage(ctx, bytes.NewReader(canon), int64(len(canon)))
+		job, err := s.buildExportJob(ctx, unit, kind, in.Scope, in.ID)
 		if err != nil {
 			return contract.Payload{}, err
 		}
-		if err := s.blobs.Publish(ctx, stagingRef, digest); err != nil {
-			return contract.Payload{}, err
-		}
-		job := wireJob{
-			ID:           s.ids.New(),
-			Version:      1,
-			Kind:         "export",
-			State:        "succeeded",
-			Requirements: []wireRequirement{},
-			ResultArtifact: &wireArtifactRef{
-				ID:     s.ids.New(),
-				Digest: digest,
-			},
-			Owner:     ownerName,
-			Operation: kind + ".export",
-		}
-		return s.completed(map[string]any{"job": job})
+		return s.accepted(map[string]any{"job": job})
 	}
 }
 
