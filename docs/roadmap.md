@@ -1530,7 +1530,32 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   check whether the landing package's own line is still in
   expected-red.txt and remove it as part of the same commit -- don't
   assume the original card's diff already handled it.
-  P11 landing now.
+  P11 LANDED (PR #14, e418f6e). P13 LANDED (PR #15, 42d12e1) -- incorporated
+  the banked origin/wave3/responses evidence (spot-checked: billing/
+  tool_usage/frequency_penalty language present in the landed PROTOCOL.md),
+  then deleted that now-fully-consumed branch from origin.
+  This completes the original 8-lane wave-3 batch (P03, P05, P06, P07,
+  P08, P09, P10, P11, P13) plus P37 -- all 12 cards landed clean.
+  THE BIG CHECK, and an honest result: `TestRealRegistryAssemblesLandedModules`
+  still fails -- not on any of the 12 just-landed packages, but on
+  `_skills.activate` (internal/skills, same wireDefs-shape pattern as
+  identity/configuration/tasks). internal/skills is NOT part of wave 3 at
+  all -- it's P19 (wave 8, depends on P18), nowhere near dispatched.
+  Realistic conclusion: cmd/zatiti/internal/application/tests/integration/
+  tests/qualification will stay on expected-red.txt for a long tail, not
+  a quick cleanup -- assembly requires EVERY package the real registry
+  wires in to have current shared-defs shapes, and most packages haven't
+  landed their own revision-3 card yet. This isn't a new problem so much
+  as a restatement of what the original P00 lore.md entry already said
+  (internal/execution not green until P14/wave 4+, internal/mcp not until
+  P40/wave 5+) -- the P37 escalation just made the mechanism (assembly-
+  wide shared-defs cross-checking, not merely per-package parity) explicit.
+  Not escalating this as a new decision -- it's the same already-approved
+  "track the red, shrink incrementally" strategy, just with a longer
+  runway than initially hoped. Continuing wave 3's remaining cards (P12
+  internal/effects, P26 internal/memory both map directly to entries
+  still on this list; P29 internal/storage, P30 internal/platform, P34
+  internal/evidence do not).
 
 ## Planned
 
