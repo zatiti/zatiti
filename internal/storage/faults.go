@@ -111,6 +111,33 @@ func invalidInputFault(format string, args ...any) *FaultError {
 	}
 }
 
+// conflictFault reports state that does not match the caller's assertion: a
+// restore image whose digest, schema versions or installation binding does
+// not match what the caller claims for it. It refuses before any
+// destructive restore action runs.
+func conflictFault(format string, args ...any) *FaultError {
+	return &FaultError{
+		Fault: &contract.Fault{
+			Code:      contract.CodeConflict,
+			Message:   fmt.Sprintf(format, args...),
+			Retryable: false,
+		},
+	}
+}
+
+// prerequisiteMissingFault reports a missing precondition for a mutation:
+// used for the post-restore pause, which keeps the public mutation surface
+// closed until an explicit resume completes.
+func prerequisiteMissingFault(format string, args ...any) *FaultError {
+	return &FaultError{
+		Fault: &contract.Fault{
+			Code:      contract.CodePrerequisiteMissing,
+			Message:   fmt.Sprintf(format, args...),
+			Retryable: false,
+		},
+	}
+}
+
 // validUUIDShape reports whether s is a canonical lowercase hyphenated UUID.
 // It mirrors the contract's identity shape; only the format is checked.
 func validUUIDShape(s string) bool {

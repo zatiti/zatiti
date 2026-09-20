@@ -52,6 +52,11 @@ func (d *database) Read(ctx context.Context, actor contract.Actor, scope contrac
 // whole transaction back; Write never retries the callback. Busy lock
 // exhaustion returns a retryable controller_unavailable fault.
 //
+// Write is the public mutation surface. It refuses with prerequisite_missing
+// after a restore (see restore.go, CommitRestore) until an explicit
+// ResumeAfterRestore completes; WriteRestoreOverlay is the narrower surface
+// usable during that paused window.
+//
 // A recursive Write from inside a callback blocks on the writer lock and
 // deadlocks; the dispatcher contract forbids recursion before storage is
 // reached.
@@ -59,6 +64,16 @@ func (d *database) Write(ctx context.Context, actor contract.Actor, scope contra
 	if err := d.entryCheck(); err != nil {
 		return err
 	}
+	if d.restoring.Load() {
+		return prerequisiteMissingFault("database is paused after a restore; an explicit resume must complete before the public mutation surface reopens")
+	}
+	return d.writeLocked(ctx, actor, scope, fn)
+}
+
+// writeLocked is the shared write-transaction body for Write and
+// WriteRestoreOverlay; the two differ only in whether the post-restore
+// pause admits the call.
+func (d *database) writeLocked(ctx context.Context, actor contract.Actor, scope contract.Scope, fn func(contract.Unit) error) error {
 	if err := validateCaller(actor, scope); err != nil {
 		return err
 	}
