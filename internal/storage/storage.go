@@ -46,6 +46,12 @@ type database struct {
 	busy   time.Duration
 	wmu    sync.Mutex
 	closed atomic.Bool
+
+	// restoring mirrors the persisted storage_restore row: true from a
+	// successful CommitRestore until an explicit ResumeAfterRestore. While
+	// true, Write refuses (the public mutation surface stays closed) and
+	// only WriteRestoreOverlay is usable; see restore.go.
+	restoring atomic.Bool
 }
 
 // Open connects to the SQLite database at cfg.Path and prepares the storage
@@ -67,15 +73,28 @@ func Open(ctx context.Context, cfg Config) (contract.Database, error) {
 	if busy == 0 {
 		busy = defaultBusyTimeout
 	}
-	dsn, err := buildDSN(cfg.Path, busy)
+	return openAt(ctx, cfg.Path, busy)
+}
+
+// openAt is Open's implementation, factored out so CommitRestore can reopen
+// the same path with the same busy timeout after a restore swap without
+// re-validating Config. It always recovers an interrupted restore journal
+// at path first, so any caller reaching a path through this function -- a
+// fresh Open or a post-restore reopen -- self-heals a crash from a previous
+// process before touching the file any other way.
+func openAt(ctx context.Context, path string, busy time.Duration) (*database, error) {
+	if err := recoverInterruptedRestore(path); err != nil {
+		return nil, err
+	}
+	dsn, err := buildDSN(path, busy)
 	if err != nil {
 		return nil, err
 	}
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
-		return nil, fmt.Errorf("storage: open %s: %w", cfg.Path, err)
+		return nil, fmt.Errorf("storage: open %s: %w", path, err)
 	}
-	d := &database{db: db, path: cfg.Path, busy: busy}
+	d := &database{db: db, path: path, busy: busy}
 	if err := d.bootstrap(ctx); err != nil {
 		_ = db.Close()
 		return nil, err
@@ -126,6 +145,10 @@ CREATE TABLE IF NOT EXISTS storage_generation (
 	id         INTEGER PRIMARY KEY CHECK (id = 1),
 	generation INTEGER NOT NULL CHECK (generation >= 1)
 );
+CREATE TABLE IF NOT EXISTS storage_restore (
+	id     INTEGER PRIMARY KEY CHECK (id = 1),
+	paused INTEGER NOT NULL CHECK (paused IN (0, 1))
+);
 CREATE TABLE IF NOT EXISTS storage_events (
 	id               TEXT PRIMARY KEY,
 	sequence         INTEGER NOT NULL UNIQUE CHECK (sequence >= 1),
@@ -170,6 +193,11 @@ func (d *database) bootstrap(ctx context.Context) error {
 	if _, err := d.db.ExecContext(ctx, bootstrapDDL); err != nil {
 		return fmt.Errorf("storage: bootstrap schema on %s: %w", d.path, err)
 	}
+	paused, err := loadRestorePaused(ctx, d.db)
+	if err != nil {
+		return fmt.Errorf("storage: read restore pause state on %s: %w", d.path, err)
+	}
+	d.restoring.Store(paused)
 	return nil
 }
 
