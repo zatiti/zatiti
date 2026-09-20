@@ -1332,6 +1332,40 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   again -- the list must shrink to empty, not calcify.
   P02 claimed and dispatched next -- the last card in the P00->P01->P02
   serialized gate; wave 3's 15 cards open the moment it lands.
+- 2026-09-19 18:00-18:15 PT -- P02 LANDED (PR #5, d11500a, rebase-merged).
+  Reviewed the full diff before landing: revision 2 of
+  docs/implementation/dependencies.lock.json -- moved the stale "Fyne v2.8.1
+  compiles and links" claim into a clearly-labeled historical_evidence entry
+  (Fyne is gone from go.mod/go.sum since fdba444), documented that neither
+  P20's controlled repository runner nor the Serenity seam needs a new pin
+  (both roots restrict production imports to internal/contract), pinned the
+  already-landed OpenAI Responses and Serenity protocol commits with an
+  honest controlled-fixture-vs-real-service distinction, and reconciled
+  apps/desktop/pubspec.lock for the first time (flutter_secure_storage +
+  its federated platform packages, flutter_lints, licenses read from each
+  package's actual LICENSE file). Only dependencies.lock.json changed --
+  go.mod/go.sum/tools.go untouched, correctly, since no new library was
+  needed. This card's own agent finished its full git workflow correctly
+  (commit, push, open PR #5, release claim, did NOT self-merge) --
+  contrast with P01's incomplete handoff two entries up.
+  THE P00->P01->P02 SERIALIZED GATE IS FULLY CLEAR. Dispatched wave 3's
+  first batch of 8 (the practical ceiling from the "Parallel dispatch
+  protocol" above), all in isolated worktrees, all running concurrently:
+  P03 (internal/identity), P05 (internal/configuration), P08
+  (internal/accounting), P09 (internal/artifacts), P10
+  (internal/messaging), P11 (internal/tasks), P13
+  (internal/adapters/responses), P37 (internal/registry). Chosen
+  deliberately: P03/P05/P08/P10/P11 are ALL five of P14's prerequisites
+  (fastest path to unlocking wave 4's execution critical path), P37 is the
+  fastest fix for internal/registry's tracked-red catalog test, and P13
+  recovers the banked live-qualification WIP on origin/wave3/responses
+  (commit 4aa219b) -- that agent was explicitly told to pull it first and
+  incorporate what's still valid under the new prepare_session/model_step
+  split rather than duplicate or discard it. Each agent was told to remove
+  its own package from docs/implementation-remediation/expected-red.txt in
+  its landing commit once its package's tests genuinely go fully green.
+  Remaining wave-3 cards not yet dispatched (P06, P07, P12, P26, P29, P30,
+  P34) queue for the next free lane slots as these 8 land.
 
 ## Planned
 
