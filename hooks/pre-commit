@@ -55,9 +55,45 @@ fi
 # timeout and every commit fails on a panic that looks like a product bug.
 # -p 2 keeps a commit from saturating the machine while other lanes work.
 echo "Running tests: go test -p 2 -timeout 30m ./..."
-if ! go test -p 2 -timeout 30m ./... ; then
-  echo "Commit failed: tests did not pass."
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+EXPECTED_RED_FILE="$REPO_ROOT/docs/implementation-remediation/expected-red.txt"
+TEST_OUT="$(mktemp)"
+trap 'rm -f "$TEST_OUT"' EXIT
+
+if go test -p 2 -timeout 30m ./... >"$TEST_OUT" 2>&1; then
+  cat "$TEST_OUT"
+  exit 0
+fi
+cat "$TEST_OUT"
+
+# implementation-remediation (docs/implementation-remediation/README.md):
+# P00 deliberately froze contract operations ahead of their Go
+# implementations, so specific packages fail their catalog/descriptor-parity
+# tests for a known, tracked reason until their own card lands (see
+# docs/lore.md, "Expected red"). A failure limited to packages listed in
+# expected-red.txt is not a regression; anything else still blocks.
+FAILED_PKGS="$(grep -E '^FAIL[[:space:]]' "$TEST_OUT" | awk '{print $2}' | sed 's#^github.com/zatiti/zatiti/##' | sort -u || true)"
+
+if [ -z "$FAILED_PKGS" ]; then
+  # go test exited nonzero with no package-level FAIL line to attribute
+  # (e.g. a build/compile failure) -- never allow this through.
+  echo "Commit failed: tests did not pass (no per-package FAIL line, likely a build/compile error)."
   exit 1
 fi
 
+UNEXPECTED=""
+for pkg in $FAILED_PKGS; do
+  if [ -f "$EXPECTED_RED_FILE" ] && grep -qxF "$pkg" "$EXPECTED_RED_FILE"; then
+    continue
+  fi
+  UNEXPECTED="$UNEXPECTED $pkg"
+done
+
+if [ -n "$UNEXPECTED" ]; then
+  echo "Commit failed: tests did not pass in package(s) not on the expected-red allowlist ($EXPECTED_RED_FILE):"
+  for pkg in $UNEXPECTED; do echo "  - $pkg"; done
+  exit 1
+fi
+
+echo "Tests failed only in package(s) tracked as expected-red ($EXPECTED_RED_FILE); allowing commit. See docs/lore.md for why."
 exit 0

@@ -1,0 +1,32 @@
+# Packages whose `go test` currently fails for a KNOWN, TRACKED reason during
+# the implementation-remediation rollout (docs/implementation-remediation/),
+# not a fresh regression. One import-path suffix (relative to
+# github.com/zatiti/zatiti/) per line, blank lines and #-comments ignored.
+#
+# hooks/pre-commit treats a package listed here as allowed to fail; a
+# failing package NOT listed here still blocks the commit. Remove a line the
+# moment its card lands and the package goes green again -- do not leave a
+# stale entry once it's actually fixed, and do not add a package here for
+# any reason other than "P00 froze a contract operation this package's Go
+# code doesn't implement yet." See docs/lore.md, "Expected red:
+# catalog/descriptor-parity tests" for the full reasoning and which card
+# fixes each one.
+#
+# Founder decision (David, 2026-09-19, in-session): merge P00's contract
+# freeze ahead of its implementations and track the red via this allowlist,
+# rather than batching cards before touching main or using a separate
+# integration branch.
+
+internal/adapters/responses
+internal/configuration
+internal/effects
+internal/execution
+internal/identity
+internal/installation
+internal/mcp
+internal/memory
+internal/messaging
+internal/registry
+internal/scheduling
+internal/skills
+internal/tasks
