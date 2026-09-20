@@ -1,0 +1,61 @@
+{
+  "definition": {
+    "acceptance": {
+      "expected_observations": [],
+      "mode": "independent",
+      "profile": {
+        "capability_evidence": {
+          "adapter_version": "1.0.0",
+          "artifact": {
+            "digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "id": "00000000-0000-4000-8000-000000000004"
+          },
+          "capabilities": [],
+          "limitations": [],
+          "profile_digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "protocol_revision": "1",
+          "qualified_at": "2026-09-19T00:00:00Z",
+          "source_revision": "3"
+        },
+        "code_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "id": "artifact-contract-v1",
+        "kind": "artifact_contract",
+        "max_bytes": 1048576,
+        "schema": "zatiti.verifier-profile/v1",
+        "supported_checks": [
+          "presence"
+        ],
+        "timeout_seconds": 60,
+        "version": "1"
+      },
+      "required_child_ids": [],
+      "sealed_inputs": [],
+      "verifier_id": "artifact-contract-v1",
+      "verifier_version": "1"
+    },
+    "dependencies": [],
+    "inputs": [],
+    "limits": {
+      "attempt_seconds": 1800,
+      "child_count": 0,
+      "concurrency": 1,
+      "currency": "USD",
+      "delegation_depth": 0,
+      "model_steps": 10,
+      "root_deadline": "2026-09-20T00:00:00Z",
+      "spend_micro_units": 0
+    },
+    "outcome": "Draft the quarterly status report",
+    "owner_id": "00000000-0000-4000-8000-000000000002",
+    "required_outputs": [
+      "status_report"
+    ],
+    "scope": {
+      "installation_id": "00000000-0000-4000-8000-000000000001"
+    },
+    "worker_id": "00000000-0000-4000-8000-000000000003"
+  },
+  "scope": {
+    "installation_id": "00000000-0000-4000-8000-000000000001"
+  }
+}

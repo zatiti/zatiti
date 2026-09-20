@@ -28,9 +28,10 @@
 // Output and exit codes. --json emits exactly one contract.Result envelope
 // to stdout and nothing else; without it, the same envelope is rendered as
 // short human-readable lines, still derived from the identical result and
-// naming an accepted job, an unknown outcome or a required manual review
-// honestly rather than as a bare failure. Diagnostics — malformed input,
-// transport failures — go to stderr only. The process exit code is always
+// naming an accepted job, a genuinely unknown outcome, a request blocked on
+// a named external condition or a required manual review honestly rather
+// than as a bare failure. Diagnostics — malformed input, transport
+// failures — go to stderr only. The process exit code is always
 // contract.CLIExit of the result's fault, so a completed or accepted
 // command exits 0 and a domain failure's exit code never depends on which
 // transport served it.

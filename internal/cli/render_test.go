@@ -228,6 +228,148 @@ func TestHumanRenderingShowsRetryable(t *testing.T) {
 	}
 }
 
+// TestAcceptedJobAndUnknownMutationNeverPrintAsCompletedTask proves that
+// task.start — the new revision-3 operation that readies a task and
+// enqueues its run — never renders an accepted durable job or a mutation
+// whose outcome could not be established as a completed task, in either
+// human or JSON mode. The frozen Payload.Status enum has exactly three
+// values (completed | accepted | failed); this checks both the human
+// "status:" line and the JSON envelope's own status field never carry
+// "completed" for either disposition.
+func TestAcceptedJobAndUnknownMutationNeverPrintAsCompletedTask(t *testing.T) {
+	descriptors := []contract.Descriptor{
+		descriptor("task.start", []string{"task", "start"}, contract.ModeMutation, true),
+	}
+
+	t.Run("accepted job", func(t *testing.T) {
+		op := &fakeOperator{fn: func(context.Context, string, contract.Request) (contract.Result, error) {
+			return contract.Result{
+				Schema:    "zatiti.result/v1",
+				CommandID: "00000000-0000-4000-8000-0000000000b1",
+				Payload:   contract.Payload{Status: contract.StatusAccepted, Data: json.RawMessage(`{"task":{"id":"t1"}}`)},
+			}, nil
+		}}
+
+		stdout, _, code := run(t, []string{"task", "start", "--submission-key", "k1"}, op, descriptors, nil)
+		if code != 0 {
+			t.Fatalf("exit code = %d, want 0 for accepted", code)
+		}
+		if strings.Contains(stdout, "status:   completed") {
+			t.Fatalf("an accepted task.start must never render as completed: %q", stdout)
+		}
+		if !strings.Contains(stdout, "accepted") {
+			t.Fatalf("expected the accepted status to be named honestly: %q", stdout)
+		}
+
+		stdoutJSON, _, codeJSON := run(t, []string{"task", "start", "--submission-key", "k1", "--json"}, op, descriptors, nil)
+		if codeJSON != 0 {
+			t.Fatalf("json mode exit code = %d, want 0", codeJSON)
+		}
+		var envelope contract.Result
+		if err := json.Unmarshal([]byte(strings.TrimSpace(stdoutJSON)), &envelope); err != nil {
+			t.Fatalf("stdout was not one valid envelope: %v", err)
+		}
+		if envelope.Status == contract.StatusCompleted {
+			t.Fatalf("JSON envelope status = %q, must never be completed for an accepted job", envelope.Status)
+		}
+		if envelope.Status != contract.StatusAccepted {
+			t.Fatalf("JSON envelope status = %q, want %q", envelope.Status, contract.StatusAccepted)
+		}
+	})
+
+	t.Run("unknown mutation outcome", func(t *testing.T) {
+		fault := contract.Fault{Code: contract.CodeOutcomeUnknown, Message: "no disposition"}
+		op := &fakeOperator{fn: func(context.Context, string, contract.Request) (contract.Result, error) {
+			return contract.Result{
+				Schema:    "zatiti.result/v1",
+				CommandID: "00000000-0000-4000-8000-0000000000b2",
+				Payload:   contract.Payload{Status: contract.StatusFailed, Error: &fault},
+			}, &fault
+		}}
+
+		stdout, _, code := run(t, []string{"task", "start", "--submission-key", "k2"}, op, descriptors, nil)
+		if code != 6 {
+			t.Fatalf("exit code = %d, want 6", code)
+		}
+		if strings.Contains(stdout, "status:   completed") || strings.Contains(stdout, "accepted") {
+			t.Fatalf("an unknown-outcome task.start must never render as completed or accepted: %q", stdout)
+		}
+		if !strings.Contains(stdout, "outcome unknown") {
+			t.Fatalf("expected the unknown outcome to be named honestly: %q", stdout)
+		}
+
+		stdoutJSON, _, codeJSON := run(t, []string{"task", "start", "--submission-key", "k2", "--json"}, op, descriptors, nil)
+		if codeJSON != 6 {
+			t.Fatalf("json mode exit code = %d, want 6", codeJSON)
+		}
+		var envelope contract.Result
+		if err := json.Unmarshal([]byte(strings.TrimSpace(stdoutJSON)), &envelope); err != nil {
+			t.Fatalf("stdout was not one valid envelope: %v", err)
+		}
+		if envelope.Status == contract.StatusCompleted || envelope.Status == contract.StatusAccepted {
+			t.Fatalf("JSON envelope status = %q, must never be completed or accepted for an unknown mutation outcome", envelope.Status)
+		}
+	})
+}
+
+// TestBlockedFaultsAreLabeledDistinctlyFromUnknownAndReviewRequired proves
+// the "accepted versus completed versus blocked/unknown" rendering split:
+// the four prerequisite-style faults that share CLI exit 5 (prerequisite
+// blocking further progress on a named external condition) are named
+// "blocked" and never collapse into the generic "failed" bucket, the
+// outcome_unknown/controller_unavailable pair (CLI exit 6, no
+// authoritative disposition) is never labeled "blocked", and
+// review_required keeps its own distinct label. Every case still carries
+// its exact fault code on the "fault:" line regardless of the status
+// summary.
+func TestBlockedFaultsAreLabeledDistinctlyFromUnknownAndReviewRequired(t *testing.T) {
+	descriptors := []contract.Descriptor{
+		descriptor("task.start", []string{"task", "start"}, contract.ModeMutation, true),
+	}
+
+	cases := []struct {
+		code       string
+		wantExit   int
+		wantSubstr string
+		notSubstr  string
+	}{
+		{contract.CodePrerequisiteMissing, 5, "blocked", "outcome unknown"},
+		{contract.CodeExternalActionRequired, 5, "blocked", "outcome unknown"},
+		{contract.CodeBudgetUnavailable, 5, "blocked", "outcome unknown"},
+		{contract.CodeCapabilityUnsupported, 5, "blocked", "outcome unknown"},
+		{contract.CodeOutcomeUnknown, 6, "outcome unknown", "blocked"},
+		{contract.CodeControllerUnavailable, 6, "controller unavailable", "blocked"},
+		{contract.CodeReviewRequired, 3, "manual review required", "blocked"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.code, func(t *testing.T) {
+			fault := contract.Fault{Code: tc.code, Message: "detail"}
+			op := &fakeOperator{fn: func(context.Context, string, contract.Request) (contract.Result, error) {
+				return contract.Result{
+					Schema:    "zatiti.result/v1",
+					CommandID: "00000000-0000-4000-8000-0000000000b3",
+					Payload:   contract.Payload{Status: contract.StatusFailed, Error: &fault},
+				}, &fault
+			}}
+
+			stdout, _, code := run(t, []string{"task", "start", "--submission-key", "k3"}, op, descriptors, nil)
+			if code != tc.wantExit {
+				t.Fatalf("exit code = %d, want %d", code, tc.wantExit)
+			}
+			if !strings.Contains(stdout, tc.wantSubstr) {
+				t.Fatalf("rendering for %s did not contain %q: %q", tc.code, tc.wantSubstr, stdout)
+			}
+			if strings.Contains(stdout, tc.notSubstr) {
+				t.Fatalf("rendering for %s unexpectedly contained %q: %q", tc.code, tc.notSubstr, stdout)
+			}
+			if !strings.Contains(stdout, "fault:    "+tc.code) {
+				t.Fatalf("rendering for %s did not carry its exact fault code: %q", tc.code, stdout)
+			}
+		})
+	}
+}
+
 // failingWriter always errors, standing in for a broken stdout (a closed
 // pipe, a full disk) so writeEnvelope's own error path is exercised.
 type failingWriter struct{}

@@ -3,6 +3,7 @@ package cli_test
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -141,6 +142,65 @@ func TestSubmissionKeyReplayParity(t *testing.T) {
 	}
 	if op.calls[0].request.SubmissionKey != "demo-org-create-001" || op.calls[1].request.SubmissionKey != "demo-org-create-001" {
 		t.Fatalf("submission key was not forwarded identically: %+v", op.calls)
+	}
+}
+
+// TestJSONModeSingleEnvelopeRetainsCommandIdentityOnReplay proves --json
+// emits exactly one decodable envelope for task.create — the new
+// revision-3 work-start family — and that replaying the identical
+// submission key returns the very same command_id rather than minting a
+// new one, matching "recover lost acknowledgements by command lookup, not
+// a new key." json.Decoder.More after one Decode is a stronger single-
+// envelope proof than counting stdout lines: it fails on any trailing
+// JSON value, not merely a second newline-delimited one.
+func TestJSONModeSingleEnvelopeRetainsCommandIdentityOnReplay(t *testing.T) {
+	descriptors := []contract.Descriptor{
+		descriptor("task.create", []string{"task", "create"}, contract.ModeMutation, true),
+	}
+	seen := map[string]contract.Result{}
+	op := &fakeOperator{fn: func(_ context.Context, _ string, req contract.Request) (contract.Result, error) {
+		if r, ok := seen[req.SubmissionKey]; ok {
+			return r, nil
+		}
+		r := contract.Result{
+			Schema:    "zatiti.result/v1",
+			CommandID: "00000000-0000-4000-8000-0000000000c1",
+			Payload:   contract.Payload{Status: contract.StatusCompleted, Data: json.RawMessage(`{"resource":{"id":"task-1"}}`)},
+		}
+		seen[req.SubmissionKey] = r
+		return r, nil
+	}}
+
+	args := []string{"task", "create", "--submission-key", "demo-task-create-001", "--json"}
+	first, _, code1 := run(t, args, op, descriptors, nil)
+	second, _, code2 := run(t, args, op, descriptors, nil)
+	if code1 != 0 || code2 != 0 {
+		t.Fatalf("exit codes = %d, %d, want 0, 0", code1, code2)
+	}
+
+	var firstEnv, secondEnv contract.Result
+	for name, out := range map[string]*contract.Result{"first": &firstEnv, "second": &secondEnv} {
+		raw := first
+		if name == "second" {
+			raw = second
+		}
+		dec := json.NewDecoder(strings.NewReader(raw))
+		if err := dec.Decode(out); err != nil {
+			t.Fatalf("%s call: stdout was not one valid envelope: %v", name, err)
+		}
+		if dec.More() {
+			t.Fatalf("%s call: stdout carried more than one JSON document: %q", name, raw)
+		}
+	}
+
+	if firstEnv.CommandID != secondEnv.CommandID {
+		t.Fatalf("replay minted a new command_id: first %q, second %q", firstEnv.CommandID, secondEnv.CommandID)
+	}
+	if len(op.calls) != 2 {
+		t.Fatalf("operator calls = %d, want 2", len(op.calls))
+	}
+	if op.calls[0].request.SubmissionKey != "demo-task-create-001" || op.calls[1].request.SubmissionKey != "demo-task-create-001" {
+		t.Fatalf("submission key was not forwarded identically across replay: %+v", op.calls)
 	}
 }
 
