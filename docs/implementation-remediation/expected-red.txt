@@ -30,8 +30,6 @@
 
 cmd/zatiti
 internal/application
-internal/effects
-internal/execution
 internal/installation
 internal/mcp
 internal/scheduling
