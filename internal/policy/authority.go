@@ -59,6 +59,16 @@ const reviewRequirementTTL = 24 * time.Hour
 // and rules.
 const capWildcard = "*"
 
+// Execution-profile and project classification values (the shared
+// ExecutionProfile.classification / Project.classification enum). Only
+// public and restricted are compared directly today; internal is named for
+// readability at call sites.
+const (
+	classificationInternal   = "internal"
+	classificationPublic     = "public"
+	classificationRestricted = "restricted"
+)
+
 // envelope is the scope/capability/destination authority envelope rebuilt
 // from identity's grant list.
 type envelope struct {
@@ -456,6 +466,24 @@ func bindingCovers(b peerBinding, req contract.Scope) bool {
 		dimMatches(b.Scope.TaskID, req.TaskID)
 }
 
+// toolBound reports whether an explicit tool-kind binding names this exact
+// tool and covers the request scope. Tool invocation is never granted by a
+// broad identity capability grant alone -- including a standing wildcard --
+// because a capability grant expresses "what this principal may do", not
+// "which concrete tool it has been handed". Only a binding that names the
+// specific tool id authorizes dispatch of that tool, so an empty binding set
+// (or a binding naming a different tool) refuses every external tool call
+// even when connections discovery lists the tool as available on the
+// account: discovery visibility is not invocation authority.
+func toolBound(bindings []peerBinding, tool contract.ID, req contract.Scope) bool {
+	for _, b := range bindings {
+		if b.Kind == "tool" && b.TargetID == tool && bindingCovers(b, req) {
+			return true
+		}
+	}
+	return false
+}
+
 // eligiblePrincipals derives the review-eligible principals from the scope
 // snapshot: the chiefs of every ancestor organization, deduplicated and
 // sorted.
@@ -558,6 +586,46 @@ func (s *Service) evaluate(ctx context.Context, unit contract.Unit, scope contra
 		}
 		if env.expires != nil && !env.expires.After(action.ExpiresAt) {
 			return deny("current grants expire before the action window ends")
+		}
+
+		// Worker-subject fences: every model call and proposal executes as
+		// the resolved worker principal (P03's worker-subject seam), so its
+		// own intersected authority -- never a broader administrative
+		// grant -- gates what a worker's proposed action may actually do.
+		if actor.Kind == "worker" {
+			// An external tool call is authorized only by an explicit tool
+			// binding naming that exact tool. A standing capability grant
+			// (even a wildcard) never substitutes: discovery can list a
+			// connection's tools, but listing is not a grant to invoke one,
+			// and an empty or mismatched binding set refuses the call
+			// before any adapter is ever reached.
+			if action.Tool != noObjectRef && !toolBound(snap.Bindings, action.Tool.ID, scope) {
+				return deny(fmt.Sprintf(
+					"no explicit tool binding authorizes this worker to invoke tool %s; catalog discovery does not grant call access",
+					action.Tool.ID))
+			}
+
+			// Resolved context about to be disclosed to a model -- skills,
+			// attachments, tool results and memory excerpts alike arrive
+			// here as staged content references -- is fenced by the
+			// worker's own execution-profile classification against the
+			// scope's project classification. A public-classified profile
+			// (a hosted/third-party model destination) never receives
+			// restricted-classified project content, decided here before
+			// any provider dispatch; a narrower or matching classification
+			// is unaffected.
+			if len(action.Content) > 0 && snap.Worker != nil && snap.Worker.Profile != nil &&
+				snap.Worker.Profile.Classification == classificationPublic {
+				projectClass := ""
+				if snap.Project != nil {
+					projectClass = snap.Project.Classification
+				}
+				if projectClass == classificationRestricted {
+					return deny(fmt.Sprintf(
+						"a %s execution profile may not disclose %s-classified project content to a model destination",
+						classificationPublic, classificationRestricted))
+				}
+			}
 		}
 	}
 
@@ -705,11 +773,18 @@ func (s *Service) evaluate(ctx context.Context, unit contract.Unit, scope contra
 		}
 	}
 
-	// A sealed candidate digest or a capability action consults the exact
-	// review state: an approved decision satisfies a review requirement, a
-	// rejected one denies, and a pending or absent review keeps the
-	// requirement.
-	if requirement != nil && (candidateDigest != "" || ensureAction != nil) {
+	// A sealed candidate digest, a capability action or an exact caller
+	// action all name a specific, reproducible digest: whichever produced
+	// requirement.ActionDigest, the exact review state for that digest is
+	// consulted the same way. This is what lets a hosted loop persist the
+	// requirement and, on a later admission of the identical action bytes,
+	// converge to allow once an eligible owner decides it -- no broad
+	// conversational approval can substitute, because only this exact
+	// digest is ever consulted, and any change to the action (content,
+	// account identity, destination, time window or preconditions) derives
+	// a different digest that this same consultation never conflates with
+	// the earlier one.
+	if requirement != nil && (candidateDigest != "" || ensureAction != nil || action != nil) {
 		eligible, state, err := s.callReviewsCheck(ctx, unit, scope, requirement.ActionDigest)
 		if err != nil {
 			return wirePolicyResult{}, err

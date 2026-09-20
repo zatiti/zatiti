@@ -541,9 +541,13 @@ type peerProject struct {
 }
 
 // peerWorkerProfile carries the execution-profile fields qualification
-// version derivation reads; decoded tolerantly from the workers snapshot.
+// version derivation and disclosure fencing read; decoded tolerantly from
+// the workers snapshot. Classification is the shared ExecutionProfile's
+// internal|public|restricted disclosure boundary for this worker's model
+// destination.
 type peerWorkerProfile struct {
-	Model string `json:"model"`
+	Model          string `json:"model"`
+	Classification string `json:"classification,omitempty"`
 }
 
 type peerWorker struct {

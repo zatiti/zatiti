@@ -790,6 +790,20 @@ func (e *testEnv) bindWorker(id contract.ID, model string, skills ...wireRef) {
 	})
 }
 
+// bindWorkerProfile registers one bound worker with an explicit execution
+// profile classification, for tests that resolve the worker's model-dispatch
+// disclosure boundary.
+func (e *testEnv) bindWorkerProfile(id contract.ID, model, classification string, skills ...wireRef) {
+	e.t.Helper()
+	if skills == nil {
+		skills = []wireRef{}
+	}
+	e.ports.bindWorker(peerWorker{
+		ID: id, OrganizationID: e.org,
+		SkillVersions: skills, Profile: &peerWorkerProfile{Model: model, Classification: classification},
+	})
+}
+
 // setTask registers one task the tasks fake serves.
 func (e *testEnv) setTask(id contract.ID, state string, worker contract.ID, version contract.Version) {
 	e.t.Helper()
@@ -856,6 +870,19 @@ func (e *testEnv) validAction(scope contract.Scope) wireAction {
 func (e *testEnv) check(scope contract.Scope, capability string, action *wireAction, digest string) wirePolicyResult {
 	e.t.Helper()
 	payload := e.mustOK(opCheck, checkInput{
+		Scope: scope, Capability: capability, Action: action, CandidateDigest: digest,
+	})
+	var out policyResultBody
+	e.decode(payload.Data, &out)
+	return out.Resource
+}
+
+// checkAs runs _policy.check as an explicit actor and scope and returns the
+// full decision, for fences gated on the calling actor's kind (worker vs.
+// service/human) rather than the default env actor.
+func (e *testEnv) checkAs(actor contract.Actor, scope contract.Scope, capability string, action *wireAction, digest string) wirePolicyResult {
+	e.t.Helper()
+	payload := e.mustOKAs(actor, scope, opCheck, checkInput{
 		Scope: scope, Capability: capability, Action: action, CandidateDigest: digest,
 	})
 	var out policyResultBody
