@@ -70,14 +70,39 @@ func registerReplayedRefusal(t *testing.T, env *testEnv, operation string, fault
 // whether or not a Go error accompanies it out of application.Invoke, the
 // wire answer is the fault's mapped status with the retained command
 // identity and fault, never HTTP 200 around a failed envelope.
+//
+// The case table is the complete revision-3 fault mapping from
+// internal/server/AGENTS.md ("Failed mapping: invalid_input 400,
+// permission_denied 403, not_found 404, stale_version/submission_conflict/
+// conflict/review_required/outcome_unknown/artifact_fault 409,
+// cursor_expired 410, prerequisite_missing/external_action_required/
+// budget_unavailable/capability_unsupported/verification_failed 422,
+// controller_unavailable 503, internal_error 500"), proven end to end over
+// the real HTTP transport rather than only against contract.HTTPStatus in
+// isolation: this is the server's own obligation to enforce that exact
+// mapping, not a restatement of the shared contract's unit tests.
 func TestReplayedRefusalKeepsItsFaultStatus(t *testing.T) {
 	cases := []struct {
 		code string
 		want int
 	}{
-		{contract.CodeConflict, http.StatusConflict},
+		{contract.CodeInvalidInput, http.StatusBadRequest},
 		{contract.CodePermissionDenied, http.StatusForbidden},
+		{contract.CodeNotFound, http.StatusNotFound},
+		{contract.CodeStaleVersion, http.StatusConflict},
+		{contract.CodeSubmissionConflict, http.StatusConflict},
+		{contract.CodeConflict, http.StatusConflict},
+		{contract.CodeReviewRequired, http.StatusConflict},
+		{contract.CodeOutcomeUnknown, http.StatusConflict},
+		{contract.CodeArtifactFault, http.StatusConflict},
+		{contract.CodeCursorExpired, http.StatusGone},
 		{contract.CodePrerequisiteMissing, http.StatusUnprocessableEntity},
+		{contract.CodeExternalActionRequired, http.StatusUnprocessableEntity},
+		{contract.CodeBudgetUnavailable, http.StatusUnprocessableEntity},
+		{contract.CodeCapabilityUnsupported, http.StatusUnprocessableEntity},
+		{contract.CodeVerificationFailed, http.StatusUnprocessableEntity},
+		{contract.CodeControllerUnavailable, http.StatusServiceUnavailable},
+		{contract.CodeInternalError, http.StatusInternalServerError},
 	}
 	for _, tc := range cases {
 		t.Run(tc.code, func(t *testing.T) {

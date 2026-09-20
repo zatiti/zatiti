@@ -148,6 +148,21 @@ func (d *fakeDB) hasEvent(kind string) bool {
 	return false
 }
 
+// countEvents reports how many events of kind were committed. hasEvent alone
+// cannot distinguish "ran once" from "ran twice"; a durable-work test that
+// must prove a disconnect never repeats a mutation needs the exact count.
+func (d *fakeDB) countEvents(kind string) int {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	n := 0
+	for _, e := range d.events {
+		if e.Kind == kind {
+			n++
+		}
+	}
+	return n
+}
+
 // fakeAuthenticator maps opaque bearer credentials and certificate SPKI
 // fingerprints to actors, standing in for the identity owner. An
 // unregistered credential or fingerprint is refused exactly as a revoked or
@@ -334,6 +349,201 @@ func (d delayedInstallationIO) Finish(ctx context.Context, u contract.Unit, plan
 	return payload, err
 }
 
+// statefulInstallationIO models the one real guard installation.init keeps
+// in production (internal/installation/bootstrap.go): bootstrap runs exactly
+// once, and a second attempt is a named conflict, not a silent retry or a
+// second installation. Prepare is where the real owner would discover, from
+// durable state read inside the transaction, that an installation already
+// exists; this fake tracks the same fact with a guarded bool set only once
+// Finish has durably committed the first bootstrap.
+type statefulInstallationIO struct {
+	mu          sync.Mutex
+	initialized bool
+}
+
+func (s *statefulInstallationIO) Prepare(ctx context.Context, u contract.Unit, invocation contract.Invocation) (contract.IOPlan, error) {
+	s.mu.Lock()
+	already := s.initialized
+	s.mu.Unlock()
+	if already {
+		return contract.IOPlan{}, &contract.Fault{
+			Code:    contract.CodeConflict,
+			Message: "this installation is already initialized; bootstrap runs exactly once",
+		}
+	}
+	return fakeInstallationIO{}.Prepare(ctx, u, invocation)
+}
+
+func (s *statefulInstallationIO) Perform(ctx context.Context, plan contract.IOPlan) (contract.IOResult, error) {
+	return fakeInstallationIO{}.Perform(ctx, plan)
+}
+
+func (s *statefulInstallationIO) Finish(ctx context.Context, u contract.Unit, plan contract.IOPlan, result contract.IOResult) (contract.Payload, error) {
+	payload, err := fakeInstallationIO{}.Finish(ctx, u, plan, result)
+	if err != nil {
+		return payload, err
+	}
+	s.mu.Lock()
+	s.initialized = true
+	s.mu.Unlock()
+	return payload, err
+}
+
+// evidenceRecord is this package's fake model of evidence's retained command
+// disposition (real shape: $defs/Command, internal/application/submission.go
+// storedCommand): enough to drive application.commandBegin/commandFinish's
+// actual replay protocol without importing that package's unexported types.
+type evidenceRecord struct {
+	id            contract.ID
+	principal     contract.ID
+	operation     string
+	version       int64
+	submissionKey string
+	digest        contract.Digest
+	finished      bool
+	result        contract.Result
+}
+
+// fakeEvidence stands in for the evidence owner's _evidence.command.begin/
+// _evidence.command.finish pair, the durable submission-key dedupe mechanism
+// every ordinary public mutation goes through (internal/application/
+// gates.go commandBegin/commandFinish). A submission key bound to an
+// operation identifies exactly one durable command no matter how many times
+// begin is called for it, so a test can prove a mutation neither cancels
+// nor repeats across a disconnect and reconnect.
+//
+// begin/finish are deliberately two-tier rather than one map mutated in
+// place. In production _evidence.command.begin's insert lives in the same
+// SQL transaction as the handler it guards: a handler failure rolls the
+// insert back too, so a retried begin sees no record and mints a genuinely
+// fresh command identity (application.recordRefusal relies on exactly this
+// to durably record a refusal after rollback). This fake has no transaction
+// to roll back, so it models the same fact directly: begin only ever
+// stages a pending attempt keyed by its own minted command_id; a key is
+// promoted into the durably discoverable index, keyed by operation+
+// submission_key, only once finish actually commits it. An attempt that
+// never reaches finish (the failed-handler path) simply never gets indexed,
+// exactly as a rolled-back insert never would.
+type fakeEvidence struct {
+	mu       sync.Mutex
+	pending  map[contract.ID]*evidenceRecord // keyed by minted command_id, not yet finished
+	finished map[string]*evidenceRecord      // keyed by operation + "\x00" + submission_key, durable
+}
+
+func newFakeEvidence() *fakeEvidence {
+	return &fakeEvidence{
+		pending:  make(map[contract.ID]*evidenceRecord),
+		finished: make(map[string]*evidenceRecord),
+	}
+}
+
+func (e *fakeEvidence) begin(principal contract.ID, operation string, version int64, submissionKey string, digest contract.Digest) (contract.ID, *evidenceRecord) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	key := operation + "\x00" + submissionKey
+	if rec, ok := e.finished[key]; ok {
+		return rec.id, rec
+	}
+	rec := &evidenceRecord{
+		id: contract.NewID(), principal: principal, operation: operation,
+		version: version, submissionKey: submissionKey, digest: digest,
+	}
+	e.pending[rec.id] = rec
+	return rec.id, nil
+}
+
+func (e *fakeEvidence) finish(commandID contract.ID, result contract.Result) *evidenceRecord {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	rec, ok := e.pending[commandID]
+	if !ok {
+		return nil
+	}
+	rec.finished = true
+	rec.result = result
+	delete(e.pending, commandID)
+	e.finished[rec.operation+"\x00"+rec.submissionKey] = rec
+	return rec
+}
+
+// registerOn wires the real _evidence.command.begin/_evidence.command.finish
+// internal contract (application/submission.go's evidenceBeginOutput and the
+// {resource: storedCommand} finish output) onto cat, backed by e.
+func (e *fakeEvidence) registerOn(cat *fakeCatalog) {
+	cat.descriptors["_evidence.command.begin"] = contract.Descriptor{
+		ID: "_evidence.command.begin", Version: 1, Owner: "evidence",
+		Visibility: contract.VisibilityInternal, Mode: contract.ModeMutation,
+		Callers: []string{"application"},
+	}
+	cat.handlers["_evidence.command.begin"] = func(_ context.Context, _ contract.Unit, inv contract.Invocation) (contract.Payload, error) {
+		var in struct {
+			PrincipalID      contract.ID     `json:"principal_id"`
+			Operation        string          `json:"operation"`
+			OperationVersion int64           `json:"operation_version"`
+			SubmissionKey    string          `json:"submission_key"`
+			RequestDigest    contract.Digest `json:"request_digest"`
+		}
+		if err := contract.DecodeStrict(inv.Input, &in); err != nil {
+			return contract.Payload{}, &contract.Fault{Code: contract.CodeInvalidInput, Message: err.Error()}
+		}
+		commandID, existing := e.begin(in.PrincipalID, in.Operation, in.OperationVersion, in.SubmissionKey, in.RequestDigest)
+		out := map[string]any{"command_id": commandID}
+		if existing != nil {
+			entry := map[string]any{
+				"id": existing.id, "principal_id": existing.principal, "operation": existing.operation,
+				"operation_version": existing.version, "submission_key": existing.submissionKey,
+				"request_digest": existing.digest, "status": "", "data": map[string]any{}, "error_code": "",
+			}
+			if existing.finished {
+				entry["status"] = existing.result.Status
+				if existing.result.Error != nil {
+					entry["error_code"] = existing.result.Error.Code
+				}
+				entry["result"] = existing.result
+			}
+			out["existing"] = entry
+		}
+		data, err := json.Marshal(out)
+		if err != nil {
+			return contract.Payload{}, &contract.Fault{Code: contract.CodeInternalError, Message: err.Error()}
+		}
+		return contract.Payload{Status: contract.StatusCompleted, Data: data}, nil
+	}
+
+	cat.descriptors["_evidence.command.finish"] = contract.Descriptor{
+		ID: "_evidence.command.finish", Version: 1, Owner: "evidence",
+		Visibility: contract.VisibilityInternal, Mode: contract.ModeMutation,
+		Callers: []string{"application"},
+	}
+	cat.handlers["_evidence.command.finish"] = func(_ context.Context, _ contract.Unit, inv contract.Invocation) (contract.Payload, error) {
+		var in struct {
+			CommandID contract.ID     `json:"command_id"`
+			Result    contract.Result `json:"result"`
+		}
+		if err := contract.DecodeStrict(inv.Input, &in); err != nil {
+			return contract.Payload{}, &contract.Fault{Code: contract.CodeInvalidInput, Message: err.Error()}
+		}
+		rec := e.finish(in.CommandID, in.Result)
+		if rec == nil {
+			return contract.Payload{}, &contract.Fault{Code: contract.CodeNotFound, Message: "no command is bound to that identity"}
+		}
+		errCode := ""
+		if rec.result.Error != nil {
+			errCode = rec.result.Error.Code
+		}
+		data, err := json.Marshal(map[string]any{"resource": map[string]any{
+			"id": rec.id, "principal_id": rec.principal, "operation": rec.operation,
+			"operation_version": rec.version, "submission_key": rec.submissionKey,
+			"request_digest": rec.digest, "status": rec.result.Status, "data": map[string]any{},
+			"error_code": errCode, "result": rec.result,
+		}})
+		if err != nil {
+			return contract.Payload{}, &contract.Fault{Code: contract.CodeInternalError, Message: err.Error()}
+		}
+		return contract.Payload{Status: contract.StatusCompleted, Data: data}, nil
+	}
+}
+
 // installationInitInputSchema is the frozen installation.init input schema
 // (internal/server/AGENTS.md, "installation.init v1").
 const installationInitInputSchema = `{"type":"object","additionalProperties":false,"properties":{"credential_store":{"type":"string","enum":["os","headless"]},"owner_name":{"type":"string","maxLength":8192},"headless_key_ref":{"type":"string","maxLength":8192}},"required":["credential_store","owner_name"]}`
@@ -394,7 +604,7 @@ func newTestEnvWithIO(t *testing.T, installIO contract.LocalIO) *testEnv {
 		SubmissionKey: false,
 	}
 	cat.handlers["capabilities.list"] = func(_ context.Context, u contract.Unit, _ contract.Invocation) (contract.Payload, error) {
-		data := []byte(fmt.Sprintf(`{"items":[],"seen_principal":%q}`, u.Actor().PrincipalID))
+		data := []byte(fmt.Sprintf(`{"items":[],"seen_principal":%q,"seen_kind":%q}`, u.Actor().PrincipalID, u.Actor().Kind))
 		return contract.Payload{Status: contract.StatusCompleted, Data: data}, nil
 	}
 
