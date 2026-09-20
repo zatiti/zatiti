@@ -130,6 +130,7 @@ type leaseRow struct {
 // verificationJobRow is the storage representation of one verification job.
 type verificationJobRow struct {
 	ID               contract.ID
+	Version          contract.Version
 	AttemptID        contract.ID
 	RunID            contract.ID
 	TaskID           contract.ID
@@ -946,19 +947,14 @@ func insertVerificationJob(ctx context.Context, unit contract.Unit, id contract.
 	return err
 }
 
-// loadVerificationJob reads the newest verification job of one attempt.
-func loadVerificationJob(ctx context.Context, unit contract.Unit, attemptID contract.ID) (*verificationJobRow, error) {
-	row := unit.QueryRowContext(ctx, `SELECT id, attempt_id, run_id, task_id,
-		installation_id, state, request_json, result_json, acceptance_digest
-		FROM execution_verification_jobs WHERE attempt_id = ?
-		ORDER BY created_at DESC LIMIT 1`, attemptID)
+const verificationJobColumns = `id, version, attempt_id, run_id, task_id,
+installation_id, state, request_json, result_json, acceptance_digest`
+
+func scanVerificationJob(scan func(dest ...any) error) (*verificationJobRow, error) {
 	var v verificationJobRow
 	var request, result string
-	err := row.Scan(&v.ID, &v.AttemptID, &v.RunID, &v.TaskID, &v.InstallationID,
+	err := scan(&v.ID, &v.Version, &v.AttemptID, &v.RunID, &v.TaskID, &v.InstallationID,
 		&v.State, &request, &result, &v.AcceptanceDigest)
-	if isNoRows(err) {
-		return nil, notFound("no verification job exists for attempt %s", attemptID)
-	}
 	if err != nil {
 		return nil, err
 	}
@@ -969,15 +965,70 @@ func loadVerificationJob(ctx context.Context, unit contract.Unit, attemptID cont
 	return &v, nil
 }
 
-// updateVerificationJob records the verifier result and terminal state.
+// loadVerificationJob reads the newest verification job of one attempt.
+func loadVerificationJob(ctx context.Context, unit contract.Unit, attemptID contract.ID) (*verificationJobRow, error) {
+	row := unit.QueryRowContext(ctx, `SELECT `+verificationJobColumns+`
+		FROM execution_verification_jobs WHERE attempt_id = ?
+		ORDER BY created_at DESC LIMIT 1`, attemptID)
+	v, err := scanVerificationJob(row.Scan)
+	if isNoRows(err) {
+		return nil, notFound("no verification job exists for attempt %s", attemptID)
+	}
+	return v, err
+}
+
+// loadVerificationJobByID reads one verification job by its own id (the
+// VerificationRequest.job_id the sealed request and _execution.verification
+// pipeline name).
+func loadVerificationJobByID(ctx context.Context, unit contract.Unit, id contract.ID) (*verificationJobRow, error) {
+	row := unit.QueryRowContext(ctx, `SELECT `+verificationJobColumns+`
+		FROM execution_verification_jobs WHERE id = ?`, id)
+	v, err := scanVerificationJob(row.Scan)
+	if isNoRows(err) {
+		return nil, notFound("verification request %s does not exist", id)
+	}
+	return v, err
+}
+
+// listPendingVerificationJobs reads the installation's pending verification
+// jobs oldest first, bounded: the fair scan _execution.verification.pending
+// serves. No worker can claim verifier authority through this read-only
+// scan; only the trusted verifier path claims and records a verdict.
+func listPendingVerificationJobs(ctx context.Context, unit contract.Unit, installation contract.ID, limit int64) ([]*verificationJobRow, error) {
+	rows, err := unit.QueryContext(ctx, `SELECT `+verificationJobColumns+`
+		FROM execution_verification_jobs
+		WHERE installation_id = ? AND state = 'pending'
+		ORDER BY created_at ASC LIMIT ?`, installation, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []*verificationJobRow
+	for rows.Next() {
+		v, err := scanVerificationJob(rows.Scan)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, v)
+	}
+	return out, rows.Err()
+}
+
+// updateVerificationJob records the verifier result and terminal state,
+// version-fenced.
 func updateVerificationJob(ctx context.Context, unit contract.Unit, v *verificationJobRow, result json.RawMessage, at time.Time) error {
 	res, err := unit.ExecContext(ctx, `UPDATE execution_verification_jobs
-		SET state = ?, result_json = ?, updated_at = ? WHERE id = ?`,
-		v.State, string(result), formatStamp(at), v.ID)
+		SET version = version + 1, state = ?, result_json = ?, updated_at = ?
+		WHERE id = ? AND version = ?`,
+		v.State, string(result), formatStamp(at), v.ID, v.Version)
 	if err != nil {
 		return err
 	}
-	return expectOneRow(res)
+	if err := expectOneRow(res); err != nil {
+		return err
+	}
+	v.Version++
+	return nil
 }
 
 // operationRow is the storage representation of one owned operation record.
@@ -1107,6 +1158,450 @@ func touchLease(ctx context.Context, unit contract.Unit, id contract.ID, expires
 		return err
 	}
 	return expectOneRow(res)
+}
+
+// turnRow is the storage representation of one durable worker turn.
+type turnRow struct {
+	ID                    contract.ID
+	Version               contract.Version
+	WorkerID              contract.ID
+	PrincipalID           contract.ID
+	InstallationID        contract.ID
+	OrganizationID        contract.ID
+	ProjectID             contract.ID
+	TaskScopeID           contract.ID
+	Scope                 contract.Scope
+	Source                wireTurnSource
+	RequesterID           contract.ID
+	ConfigurationRevision contract.Version
+	State                 string
+	Generation            int64
+	Limits                wireLimits
+	RootID                contract.ID
+	StepsUsed             int64
+	CreatedAt             time.Time
+	UpdatedAt             time.Time
+	ConversationID        contract.ID
+	TaskID                contract.ID
+	RunID                 contract.ID
+	AttemptID             contract.ID
+	WaitingReason         string
+	WaitingResourceID     contract.ID
+	NextWake              time.Time
+	LeaseID               contract.ID
+	LeaseExpiresAt        time.Time
+	ContextArtifact       *wireArtifactRef
+	LastObservationID     contract.ID
+}
+
+const turnColumns = `id, version, worker_id, principal_id, installation_id,
+organization_id, project_id, task_scope_id, scope_json, source_kind, source_id,
+source_version, recipient_worker_id, requester_id, configuration_revision,
+state, generation, limits_json, root_id, steps_used, created_at, updated_at,
+conversation_id, task_id, run_id, attempt_id, waiting_reason,
+waiting_resource_id, next_wake, lease_id, lease_expires_at,
+context_artifact_json, last_observation_id`
+
+func scanTurn(scan func(dest ...any) error) (*turnRow, error) {
+	var t turnRow
+	var scopeJSON, limitsJSON, contextJSON string
+	var sourceKind, sourceID string
+	var sourceVersion contract.Version
+	var recipientWorkerID contract.ID
+	var nextWake, leaseExpires, created, updated string
+	err := scan(&t.ID, &t.Version, &t.WorkerID, &t.PrincipalID, &t.InstallationID,
+		&t.OrganizationID, &t.ProjectID, &t.TaskScopeID, &scopeJSON, &sourceKind, &sourceID,
+		&sourceVersion, &recipientWorkerID, &t.RequesterID, &t.ConfigurationRevision,
+		&t.State, &t.Generation, &limitsJSON, &t.RootID, &t.StepsUsed, &created, &updated,
+		&t.ConversationID, &t.TaskID, &t.RunID, &t.AttemptID, &t.WaitingReason,
+		&t.WaitingResourceID, &nextWake, &t.LeaseID, &leaseExpires,
+		&contextJSON, &t.LastObservationID)
+	if err != nil {
+		return nil, err
+	}
+	t.Source = wireTurnSource{
+		Kind: sourceKind, SourceID: contract.ID(sourceID), SourceVersion: sourceVersion,
+		RecipientWorkerID: recipientWorkerID,
+	}
+	if err := decodeJSON(scopeJSON, &t.Scope); err != nil {
+		return nil, err
+	}
+	if err := decodeJSON(limitsJSON, &t.Limits); err != nil {
+		return nil, err
+	}
+	if err := decodeJSON(contextJSON, &t.ContextArtifact); err != nil {
+		return nil, err
+	}
+	if t.CreatedAt, err = parseStamp(created); err != nil {
+		return nil, err
+	}
+	if t.UpdatedAt, err = parseStamp(updated); err != nil {
+		return nil, err
+	}
+	if t.NextWake, err = parseStamp(nextWake); err != nil {
+		return nil, err
+	}
+	if t.LeaseExpiresAt, err = parseStamp(leaseExpires); err != nil {
+		return nil, err
+	}
+	return &t, nil
+}
+
+// loadTurn reads one worker turn by id.
+func loadTurn(ctx context.Context, unit contract.Unit, id contract.ID) (*turnRow, error) {
+	row := unit.QueryRowContext(ctx, `SELECT `+turnColumns+` FROM execution_turns WHERE id = ?`, id)
+	t, err := scanTurn(row.Scan)
+	if isNoRows(err) {
+		return nil, notFound("turn %s does not exist", id)
+	}
+	return t, err
+}
+
+// loadTurnForUpdate reads one worker turn and enforces the version fence.
+func loadTurnForUpdate(ctx context.Context, unit contract.Unit, id contract.ID, expected contract.Version) (*turnRow, error) {
+	t, err := loadTurn(ctx, unit, id)
+	if err != nil {
+		return nil, err
+	}
+	if t.Version != expected {
+		return nil, staleVersion("turn %s version %d does not match expected version %d", id, t.Version, expected)
+	}
+	return t, nil
+}
+
+// findTurnBySource locates the turn admitted for one exact source identity;
+// no match reads as nil. This is _execution.turn.admit's idempotency key.
+func findTurnBySource(ctx context.Context, unit contract.Unit, installation contract.ID, sourceKind string, sourceID contract.ID, sourceVersion contract.Version, workerID contract.ID) (*turnRow, error) {
+	row := unit.QueryRowContext(ctx, `SELECT `+turnColumns+` FROM execution_turns
+		WHERE installation_id = ? AND source_kind = ? AND source_id = ? AND source_version = ? AND worker_id = ?`,
+		installation, sourceKind, sourceID, sourceVersion, workerID)
+	t, err := scanTurn(row.Scan)
+	if isNoRows(err) {
+		return nil, nil
+	}
+	return t, err
+}
+
+// findActiveTurnForWorker locates the worker's one live (non-terminal)
+// decision stream; no match reads as nil. A message or responsibility
+// trigger for a worker with an active turn is a safe-boundary injection into
+// that turn, never a second concurrent stream.
+func findActiveTurnForWorker(ctx context.Context, unit contract.Unit, installation, workerID contract.ID) (*turnRow, error) {
+	row := unit.QueryRowContext(ctx, `SELECT `+turnColumns+` FROM execution_turns
+		WHERE installation_id = ? AND worker_id = ?
+		AND state NOT IN ('completed','failed','cancelled')
+		ORDER BY created_at DESC LIMIT 1`, installation, workerID)
+	t, err := scanTurn(row.Scan)
+	if isNoRows(err) {
+		return nil, nil
+	}
+	return t, err
+}
+
+// insertTurn persists a new worker turn at version 1.
+func insertTurn(ctx context.Context, unit contract.Unit, t *turnRow) error {
+	scopeJSON, err := encodeScope(t.Scope)
+	if err != nil {
+		return err
+	}
+	limitsJSON, err := encodeJSON(t.Limits)
+	if err != nil {
+		return err
+	}
+	contextJSON, err := encodeJSON(t.ContextArtifact)
+	if err != nil {
+		return err
+	}
+	_, err = unit.ExecContext(ctx, `INSERT INTO execution_turns
+		(id, version, worker_id, principal_id, installation_id, organization_id,
+		 project_id, task_scope_id, scope_json, source_kind, source_id,
+		 source_version, recipient_worker_id, requester_id, configuration_revision,
+		 state, generation, limits_json, root_id, steps_used, created_at, updated_at,
+		 conversation_id, task_id, run_id, attempt_id, waiting_reason,
+		 waiting_resource_id, next_wake, lease_id, lease_expires_at,
+		 context_artifact_json, last_observation_id)
+		VALUES (?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		t.ID, t.WorkerID, t.PrincipalID, t.InstallationID, t.OrganizationID,
+		t.ProjectID, t.TaskScopeID, scopeJSON, t.Source.Kind, t.Source.SourceID,
+		t.Source.SourceVersion, t.Source.RecipientWorkerID, t.RequesterID, t.ConfigurationRevision,
+		t.State, t.Generation, limitsJSON, t.RootID, t.StepsUsed, formatStamp(t.CreatedAt), formatStamp(t.UpdatedAt),
+		t.ConversationID, t.TaskID, t.RunID, t.AttemptID, t.WaitingReason,
+		t.WaitingResourceID, formatStamp(t.NextWake), t.LeaseID, formatStamp(t.LeaseExpiresAt),
+		contextJSON, t.LastObservationID)
+	return err
+}
+
+// updateTurn applies a version-fenced mutation to one worker turn.
+func updateTurn(ctx context.Context, unit contract.Unit, t *turnRow) error {
+	contextJSON, err := encodeJSON(t.ContextArtifact)
+	if err != nil {
+		return err
+	}
+	res, err := unit.ExecContext(ctx, `UPDATE execution_turns SET
+		version = ?, state = ?, generation = ?, root_id = ?, steps_used = ?, updated_at = ?,
+		task_id = ?, run_id = ?, attempt_id = ?, waiting_reason = ?, waiting_resource_id = ?,
+		next_wake = ?, lease_id = ?, lease_expires_at = ?, context_artifact_json = ?,
+		last_observation_id = ?
+		WHERE id = ? AND version = ?`,
+		t.Version+1, t.State, t.Generation, t.RootID, t.StepsUsed, formatStamp(t.UpdatedAt),
+		t.TaskID, t.RunID, t.AttemptID, t.WaitingReason, t.WaitingResourceID,
+		formatStamp(t.NextWake), t.LeaseID, formatStamp(t.LeaseExpiresAt), contextJSON,
+		t.LastObservationID, t.ID, t.Version)
+	if err != nil {
+		return err
+	}
+	if err := expectOneRow(res); err != nil {
+		return err
+	}
+	t.Version++
+	return nil
+}
+
+// listTurns reads turns matching the conditions, oldest first: the durable
+// worker loop's fair, bounded scans order by admission time.
+func listTurns(ctx context.Context, unit contract.Unit, conds []string, args []any, limit int64) ([]*turnRow, error) {
+	query := `SELECT ` + turnColumns + ` FROM execution_turns`
+	if len(conds) > 0 {
+		query += ` WHERE ` + joinConds(conds)
+	}
+	query += ` ORDER BY created_at ASC, id ASC LIMIT ?`
+	args = append(args, limit)
+	rows, err := unit.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []*turnRow
+	for rows.Next() {
+		t, err := scanTurn(rows.Scan)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, t)
+	}
+	return out, rows.Err()
+}
+
+// proposalRow is the storage representation of one durable ProposalRecord.
+type proposalRow struct {
+	ID                  contract.ID
+	InstallationID      contract.ID
+	TurnID              contract.ID
+	StepIndex           int64
+	ProposalID          string
+	SourceContextDigest contract.Digest
+	NormalizedProposal  json.RawMessage
+	State               string
+	CreatedAt           time.Time
+	UpdatedAt           time.Time
+	CommandID           contract.ID
+	EffectOperationID   contract.ID
+	ResultArtifact      *wireArtifactRef
+}
+
+const proposalColumns = `id, installation_id, turn_id, step_index, proposal_id,
+source_context_digest, normalized_proposal_json, state, created_at, updated_at,
+command_id, effect_operation_id, result_artifact_json`
+
+func scanProposal(scan func(dest ...any) error) (*proposalRow, error) {
+	var p proposalRow
+	var normalizedJSON, artifactJSON string
+	var created, updated string
+	err := scan(&p.ID, &p.InstallationID, &p.TurnID, &p.StepIndex, &p.ProposalID,
+		&p.SourceContextDigest, &normalizedJSON, &p.State, &created, &updated,
+		&p.CommandID, &p.EffectOperationID, &artifactJSON)
+	if err != nil {
+		return nil, err
+	}
+	if normalizedJSON != "" {
+		p.NormalizedProposal = json.RawMessage(normalizedJSON)
+	}
+	if err := decodeJSON(artifactJSON, &p.ResultArtifact); err != nil {
+		return nil, err
+	}
+	if p.CreatedAt, err = parseStamp(created); err != nil {
+		return nil, err
+	}
+	if p.UpdatedAt, err = parseStamp(updated); err != nil {
+		return nil, err
+	}
+	return &p, nil
+}
+
+// findProposalByKey locates the proposal at its unique (turn_id, step_index,
+// proposal_id) key; no match reads as nil.
+func findProposalByKey(ctx context.Context, unit contract.Unit, turnID contract.ID, stepIndex int64, proposalID string) (*proposalRow, error) {
+	row := unit.QueryRowContext(ctx, `SELECT `+proposalColumns+` FROM execution_proposals
+		WHERE turn_id = ? AND step_index = ? AND proposal_id = ?`, turnID, stepIndex, proposalID)
+	p, err := scanProposal(row.Scan)
+	if isNoRows(err) {
+		return nil, nil
+	}
+	return p, err
+}
+
+// findProposalByID locates the newest proposal carrying the given
+// proposal_id within the caller's installation; no match reads as nil.
+// _execution.proposal.record's input names only the proposal identity, so
+// this resolves the record it was staged against.
+func findProposalByID(ctx context.Context, unit contract.Unit, installation contract.ID, proposalID string) (*proposalRow, error) {
+	row := unit.QueryRowContext(ctx, `SELECT `+proposalColumns+` FROM execution_proposals
+		WHERE installation_id = ? AND proposal_id = ? ORDER BY created_at DESC LIMIT 1`,
+		installation, proposalID)
+	p, err := scanProposal(row.Scan)
+	if isNoRows(err) {
+		return nil, nil
+	}
+	return p, err
+}
+
+// insertProposal persists a new proposal record.
+func insertProposal(ctx context.Context, unit contract.Unit, p *proposalRow) error {
+	artifactJSON, err := encodeJSON(p.ResultArtifact)
+	if err != nil {
+		return err
+	}
+	normalized := string(p.NormalizedProposal)
+	if normalized == "" {
+		normalized = "{}"
+	}
+	_, err = unit.ExecContext(ctx, `INSERT INTO execution_proposals
+		(id, installation_id, turn_id, step_index, proposal_id, source_context_digest,
+		 normalized_proposal_json, state, created_at, updated_at, command_id,
+		 effect_operation_id, result_artifact_json)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		p.ID, p.InstallationID, p.TurnID, p.StepIndex, p.ProposalID, p.SourceContextDigest,
+		normalized, p.State, formatStamp(p.CreatedAt), formatStamp(p.UpdatedAt),
+		p.CommandID, p.EffectOperationID, artifactJSON)
+	return err
+}
+
+// updateProposal records the recorded disposition of an existing proposal.
+func updateProposal(ctx context.Context, unit contract.Unit, p *proposalRow) error {
+	artifactJSON, err := encodeJSON(p.ResultArtifact)
+	if err != nil {
+		return err
+	}
+	res, err := unit.ExecContext(ctx, `UPDATE execution_proposals SET
+		state = ?, updated_at = ?, command_id = ?, effect_operation_id = ?, result_artifact_json = ?
+		WHERE id = ?`,
+		p.State, formatStamp(p.UpdatedAt), p.CommandID, p.EffectOperationID, artifactJSON, p.ID)
+	if err != nil {
+		return err
+	}
+	return expectOneRow(res)
+}
+
+// contextPlanRow is the storage representation of one versioned immutable
+// ContextPlan.
+type contextPlanRow struct {
+	ID                    contract.ID
+	InstallationID        contract.ID
+	TurnID                contract.ID
+	ExpectedVersion       contract.Version
+	Generation            int64
+	Refs                  []wireArtifactRef
+	ConfigurationRevision contract.Version
+	ByteBound             int64
+	TokenBound            int64
+	Committed             bool
+	CreatedAt             time.Time
+}
+
+// insertContextPlan persists a new immutable context plan.
+func insertContextPlan(ctx context.Context, unit contract.Unit, p *contextPlanRow) error {
+	refsJSON, err := encodeJSON(p.Refs)
+	if err != nil {
+		return err
+	}
+	_, err = unit.ExecContext(ctx, `INSERT INTO execution_context_plans
+		(id, installation_id, turn_id, expected_version, generation, refs_json,
+		 configuration_revision, byte_bound, token_bound, committed, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
+		p.ID, p.InstallationID, p.TurnID, p.ExpectedVersion, p.Generation, refsJSON,
+		p.ConfigurationRevision, p.ByteBound, p.TokenBound, formatStamp(p.CreatedAt))
+	return err
+}
+
+// loadContextPlan reads one context plan by id.
+func loadContextPlan(ctx context.Context, unit contract.Unit, id contract.ID) (*contextPlanRow, error) {
+	row := unit.QueryRowContext(ctx, `SELECT id, installation_id, turn_id, expected_version,
+		generation, refs_json, configuration_revision, byte_bound, token_bound, committed, created_at
+		FROM execution_context_plans WHERE id = ?`, id)
+	var p contextPlanRow
+	var refsJSON string
+	var committed int64
+	var created string
+	err := row.Scan(&p.ID, &p.InstallationID, &p.TurnID, &p.ExpectedVersion, &p.Generation,
+		&refsJSON, &p.ConfigurationRevision, &p.ByteBound, &p.TokenBound, &committed, &created)
+	if isNoRows(err) {
+		return nil, notFound("context plan %s does not exist", id)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if err := decodeJSON(refsJSON, &p.Refs); err != nil {
+		return nil, err
+	}
+	p.Committed = committed == 1
+	if p.CreatedAt, err = parseStamp(created); err != nil {
+		return nil, err
+	}
+	return &p, nil
+}
+
+// commitContextPlan marks a plan committed exactly once; a repeated commit
+// of the same plan id matches no row, so the caller's own idempotent-replay
+// check (by turn state) must run first.
+func commitContextPlan(ctx context.Context, unit contract.Unit, id contract.ID) error {
+	res, err := unit.ExecContext(ctx, `UPDATE execution_context_plans
+		SET committed = 1 WHERE id = ? AND committed = 0`, id)
+	if err != nil {
+		return err
+	}
+	return expectOneRow(res)
+}
+
+// verificationClaimRow tracks the generation-bound claim of one sealed
+// VerificationRequest, kept separate from execution_verification_jobs so the
+// original table's shape stays untouched.
+type verificationClaimRow struct {
+	RequestID         contract.ID
+	ClaimedGeneration int64
+	ClaimToken        string
+	ClaimedAt         time.Time
+}
+
+// loadVerificationClaim reads the current claim of one verification job; no
+// claim reads as nil.
+func loadVerificationClaim(ctx context.Context, unit contract.Unit, requestID contract.ID) (*verificationClaimRow, error) {
+	row := unit.QueryRowContext(ctx, `SELECT request_id, claimed_generation, claim_token, claimed_at
+		FROM execution_verification_claims WHERE request_id = ?`, requestID)
+	var c verificationClaimRow
+	var claimedAt string
+	err := row.Scan(&c.RequestID, &c.ClaimedGeneration, &c.ClaimToken, &claimedAt)
+	if isNoRows(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if c.ClaimedAt, err = parseStamp(claimedAt); err != nil {
+		return nil, err
+	}
+	return &c, nil
+}
+
+// setVerificationClaim upserts the claim of one verification job.
+func setVerificationClaim(ctx context.Context, unit contract.Unit, c *verificationClaimRow) error {
+	_, err := unit.ExecContext(ctx, `INSERT INTO execution_verification_claims
+		(request_id, claimed_generation, claim_token, claimed_at)
+		VALUES (?, ?, ?, ?)
+		ON CONFLICT(request_id) DO UPDATE SET
+		  claimed_generation = excluded.claimed_generation,
+		  claim_token = excluded.claim_token, claimed_at = excluded.claimed_at`,
+		c.RequestID, c.ClaimedGeneration, c.ClaimToken, formatStamp(c.ClaimedAt))
+	return err
 }
 
 // findJobBySourceID locates the newest job committed for one source identity;

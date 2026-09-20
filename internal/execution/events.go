@@ -40,6 +40,16 @@ const (
 	eventJobRecorded   = "execution.job.recorded"
 	eventWorkerPaused  = "execution.worker.paused"
 	eventWorkerResumed = "execution.worker.resumed"
+
+	eventTurnAdmitted        = "execution.turn.admitted"
+	eventTurnClaimed         = "execution.turn.claimed"
+	eventTurnFenced          = "execution.turn.fenced"
+	eventTurnWaiting         = "execution.turn.waiting"
+	eventContextPrepared     = "execution.context.prepared"
+	eventContextCommitted    = "execution.context.committed"
+	eventProposalPrepared    = "execution.proposal.prepared"
+	eventProposalRecorded    = "execution.proposal.recorded"
+	eventVerificationClaimed = "execution.verification.claimed"
 )
 
 // emitTransition appends one state-correlated event to the transaction

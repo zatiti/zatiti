@@ -30,9 +30,16 @@ func (s *Service) handleJobCreate(ctx context.Context, unit contract.Unit, in jo
 		return contract.Outcome[jobBody]{}, err
 	}
 	inputHash := sha256Hex(inputJSON)
-	operationID, err := operationIDOf(inputJSON)
-	if err != nil {
-		return contract.Outcome[jobBody]{}, err
+	// Revision 3 carries operation_id as an explicit top-level request
+	// field (P00-008); a caller still embedding it inside the opaque input
+	// (the pre-revision-3 seam) is honored as a fallback so an existing
+	// caller is not silently broken.
+	operationID := in.OperationID
+	if operationID == "" {
+		operationID, err = operationIDOf(inputJSON)
+		if err != nil {
+			return contract.Outcome[jobBody]{}, err
+		}
 	}
 
 	// Dedup: one job per source identity; the same identity with the same

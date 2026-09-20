@@ -96,6 +96,35 @@ func (s *Service) handleFence(ctx context.Context, unit contract.Unit, in fenceI
 		}
 		ids = append(ids, a.ID)
 	}
+
+	// A restart also fences every claimed WorkerTurn bound to a stale
+	// generation: an old controller can never continue a decision stream it
+	// claimed. Steps used and limits are untouched — a root's cumulative
+	// spend is never reset by a fence, only the lease/claim binding is.
+	// Pending (never claimed) and waiting (already parked) turns hold no
+	// live claim to fence; work.claim's own generation check and wake
+	// revalidation cover them.
+	turns, err := listTurns(ctx, unit,
+		[]string{"installation_id = ?", "generation < ?",
+			"state IN ('claimed','context_pending','model_pending','proposal_pending')"},
+		[]any{installationOf(unit), in.Generation}, 4096)
+	if err != nil {
+		return contract.Outcome[fenceBody]{}, err
+	}
+	for _, turn := range turns {
+		turn.State = "waiting"
+		turn.WaitingReason = waitingRecovery
+		turn.LeaseID = ""
+		turn.LeaseExpiresAt = time.Time{}
+		turn.NextWake = now
+		turn.UpdatedAt = now
+		if err := updateTurn(ctx, unit, turn); err != nil {
+			return contract.Outcome[fenceBody]{}, err
+		}
+		if err := emitTransition(ctx, unit, eventTurnFenced, turn.ID, turn.Version); err != nil {
+			return contract.Outcome[fenceBody]{}, err
+		}
+	}
 	return completedOutcome(fenceBody{AttemptIDs: ids})
 }
 
