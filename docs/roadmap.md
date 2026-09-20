@@ -1597,7 +1597,50 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   sometimes it reproduces, sometimes it doesn't, which is itself
   evidence for "real bug with specific trigger conditions" over "random
   noise."
-  P26 (internal/memory) cleared next, committing now.
+  P26 LANDED (PR #17, 11cb0b6). Fixed both wireDefs AND adapterDefs
+  staleness (this package has two separate embedded-schema consts, more
+  than the single-const pattern seen elsewhere). Restoring the correct
+  adapterDefs surfaced a real production bug: `serenityPhysicalCall.
+  RequestContext` was typed as a bare ArtifactRef instead of the frozen
+  ArtifactLocator oneOf -- this resolves the internal/memory instance of
+  a gap tracked since 2026-09-14 (retype PhysicalCallEvidence.
+  request_context to ArtifactLocator across every adapter). Implemented
+  memory.list from scratch (previously 0% -- no DTO/descriptor/handler).
+  Found a second frozen-catalog drift matching messaging's precedent
+  (memory.list's scope_required key missing from operations.json,
+  matched rather than invented around). P27 (Serenity) dependency
+  correctly deferred with evidence, not guessed. CAUGHT DURING LANDING:
+  the agent's own commit was based on a stale main (predated P34 and
+  several docs commits) -- rebased before pushing so the PR didn't
+  appear to revert P34's evidence work. Also independently ran
+  `go test ./internal/application/...` (the assembly test the agent
+  couldn't run without a lease) myself before merging: still failing,
+  but ONLY on `_skills.activate` -- confirms P26 itself doesn't block
+  assembly, consistent with the "long tail, not quick cleanup" honest
+  assessment from the earlier entry.
+  P12 (internal/effects) and P30 (internal/platform) both reported ready
+  while P26 was landing. P12: fixed wireDefs staleness, implemented
+  callback-route persistence/validation, replaced operation.reconcile's
+  stalled-job pattern with a real bounded reconciliation read, fair
+  pending-scan fairness fix (105 blocked ops no longer starve a ready
+  one). Flagged a real forward-looking note for P16/P23: Operation.attempts
+  on the wire doesn't expose attempt Kind, so a future dispatch loop
+  needs its own bookkeeping to know an attempt came from reconciliation.
+  P30: root-caused BOTH named security failures from CI run 35473210732
+  with rigor -- TestListenPrivateRefusesSymlinkedRunDirectory was a REAL
+  bug (EvalSymlinks applied to the run directory itself, not just its
+  ancestors, silently following a planted symlink; local pass was
+  coincidental, from t.TempDir()'s path length tripping an unrelated
+  guard first) and fixed correctly (resolve only in dir's parent).
+  TestBlobTamperedObjectFailsPublishOverExisting was NOT a real crypto
+  defect (confirmed via a 3000-iteration mechanistic check: 12 byte-
+  already-equals-0x11 coincidences exactly matched 12 false-accepts) --
+  fixed the fixture (XOR-flip instead of fixed-byte overwrite) and
+  hardened two sibling tests with the same latent flaw. Also implemented
+  the card's backup/restore blob-key primitives, flagged the same
+  Restorable-style seam question for P31 that P29 flagged. Both queued
+  behind P29, which is committing now (needed a rebase first -- its
+  worktree also predated P26/P34).
 
 ## Planned
 
