@@ -88,13 +88,20 @@ CREATE INDEX artifacts_faults_artifact_idx
 	ON artifacts_faults (artifact_id);
 `
 
+// schemaV2 adds the revision-3 provenance columns (AGENTS.md: "Artifact
+// gains optional source_operation_id/purpose"). Both are additive, default
+// to the empty string, and existing rows validate unchanged with the new
+// fields simply absent from their wire projection (dto.go's omitempty).
+const schemaV2 = `
+ALTER TABLE artifacts_metadata ADD COLUMN source_operation_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE artifacts_metadata ADD COLUMN purpose TEXT NOT NULL DEFAULT '';
+`
+
 // migrations returns the artifacts-owned migration set. Bodies are pinned
 // by SHA-256 so storage can detect any drift from the reviewed schema.
 func migrations() []contract.Migration {
-	return []contract.Migration{{
-		Owner:   owner,
-		Version: 1,
-		SQL:     schemaV1,
-		SHA256:  contract.Hash([]byte(schemaV1)),
-	}}
+	return []contract.Migration{
+		{Owner: owner, Version: 1, SQL: schemaV1, SHA256: contract.Hash([]byte(schemaV1))},
+		{Owner: owner, Version: 2, SQL: schemaV2, SHA256: contract.Hash([]byte(schemaV2))},
+	}
 }
