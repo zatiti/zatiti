@@ -159,3 +159,28 @@ caused this incident. Never let an agent's own "I'll wait for a monitor"
 report go unaddressed for more than one tick; either it has genuinely
 stopped (resume it explicitly, one at a time) or it's about to spawn a
 wasteful poll loop (tell it to stop and wait for you by name instead).
+
+## [implementation-remediation] "Report ready, wait for clearance" instructions get read as "poll in a background loop," 2026-09-20
+
+Recurring, not a one-off: across wave-3's last 5 cards and wave 4's first
+batch, multiple different dispatched agents (P08, P29, P35 confirmed;
+likely others) -- given the explicit instruction "report ready and WAIT
+for the lead's clearance... do not self-poll the lease/load in a loop,
+report once and wait" -- still started their own background bash loop
+checking `uptime`/`R-build-lease` every 15-30s, sometimes for up to 10
+minutes, even AFTER their own commit had already succeeded. The
+instruction's "wait" is apparently read as "keep checking a condition
+locally" rather than "end your turn and let the lead resume you" -- an
+LLM default that plain prose reinforcement doesn't reliably override.
+
+Mitigation that actually works, used throughout this session: the LEAD
+never trusts "I'm waiting for X" at face value. On every such report,
+check the agent's worktree directly (`git log`/`status`, live `ps`
+processes) before doing anything else -- more than once the real state
+was "already succeeded, agent just hasn't noticed and is now burning
+tokens re-checking a finished condition." If a poll loop is found, tell
+the agent explicitly to kill it and stop, then the lead takes over the
+remaining mechanical steps (push/PR) itself rather than re-explaining and
+hoping the next round doesn't repeat the pattern. Do not expect a
+stronger prose instruction to fix this on the next dispatch -- verify
+instead of asking nicely again.
