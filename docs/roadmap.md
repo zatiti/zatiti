@@ -1877,6 +1877,25 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   WAVE 4 IS NOW COMPLETE -- all 6 cards (P04, P14, P27, P35, P38, P41)
   landed. Next: verify wave 5's actual dependencies (P15, P17, P39, P40)
   via plan.json before dispatching.
+- 2026-09-20 16:19 PT -- WAVE 5 DISPATCHED. plan.json's own `status`
+  field is stale (still says "planned" even for P14, which had just
+  landed), so verified real readiness directly: ran `go test` against
+  every dependency package on current main (internal/connections,
+  internal/policy, internal/artifacts, internal/adapters/responses,
+  internal/registry, internal/client, internal/tasks) -- all green.
+  Confirmed with David (AskUserQuestion) to dispatch all 4 ready wave-5
+  cards in parallel rather than one at a time or pausing: P15 (build/
+  publish the actual model context, owner internal/execution -- the
+  direct continuation of P14's turn pipeline), P17 (responsibility
+  reasoning and event wakes, owner internal/scheduling), P39 (CLI work
+  journeys, owner internal/cli), P40 (MCP work journeys, owner
+  internal/mcp). Four independent write-roots, no overlap. All four
+  claimed (claim.sh) and dispatched as isolated-worktree agents
+  (zatiti_p15/p17/p39/p40), each briefed with its exact card scope, the
+  schemaDefs-diff verification method, the one-at-a-time landing
+  discipline, and explicit "do not self-commit, do not self-poll"
+  instructions given the recurring self-poll anti-pattern documented in
+  docs/lore.md.
 
 ## Planned
 
