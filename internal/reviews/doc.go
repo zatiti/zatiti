@@ -55,6 +55,30 @@
 // self-delegation is refused, and an identical delegation is a no-op that
 // does not consume a review version.
 //
+// # Eligibility is kind-based, never capability-based (P00-015)
+//
+// The eligible reviewer of an exact review-class request is the human
+// principal whose current authority admitted that request; a service,
+// worker or agent principal is never an eligible reviewer, regardless of
+// whatever standing capability it otherwise holds, because eligibility here
+// is decided entirely by the recheck of current principal kind against the
+// stored requirement — grant contents are never inspected. Proposer
+// separation stays mandatory for every non-eligible kind and remains
+// enforced for an eligible human proposer deciding their own request.
+//
+// # Waking a waiting turn
+//
+// reviews holds no outgoing call into execution or scheduling, so it cannot
+// itself wake the worker turn that is waiting on a review's outcome. Its
+// contribution to that lifecycle is committing the decision and its
+// reviews.review.decided event atomically in the one transaction, with the
+// event's data payload carrying the review's own scope (installation,
+// organization, project, worker and task) and its exact action digest. A
+// downstream consumer can wake the exact correct turn from that committed
+// event alone, with no extra round trip. A refused, stale, duplicate or
+// otherwise non-committing decide attempt never reaches this emission, so
+// no wake signal is ever produced for an outcome that did not commit.
+//
 // # Scope and fault mapping
 //
 // Storage is installation-scoped on every query; a request body whose

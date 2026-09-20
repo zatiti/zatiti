@@ -413,6 +413,77 @@ func TestZ04StaleDependencies(t *testing.T) {
 	}
 }
 
+// P00.review_eligibility_human_only — revision 3's settled ruling: the
+// eligible reviewer of an exact review-class request is the human principal
+// whose current authority admitted the request; services, workers and
+// agents are never eligible reviewers no matter what standing capability
+// they otherwise hold, and proposer separation stays mandatory for the
+// eligible human too.
+func TestP00ReviewEligibilityHumanOnly(t *testing.T) {
+	e := newEnv(t)
+	humanAdmitter := e.principal(contract.KindHuman)
+	// Represents a worker/service/agent principal that also holds broad
+	// standing capability elsewhere in the system. reviews never inspects
+	// grant contents (authority.go: "never mints authority from grant
+	// contents"), so that broad capability is irrelevant here by
+	// construction — kind alone governs, which is exactly the property this
+	// case proves.
+	broadWorker := e.principal(contract.KindWorker)
+	independentProposer := e.actorFor(e.principal(contract.KindClientAgent))
+
+	// Setup: the eligible set names both the human admitter and the
+	// broadly-capable worker for the same review class.
+	mixedEligible := []contract.ID{humanAdmitter, broadWorker}
+
+	// Action 1: attempt review.decide as the worker/service/agent
+	// principal. Expected: refused regardless of its standing capability.
+	reviewA, _ := pendingReview(t, e, requirementFixture(mixedEligible, true))
+	_ = e.expectFaultAs(e.actorFor(broadWorker), opDecide, wireDecideInput{
+		Scope: e.scope, ID: reviewA.ID, ExpectedVersion: reviewA.Version,
+		ActionDigest: reviewA.ActionDigest, Decision: decideApprove, Reason: "broad capability should not decide",
+	}, contract.CodePermissionDenied)
+	stillPending, fault := e.getReview(reviewA.ID)
+	if fault != nil {
+		t.Fatalf("get reviewA: %v", fault)
+	}
+	if stillPending.State != statePending || stillPending.DecisionID != nil {
+		t.Fatalf("worker/service/agent decision was committed: state %s decision %v",
+			stillPending.State, stillPending.DecisionID)
+	}
+
+	// Action 2: attempt review.decide as the eligible human admitter, on a
+	// review it did not itself propose. Expected: accepted.
+	reviewB, fault := e.ensureFor(independentProposer, e.scope,
+		ensureInputFor(t, e.scope, actionFixture(e.scope, "https://api.example.com/v1/mixed-eligible"),
+			requirementFixture(mixedEligible, true)))
+	if fault != nil {
+		t.Fatalf("ensure reviewB: %v", fault)
+	}
+	if _, fault := e.decideAs(e.actorFor(humanAdmitter), wireDecideInput{
+		Scope: e.scope, ID: reviewB.ID, ExpectedVersion: reviewB.Version,
+		ActionDigest: reviewB.ActionDigest, Decision: decideApprove, Reason: "eligible human decides",
+	}); fault != nil {
+		t.Fatalf("eligible human principal's decision was refused: %v", fault)
+	}
+
+	// Action 3: attempt review.decide as the human principal who authored
+	// the original proposal — eligible by kind and by the eligible-class
+	// list, but the proposer of this exact request. Expected: refused on
+	// separation even though they are human.
+	req := requirementFixture([]contract.ID{humanAdmitter}, true)
+	req.SeparateProposer = true
+	proposerIsReviewer := e.actorFor(humanAdmitter)
+	reviewC, fault := e.ensureFor(proposerIsReviewer, e.scope,
+		ensureInputFor(t, e.scope, actionFixture(e.scope, "https://api.example.com/v1/self-proposed"), req))
+	if fault != nil {
+		t.Fatalf("ensure reviewC: %v", fault)
+	}
+	_ = e.expectFaultAs(proposerIsReviewer, opDecide, wireDecideInput{
+		Scope: e.scope, ID: reviewC.ID, ExpectedVersion: reviewC.Version,
+		ActionDigest: reviewC.ActionDigest, Decision: decideApprove, Reason: "proposer cannot review their own request",
+	}, contract.CodePermissionDenied)
+}
+
 // JOURNEY slice (local to reviews) — ensure → check(false) → delegate →
 // decide(approve) → check(true), with every state observable through the
 // public reads.

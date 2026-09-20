@@ -13,11 +13,22 @@ import (
 // satisfy a human-required review. A decision is permanent for its review;
 // a rejection vetoes the exact action digest.
 
-// eventDecidedData is the inert payload on reviews.review.decided.
+// eventDecidedData is the inert payload on reviews.review.decided. It
+// carries the review's own scope (installation/organization/project/
+// worker/task) and exact action digest alongside the decision, so a
+// downstream consumer — the durable worker-turn pipeline's wake path, owned
+// outside this package — can identify and wake the exact waiting turn from
+// the committed event alone, with no extra round trip back into reviews.
+// This data is populated only on the transaction that actually commits a
+// decision: a refused, stale, duplicate or otherwise rejected decide never
+// reaches this emission, so no wake signal is ever produced for a
+// non-committed outcome.
 type eventDecidedData struct {
-	DecisionID contract.ID `json:"decision_id"`
-	Decision   string      `json:"decision"`
-	ReviewerID contract.ID `json:"reviewer_id"`
+	DecisionID   contract.ID    `json:"decision_id"`
+	Decision     string         `json:"decision"`
+	ReviewerID   contract.ID    `json:"reviewer_id"`
+	ActionDigest string         `json:"action_digest"`
+	Scope        contract.Scope `json:"scope"`
 }
 
 // decide implements review.decide.
@@ -80,9 +91,11 @@ func (s *Service) decide(ctx context.Context, unit contract.Unit, in wireDecideI
 		return contract.Payload{}, err
 	}
 	if err := emitReviewEvent(ctx, unit, eventReviewDecided, review.ID, newVersion, eventDecidedData{
-		DecisionID: decision.ID,
-		Decision:   decision.Decision,
-		ReviewerID: reviewer,
+		DecisionID:   decision.ID,
+		Decision:     decision.Decision,
+		ReviewerID:   reviewer,
+		ActionDigest: review.ActionDigest,
+		Scope:        review.Scope,
 	}); err != nil {
 		return contract.Payload{}, err
 	}
