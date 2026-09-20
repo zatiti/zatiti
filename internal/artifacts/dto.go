@@ -58,18 +58,26 @@ type wireJob struct {
 	Result         json.RawMessage   `json:"result,omitempty"`
 }
 
-// wireArtifact is one immutable artifact metadata document.
+// wireArtifact is one immutable artifact metadata document. Revision 3 adds
+// optional provenance: SourceOperationID names the effects/adapter operation
+// that produced these bytes (empty when the publishing caller supplied
+// none — see the source_operation_id/purpose contract gap noted in
+// AGENTS.md and this package's doc.go), and Purpose carries a free-form
+// producer-assigned tag (context, model_text, tool_result, verification,
+// backup, export, ...) mirroring StagedOutput.purpose upstream.
 type wireArtifact struct {
-	ID             contract.ID      `json:"id"`
-	Version        contract.Version `json:"version"`
-	Scope          wireScope        `json:"scope"`
-	Digest         contract.Digest  `json:"digest"`
-	Size           int64            `json:"size"`
-	MediaType      string           `json:"media_type"`
-	Classification string           `json:"classification"`
-	Encrypted      bool             `json:"encrypted"`
-	State          string           `json:"state"`
-	CreatedAt      string           `json:"created_at"`
+	ID                contract.ID      `json:"id"`
+	Version           contract.Version `json:"version"`
+	Scope             wireScope        `json:"scope"`
+	Digest            contract.Digest  `json:"digest"`
+	Size              int64            `json:"size"`
+	MediaType         string           `json:"media_type"`
+	Classification    string           `json:"classification"`
+	Encrypted         bool             `json:"encrypted"`
+	State             string           `json:"state"`
+	CreatedAt         string           `json:"created_at"`
+	SourceOperationID contract.ID      `json:"source_operation_id,omitempty"`
+	Purpose           string           `json:"purpose,omitempty"`
 }
 
 // wireUpload is one resumable bounded upload.

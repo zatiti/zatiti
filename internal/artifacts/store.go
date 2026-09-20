@@ -19,22 +19,27 @@ import (
 // another writer moved the resource first and the caller sees stale_version.
 
 // artifactRow is the storage representation of one immutable artifact.
+// SourceOperationID and Purpose are the revision-3 provenance additions
+// (AGENTS.md: "Artifact gains optional source_operation_id/purpose"); both
+// are optional and empty unless the creating caller supplied them.
 type artifactRow struct {
-	ID             contract.ID
-	Version        contract.Version
-	InstallationID contract.ID
-	OrganizationID contract.ID
-	ProjectID      contract.ID
-	WorkerID       contract.ID
-	TaskID         contract.ID
-	Scope          contract.Scope
-	Digest         contract.Digest
-	Size           int64
-	MediaType      string
-	Classification string
-	Encrypted      bool
-	State          string
-	CreatedAt      time.Time
+	ID                contract.ID
+	Version           contract.Version
+	InstallationID    contract.ID
+	OrganizationID    contract.ID
+	ProjectID         contract.ID
+	WorkerID          contract.ID
+	TaskID            contract.ID
+	Scope             contract.Scope
+	Digest            contract.Digest
+	Size              int64
+	MediaType         string
+	Classification    string
+	Encrypted         bool
+	State             string
+	CreatedAt         time.Time
+	SourceOperationID contract.ID
+	Purpose           string
 }
 
 // uploadRow is the storage representation of one resumable upload.
@@ -133,7 +138,7 @@ func expectOneRow(res sql.Result) error {
 
 const artifactColumns = `id, version, installation_id, organization_id, project_id,
 worker_id, task_id, scope_json, digest, size, media_type, classification,
-encrypted, state, created_at`
+encrypted, state, created_at, source_operation_id, purpose`
 
 func scanArtifact(scan func(dest ...any) error) (*artifactRow, error) {
 	var a artifactRow
@@ -142,7 +147,7 @@ func scanArtifact(scan func(dest ...any) error) (*artifactRow, error) {
 	var created string
 	err := scan(&a.ID, &a.Version, &a.InstallationID, &a.OrganizationID, &a.ProjectID,
 		&a.WorkerID, &a.TaskID, &scopeJSON, &a.Digest, &a.Size, &a.MediaType,
-		&a.Classification, &encrypted, &a.State, &created)
+		&a.Classification, &encrypted, &a.State, &created, &a.SourceOperationID, &a.Purpose)
 	if err != nil {
 		return nil, err
 	}
@@ -175,11 +180,11 @@ func insertArtifact(ctx context.Context, unit contract.Unit, a *artifactRow) err
 	_, err = unit.ExecContext(ctx, `INSERT INTO artifacts_metadata
 		(id, version, installation_id, organization_id, project_id, worker_id,
 		 task_id, scope_json, digest, size, media_type, classification,
-		 encrypted, state, created_at)
-		VALUES (?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		 encrypted, state, created_at, source_operation_id, purpose)
+		VALUES (?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		a.ID, a.InstallationID, a.OrganizationID, a.ProjectID, a.WorkerID, a.TaskID,
 		scopeJSON, a.Digest, a.Size, a.MediaType, a.Classification,
-		boolInt(a.Encrypted), a.State, formatStamp(a.CreatedAt))
+		boolInt(a.Encrypted), a.State, formatStamp(a.CreatedAt), a.SourceOperationID, a.Purpose)
 	return err
 }
 

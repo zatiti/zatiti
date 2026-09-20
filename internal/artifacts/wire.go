@@ -23,13 +23,15 @@ func (a *artifactRow) wire() wireArtifact {
 			WorkerID:       a.WorkerID,
 			TaskID:         a.TaskID,
 		},
-		Digest:         a.Digest,
-		Size:           a.Size,
-		MediaType:      a.MediaType,
-		Classification: a.Classification,
-		Encrypted:      a.Encrypted,
-		State:          a.State,
-		CreatedAt:      wireTime(a.CreatedAt),
+		Digest:            a.Digest,
+		Size:              a.Size,
+		MediaType:         a.MediaType,
+		Classification:    a.Classification,
+		Encrypted:         a.Encrypted,
+		State:             a.State,
+		CreatedAt:         wireTime(a.CreatedAt),
+		SourceOperationID: a.SourceOperationID,
+		Purpose:           a.Purpose,
 	}
 }
 
