@@ -1578,6 +1578,26 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   it within its own package's scope, then report ready and WAIT for the
   lead to clear it by name before running any real (hook-gated) commit --
   the lead lands each one serially, same discipline as the first 12.
+- 2026-09-20 13:45-14:00 PT -- P34 LANDED (PR #16, 32bbd6d), the first of
+  the last 5 wave-3 cards, and the coding-only-subagent-plus-serialized-
+  lead-commit pattern worked exactly as designed: real hook-gated commit
+  under its own lease, no concurrency, clean report, lead verified scope
+  before merging (not just trusted the report). event.list's cursor now
+  binds principal_id and is always minted even on a drained page (was
+  nil, meaning a client that fully drained the backlog had no way to
+  resume). Confirmed via a real red->green check (stashed the fix,
+  reran the new tests, confirmed genuine failures) that this was a real
+  gap while the other two required behaviors (turn/proposal/etc.
+  linkage, job completion links) were already correctly implemented --
+  landed as proof tests, not invented fixes. internal/evidence's own
+  schemaDefs already matched AGENTS.md, confirmed not stale. Notably,
+  this commit's full-module hook run hit internal/platform cleanly (no
+  P30 defect reproduction this time) -- consistent with the corrected
+  lore.md entry that it's a real, intermittent defect, not a flake:
+  sometimes it reproduces, sometimes it doesn't, which is itself
+  evidence for "real bug with specific trigger conditions" over "random
+  noise."
+  P26 (internal/memory) cleared next, committing now.
 
 ## Planned
 
