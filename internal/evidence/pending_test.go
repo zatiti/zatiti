@@ -25,8 +25,17 @@ func acceptedResult(commandID contract.ID, data json.RawMessage) contract.Result
 
 func (e *testEnv) getCommand(key string) commandResourceBody {
 	e.t.Helper()
+	return e.getCommandFor(key, "artifact.upload.chunk")
+}
+
+// getCommandFor runs command.get for an arbitrary operation identity —
+// getCommand's fixed "artifact.upload.chunk" operation covers most pending-
+// disposition tests, but recovering a lost acknowledgement by identity
+// requires naming the exact operation the command was reserved under.
+func (e *testEnv) getCommandFor(key, operation string) commandResourceBody {
+	e.t.Helper()
 	payload := e.mustOK(opCommandGet, commandGetInput{
-		Scope: e.scope, SubmissionKey: key, Operation: "artifact.upload.chunk", OperationVersion: 1,
+		Scope: e.scope, SubmissionKey: key, Operation: operation, OperationVersion: 1,
 	})
 	var out commandResourceBody
 	e.decode(payload.Data, &out)

@@ -256,7 +256,10 @@ func normalizeEventFilter(f *eventFilterInput) (eventFilter, error) {
 // event.list replays authorized, redacted events after an opaque cursor.
 // Filters are structured exact-match fields applied with AND semantics; an
 // expired cursor demands a fresh snapshot rather than silently omitting a
-// gap.
+// gap. This is a tail, not a bounded page list: it always returns a
+// resumable cursor, even on an already-drained page, so a client that
+// drains the backlog, restarts and resumes later neither misses an event
+// that arrives afterward nor rereads what it already saw.
 func (s *Service) handleEventList(ctx context.Context, unit contract.Unit, in eventListInput) (contract.Outcome[eventListOutput], error) {
 	if err := s.checkInstallation(unit, in.Scope.InstallationID); err != nil {
 		return contract.Outcome[eventListOutput]{}, err
@@ -273,32 +276,37 @@ func (s *Service) handleEventList(ctx context.Context, unit contract.Unit, in ev
 				"limit %d must be between 1 and %d", limit, maxEventListLimit)
 		}
 	}
+	principal := unit.Actor().PrincipalID
 	var after int64
 	if in.Cursor != nil && *in.Cursor != "" {
-		seq, cerr := s.readEventCursor(in.Scope, filter, *in.Cursor)
+		seq, cerr := s.readEventCursor(principal, in.Scope, filter, *in.Cursor)
 		if cerr != nil {
 			return contract.Outcome[eventListOutput]{}, cerr
 		}
 		after = seq
 	}
-	events, hasMore, err := queryEventsPage(ctx, unit, in.Scope, filter, after, limit)
+	events, _, err := queryEventsPage(ctx, unit, in.Scope, filter, after, limit)
 	if err != nil {
 		return contract.Outcome[eventListOutput]{}, err
 	}
 	for i := range events {
 		events[i].Data = redactJSON(events[i].Data)
 	}
-	outcome := contract.Outcome[eventListOutput]{
-		Status: contract.StatusCompleted,
-		Data:   eventListOutput{Items: events},
+	// The tail position this call lands on: the last event actually
+	// returned, or — on a drained page — the position it resumed from, so a
+	// caller that saw nothing new still gets a cursor that means exactly
+	// "nothing past here yet" rather than no cursor at all.
+	tail := after
+	if len(events) > 0 {
+		tail = events[len(events)-1].Sequence
 	}
-	if hasMore && len(events) > 0 {
-		last := events[len(events)-1].Sequence
-		cursor, cerr := s.mintEventCursor(in.Scope, filter, last, s.now())
-		if cerr != nil {
-			return contract.Outcome[eventListOutput]{}, cerr
-		}
-		outcome.NextCursor = &cursor
+	cursor, cerr := s.mintEventCursor(principal, in.Scope, filter, tail, s.now())
+	if cerr != nil {
+		return contract.Outcome[eventListOutput]{}, cerr
 	}
-	return outcome, nil
+	return contract.Outcome[eventListOutput]{
+		Status:     contract.StatusCompleted,
+		Data:       eventListOutput{Items: events},
+		NextCursor: &cursor,
+	}, nil
 }

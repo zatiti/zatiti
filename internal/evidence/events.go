@@ -41,12 +41,22 @@ func commandEventKind(status string) string {
 
 // Opaque event.list cursors.
 //
-// A cursor binds the operation, installation scope, serialized filter and
-// last emitted sequence under an HMAC, and carries an absolute expiry. A
-// tampered, foreign or filter-mismatched cursor is invalid_input; an expired
-// one is cursor_expired with snapshot_required=true, so clients re-read a
-// fresh snapshot instead of retrying a stale position — an event replay
-// never silently presents a gap as complete history.
+// A cursor binds the operation, calling principal, installation scope,
+// serialized filter and last emitted sequence under an HMAC, and carries an
+// absolute expiry — the exact "principal/scope/filter/order/snapshot"
+// binding the wire conventions require of every opaque authenticated
+// cursor (event.list has no separate order option, so total order is
+// always ascending sequence). A tampered, foreign-principal, foreign-scope
+// or filter-mismatched cursor is invalid_input; an expired one is
+// cursor_expired with snapshot_required=true, so clients re-read a fresh
+// snapshot instead of retrying a stale position — an event replay never
+// silently presents a gap as complete history.
+//
+// event.list always mints a cursor, including on an already-drained page:
+// the tail position it lands on (the last returned event's sequence, or the
+// position it was asked to resume from when nothing new landed) is exactly
+// what a resuming client needs to poll again without missing an event that
+// arrives later or endlessly rereading the events it already drained.
 
 const (
 	eventCursorTTL    = 15 * time.Minute
@@ -67,8 +77,12 @@ func (s *Service) cursorKeyLocked() ([]byte, error) {
 	return s.cursorKey, nil
 }
 
-// mintEventCursor seals the last emitted sequence for one scope and filter.
-func (s *Service) mintEventCursor(scope contract.Scope, filter eventFilter, lastSequence int64, now time.Time) (string, error) {
+// mintEventCursor seals the tail position reached for one principal, scope
+// and filter. lastSequence is the resume position: the last event actually
+// returned to the caller, or — on a drained page where nothing new landed —
+// the position the caller was already resuming from, so the minted cursor
+// always names a stable place to continue from later.
+func (s *Service) mintEventCursor(principal contract.ID, scope contract.Scope, filter eventFilter, lastSequence int64, now time.Time) (string, error) {
 	filterJSON, err := json.Marshal(filter)
 	if err != nil {
 		return "", fmt.Errorf("evidence: bind cursor filter: %w", err)
@@ -80,6 +94,7 @@ func (s *Service) mintEventCursor(scope contract.Scope, filter eventFilter, last
 	payload := strings.Join([]string{
 		eventCursorPrefix,
 		opEventList,
+		fmt.Sprintf("%x", sha256.Sum256([]byte(principal))),
 		fmt.Sprintf("%x", sha256.Sum256(scopeJSON)),
 		fmt.Sprintf("%x", sha256.Sum256(filterJSON)),
 		strconv.FormatInt(lastSequence, 10),
@@ -92,9 +107,9 @@ func (s *Service) mintEventCursor(scope contract.Scope, filter eventFilter, last
 	return base64url([]byte(payload)) + "." + base64url(mac), nil
 }
 
-// readEventCursor validates a client cursor and returns its bound sequence
-// position.
-func (s *Service) readEventCursor(scope contract.Scope, filter eventFilter, raw string) (int64, error) {
+// readEventCursor validates a client cursor against the calling principal
+// and current scope/filter, and returns its bound resume position.
+func (s *Service) readEventCursor(principal contract.ID, scope contract.Scope, filter eventFilter, raw string) (int64, error) {
 	parts := strings.Split(raw, ".")
 	if len(parts) != 2 {
 		return 0, invalidInput("cursor is malformed")
@@ -112,28 +127,31 @@ func (s *Service) readEventCursor(scope contract.Scope, filter eventFilter, raw 
 		return 0, invalidInput("cursor is malformed")
 	}
 	fields := strings.Split(string(payload), "|")
-	if len(fields) != 6 || fields[0] != eventCursorPrefix || fields[1] != opEventList {
+	if len(fields) != 7 || fields[0] != eventCursorPrefix || fields[1] != opEventList {
 		return 0, invalidInput("cursor does not belong to this query")
+	}
+	if fields[2] != fmt.Sprintf("%x", sha256.Sum256([]byte(principal))) {
+		return 0, invalidInput("cursor does not match the calling principal")
 	}
 	scopeJSON, err := json.Marshal(scope)
 	if err != nil {
 		return 0, fmt.Errorf("evidence: bind cursor scope: %w", err)
 	}
-	if fields[2] != fmt.Sprintf("%x", sha256.Sum256(scopeJSON)) {
+	if fields[3] != fmt.Sprintf("%x", sha256.Sum256(scopeJSON)) {
 		return 0, invalidInput("cursor does not match the current scope")
 	}
 	filterJSON, err := json.Marshal(filter)
 	if err != nil {
 		return 0, fmt.Errorf("evidence: bind cursor filter: %w", err)
 	}
-	if fields[3] != fmt.Sprintf("%x", sha256.Sum256(filterJSON)) {
+	if fields[4] != fmt.Sprintf("%x", sha256.Sum256(filterJSON)) {
 		return 0, invalidInput("cursor does not match the current filter")
 	}
-	lastSequence, cerr := strconv.ParseInt(fields[4], 10, 64)
+	lastSequence, cerr := strconv.ParseInt(fields[5], 10, 64)
 	if cerr != nil {
 		return 0, invalidInput("cursor is malformed")
 	}
-	expiry, cerr := strconv.ParseInt(fields[5], 10, 64)
+	expiry, cerr := strconv.ParseInt(fields[6], 10, 64)
 	if cerr != nil {
 		return 0, invalidInput("cursor is malformed")
 	}
