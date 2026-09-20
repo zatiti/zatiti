@@ -19,6 +19,20 @@ type opMeta struct {
 	expectedVersion bool
 	callers         []string
 	cli             string // CLI tokens below the root command, space separated; empty for internal operations
+
+	// noScopeRequired overrides the derived scope_required for one operation
+	// to empty even though its input schema requires "scope". It exists for
+	// exactly one confirmed drift in the frozen catalog of record
+	// (docs/implementation/operations.json): conversation.message.list
+	// requires scope in its input schema like every sibling conversation.*/
+	// mailbox.* operation, but its frozen descriptor entry omits
+	// scope_required, unlike every one of them. TestDescriptorsMatchFrozenCatalog
+	// pins this package to that frozen entry byte for byte, and the shared
+	// registry refuses to assemble a module whose descriptor surface drifts
+	// from it, so this package matches the frozen (apparently mistaken)
+	// entry rather than the general rule. Reported upstream at landing
+	// rather than silently invented around; see the P10 PR/handoff.
+	noScopeRequired bool
 }
 
 // opMetas lists every owned operation: the three internal peer operations
@@ -31,6 +45,10 @@ var opMetas = []opMeta{
 		callers: []string{"installation"}},
 	{id: "_messaging.pending", visibility: "internal", mode: "query", effect: "local",
 		callers: []string{"execution", "scheduling"}},
+	{id: "_messaging.ready", visibility: "internal", mode: "query", effect: "local",
+		callers: []string{"execution", "controller"}},
+	{id: "_messaging.processed", visibility: "internal", mode: "mutation", effect: "local",
+		callers: []string{"execution"}},
 
 	// conversation.*
 	{id: "conversation.create", visibility: "public", mode: "mutation", effect: "local", submission: true,
@@ -39,6 +57,8 @@ var opMetas = []opMeta{
 		cli: "conversation get"},
 	{id: "conversation.list", visibility: "public", mode: "query", effect: "local",
 		cli: "conversation list"},
+	{id: "conversation.message.list", visibility: "public", mode: "query", effect: "local",
+		cli: "conversation message list", noScopeRequired: true},
 	{id: "conversation.message.send", visibility: "public", mode: "mutation", effect: "disclosure",
 		submission: true, cli: "conversation message send"},
 	{id: "conversation.update", visibility: "public", mode: "mutation", effect: "local",
@@ -107,6 +127,10 @@ func (s *Service) Descriptors() []contract.Descriptor { return s.descriptors }
 func buildDescriptors(catalog map[string]contract.Descriptor) []contract.Descriptor {
 	out := make([]contract.Descriptor, 0, len(opMetas))
 	for _, m := range opMetas {
+		scopeRequired := scopeRequirement(inputSchema(m.id))
+		if m.noScopeRequired {
+			scopeRequired = nil
+		}
 		d := contract.Descriptor{
 			ID:              m.id,
 			Version:         1,
@@ -116,7 +140,7 @@ func buildDescriptors(catalog map[string]contract.Descriptor) []contract.Descrip
 			Effect:          m.effect,
 			InputSchema:     inputSchema(m.id),
 			OutputSchema:    outputSchema(m.id),
-			ScopeRequired:   scopeRequirement(inputSchema(m.id)),
+			ScopeRequired:   scopeRequired,
 			Callers:         m.callers,
 			ExpectedVersion: m.expectedVersion,
 			SubmissionKey:   m.submission,
@@ -154,9 +178,12 @@ var handlers = map[string]handlerFunc{
 	"_messaging.admit":          handleMessagingAdmit,
 	"_messaging.bootstrap":      handleMessagingBootstrap,
 	"_messaging.pending":        handleMessagingPending,
+	"_messaging.ready":          handleMessagingReady,
+	"_messaging.processed":      handleMessagingProcessed,
 	"conversation.create":       handleConversationCreate,
 	"conversation.get":          handleConversationGet,
 	"conversation.list":         handleConversationList,
+	"conversation.message.list": handleConversationMessageList,
 	"conversation.message.send": handleConversationMessageSend,
 	"conversation.update":       handleConversationUpdate,
 	"mailbox.ack":               handleMailboxAck,

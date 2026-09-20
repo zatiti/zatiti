@@ -20,6 +20,7 @@ const (
 	eventMessageAdmitted          = "messaging.message.admitted"
 	eventMessageAcknowledged      = "messaging.message.acknowledged"
 	eventConversationBootstrapped = "messaging.conversation.bootstrapped"
+	eventMessageProcessed         = "messaging.message.processed"
 )
 
 // emitConversationEvent appends one event for a conversation change to the
@@ -60,6 +61,27 @@ func (s *Service) emitMessageEvent(ctx context.Context, unit contract.Unit, row 
 		Kind:            kind,
 		ResourceID:      row.ID,
 		ResourceVersion: contract.Version(row.Version),
+		Scope:           unit.Scope(),
+		Data:            raw,
+	})
+}
+
+// emitTurnLinkEvent appends the durable record that one recipient's turn
+// admission committed for a message: the link exists in messaging_turn_links
+// before this event too, but the event lets a controller or client observe
+// the transition without polling the table.
+func (s *Service) emitTurnLinkEvent(ctx context.Context, unit contract.Unit, message *messageRow, recipientID, turnID contract.ID) error {
+	raw, err := marshalData(map[string]any{
+		"recipient_id": recipientID,
+		"turn_id":      turnID,
+	})
+	if err != nil {
+		return err
+	}
+	return unit.Emit(ctx, contract.Event{
+		Kind:            eventMessageProcessed,
+		ResourceID:      message.ID,
+		ResourceVersion: contract.Version(message.Version),
 		Scope:           unit.Scope(),
 		Data:            raw,
 	})

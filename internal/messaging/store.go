@@ -72,6 +72,19 @@ type recipientRow struct {
 	AcknowledgedAt time.Time
 }
 
+// turnLinkRow is the durable (message_id, recipient_id) -> turn_id record
+// _messaging.processed writes. Its presence is exactly what removes a
+// recipient from the _messaging.ready backlog: message ID plus recipient ID
+// is the deduplication identity for turn admission.
+type turnLinkRow struct {
+	MessageID           contract.ID
+	RecipientID         contract.ID
+	InstallationID      contract.ID
+	TurnID              contract.ID
+	ContextArtifactJSON string
+	CreatedAt           time.Time
+}
+
 // conversation columns -------------------------------------------------------
 
 const conversationColumns = `id, version, installation_id, organization_id, scope_json, kind, title, pinned, key, participant_ids_json, last_meaningful_event, created_at, updated_at`
@@ -276,6 +289,177 @@ func countUnacknowledged(ctx context.Context, unit contract.Unit, messageID cont
 		`SELECT COUNT(*) FROM messaging_recipients WHERE message_id = ? AND state != ?`,
 		string(messageID), recipientAcknowledged).Scan(&n)
 	return n, err
+}
+
+// turn links -------------------------------------------------------------
+
+const turnLinkColumns = `message_id, recipient_id, installation_id, turn_id, context_artifact_json, created_at`
+
+func scanTurnLink(row rowScanner) (*turnLinkRow, error) {
+	var r turnLinkRow
+	var created string
+	err := row.Scan(&r.MessageID, &r.RecipientID, &r.InstallationID, &r.TurnID,
+		&r.ContextArtifactJSON, &created)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if r.CreatedAt, err = time.Parse(timeLayout, created); err != nil {
+		return nil, err
+	}
+	return &r, nil
+}
+
+// getTurnLink fetches the durable turn link for one (message, recipient)
+// pair; nil when the recipient has not yet been processed into a turn.
+func getTurnLink(ctx context.Context, unit contract.Unit, messageID, recipientID contract.ID) (*turnLinkRow, error) {
+	row := unit.QueryRowContext(ctx,
+		`SELECT `+turnLinkColumns+` FROM messaging_turn_links WHERE message_id = ? AND recipient_id = ?`,
+		string(messageID), string(recipientID))
+	return scanTurnLink(row)
+}
+
+func insertTurnLink(ctx context.Context, unit contract.Unit, r *turnLinkRow) error {
+	_, err := unit.ExecContext(ctx, `INSERT INTO messaging_turn_links
+		(message_id, recipient_id, installation_id, turn_id, context_artifact_json, created_at)
+		VALUES (?, ?, ?, ?, ?, ?)`,
+		string(r.MessageID), string(r.RecipientID), string(r.InstallationID), string(r.TurnID),
+		r.ContextArtifactJSON, r.CreatedAt.Format(timeLayout))
+	return err
+}
+
+// listReady returns the oldest distinct messages carrying at least one
+// admitted recipient with no durable turn link yet, ordered by the earliest
+// such pending recipient. Grouping by message and ordering on the minimum
+// pending admission time is the fairness rule: a message with many
+// recipients cannot crowd out an older message waiting on just one, and no
+// single recipient's backlog can starve another's.
+func listReady(ctx context.Context, unit contract.Unit, installation contract.ID, limit int) ([]*messageRow, error) {
+	query := `SELECT ` + messageColumnsJoined + `
+		FROM messaging_messages msg
+		JOIN messaging_recipients r ON r.message_id = msg.id
+		LEFT JOIN messaging_turn_links tl ON tl.message_id = r.message_id AND tl.recipient_id = r.recipient_id
+		WHERE msg.installation_id = ? AND r.state = ? AND tl.message_id IS NULL
+		GROUP BY msg.id
+		ORDER BY MIN(r.admitted_at) ASC, msg.id
+		LIMIT ?`
+	rows, err := unit.QueryContext(ctx, query, string(installation), recipientAdmitted, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []*messageRow
+	for rows.Next() {
+		r, err := scanMessage(rows)
+		if err != nil {
+			return nil, err
+		}
+		if r != nil {
+			out = append(out, r)
+		}
+	}
+	return out, rows.Err()
+}
+
+// listConversationMessages reads one conversation's authorized history for a
+// caller: every message they sent plus every message admitted to their own
+// inbox. The sender side matters because deliver() never creates a
+// recipient row for the sender, so a recipient-only join would silently
+// drop a caller's own sent messages from their reopened history. A
+// participant who joined later has no recipient rows for, and never sent,
+// the messages before they joined, so they are excluded without any extra
+// disclosure-boundary logic.
+func listConversationMessages(ctx context.Context, unit contract.Unit, conversationID, principal contract.ID, limit, offset int) ([]*messageRow, error) {
+	rows, err := unit.QueryContext(ctx, `SELECT `+messageColumns+` FROM messaging_messages
+		WHERE conversation_id = ? AND (sender_id = ? OR id IN (
+			SELECT message_id FROM messaging_recipients WHERE recipient_id = ?))
+		ORDER BY created_at DESC, id LIMIT ? OFFSET ?`,
+		string(conversationID), string(principal), string(principal), limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []*messageRow
+	for rows.Next() {
+		r, err := scanMessage(rows)
+		if err != nil {
+			return nil, err
+		}
+		if r != nil {
+			out = append(out, r)
+		}
+	}
+	return out, rows.Err()
+}
+
+// hydrateCallerProjection computes one principal's caller_unread_count and
+// caller_last_read_marker for a batch of conversations in two batched
+// queries. Unread counts only meaningful, still-admitted recipient rows:
+// quiet routine coordination never marks a human's chat unread, matching
+// the same rule that keeps it out of last_meaningful_event and needs_you.
+func hydrateCallerProjection(ctx context.Context, unit contract.Unit, principal contract.ID, rows []*conversationRow) (map[contract.ID]int64, map[contract.ID]string, error) {
+	if len(rows) == 0 {
+		return map[contract.ID]int64{}, map[contract.ID]string{}, nil
+	}
+	ids := make([]contract.ID, 0, len(rows))
+	for _, r := range rows {
+		ids = append(ids, r.ID)
+	}
+	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")
+
+	unreadArgs := make([]any, 0, len(ids)+2)
+	unreadArgs = append(unreadArgs, string(principal), recipientAdmitted)
+	for _, id := range ids {
+		unreadArgs = append(unreadArgs, string(id))
+	}
+	unreadQuery := `SELECT msg.conversation_id, COUNT(*) FROM messaging_messages msg
+		JOIN messaging_recipients r ON r.message_id = msg.id
+		WHERE r.recipient_id = ? AND msg.meaningful = 1 AND r.state = ?
+		  AND msg.conversation_id IN (` + placeholders + `)
+		GROUP BY msg.conversation_id`
+	unreadRows, err := unit.QueryContext(ctx, unreadQuery, unreadArgs...)
+	if err != nil {
+		return nil, nil, err
+	}
+	unread := map[contract.ID]int64{}
+	for unreadRows.Next() {
+		var id string
+		var n int64
+		if err := unreadRows.Scan(&id, &n); err != nil {
+			_ = unreadRows.Close()
+			return nil, nil, err
+		}
+		unread[contract.ID(id)] = n
+	}
+	if err := unreadRows.Err(); err != nil {
+		_ = unreadRows.Close()
+		return nil, nil, err
+	}
+	_ = unreadRows.Close()
+
+	markerArgs := make([]any, 0, len(ids)+1)
+	markerArgs = append(markerArgs, string(principal))
+	for _, id := range ids {
+		markerArgs = append(markerArgs, string(id))
+	}
+	markerQuery := `SELECT conversation_id, last_read_at FROM messaging_read_markers
+		WHERE principal_id = ? AND conversation_id IN (` + placeholders + `)`
+	markerRows, err := unit.QueryContext(ctx, markerQuery, markerArgs...)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer func() { _ = markerRows.Close() }()
+	marker := map[contract.ID]string{}
+	for markerRows.Next() {
+		var id, at string
+		if err := markerRows.Scan(&id, &at); err != nil {
+			return nil, nil, err
+		}
+		marker[contract.ID(id)] = at
+	}
+	return unread, marker, markerRows.Err()
 }
 
 // receipts and read markers --------------------------------------------------

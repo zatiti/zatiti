@@ -171,6 +171,141 @@ func handleMessagingPending(ctx context.Context, s *Service, unit contract.Unit,
 	return s.completed(map[string]any{"items": items})
 }
 
+// handleMessagingReady runs the bounded fair scan of admitted messages
+// awaiting a durable worker turn: recipient rows in state "admitted" that
+// carry no messaging_turn_links row yet. It never acknowledges anything —
+// scanning is not processing — and it is not scoped to one worker: the
+// caller enumerates each returned message's recipient_ids and decides which
+// ones are its own to turn-admit, exactly as _messaging.processed's
+// idempotent dedup key (message_id, recipient_id) expects.
+func handleMessagingReady(ctx context.Context, s *Service, unit contract.Unit, inv contract.Invocation) (contract.Payload, error) {
+	in, err := decodeInto[struct {
+		Limit int64 `json:"limit"`
+	}](s, "_messaging.ready", inv.Input)
+	if err != nil {
+		return contract.Payload{}, err
+	}
+	limit := int(in.Limit)
+	if limit > 100 {
+		limit = 100
+	}
+	rows, err := listReady(ctx, unit, unit.Scope().InstallationID, limit)
+	if err != nil {
+		return contract.Payload{}, err
+	}
+	if err := hydrateRecipients(ctx, unit, rows); err != nil {
+		return contract.Payload{}, err
+	}
+	items := make([]*wireMessage, 0, len(rows))
+	for _, row := range rows {
+		wire, err := row.toWire()
+		if err != nil {
+			return contract.Payload{}, err
+		}
+		items = append(items, wire)
+	}
+	return s.completed(map[string]any{"items": items})
+}
+
+// handleMessagingProcessed records the durable link from one (message_id,
+// recipient_id) pair to the turn that committed it, sharing the caller's
+// transaction with its own turn admission/context commit. message_id plus
+// recipient_id is the deduplication identity: a replay carrying the exact
+// turn_id already linked is idempotent (a lost acknowledgement after a
+// crash never admits a second turn or a second acknowledgement); the same
+// pair reported under a different turn_id is a genuine submission_conflict,
+// never silently accepted. The first successful link is also the
+// recipient's acknowledgement — mirroring mailbox.ack — because a worker
+// message is never acknowledged before its turn (or safe-boundary
+// injection) actually committed.
+func handleMessagingProcessed(ctx context.Context, s *Service, unit contract.Unit, inv contract.Invocation) (contract.Payload, error) {
+	in, err := decodeInto[struct {
+		MessageID       contract.ID      `json:"message_id"`
+		RecipientID     contract.ID      `json:"recipient_id"`
+		TurnID          contract.ID      `json:"turn_id"`
+		ContextArtifact *wireArtifactRef `json:"context_artifact"`
+	}](s, "_messaging.processed", inv.Input)
+	if err != nil {
+		return contract.Payload{}, err
+	}
+	if in.MessageID == "" || in.RecipientID == "" || in.TurnID == "" {
+		return contract.Payload{}, invalidInput("_messaging.processed requires message_id, recipient_id and turn_id")
+	}
+	message, err := getMessageInInstallation(ctx, unit, unit.Scope().InstallationID, in.MessageID)
+	if err != nil {
+		return contract.Payload{}, err
+	}
+	if message == nil {
+		return contract.Payload{}, notFound("message %s not found", in.MessageID)
+	}
+	recipient, err := getRecipient(ctx, unit, in.MessageID, in.RecipientID)
+	if err != nil {
+		return contract.Payload{}, err
+	}
+	if recipient == nil {
+		return contract.Payload{}, notFound("message %s is not addressed to recipient %s", in.MessageID, in.RecipientID)
+	}
+
+	existing, err := getTurnLink(ctx, unit, in.MessageID, in.RecipientID)
+	if err != nil {
+		return contract.Payload{}, err
+	}
+	if existing != nil {
+		if existing.TurnID != in.TurnID {
+			return contract.Payload{}, submissionConflict(
+				"message %s recipient %s is already linked to turn %s", in.MessageID, in.RecipientID, existing.TurnID)
+		}
+		// Idempotent replay: the durable link and any acknowledgement it
+		// caused already committed on the first successful call. A lost
+		// acknowledgement retried here must never admit a second turn or
+		// fire a second acknowledgement event.
+		if err := hydrateRecipients(ctx, unit, []*messageRow{message}); err != nil {
+			return contract.Payload{}, err
+		}
+		wire, err := message.toWire()
+		if err != nil {
+			return contract.Payload{}, err
+		}
+		return s.completed(map[string]any{"resource": wire})
+	}
+
+	now := s.clock.Now()
+	var contextJSON string
+	if in.ContextArtifact != nil {
+		contextJSON = string(mustJSON(*in.ContextArtifact))
+	}
+	if err := insertTurnLink(ctx, unit, &turnLinkRow{
+		MessageID:           in.MessageID,
+		RecipientID:         in.RecipientID,
+		InstallationID:      unit.Scope().InstallationID,
+		TurnID:              in.TurnID,
+		ContextArtifactJSON: contextJSON,
+		CreatedAt:           now,
+	}); err != nil {
+		if isUniqueViolation(err) {
+			return contract.Payload{}, submissionConflict(
+				"message %s recipient %s was concurrently linked to a turn", in.MessageID, in.RecipientID)
+		}
+		return contract.Payload{}, err
+	}
+	if recipient.State != recipientAcknowledged {
+		if err := s.acknowledgeRecipient(ctx, unit, message, in.RecipientID, now); err != nil {
+			return contract.Payload{}, err
+		}
+	}
+	if err := s.emitTurnLinkEvent(ctx, unit, message, in.RecipientID, in.TurnID); err != nil {
+		return contract.Payload{}, err
+	}
+	if err := hydrateRecipients(ctx, unit, []*messageRow{message}); err != nil {
+		return contract.Payload{}, err
+	}
+	wire, err := message.toWire()
+	if err != nil {
+		return contract.Payload{}, err
+	}
+	return s.completed(map[string]any{"resource": wire})
+}
+
 // equalIDs reports slice equality ignoring order.
 func equalIDs(a, b []contract.ID) bool {
 	if len(a) != len(b) {

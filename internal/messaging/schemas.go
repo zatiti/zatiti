@@ -16,9 +16,12 @@ var opSchemas = map[string][2]string{
 	"_messaging.admit":          {schemaInMessagingAdmit, schemaOutMessage},
 	"_messaging.bootstrap":      {schemaInMessagingBootstrap, schemaOutConversation},
 	"_messaging.pending":        {schemaInMessagingPending, schemaOutMessages},
+	"_messaging.ready":          {schemaInMessagingReady, schemaOutMessages},
+	"_messaging.processed":      {schemaInMessagingProcessed, schemaOutMessage},
 	"conversation.create":       {schemaInConversationCreate, schemaOutConversation},
 	"conversation.get":          {schemaInConversationGet, schemaOutConversation},
 	"conversation.list":         {schemaInConversationList, schemaOutConversations},
+	"conversation.message.list": {schemaInConversationMessageList, schemaOutMessages},
 	"conversation.message.send": {schemaInConversationMessageSend, schemaOutMessage},
 	"conversation.update":       {schemaInConversationUpdate, schemaOutConversation},
 	"mailbox.ack":               {schemaInMailboxAck, schemaOutMessage},
@@ -40,11 +43,17 @@ const schemaInMessagingBootstrap = `{"type":"object","additionalProperties":fals
 
 const schemaInMessagingPending = `{"type":"object","additionalProperties":false,"properties":{"worker_id":{"type":"string","format":"uuid"},"limit":{"type":"integer","minimum":1,"maximum":100}},"required":["worker_id","limit"]}`
 
+const schemaInMessagingReady = `{"type":"object","additionalProperties":false,"properties":{"limit":{"type":"integer","minimum":1,"maximum":100}},"required":["limit"]}`
+
+const schemaInMessagingProcessed = `{"type":"object","additionalProperties":false,"properties":{"message_id":{"type":"string","format":"uuid"},"recipient_id":{"type":"string","format":"uuid"},"turn_id":{"type":"string","format":"uuid"},"context_artifact":{"$ref":"#/$defs/ArtifactRef"}},"required":["message_id","recipient_id","turn_id"]}`
+
 const schemaInConversationCreate = `{"type":"object","additionalProperties":false,"properties":{"scope":{"$ref":"#/$defs/Scope"},"kind":{"type":"string","enum":["direct","group"]},"participant_ids":{"type":"array","items":{"type":"string","format":"uuid"},"maxItems":4096},"title":{"type":"string","maxLength":8192}},"required":["scope","kind","participant_ids","title"]}`
 
 const schemaInConversationGet = `{"type":"object","additionalProperties":false,"properties":{"scope":{"$ref":"#/$defs/Scope"},"id":{"type":"string","format":"uuid"}},"required":["scope","id"]}`
 
 const schemaInConversationList = `{"type":"object","additionalProperties":false,"properties":{"scope":{"$ref":"#/$defs/Scope"},"cursor":{"type":"string","maxLength":8192},"limit":{"type":"integer","minimum":1,"maximum":200},"filter":{"type":"object","additionalProperties":false,"properties":{"state":{"type":"string","maxLength":8192},"key":{"type":"string","maxLength":8192},"parent_id":{"type":"string","format":"uuid"},"worker_id":{"type":"string","format":"uuid"},"task_id":{"type":"string","format":"uuid"},"organization_id":{"type":"string","format":"uuid"},"descendants":{"type":"boolean"},"needs_you":{"type":"boolean"}},"required":[]}},"required":["scope"]}`
+
+const schemaInConversationMessageList = `{"type":"object","additionalProperties":false,"properties":{"scope":{"$ref":"#/$defs/Scope"},"conversation_id":{"type":"string","format":"uuid"},"cursor":{"type":"string","maxLength":8192},"limit":{"type":"integer","minimum":1,"maximum":200}},"required":["scope","conversation_id"]}`
 
 const schemaInConversationMessageSend = `{"type":"object","additionalProperties":false,"properties":{"scope":{"$ref":"#/$defs/Scope"},"conversation_id":{"type":"string","format":"uuid"},"message_id":{"type":"string","format":"uuid"},"body":{"type":"string","maxLength":8192},"attachments":{"type":"array","items":{"$ref":"#/$defs/ArtifactRef"},"maxItems":4096},"task_ids":{"type":"array","items":{"type":"string","format":"uuid"},"maxItems":4096}},"required":["scope","conversation_id","message_id","body","attachments","task_ids"]}`
 

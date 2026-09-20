@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"sort"
+	"time"
 
 	"github.com/zatiti/zatiti/internal/contract"
 )
@@ -283,6 +284,46 @@ func (s *Service) deliver(ctx context.Context, unit contract.Unit, p *deliverPar
 		return nil, err
 	}
 	return wire, nil
+}
+
+// acknowledgeRecipient advances one recipient's inbox row to acknowledged,
+// records the durable receipt and read marker, and — when it is the last
+// unacknowledged recipient — transitions the message itself. It is the one
+// place that implements "acknowledge a message": mailbox.ack (the recipient
+// acknowledging its own read) and _messaging.processed (a durable worker
+// turn committing) both call it, because both are exactly "the recipient is
+// done with this message", differing only in who triggers it and why. A
+// mailbox read (_messaging.pending, mailbox.list) never calls it: reading a
+// mailbox is not processing.
+func (s *Service) acknowledgeRecipient(ctx context.Context, unit contract.Unit, message *messageRow, recipientID contract.ID, at time.Time) error {
+	if err := updateRecipientState(ctx, unit, message.ID, recipientID, recipientAcknowledged, at); err != nil {
+		return err
+	}
+	if err := insertReceipt(ctx, unit, s.ids.New(), message.ID, recipientID, unit.Scope().InstallationID, at); err != nil {
+		return err
+	}
+	if message.ConversationID != "" {
+		if err := upsertReadMarker(ctx, unit, message.ConversationID, recipientID,
+			unit.Scope().InstallationID, message.ID, at); err != nil {
+			return err
+		}
+	}
+	remaining, err := countUnacknowledged(ctx, unit, message.ID)
+	if err != nil {
+		return err
+	}
+	if remaining == 0 {
+		message.State = messageStateAcknowledged
+		message.Version++
+		message.UpdatedAt = at
+		if err := updateMessageState(ctx, unit, message); err != nil {
+			return err
+		}
+		if err := s.emitMessageEvent(ctx, unit, message, eventMessageAcknowledged); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // classifyMeaningful decides whether a delivery is a meaningful human-facing

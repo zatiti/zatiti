@@ -60,16 +60,21 @@ type wireMessage struct {
 	ConversationID contract.ID       `json:"conversation_id,omitempty"`
 }
 
-// wireConversation mirrors #/$defs/Conversation.
+// wireConversation mirrors #/$defs/Conversation. CallerUnreadCount and
+// CallerLastReadMarker are revision-3 additions: the calling principal's own
+// projection, filled in per request from the read-marker/recipient-ack
+// state and never persisted on the conversation row itself.
 type wireConversation struct {
-	ID                  contract.ID      `json:"id"`
-	Version             contract.Version `json:"version"`
-	Scope               wireScope        `json:"scope"`
-	Kind                string           `json:"kind"`
-	ParticipantIDs      []contract.ID    `json:"participant_ids"`
-	Title               string           `json:"title"`
-	Pinned              bool             `json:"pinned"`
-	LastMeaningfulEvent string           `json:"last_meaningful_event,omitempty"`
+	ID                   contract.ID      `json:"id"`
+	Version              contract.Version `json:"version"`
+	Scope                wireScope        `json:"scope"`
+	Kind                 string           `json:"kind"`
+	ParticipantIDs       []contract.ID    `json:"participant_ids"`
+	Title                string           `json:"title"`
+	Pinned               bool             `json:"pinned"`
+	LastMeaningfulEvent  string           `json:"last_meaningful_event,omitempty"`
+	CallerUnreadCount    int64            `json:"caller_unread_count,omitempty"`
+	CallerLastReadMarker string           `json:"caller_last_read_marker,omitempty"`
 }
 
 // Conversation kinds.
