@@ -44,22 +44,47 @@ artifacts against the new revision-3 catalog:
 A package's parity test going green is a real, verifiable signal that card
 landed correctly -- use it as a spot-check when reviewing that card's PR.
 
-**CORRECTION, 2026-09-20: this is a real security defect, NOT a flake --
-the paragraph below this one is wrong and kept only so the mistake is
-visible.** P30's card (docs/implementation-remediation/assignments/P30.md)
-cites a specific CI run (35473210732) where
-`internal/platform.TestListenPrivateRefusesSymlinkedRunDirectory` accepted
-a symlinked run directory on both Linux and macOS, and
-`TestBlobTamperedObjectFailsPublishOverExisting` accepted tampered content
-on macOS -- a symlink-defense bypass and a tamper-detection bypass, found
-by the original P00 audit, not by this session. P30 exists specifically
-to reproduce and fix both with filesystem fixtures before touching
-implementation or fixture assumptions. Local reproduction attempts in
-this session passed clean, which is NOT evidence of a flake -- it likely
-means the local environment doesn't trigger the same condition (timing,
-specific filesystem behavior, or something CI-environment-specific).
-Do not casually retry past a `internal/platform` test failure again;
-read P30's card and investigate properly.
+**FIXED, 2026-09-20 (P30, PR #19, 4645b41).** Both named failures were
+root-caused with filesystem fixtures before any implementation change,
+per the card's own instruction, and the fix is landed and verified (5x
+repeat run clean on both tests; the original card's own instruction asked
+for a Linux+macOS repro, this session only had macOS available).
+
+`TestListenPrivateRefusesSymlinkedRunDirectory` was a REAL implementation
+bug: `internal/platform/socket.go`'s `ListenPrivate` called
+`filepath.EvalSymlinks` on the run directory itself before the strict
+no-symlink check (`mkdirPrivate`, which uses `os.Lstat` + an explicit
+`ModeSymlink` check) ever saw it -- silently resolving away a planted (or
+otherwise unexpected) symlink instead of refusing it. Fixed by resolving
+symlinks only in the directory's ancestors, never the directory itself,
+so `mkdirPrivate` sees the real, unresolved leaf path. It passed locally
+in this session only by coincidence: `t.TempDir()` on this machine
+produces paths that push the resulting socket path over the 104-byte
+`socketPathMax` guard, so the test failed for an unrelated reason
+(path-too-long) before ever reaching the vulnerable code -- confirmed by
+direct measurement, not assumed.
+
+`TestBlobTamperedObjectFailsPublishOverExisting` was NOT a real
+crypto/implementation defect -- confirmed by an exhaustive XOR-flip probe
+across all 219 bytes of a published object (zero undetected corruptions)
+and a 3000-iteration mechanistic check showing the count of "pre-existing
+byte already equals the fixed tamper value" coincidences (12) exactly
+matched the count of false accepts (12). The GCM tamper-detection logic
+was always sound; the TEST FIXTURE tampered by overwriting a byte inside
+a per-chunk random AES-GCM nonce with a fixed value, which had a ~1/256
+chance of being a no-op. Fixed by XOR-flipping the existing byte instead
+(guarantees an actual change), applied to this test and two siblings with
+the identical latent flaw; the security assertion itself is unchanged
+(and the test gained a new assertion that the object wasn't consumed by
+a refused republish).
+
+Original correction below (2026-09-20, superseded by this entry) is kept
+for the mistake it documents: passing locally is weak evidence against a
+CI-cited, audit-documented defect with a specific repro. Two commits in
+this session (P07, P08) had retried past an `internal/platform` failure
+without investigating -- worth knowing that pattern happened even though
+this specific incident turned out to be the (also real) fixture-flake
+case for the tamper test and unrelated to what those two commits hit.
 
 Original (WRONG) entry, 2026-09-19: "the same CI run showed
 `internal/platform.TestListenPrivateRefusesSymlinkedRunDirectory` failing.
