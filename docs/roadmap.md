@@ -1243,6 +1243,26 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   cards -- wave3/integration has one commit ahead of main, wave3/responses
   has uncommitted changes -- they need landing or reconciling before P24/P46/
   P13 (their eventual owners under the new plan) can be dispatched.
+- 2026-09-20 00:06 UTC -- P00 LANDED (PR #3, b6f2cc2, rebase-merged). Verified
+  independently before landing, not taken on the dispatched agent's word:
+  zero Go source touched (diff is tools/specgen/*.py, docs/implementation/*,
+  every package AGENTS.md); requirements.json 127->144 and acceptance.json
+  116->130 are byte-for-byte additive, nothing existing removed or reworded;
+  the one real breaking change (ResponsesParameters/ResponsesEvidence split
+  into prepare_session/model_step) is exactly what the card specified and was
+  self-flagged in the PR. CI's build-and-test matrix came back red on 11
+  packages -- all catalog/descriptor/schema-parity tests comparing committed
+  Go artifacts against the new revision-3 catalog, expected because P00's
+  allowed writes exclude Go source and P37/P14/P40/etc. are the cards that
+  update each package's side. David decided (in-session, given three options:
+  merge-and-track-red / batch the gate before touching main / a separate
+  integration branch): merge now and track the red rather than re-serializing
+  the parallelism this push is for. Full package list, which card fixes each,
+  and the one unrelated pre-existing flake (internal/platform symlink test,
+  confirmed passing on pre-P00 baseline) are recorded in docs/lore.md under
+  "Expected red: catalog/descriptor-parity tests" -- check there before
+  treating any of those specific tests as a fresh regression. P00's claim
+  released; P01 claimed and dispatched next.
 
 ## Planned
 
