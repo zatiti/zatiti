@@ -34,7 +34,6 @@ internal/effects
 internal/execution
 internal/installation
 internal/mcp
-internal/memory
 internal/scheduling
 internal/skills
 tests/integration
