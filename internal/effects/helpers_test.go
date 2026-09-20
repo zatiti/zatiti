@@ -647,6 +647,46 @@ func (e *testEnv) reconcileOp(scope contract.Scope, id contract.ID, version int6
 	return out.Resource
 }
 
+// reconciliationPrepareOp runs _effects.reconciliation.prepare and returns
+// the wire operation carrying the fresh reconciliation attempt.
+func (e *testEnv) reconciliationPrepareOp(id contract.ID, version int64) wireOperation {
+	e.t.Helper()
+	payload := e.mustOK(opReconciliationPrepare, admitInput{OperationID: id, ExpectedVersion: version})
+	var out operationResourceBody
+	e.decode(payload.Data, &out)
+	return out.Resource
+}
+
+// reconciliationRecordOp runs _effects.reconciliation.record and returns the
+// merged wire operation.
+func (e *testEnv) reconciliationRecordOp(opID, attemptID contract.ID, gen int64, obs wireObservation) wireOperation {
+	e.t.Helper()
+	payload := e.mustOK(opReconciliationRecord, recordInput{
+		OperationID: opID, AttemptID: attemptID, Generation: gen, Observation: obs,
+	})
+	var out operationResourceBody
+	e.decode(payload.Data, &out)
+	return out.Resource
+}
+
+// prepareOpWithRoute runs _effects.prepare with an explicit callback route
+// and returns the wire operation.
+func (e *testEnv) prepareOpWithRoute(scope contract.Scope, action wireAction, source contract.ID, route *wireCallbackRoute) (contract.Payload, error) {
+	e.t.Helper()
+	return e.call(opPrepare, prepareInput{Scope: unitScope(scope), Action: action, SourceID: source, CallbackRoute: route})
+}
+
+// newGeneration advances storage to a fresh controller generation, as a
+// controller restart would.
+func (e *testEnv) newGeneration() int64 {
+	e.t.Helper()
+	gen, err := e.db.StartGeneration(e.ctx)
+	if err != nil {
+		e.t.Fatalf("start generation: %v", err)
+	}
+	return gen
+}
+
 // linkedProposeOp runs operation.compensation.propose or
 // operation.replacement.propose and returns the wire operation.
 func (e *testEnv) linkedProposeOp(op string, scope contract.Scope, id contract.ID, version int64, action wireAction) wireOperation {

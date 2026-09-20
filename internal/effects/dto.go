@@ -84,26 +84,58 @@ type wireAction struct {
 
 // wireOperation mirrors $defs/Operation.
 type wireOperation struct {
-	ID                contract.ID   `json:"id"`
-	Version           int64         `json:"version"`
-	Action            wireAction    `json:"action"`
-	ActionDigest      string        `json:"action_digest"`
-	State             string        `json:"state"`
-	AttemptIDs        []contract.ID `json:"attempt_ids"`
-	LinkedOperationID *contract.ID  `json:"linked_operation_id,omitempty"`
-	Relationship      *string       `json:"relationship,omitempty"`
+	ID                contract.ID            `json:"id"`
+	Version           int64                  `json:"version"`
+	Action            wireAction             `json:"action"`
+	ActionDigest      string                 `json:"action_digest"`
+	State             string                 `json:"state"`
+	AttemptIDs        []contract.ID          `json:"attempt_ids"`
+	LinkedOperationID *contract.ID           `json:"linked_operation_id,omitempty"`
+	Relationship      *string                `json:"relationship,omitempty"`
+	Attempts          []wireOperationAttempt `json:"attempts,omitempty"`
+	CallbackRoute     *wireCallbackRoute     `json:"callback_route,omitempty"`
+}
+
+// wireOperationAttempt mirrors $defs/OperationAttempt: one {attempt_id,
+// generation} pair, additive alongside the unchanged attempt_ids so a caller
+// can resolve which controller generation claimed each attempt.
+type wireOperationAttempt struct {
+	AttemptID  contract.ID `json:"attempt_id"`
+	Generation int64       `json:"generation"`
+}
+
+// Revision 3 callback-route kinds ($defs/CallbackRoute.kind).
+const (
+	callbackKindWorkerTurn = "worker_turn"
+	callbackKindJob        = "job"
+	callbackKindMemory     = "memory"
+	callbackKindSkill      = "skill"
+	callbackKindConnection = "connection"
+)
+
+// wireCallbackRoute mirrors $defs/CallbackRoute: the controller-owned
+// routing reference _effects.prepare persists alongside the immutable action
+// and returns unmodified at claim as Dispatch.callback_route. Adapters never
+// see it; the controller resolves callback routing exclusively from this
+// persisted route.
+type wireCallbackRoute struct {
+	Kind      string       `json:"kind"`
+	TurnID    *contract.ID `json:"turn_id,omitempty"`
+	StepIndex *int64       `json:"step_index,omitempty"`
+	JobID     *contract.ID `json:"job_id,omitempty"`
 }
 
 // wireDispatch mirrors $defs/Dispatch.
 type wireDispatch struct {
-	OperationID   contract.ID     `json:"operation_id"`
-	AttemptID     contract.ID     `json:"attempt_id"`
-	Generation    int64           `json:"generation"`
-	Adapter       string          `json:"adapter"`
-	Action        json.RawMessage `json:"action"`
-	CredentialRef string          `json:"credential_ref"`
-	Deadline      time.Time       `json:"deadline"`
-	ProviderKey   string          `json:"provider_key,omitempty"`
+	OperationID   contract.ID        `json:"operation_id"`
+	AttemptID     contract.ID        `json:"attempt_id"`
+	Generation    int64              `json:"generation"`
+	Adapter       string             `json:"adapter"`
+	Action        json.RawMessage    `json:"action"`
+	CredentialRef string             `json:"credential_ref"`
+	Deadline      time.Time          `json:"deadline"`
+	ProviderKey   string             `json:"provider_key,omitempty"`
+	CallbackRoute *wireCallbackRoute `json:"callback_route,omitempty"`
 }
 
 // wireObservation mirrors $defs/Observation.
@@ -306,11 +338,14 @@ type taskBody struct {
 // Operation inputs.
 
 type prepareInput struct {
-	Scope    wireScope   `json:"scope"`
-	Action   wireAction  `json:"action"`
-	SourceID contract.ID `json:"source_id"`
+	Scope         wireScope          `json:"scope"`
+	Action        wireAction         `json:"action"`
+	SourceID      contract.ID        `json:"source_id"`
+	CallbackRoute *wireCallbackRoute `json:"callback_route,omitempty"`
 }
 
+// admitInput is also the wire input of _effects.reconciliation.prepare: the
+// two operations share the exact {operation_id, expected_version} schema.
 type admitInput struct {
 	OperationID     contract.ID `json:"operation_id"`
 	ExpectedVersion int64       `json:"expected_version"`
@@ -322,11 +357,16 @@ type claimInput struct {
 	Generation  int64       `json:"generation"`
 }
 
+// recordInput is also the wire input of _effects.reconciliation.record: its
+// schema omits current_generation entirely (additionalProperties: false), so
+// a reconciliation.record invocation strictly validated against that schema
+// can never carry the field and CurrentGeneration always decodes nil.
 type recordInput struct {
-	OperationID contract.ID     `json:"operation_id"`
-	AttemptID   contract.ID     `json:"attempt_id"`
-	Generation  int64           `json:"generation"`
-	Observation wireObservation `json:"observation"`
+	OperationID       contract.ID     `json:"operation_id"`
+	AttemptID         contract.ID     `json:"attempt_id"`
+	Generation        int64           `json:"generation"`
+	Observation       wireObservation `json:"observation"`
+	CurrentGeneration *int64          `json:"current_generation,omitempty"`
 }
 
 type pendingInput struct {
