@@ -16,8 +16,21 @@
 # freeze ahead of its implementations and track the red via this allowlist,
 # rather than batching cards before touching main or using a separate
 # integration branch.
+#
+# Founder decision (David, 2026-09-20, in-session): P37 (internal/registry)
+# regenerated catalog.json to the correct revision-3 shape of the shared
+# $defs (Operation/Artifact/Responsibility/Conversation), which is P37's own
+# job and is correct -- but every module still shipping the old shape now
+# fails registry assembly ("operation schema redefines the shared
+# definition X"), which is the entries below. P09 (internal/artifacts) is
+# structurally blocked from landing until this entry set is added, since it
+# embeds Artifact/Operation directly -- there is no order that avoids this.
+# Remove each line the moment P06/P07/P09/P10 land and the assembly-wide
+# check passes clean again; see docs/roadmap.md's 2026-09-20 entry.
 
+cmd/zatiti
 internal/adapters/responses
+internal/application
 internal/configuration
 internal/effects
 internal/execution
@@ -26,7 +39,8 @@ internal/installation
 internal/mcp
 internal/memory
 internal/messaging
-internal/registry
 internal/scheduling
 internal/skills
 internal/tasks
+tests/integration
+tests/qualification

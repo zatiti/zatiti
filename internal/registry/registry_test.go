@@ -63,8 +63,8 @@ func TestNewAssemblesTheCompleteFrozenSurface(t *testing.T) {
 		t.Fatalf("assembly over the frozen catalog failed: %v", err)
 	}
 	public := reg.Public()
-	if len(public) != 197 {
-		t.Fatalf("Public() holds %d operations, want the 197 frozen ones", len(public))
+	if len(public) != 201 {
+		t.Fatalf("Public() holds %d operations, want the 201 frozen ones", len(public))
 	}
 	if !slices.IsSortedFunc(public, func(a, b contract.Descriptor) int { return strings.Compare(a.ID, b.ID) }) {
 		t.Fatal("Public() is not sorted by operation ID")
@@ -336,8 +336,8 @@ func TestInternalVisibilityIsTheTypedBoundary(t *testing.T) {
 			t.Fatal("internal operation appears in Public()")
 		}
 	}
-	if len(reg.Public()) != 197 {
-		t.Fatalf("Public() holds %d operations, want 197", len(reg.Public()))
+	if len(reg.Public()) != 201 {
+		t.Fatalf("Public() holds %d operations, want 201", len(reg.Public()))
 	}
 	// Internal operations resolve through the same typed boundary; routing
 	// them away from public transport is the application's decision.
