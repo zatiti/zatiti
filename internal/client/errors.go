@@ -30,6 +30,13 @@ var (
 	// has already attempted bounded replay and command lookup; the caller must
 	// resolve with the original submission key and never a new one.
 	ErrUnknownOutcome = errors.New("command outcome unknown")
+
+	// ErrPollExhausted reports that Poll's bounded attempts ran out while the
+	// operation was still accepted (not yet completed or failed). The caller
+	// may Poll again with a fresh bound, or reconnect and Lookup by
+	// submission key; Poll never resends a mutation to make progress and
+	// mints no new submission identity of its own.
+	ErrPollExhausted = errors.New("poll attempts exhausted before a terminal result")
 )
 
 // UnknownAckError reports that request bytes were sent but the exchange

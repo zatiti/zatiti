@@ -50,4 +50,16 @@
 // Cursors. An expired cursor is never papered over: the cursor_expired fault
 // surfaces as *CursorExpiredError with its snapshot_required detail parsed,
 // and the caller refreshes its snapshot and replay position.
+//
+// Reconnect and poll helpers. Lookup performs the command.get recovery
+// query directly from an operation, scope and submission key alone, with no
+// need for the original request bytes -- the shape a caller recovering
+// after a restart (a fresh CLI process, a reconnecting desktop or MCP
+// session) actually has. Poll repeats a read-only query operation (for
+// example job.get on an accepted job reference) until it stops being
+// accepted or a bounded PollOptions.MaxAttempts is reached, returning
+// ErrPollExhausted rather than polling forever; it refuses outright to poll
+// a keyed request, so it can never be used to resend a mutation. Both
+// helpers add no domain knowledge of any specific operation: they compose
+// the same envelope, retry and lookup machinery Call already uses.
 package client
