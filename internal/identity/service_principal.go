@@ -28,9 +28,12 @@ import (
 // revocation apply to it exactly as to any other principal, so the owner can
 // stop the controller's admission immediately.
 //
-// The frozen _identity.bootstrap input carries the owner's credential
-// reference only, so the controller principal is created without a
-// credential: the in-process Internal seam authenticates by assembly trust
+// Revision 3 additionally lets _identity.bootstrap carry an optional
+// service_credential_id/service_store_ref pair so the controller principal
+// can receive a credential in this same transaction, for an out-of-process
+// controller that must authenticate by presented bytes. When omitted, the
+// controller principal is created without a credential exactly as in
+// revision 2: the in-process Internal seam authenticates by assembly trust
 // and passes the actor explicitly, never by presented bytes.
 
 // ControllerPrincipalName is the reserved principal name of the controller's
@@ -46,7 +49,13 @@ var controllerCapabilities = []string{opAuthority}
 // its standing grant inside the bootstrap transaction and records both
 // transitions. The caller has already proven the installation holds no
 // principal at all, so the reserved name is free by construction.
-func (s *Service) createControllerPrincipal(ctx context.Context, unit contract.Unit, installationID contract.ID, now time.Time) error {
+//
+// When serviceCredentialID and serviceStoreRef are both non-nil (revision 3),
+// the controller principal also receives a credential in this same
+// transaction, resolved and hashed exactly like the owner's bootstrap
+// credential. Either argument nil leaves the controller credential-less,
+// unchanged from revision 2.
+func (s *Service) createControllerPrincipal(ctx context.Context, unit contract.Unit, installationID contract.ID, now time.Time, serviceCredentialID *contract.ID, serviceStoreRef *string) error {
 	ctrl := principalRow{
 		ID:        contract.ID(s.deps.IDs.New()),
 		Version:   1,
@@ -80,7 +89,30 @@ func (s *Service) createControllerPrincipal(ctx context.Context, unit contract.U
 	if err := emitTransition(ctx, unit, eventPrincipalCreated, ctrl.ID, 1); err != nil {
 		return err
 	}
-	return emitTransition(ctx, unit, eventGrantCreated, standing.ID, 1)
+	if err := emitTransition(ctx, unit, eventGrantCreated, standing.ID, 1); err != nil {
+		return err
+	}
+	if serviceCredentialID == nil || serviceStoreRef == nil {
+		return nil
+	}
+	digest, err := s.resolveTokenDigest(ctx, *serviceStoreRef)
+	if err != nil {
+		return err
+	}
+	cred := credentialRow{
+		ID:          *serviceCredentialID,
+		Version:     1,
+		PrincipalID: ctrl.ID,
+		StoreRef:    *serviceStoreRef,
+		ExpiresAt:   nil,
+		Revoked:     false,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+	if err := s.insertCredential(ctx, unit, cred, digest); err != nil {
+		return err
+	}
+	return emitTransition(ctx, unit, eventCredProvisioned, cred.ID, 1)
 }
 
 // ControllerPrincipal reports the bootstrapped controller service principal

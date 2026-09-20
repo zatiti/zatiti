@@ -21,7 +21,8 @@ import (
 // is kept here, read-only, before any write.
 
 func (s *Service) credentialProvision(ctx context.Context, unit contract.Unit, in credentialProvisionInput) (contract.Payload, error) {
-	if _, err := s.authorize(ctx, unit, opCredProvision, in.Scope); err != nil {
+	env, err := s.authorize(ctx, unit, opCredProvision, in.Scope)
+	if err != nil {
 		return contract.Payload{}, err
 	}
 	if in.Scope.InstallationID != unit.Scope().InstallationID {
@@ -31,7 +32,13 @@ func (s *Service) credentialProvision(ctx context.Context, unit contract.Unit, i
 	if err != nil {
 		return contract.Payload{}, err
 	}
-	if !found {
+	if !found || !env.coversScope(p.Scope) {
+		// `in.Scope` authorizes the request; `in.PrincipalID` names the
+		// credential's future owner independently. Without also checking
+		// that principal's own scope against the envelope, a caller holding
+		// credential.provision at any narrow scope of its own could mint a
+		// working credential for the owner or any other principal in the
+		// installation -- an authentication escalation, not merely a read.
 		return contract.Payload{}, notFound("principal %s is unknown in this installation", in.PrincipalID)
 	}
 	if p.Revoked {
@@ -113,7 +120,8 @@ func (s *Service) insertCredential(ctx context.Context, unit contract.Unit, c cr
 }
 
 func (s *Service) credentialRevoke(ctx context.Context, unit contract.Unit, in credentialRevokeInput) (contract.Payload, error) {
-	if _, err := s.authorize(ctx, unit, opCredRevoke, in.Scope); err != nil {
+	env, err := s.authorize(ctx, unit, opCredRevoke, in.Scope)
+	if err != nil {
 		return contract.Payload{}, err
 	}
 	c, found, err := s.loadCredential(ctx, unit, in.ID)
@@ -121,6 +129,17 @@ func (s *Service) credentialRevoke(ctx context.Context, unit contract.Unit, in c
 		return contract.Payload{}, err
 	}
 	if !found {
+		return contract.Payload{}, notFound("credential %s is unknown in this installation", in.ID)
+	}
+	// A credential carries no scope of its own; the envelope check applies
+	// to its owning principal, exactly as for principal and grant get/update/
+	// revoke: `in.Scope` authorizes the request, `in.ID` names the target
+	// independently, and only the target's own reach determines visibility.
+	owner, ownerFound, err := s.loadPrincipal(ctx, unit, c.PrincipalID)
+	if err != nil {
+		return contract.Payload{}, err
+	}
+	if !ownerFound || !env.coversScope(owner.Scope) {
 		return contract.Payload{}, notFound("credential %s is unknown in this installation", in.ID)
 	}
 	if c.Revoked {

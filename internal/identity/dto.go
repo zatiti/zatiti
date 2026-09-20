@@ -222,6 +222,14 @@ type bootstrapInput struct {
 	StoreRef       string      `json:"store_ref"`
 	Name           string      `json:"name"`
 	InstallationID contract.ID `json:"installation_id"`
+	// ServiceCredentialID and ServiceStoreRef are revision 3 additions: when
+	// both are present, the bootstrap-created controller service principal
+	// receives a credential in the same transaction, letting an
+	// out-of-process controller authenticate. Omitted, the service principal
+	// stays credential-less for the in-process explicit-Actor seam, exactly
+	// as in revision 2.
+	ServiceCredentialID *contract.ID `json:"service_credential_id,omitempty"`
+	ServiceStoreRef     *string      `json:"service_store_ref,omitempty"`
 }
 
 type promoteInput struct {

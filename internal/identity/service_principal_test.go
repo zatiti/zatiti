@@ -291,6 +291,155 @@ func TestBootstrapRefusesReservedOwnerName(t *testing.T) {
 	env.controllerFault(t, contract.CodePrerequisiteMissing)
 }
 
+// TestBootstrapProvisionsServiceCredentialWhenRequested proves the revision 3
+// addition to _identity.bootstrap: when service_credential_id and
+// service_store_ref are both present, the controller's service principal
+// receives a credential in the same exclusive transaction, and that
+// credential authenticates exactly like any other -- the out-of-process
+// controller case the brief added this for. Omitting both fields (the
+// existing newTestEnv path, proven by TestControllerPrincipalHoldsNothingElse)
+// must keep leaving the controller credential-less.
+func TestBootstrapProvisionsServiceCredentialWhenRequested(t *testing.T) {
+	ctx := context.Background()
+	clock := &fakeClock{t: time.Date(2026, 9, 10, 12, 0, 0, 0, time.UTC)}
+	secrets := newFakeSecrets()
+	svc, err := New(contract.Dependencies{Clock: clock, IDs: idSource{}, Secrets: secrets})
+	if err != nil {
+		t.Fatal(err)
+	}
+	db, err := storage.Open(ctx, storage.Config{Path: filepath.Join(t.TempDir(), "identity.db")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	if err := db.Migrate(ctx, svc.Migrations()); err != nil {
+		t.Fatal(err)
+	}
+	inst := contract.NewID()
+	env := &testEnv{t: t, db: db, svc: svc, clock: clock, secrets: secrets, inst: inst}
+
+	ownerToken := "zt-owner-token"
+	serviceToken := "zt-service-token"
+	if _, err := secrets.Put(ctx, "store/owner-token", []byte(ownerToken)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := secrets.Put(ctx, "store/service-token", []byte(serviceToken)); err != nil {
+		t.Fatal(err)
+	}
+	serviceCredID := contract.NewID()
+	serviceStoreRef := "store/service-token"
+	env.mustCall(bootActor, opBootstrap, bootstrapInput{
+		OwnerID:             contract.NewID(),
+		CredentialID:        contract.NewID(),
+		StoreRef:            "store/owner-token",
+		Name:                "Ada Owner",
+		InstallationID:      inst,
+		ServiceCredentialID: &serviceCredID,
+		ServiceStoreRef:     &serviceStoreRef,
+	})
+
+	ctrl := env.controllerActor(t)
+
+	// The service credential authenticates as the controller.
+	actor, err := env.authenticate(serviceToken)
+	if err != nil {
+		t.Fatalf("authenticate with the provisioned service credential: %v", err)
+	}
+	if actor.PrincipalID != ctrl.PrincipalID || actor.Kind != contract.KindService {
+		t.Fatalf("service credential authenticated as %+v, want the controller %+v", actor, ctrl)
+	}
+	if actor.CredentialID != serviceCredID {
+		t.Fatalf("authenticated credential id = %s, want %s", actor.CredentialID, serviceCredID)
+	}
+
+	// The row exists, is bound to the controller, and carries no raw bytes.
+	var storedPrincipal, storedRef string
+	if err := db.Read(ctx, bootActor, contract.Scope{InstallationID: inst}, func(unit contract.Unit) error {
+		return unit.QueryRowContext(ctx,
+			`SELECT principal_id, store_ref FROM identity_credentials WHERE id = ?`, string(serviceCredID)).
+			Scan(&storedPrincipal, &storedRef)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if contract.ID(storedPrincipal) != ctrl.PrincipalID || storedRef != serviceStoreRef {
+		t.Fatalf("service credential row = (%s, %s), want (%s, %s)", storedPrincipal, storedRef, ctrl.PrincipalID, serviceStoreRef)
+	}
+
+	// Revoking it behaves exactly like any other credential: immediate,
+	// durable denial, with the controller principal itself untouched.
+	env.owner = contract.Actor{PrincipalID: env.mustPrincipalID("Ada Owner"), Kind: contract.KindHuman}
+	env.mustCall(env.owner, opCredRevoke, credentialRevokeInput{
+		Scope: contract.Scope{InstallationID: inst}, ID: serviceCredID, ExpectedVersion: 1,
+	})
+	if _, err := env.authenticate(serviceToken); err == nil {
+		t.Fatal("revoked service credential still authenticates")
+	}
+	if again := env.controllerActor(t); again != ctrl {
+		t.Fatalf("controller principal changed after credential revoke: %+v", again)
+	}
+}
+
+// TestBootstrapRefusesPartialServiceCredentialFields proves that
+// service_credential_id and service_store_ref must arrive together: supplying
+// only one half is a malformed request, not a silent credential-less
+// bootstrap or a partial write.
+func TestBootstrapRefusesPartialServiceCredentialFields(t *testing.T) {
+	ctx := context.Background()
+	clock := &fakeClock{t: time.Date(2026, 9, 10, 12, 0, 0, 0, time.UTC)}
+	secrets := newFakeSecrets()
+	svc, err := New(contract.Dependencies{Clock: clock, IDs: idSource{}, Secrets: secrets})
+	if err != nil {
+		t.Fatal(err)
+	}
+	db, err := storage.Open(ctx, storage.Config{Path: filepath.Join(t.TempDir(), "identity.db")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	if err := db.Migrate(ctx, svc.Migrations()); err != nil {
+		t.Fatal(err)
+	}
+	inst := contract.NewID()
+	env := &testEnv{t: t, db: db, svc: svc, clock: clock, secrets: secrets, inst: inst}
+	if _, err := secrets.Put(ctx, "store/owner-token", []byte("zt-owner-token")); err != nil {
+		t.Fatal(err)
+	}
+
+	serviceCredID := contract.NewID()
+	env.wantFault(bootActor, opBootstrap, bootstrapInput{
+		OwnerID:             contract.NewID(),
+		CredentialID:        contract.NewID(),
+		StoreRef:            "store/owner-token",
+		Name:                "Ada Owner",
+		InstallationID:      inst,
+		ServiceCredentialID: &serviceCredID,
+		// ServiceStoreRef omitted: only half the pair.
+	}, contract.CodeInvalidInput)
+
+	serviceStoreRef := "store/owner-token"
+	env.wantFault(bootActor, opBootstrap, bootstrapInput{
+		OwnerID:         contract.NewID(),
+		CredentialID:    contract.NewID(),
+		StoreRef:        "store/owner-token",
+		Name:            "Ada Owner",
+		InstallationID:  inst,
+		ServiceStoreRef: &serviceStoreRef,
+		// ServiceCredentialID omitted: only half the pair.
+	}, contract.CodeInvalidInput)
+
+	// Neither refused attempt left any principal behind.
+	var principals int64
+	if err := db.Read(ctx, bootActor, contract.Scope{InstallationID: inst}, func(unit contract.Unit) error {
+		return unit.QueryRowContext(ctx,
+			`SELECT COUNT(*) FROM identity_principals WHERE installation_id = ?`, string(inst)).Scan(&principals)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if principals != 0 {
+		t.Fatalf("refused bootstrap left %d principals behind", principals)
+	}
+}
+
 // TestBootstrapCreatesServicePrincipal proves bootstrap creates exactly one
 // service principal (the controller's) and that it can resolve its own
 // authority, which is what application's Internal revalidation requires.
