@@ -1775,6 +1775,17 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   was still the harness-default name, never renamed -- pushed under the
   correct remote name directly rather than failing on that).
   P38 cleared next.
+- 2026-09-20 15:05-15:13 PT -- P38 LANDED (PR #22, f6605bc), executed
+  cleanly end to end by its own agent (good example of the discipline
+  working correctly: rebase refused on a dirty zero-commits-ahead tree,
+  agent correctly substituted the equivalent non-destructive
+  `git merge --ff-only` rather than forcing or guessing; waited for its
+  own genuine background commit notification instead of self-polling).
+  P41 (internal/server) and P04 (internal/application) both also
+  reported ready in the meantime -- both found their packages' production
+  code already substantially complete from earlier work and added only
+  proof tests, same pattern as P13/P27/P35. P41 cleared next; P04 queued
+  behind it. P14 (critical path) still working.
 
 ## Planned
 
