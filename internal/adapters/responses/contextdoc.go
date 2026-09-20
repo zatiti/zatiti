@@ -143,6 +143,27 @@ func loadContext(ctx context.Context, blobs contract.BlobStore, profile *respons
 				budget -= int64(len(data))
 				part.Bytes = data
 			}
+			if part.ToolCall != nil {
+				// The proposal's source_context is a provenance claim:
+				// which earlier persisted context this tool call was
+				// originally proposed under. A malformed reference (a bad
+				// id/digest shape) already fails zatiti.context/v1 schema
+				// validation before this function runs; a structurally
+				// valid but foreign one -- naming an object this
+				// installation's blob store cannot actually produce --
+				// must fail too, or an unverifiable claim of provenance
+				// would ride into model-visible history unchecked. The
+				// proposal's own id/tool/input translate the item (see
+				// openaiItems); these bytes are not disclosed again, so
+				// they are verified and discarded, never assigned to
+				// part.Bytes.
+				bound := min(int64(maxPartBytes), budget)
+				data, err := readArtifact(ctx, blobs, part.ToolCall.Proposal.SourceContext, bound, "the tool proposal's source_context")
+				if err != nil {
+					return nil, err
+				}
+				budget -= int64(len(data))
+			}
 			decoded.DecodedParts = append(decoded.DecodedParts, part)
 		}
 		doc.Messages = append(doc.Messages, decoded)

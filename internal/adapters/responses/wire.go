@@ -82,14 +82,45 @@ type wireResponsesProfile struct {
 
 // ---------- action (Dispatch.Action) body ----------
 
-// wireResponsesParameters is the decoded zatiti.responses.action/v1 action.
+// wireResponsesParameters is the decoded zatiti.responses.action/v1 action:
+// a kind-discriminated oneOf of ResponsesPrepareSessionParameters (only
+// Schema/Kind) and ResponsesModelStepParameters (every other field). Schema
+// validation against the composed oneOf (parametersSchema) runs before this
+// struct is ever decoded into (decodeAction), so decoding a superset struct
+// is safe: whichever fields the wire document omits simply decode to their
+// zero value. MarshalJSON re-splits it back into the exact shape its Kind
+// names, for the one caller (tests) that constructs an action as a Go value.
 type wireResponsesParameters struct {
 	Schema                string           `json:"schema"`
 	Kind                  string           `json:"kind"`
+	SessionHandle         string           `json:"session_handle"`
 	ContextArtifact       wireArtifactRef  `json:"context_artifact"`
 	MaxOutputTokens       int64            `json:"max_output_tokens"`
 	ToolContractVersions  []wireVersionRef `json:"tool_contract_versions"`
 	ContinuationReference string           `json:"continuation_reference,omitempty"`
+}
+
+// MarshalJSON encodes w as exactly ResponsesPrepareSessionParameters (only
+// schema/kind) or exactly ResponsesModelStepParameters (every other field),
+// matching w.Kind. Production code never marshals this type -- Dispatch.
+// Action is produced upstream of this package -- so this exists for tests
+// and any future caller that builds one as a Go value.
+func (w wireResponsesParameters) MarshalJSON() ([]byte, error) {
+	if w.Kind == kindPrepareSession {
+		return json.Marshal(struct {
+			Schema string `json:"schema"`
+			Kind   string `json:"kind"`
+		}{w.Schema, w.Kind})
+	}
+	return json.Marshal(struct {
+		Schema                string           `json:"schema"`
+		Kind                  string           `json:"kind"`
+		SessionHandle         string           `json:"session_handle"`
+		ContextArtifact       wireArtifactRef  `json:"context_artifact"`
+		MaxOutputTokens       int64            `json:"max_output_tokens"`
+		ToolContractVersions  []wireVersionRef `json:"tool_contract_versions"`
+		ContinuationReference string           `json:"continuation_reference,omitempty"`
+	}{w.Schema, w.Kind, w.SessionHandle, w.ContextArtifact, w.MaxOutputTokens, w.ToolContractVersions, w.ContinuationReference})
 }
 
 // ---------- persisted request context (zatiti.context/v1) ----------
@@ -263,11 +294,17 @@ type wireModelOutput struct {
 	ContinuationReference string                  `json:"continuation_reference,omitempty"`
 }
 
+// wireResponsesEvidence is the decoded zatiti.responses.evidence/v1
+// document. Revision 3: session_handle is required on every evidence
+// document, prepare_session's own handle or the model_step's echoed input;
+// response_id/output/output_artifacts are optional and present only for a
+// model_step evidence document -- a prepare_session mints no model output.
 type wireResponsesEvidence struct {
 	Schema          string                   `json:"schema"`
 	PhysicalCall    wirePhysicalCallEvidence `json:"physical_call"`
-	ResponseID      string                   `json:"response_id"`
-	Output          wireModelOutput          `json:"output"`
+	SessionHandle   string                   `json:"session_handle"`
+	ResponseID      string                   `json:"response_id,omitempty"`
+	Output          *wireModelOutput         `json:"output,omitempty"`
 	StagedOutputs   []wireStagedOutput       `json:"staged_outputs"`
-	OutputArtifacts []wireArtifactRef        `json:"output_artifacts"`
+	OutputArtifacts []wireArtifactRef        `json:"output_artifacts,omitempty"`
 }

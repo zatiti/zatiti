@@ -133,20 +133,27 @@ func buildContractDocument(revisions []string) (json.RawMessage, error) {
 	return out, nil
 }
 
-// step is the validated, admitted model step every physical call of one
-// Invoke or Reconcile works from.
+// step is the validated, admitted prepare_session or model_step call every
+// physical call of one Invoke or Reconcile works from. doc is nil for
+// prepare_session: it has no context_artifact, and classification -- what
+// every request/response record this step stages is classified under --
+// falls back to "internal" ("repository and task content default to
+// internal classification") rather than a nonexistent context's.
 type step struct {
-	doc     *contextDocument
-	request protocolRequest
-	bound   *int64
-	bounds  admittedBounds
-	secret  []byte
+	act            *wireResponsesParameters
+	doc            *contextDocument
+	classification string
+	request        protocolRequest
+	bound          *int64
+	bounds         admittedBounds
+	secret         []byte
 }
 
 // admitStep performs every local check that precedes any physical call:
-// action and context validation, protocol selection, the output ceiling,
-// the input bound and the cost bound, then credential resolution. A
-// non-nil error means nothing was sent.
+// action decoding, protocol selection and, for a model_step, context
+// validation, the output ceiling, the input bound and the cost bound; then
+// credential resolution for either kind. A non-nil error means nothing was
+// sent.
 func (a *Adapter) admitStep(ctx context.Context, dispatch contract.Dispatch, reconcile bool) (*step, error) {
 	if dispatch.Adapter != adapterName {
 		return nil, invalidInput("dispatch adapter %q does not match %q", dispatch.Adapter, adapterName)
@@ -155,6 +162,42 @@ func (a *Adapter) admitStep(ctx context.Context, dispatch contract.Dispatch, rec
 	if err != nil {
 		return nil, err
 	}
+	s := &step{act: act}
+
+	if act.Kind == kindPrepareSession {
+		// The wire boundary: everything above is defined by the frozen
+		// Zatiti-side contract; the upstream request is defined only by a
+		// qualified protocol revision.
+		if a.protocol == nil {
+			return nil, capabilityUnsupported(
+				"wire protocol revision %q is not qualified in this build: the upstream request and response shapes are pinned only by real-endpoint qualification; no call was made",
+				a.profile.CapabilityEvidence.ProtocolRevision)
+		}
+		if reconcile {
+			// No documented way to list conversations or find one by
+			// metadata: a lost prepare_session stays unknown forever,
+			// never resolved by a later lookup (PROTOCOL.md).
+			return nil, capabilityUnsupported("prepare_session has no documented authoritative lookup; a lost session creation stays unknown and reconciliation cannot resolve it")
+		}
+		s.classification = "internal"
+		s.request = protocolRequest{
+			Profile:     a.profile.protocolProfile(),
+			OperationID: string(dispatch.OperationID),
+			AttemptID:   string(dispatch.AttemptID),
+		}
+		// Session creation is never billed by the pinned protocol (see
+		// PROTOCOL.md's accounting section): there is no worst-case
+		// charge to admit or refuse.
+		s.bounds = admittedBounds{}
+		if s.secret, err = a.resolveCredential(ctx, dispatch.CredentialRef); err != nil {
+			return nil, err
+		}
+		return s, nil
+	}
+
+	// model_step: the same reachable-check ordering as before revision 3
+	// -- local checks the profile alone can answer, then the persisted
+	// context, before anything asks what the wire protocol can do.
 	if act.MaxOutputTokens > a.profile.MaxOutputTokens {
 		return nil, budgetUnavailable("action max_output_tokens %d exceeds the profile's max_output_tokens %d", act.MaxOutputTokens, a.profile.MaxOutputTokens)
 	}
@@ -162,10 +205,6 @@ func (a *Adapter) admitStep(ctx context.Context, dispatch contract.Dispatch, rec
 	if err != nil {
 		return nil, err
 	}
-
-	// The wire boundary: everything above is defined by the frozen
-	// Zatiti-side contract; the upstream request is defined only by a
-	// qualified protocol revision.
 	if a.protocol == nil {
 		return nil, capabilityUnsupported(
 			"wire protocol revision %q is not qualified in this build: the upstream request and response shapes are pinned only by real-endpoint qualification; no call was made",
@@ -182,16 +221,15 @@ func (a *Adapter) admitStep(ctx context.Context, dispatch contract.Dispatch, rec
 		return nil, capabilityUnsupported("the qualified wire protocol has no documented authoritative lookup; the original outcome remains unknown and no call was made")
 	}
 
-	s := &step{
-		doc: doc,
-		request: protocolRequest{
-			Profile:               a.profile.protocolProfile(),
-			OperationID:           string(dispatch.OperationID),
-			AttemptID:             string(dispatch.AttemptID),
-			MaxOutputTokens:       act.MaxOutputTokens,
-			Context:               doc,
-			ContinuationReference: act.ContinuationReference,
-		},
+	s.doc = doc
+	s.classification = doc.Classification
+	s.request = protocolRequest{
+		Profile:               a.profile.protocolProfile(),
+		OperationID:           string(dispatch.OperationID),
+		AttemptID:             string(dispatch.AttemptID),
+		MaxOutputTokens:       act.MaxOutputTokens,
+		Context:               doc,
+		ContinuationReference: act.ContinuationReference,
 	}
 	s.bound = a.protocol.inputTokenBound(s.request)
 	if reconcile {
@@ -225,12 +263,13 @@ func (a *Adapter) callContext(ctx context.Context, deadline time.Time) (context.
 	return callCtx, cancel, nil
 }
 
-// Invoke implements contract.Adapter. It performs the physical calls the
-// qualified wire protocol requires for one model step -- a preparatory
-// call that mints the reconciliation handle when the protocol needs one,
-// then the model step itself -- each staged before it is sent. A non-nil
-// error means nothing was sent; once any request is handed to the
-// transport, the outcome is reported through Observation with a nil error.
+// Invoke implements contract.Adapter. Revision 3 splits OpenAI conversation
+// preparation from the model call into two separately admitted, journaled
+// single-call effects (P00-009): a dispatch names exactly one of them, and
+// Invoke performs exactly the one physical call that kind describes, never
+// both. A non-nil error means nothing was sent; once a request is handed to
+// the transport, the outcome is reported through Observation with a nil
+// error.
 func (a *Adapter) Invoke(ctx context.Context, dispatch contract.Dispatch) (contract.Observation, error) {
 	s, err := a.admitStep(ctx, dispatch, false)
 	if err != nil {
@@ -242,53 +281,61 @@ func (a *Adapter) Invoke(ctx context.Context, dispatch contract.Dispatch) (contr
 	}
 	defer cancel()
 
-	// Translation is validated before any preparatory call so a refusal
-	// never follows a sent request; the handle-bearing request is encoded
-	// again once the handle exists.
-	if _, err := a.encodeStep(s, ""); err != nil {
+	if s.act.Kind == kindPrepareSession {
+		return a.invokePrepareSession(ctx, callCtx, dispatch, s)
+	}
+	call, err := a.encodeStep(s, s.act.SessionHandle)
+	if err != nil {
 		return contract.Observation{}, err
 	}
+	return a.invokeModelStep(ctx, callCtx, dispatch, s, call)
+}
+
+// invokePrepareSession performs the one physical call a prepare_session
+// action describes: create the provider conversation and report its handle
+// as session_handle. It never sends the model step itself. Session
+// creation is never billed by the pinned protocol (PROTOCOL.md's
+// accounting section), so usage is always no_charge once the request was
+// sent.
+func (a *Adapter) invokePrepareSession(ctx, callCtx context.Context, dispatch contract.Dispatch, s *step) (contract.Observation, error) {
 	prep, err := a.protocol.prepare(s.request)
 	if err != nil {
-		return contract.Observation{}, capabilityUnsupported("the qualified wire protocol cannot prepare this model step: %v", err)
+		return contract.Observation{}, capabilityUnsupported("the qualified wire protocol cannot prepare a session: %v", err)
 	}
-
-	var staged []wireStagedOutput
-	handle := ""
-	if prep != nil {
-		po, err := a.physical(ctx, callCtx, *prep, s)
-		if err != nil {
-			return contract.Observation{}, err
-		}
-		staged = po.staged()
-		if reason, message := po.failure(); reason != "" {
-			// The preparatory call did not establish a handle, so the
-			// model step was never sent: nothing was billed and there is
-			// nothing to reconcile. The preparatory request record stands
-			// as this attempt's request context.
-			return a.notSent(dispatch, s, po, staged, "prepare_"+reason, message)
-		}
-		handle, err = a.protocol.decodePrepare(po.status, po.header, po.body)
-		if err != nil {
-			return a.notSent(dispatch, s, po, staged, "prepare_rejected", err.Error())
-		}
+	if prep == nil {
+		return contract.Observation{}, capabilityUnsupported("the qualified wire protocol requires no preparatory call; prepare_session does not apply to it")
 	}
-
-	call, err := a.encodeStep(s, handle)
+	po, err := a.physical(ctx, callCtx, *prep, s)
 	if err != nil {
 		return contract.Observation{}, err
 	}
+	physical := a.basePhysicalEvidence(dispatch, po)
+	disposition, handle := interpretPrepareSession(a.protocol, s.secret, po, &physical)
+	physical.ProviderReference = handle
+	usage := a.profile.usageFor(usageInput{Bounds: s.bounds, Sent: disposition != contract.DispositionNotSent, NoCharge: true})
+	built, err := buildPrepareSessionEvidence(handle, physical, usage, po.staged())
+	if err != nil {
+		return contract.Observation{}, err
+	}
+	return finishObservation(disposition, handle, built, physical.FinishedAt), nil
+}
+
+// invokeModelStep performs the one physical call already encoded as call:
+// the model step, naming the session handle a prior prepare_session
+// established (s.act.SessionHandle, admitted as a required, non-empty
+// field of the action). A non-nil error means nothing was sent; once the
+// request is handed to the transport, the outcome is reported through
+// Observation with a nil error.
+func (a *Adapter) invokeModelStep(ctx, callCtx context.Context, dispatch contract.Dispatch, s *step, call protocolCall) (contract.Observation, error) {
 	po, err := a.physical(ctx, callCtx, call, s)
 	if err != nil {
-		// Nothing was sent. A handle minted by the preparatory call is
-		// orphaned upstream, which is harmless: no step is journaled under
-		// it and nothing is billed.
 		return contract.Observation{}, err
 	}
-	staged = append(staged, po.staged()...)
+	staged := po.staged()
 
-	physical, output := a.baseEvidence(dispatch, po)
-	in := interpretation{secret: s.secret, bounds: s.bounds, inputBound: s.bound, classification: s.doc.Classification, stageErr: po.stageErr}
+	physical := a.basePhysicalEvidence(dispatch, po)
+	output := baseModelOutput(po)
+	in := interpretation{secret: s.secret, bounds: s.bounds, inputBound: s.bound, classification: s.classification, stageErr: po.stageErr}
 	if reason, message := po.failure(); reason != "" {
 		if po.doErr != nil {
 			physical.RequestSent, in.disposition, physical.Confirmation = classifyNetworkError(po.doErr)
@@ -302,11 +349,11 @@ func (a *Adapter) Invoke(ctx context.Context, dispatch contract.Dispatch) (contr
 		result, decodeErr := a.protocol.decode(po.status, po.header, po.body)
 		staged = in.interpret(ctx, a, po.status, result, decodeErr, &physical, &output, staged)
 	}
-	reference := handle
-	if reference == "" {
-		reference = output.ResponseID
+	built, err := buildModelStepEvidence(s.act.SessionHandle, physical, output, staged)
+	if err != nil {
+		return contract.Observation{}, err
 	}
-	return observe(in.disposition, reference, physical, output, staged)
+	return finishObservation(in.disposition, s.act.SessionHandle, built, physical.FinishedAt), nil
 }
 
 // encodeStep translates the admitted step through the wire protocol,
@@ -328,18 +375,22 @@ func (a *Adapter) encodeStep(s *step, handle string) (protocolCall, error) {
 
 // Reconcile implements contract.Adapter: one bounded, documented
 // authoritative lookup for a model step whose outcome is unknown, keyed by
-// Dispatch.ProviderKey -- the handle the original Invoke reported as
-// Observation.ProviderReference. It never repeats the model step. The
-// lookup can only confirm that the step completed; it cannot prove
-// non-execution, so anything short of positive evidence leaves the outcome
-// unknown.
+// Dispatch.ProviderKey -- the session handle the original model_step
+// Invoke reported as Observation.ProviderReference. It never repeats the
+// model step. prepare_session has no documented authoritative lookup
+// (admitStep refuses it before any call); this method only ever resolves a
+// model_step. The lookup can only confirm that the step completed; it
+// cannot prove non-execution, so anything short of positive evidence
+// leaves the outcome unknown, and a lookup that finds output but no usage
+// never invents the missing usage -- the admitted worst case stays
+// outstanding.
 func (a *Adapter) Reconcile(ctx context.Context, dispatch contract.Dispatch) (contract.Observation, error) {
 	s, err := a.admitStep(ctx, dispatch, true)
 	if err != nil {
 		return contract.Observation{}, err
 	}
 	if dispatch.ProviderKey == "" {
-		return contract.Observation{}, prerequisiteMissing("reconciliation requires dispatch provider_key, the handle the original attempt reported as its provider reference; the outcome remains unknown")
+		return contract.Observation{}, prerequisiteMissing("reconciliation requires dispatch provider_key, the session handle the original attempt reported as its provider reference; the outcome remains unknown")
 	}
 	callCtx, cancel, err := a.callContext(ctx, dispatch.Deadline)
 	if err != nil {
@@ -356,8 +407,9 @@ func (a *Adapter) Reconcile(ctx context.Context, dispatch contract.Dispatch) (co
 		return contract.Observation{}, err
 	}
 	staged := po.staged()
-	physical, output := a.baseEvidence(dispatch, po)
-	in := interpretation{secret: s.secret, bounds: s.bounds, inputBound: s.bound, classification: s.doc.Classification, stageErr: po.stageErr, reconcile: true}
+	physical := a.basePhysicalEvidence(dispatch, po)
+	output := baseModelOutput(po)
+	in := interpretation{secret: s.secret, bounds: s.bounds, inputBound: s.bound, classification: s.classification, stageErr: po.stageErr, reconcile: true}
 	if reason, message := po.failure(); reason != "" {
 		if po.doErr != nil {
 			physical.RequestSent, _, _ = classifyNetworkError(po.doErr)
@@ -375,7 +427,11 @@ func (a *Adapter) Reconcile(ctx context.Context, dispatch contract.Dispatch) (co
 		result, decodeErr := a.protocol.decodeReconcile(po.status, po.header, po.body)
 		staged = in.interpret(ctx, a, po.status, result, decodeErr, &physical, &output, staged)
 	}
-	return observe(in.disposition, dispatch.ProviderKey, physical, output, staged)
+	built, err := buildModelStepEvidence(dispatch.ProviderKey, physical, output, staged)
+	if err != nil {
+		return contract.Observation{}, err
+	}
+	return finishObservation(in.disposition, dispatch.ProviderKey, built, physical.FinishedAt), nil
 }
 
 // physicalOutcome is what one physical call produced: the staged request
@@ -431,7 +487,7 @@ func (a *Adapter) physical(ctx, callCtx context.Context, call protocolCall, s *s
 	if !a.profile.permitsDestination(call.Destination) {
 		return nil, permissionDenied("wire protocol destination %q is not within enforcement.provider_destinations; declare the origin or that exact resource", redactURL(call.Destination))
 	}
-	stagedRequest, requestContext, err := stageRequestContext(ctx, a.deps.Blobs, s.secret, call, s.doc.Classification)
+	stagedRequest, requestContext, err := stageRequestContext(ctx, a.deps.Blobs, s.secret, call, s.classification)
 	if err != nil {
 		return nil, err
 	}
@@ -483,7 +539,7 @@ func (a *Adapter) physical(ctx, callCtx context.Context, call protocolCall, s *s
 		if mediaType == "" || len(mediaType) > 256 {
 			mediaType = "application/octet-stream"
 		}
-		stagedBody, err := stageBytes(ctx, a.deps.Blobs, scrubSecretBytes(s.secret, body), mediaType, s.doc.Classification, "provider_response")
+		stagedBody, err := stageBytes(ctx, a.deps.Blobs, scrubSecretBytes(s.secret, body), mediaType, s.classification, "provider_response")
 		if err != nil {
 			po.stageErr = err
 		} else {
@@ -493,9 +549,10 @@ func (a *Adapter) physical(ctx, callCtx context.Context, call protocolCall, s *s
 	return po, nil
 }
 
-// baseEvidence starts the physical-call evidence and model output for the
-// call po, before its outcome is classified.
-func (a *Adapter) baseEvidence(dispatch contract.Dispatch, po *physicalOutcome) (wirePhysicalCallEvidence, wireModelOutput) {
+// basePhysicalEvidence starts the physical-call evidence for the call po,
+// before its outcome is classified. Shared by prepare_session, model_step
+// and Reconcile.
+func (a *Adapter) basePhysicalEvidence(dispatch contract.Dispatch, po *physicalOutcome) wirePhysicalCallEvidence {
 	physical := wirePhysicalCallEvidence{
 		OperationID:          dispatch.OperationID,
 		AttemptID:            dispatch.AttemptID,
@@ -512,43 +569,32 @@ func (a *Adapter) baseEvidence(dispatch contract.Dispatch, po *physicalOutcome) 
 	if po.doErr == nil {
 		physical.HTTPStatus = int64(po.status)
 	}
-	output := wireModelOutput{
+	return physical
+}
+
+// baseModelOutput starts the model output for the call po, before its
+// outcome is classified. Only a model_step (Invoke or Reconcile) has one:
+// prepare_session mints no model output.
+func baseModelOutput(po *physicalOutcome) wireModelOutput {
+	return wireModelOutput{
 		Schema:         "zatiti.model-output/v1",
 		RequestContext: po.requestContext,
 		FinishReason:   finishUnknown,
 	}
-	return physical, output
-}
-
-// notSent reports a model step that was never dispatched because its
-// preparatory call failed: the model step's own physical call did not
-// happen, so request_sent is "no" and nothing was billed. The preparatory
-// call's evidence (its staged request record and response) is retained.
-func (a *Adapter) notSent(dispatch contract.Dispatch, s *step, po *physicalOutcome, staged []wireStagedOutput, code, message string) (contract.Observation, error) {
-	physical, output := a.baseEvidence(dispatch, po)
-	physical.RequestSent = "no"
-	physical.Confirmation = "authoritative_nonexecution"
-	physical.ErrorCode = sanitizeText(s.secret, code, maxErrorCodeChars)
-	physical.ErrorMessage = sanitizeText(s.secret, message, maxMessageChars)
-	output.Usage = a.profile.usageFor(usageInput{Bounds: s.bounds, Sent: false})
-	return observe(contract.DispositionNotSent, "", physical, output, staged)
 }
 
 // now reads the injected clock in UTC, the only zone the frozen UTC
 // timestamp format admits.
 func (a *Adapter) now() time.Time { return a.deps.Clock.Now().UTC() }
 
-// observe assembles the Observation for one attempted physical call.
-// Observation.Usage carries the accounting Usage the controller validates
-// against $defs/Usage; the full ProviderUsage lives in the evidence.
-func observe(disposition, reference string, physical wirePhysicalCallEvidence, output wireModelOutput, staged []wireStagedOutput) (contract.Observation, error) {
-	built, err := buildEvidence(physical, output, staged)
-	if err != nil {
-		return contract.Observation{}, err
-	}
+// finishObservation assembles the Observation for one attempted physical
+// call from its already-marshaled evidence and usage. Observation.Usage
+// carries the accounting Usage the controller validates against
+// $defs/Usage; the full ProviderUsage lives in the evidence.
+func finishObservation(disposition, reference string, built builtEvidence, finishedAt time.Time) contract.Observation {
 	var confirmedAt *time.Time
 	if disposition == contract.DispositionSucceeded || disposition == contract.DispositionFailed {
-		t := physical.FinishedAt
+		t := finishedAt
 		confirmedAt = &t
 	}
 	return contract.Observation{
@@ -557,7 +603,7 @@ func observe(disposition, reference string, physical wirePhysicalCallEvidence, o
 		Evidence:          built.doc,
 		Usage:             built.usage,
 		ConfirmedAt:       confirmedAt,
-	}, nil
+	}
 }
 
 // resolveCredential resolves dispatch.CredentialRef to secret bytes outside

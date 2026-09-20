@@ -168,6 +168,62 @@ func (in *interpretation) interpret(ctx context.Context, a *Adapter, status int,
 	return staged
 }
 
+// interpretPrepareSession classifies one prepare_session physical outcome
+// and reports its disposition and, only on authoritative success, the
+// minted session handle. It never charges anything: session creation is
+// never billed by the pinned protocol (PROTOCOL.md's accounting section),
+// which the caller (invokePrepareSession) accounts for, not this function.
+//
+// A prepare_session whose response is lost stays unknown, exactly like a
+// model_step: "the caller must not create a second session on an
+// unconfirmed prepare_session outcome" (AGENTS.md, P00-009). Status
+// classification mirors interpretation.interpret: a decoded 2xx can
+// succeed, a 5xx or an undecodable 2xx body cannot rule out that the
+// provider created the session and stays unknown, and any other status is
+// this attempt's authoritative failure.
+func interpretPrepareSession(protocol wireProtocol, secret []byte, po *physicalOutcome, physical *wirePhysicalCallEvidence) (disposition, handle string) {
+	if reason, message := po.failure(); reason != "" {
+		if po.doErr != nil {
+			var confirmation string
+			physical.RequestSent, disposition, confirmation = classifyNetworkError(po.doErr)
+			physical.Confirmation = confirmation
+			physical.ErrorCode = "transport_error"
+		} else {
+			disposition = contract.DispositionUnknown
+			physical.Confirmation = "unknown"
+			physical.ErrorCode = sanitizeText(secret, reason, maxErrorCodeChars)
+		}
+		physical.ErrorMessage = sanitizeText(secret, message, maxMessageChars)
+		return disposition, ""
+	}
+
+	is2xx := po.status >= 200 && po.status < 300
+	h, decodeErr := protocol.decodePrepare(po.status, po.header, po.body)
+	switch {
+	case decodeErr == nil && is2xx:
+		physical.Confirmation = "authoritative_success"
+		return contract.DispositionSucceeded, sanitizeText(secret, h, maxReferenceChars)
+	case is2xx:
+		// A 2xx status this protocol cannot decode into a handle: bytes
+		// left and the provider reported success, so the session may
+		// exist even though its reply cannot be trusted as the handle.
+		physical.Confirmation = "unknown"
+		physical.ErrorCode = "response_undecodable"
+		physical.ErrorMessage = sanitizeText(secret, decodeErr.Error(), maxMessageChars)
+		return contract.DispositionUnknown, ""
+	case po.status >= 500:
+		physical.Confirmation = "unknown"
+		physical.ErrorCode = fmt.Sprintf("http_%d", po.status)
+		physical.ErrorMessage = sanitizeText(secret, decodeErr.Error(), maxMessageChars)
+		return contract.DispositionUnknown, ""
+	default:
+		physical.Confirmation = "authoritative_failure"
+		physical.ErrorCode = fmt.Sprintf("http_%d", po.status)
+		physical.ErrorMessage = sanitizeText(secret, decodeErr.Error(), maxMessageChars)
+		return contract.DispositionFailed, ""
+	}
+}
+
 // validateResult checks a decoded result against the bounds of the frozen
 // evidence schema. A result outside them cannot be recorded faithfully, so
 // it is treated as undecodable rather than truncated into something the

@@ -36,13 +36,21 @@ const openaiCompletedBody = `{"id":"resp_001","object":"response","created_at":1
 "output":[{"type":"reasoning","id":"rs_1","summary":[]},{"type":"message","id":"msg_1","role":"assistant","status":"completed","content":[{"type":"output_text","text":"A cited brief.","annotations":[],"logprobs":[]},{"type":"output_text","text":"A second part.","annotations":[],"logprobs":[]}]}],
 "usage":{"input_tokens":120,"input_tokens_details":{"cached_tokens":0,"cache_write_tokens":0},"output_tokens":3,"output_tokens_details":{"reasoning_tokens":1},"total_tokens":123}}`
 
-// openaiHarness builds the qualified adapter over the real protocol with
-// a transport that answers the conversations and responses resources.
-func openaiHarness(t *testing.T, conversationStatus int, conversationBody string, stepStatus int, stepBody string, opts ...harnessOption) *harness {
+// openaiHarness builds the qualified adapter over the real protocol with a
+// transport that answers the conversations resource with a fixed
+// successful conversation and the responses resource with stepStatus/
+// stepBody, then bootstraps h.dispatch to a model_step action naming the
+// handle a prepare_session Invoke against that same conversations resource
+// actually minted -- exactly as the controller would dispatch the two
+// separately admitted effects revision 3 splits (P00-009). That bootstrap
+// Invoke is request 0 on h.transport; a test's own Invoke/Reconcile call is
+// request 1 (or later), preserving every existing h.transport.requests[0]/
+// [1] assumption below.
+func openaiHarness(t *testing.T, stepStatus int, stepBody string, opts ...harnessOption) *harness {
 	t.Helper()
 	fn := func(r *http.Request) (*http.Response, error) {
 		if r.URL.String() == openaiConversations {
-			return respond(conversationStatus, conversationBody)(r)
+			return respond(200, openaiConversationBody)(r)
 		}
 		return respond(stepStatus, stepBody)(r)
 	}
@@ -56,6 +64,13 @@ func openaiHarness(t *testing.T, conversationStatus int, conversationBody string
 		t.Fatalf("New: %v", err)
 	}
 	h.adapter = a.(*Adapter)
+
+	prep, err := h.adapter.Invoke(context.Background(), testDispatch(t, defaultPrepareSessionAction()))
+	if err != nil || prep.Disposition != contract.DispositionSucceeded {
+		t.Fatalf("prepare_session bootstrap: %v / %+v", err, prep)
+	}
+	h.action.SessionHandle = prep.ProviderReference
+	h.dispatch = testDispatch(t, h.action)
 	return h
 }
 
@@ -105,7 +120,7 @@ func TestOpenAIConversationsURL(t *testing.T) {
 
 func TestOpenAIInvokeSendsTheDocumentedShapes(t *testing.T) {
 	t.Parallel()
-	h := openaiHarness(t, 200, openaiConversationBody, 200, openaiCompletedBody)
+	h := openaiHarness(t, 200, openaiCompletedBody)
 	obs, err := h.adapter.Invoke(context.Background(), h.dispatch)
 	if err != nil {
 		t.Fatalf("Invoke: %v", err)
@@ -123,7 +138,11 @@ func TestOpenAIInvokeSendsTheDocumentedShapes(t *testing.T) {
 	if err := json.Unmarshal(h.transport.bodies[0], &convBody); err != nil {
 		t.Fatalf("conversation body: %v", err)
 	}
-	if convBody["metadata"]["zatiti_operation_id"] != string(h.dispatch.OperationID) || convBody["metadata"]["zatiti_attempt_id"] != string(h.dispatch.AttemptID) {
+	// The prepare_session bootstrap dispatch is a separate admitted effect
+	// from the model_step h.dispatch (revision 3, P00-009): its own
+	// operation/attempt identity is bound in the conversation's metadata,
+	// not the model_step's.
+	if convBody["metadata"]["zatiti_operation_id"] == "" || convBody["metadata"]["zatiti_attempt_id"] == "" {
 		t.Fatalf("conversation metadata = %v", convBody)
 	}
 
@@ -191,10 +210,11 @@ func TestOpenAIContextTranslation(t *testing.T) {
 	blobs := newFakeBlobStore()
 	storeAttachment(blobs)
 	resultDigest := blobs.put([]byte(`{"status":"ok","body":"source text"}`))
+	sourceContextDigest := blobs.put([]byte("prior"))
 	c := defaultContext(t)
 	proposal := wireModelToolProposal{
 		ID: "call_1", Tool: testTool, OperationID: "artifact.read", OperationVersion: 1,
-		Input: json.RawMessage(`{"url":"https://sources.example.test/a"}`), SourceContext: wireArtifactRef{ID: "eeeeeeee-0000-4000-8000-000000000001", Digest: contract.Hash([]byte("prior"))},
+		Input: json.RawMessage(`{"url":"https://sources.example.test/a"}`), SourceContext: wireArtifactRef{ID: "eeeeeeee-0000-4000-8000-000000000001", Digest: sourceContextDigest},
 	}
 	mustJSON := func(v any) json.RawMessage {
 		raw, err := json.Marshal(v)
@@ -255,6 +275,70 @@ func TestOpenAIContextTranslation(t *testing.T) {
 	}
 }
 
+// TestOpenAIContextTranslationCarriesMultipleToolRoundTrips extends fixture
+// coverage (P13 card step 6) to two sequential tool call/result rounds
+// against the same declared tool: each proposal id must stay paired with
+// its own result and the two rounds must never be conflated or reordered,
+// which a translation keyed only by tool name (not call id) could get
+// wrong silently.
+func TestOpenAIContextTranslationCarriesMultipleToolRoundTrips(t *testing.T) {
+	t.Parallel()
+	blobs := newFakeBlobStore()
+	firstResult := blobs.put([]byte(`{"status":"ok","body":"first source"}`))
+	secondResult := blobs.put([]byte(`{"status":"ok","body":"second source"}`))
+	sourceContextDigest := blobs.put([]byte("prior"))
+	mustJSON := func(v any) json.RawMessage {
+		raw, err := json.Marshal(v)
+		if err != nil {
+			t.Fatalf("marshal: %v", err)
+		}
+		return raw
+	}
+	proposal := func(id string) wireModelToolProposal {
+		return wireModelToolProposal{
+			ID: id, Tool: testTool, OperationID: "artifact.read", OperationVersion: 1,
+			Input:         json.RawMessage(`{"url":"https://sources.example.test/` + id + `"}`),
+			SourceContext: wireArtifactRef{ID: "eeeeeeee-0000-4000-8000-000000000001", Digest: sourceContextDigest},
+		}
+	}
+	c := defaultContext(t)
+	c.Messages = append(c.Messages,
+		wireContextMessage{ID: "bbbbbbbb-1111-4000-8000-000000000001", Role: "assistant", Origin: "model_output", SourceArtifacts: []wireArtifactRef{},
+			Parts: []json.RawMessage{mustJSON(wireContextToolCall{Kind: partToolCall, Proposal: proposal("call_1")})}},
+		wireContextMessage{ID: "bbbbbbbb-1111-4000-8000-000000000002", Role: "tool", Origin: "tool_result", SourceArtifacts: []wireArtifactRef{},
+			Parts: []json.RawMessage{mustJSON(wireContextToolResult{Kind: partToolResult, ProposalID: "call_1", OperationID: "ffffffff-0000-4000-8000-000000000001", Status: "completed",
+				Artifact: wireArtifactRef{ID: "ffffffff-0000-4000-8000-000000000002", Digest: firstResult}})}},
+		wireContextMessage{ID: "bbbbbbbb-1111-4000-8000-000000000003", Role: "assistant", Origin: "model_output", SourceArtifacts: []wireArtifactRef{},
+			Parts: []json.RawMessage{mustJSON(wireContextToolCall{Kind: partToolCall, Proposal: proposal("call_2")})}},
+		wireContextMessage{ID: "bbbbbbbb-1111-4000-8000-000000000004", Role: "tool", Origin: "tool_result", SourceArtifacts: []wireArtifactRef{},
+			Parts: []json.RawMessage{mustJSON(wireContextToolResult{Kind: partToolResult, ProposalID: "call_2", OperationID: "ffffffff-0000-4000-8000-000000000001", Status: "completed",
+				Artifact: wireArtifactRef{ID: "ffffffff-0000-4000-8000-000000000003", Digest: secondResult}})}},
+	)
+	act := defaultAction(storeContext(t, blobs, c))
+	profile := &responsesProfile{Classifications: map[string]bool{"internal": true}}
+	doc, err := loadContext(context.Background(), blobs, profile, &act)
+	if err != nil {
+		t.Fatalf("loadContext: %v", err)
+	}
+	items, _, err := openaiItems(doc)
+	if err != nil {
+		t.Fatalf("openaiItems: %v", err)
+	}
+	got, err := json.Marshal(items)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `[{"type":"message","role":"system","content":[{"type":"input_text","text":"You are a careful researcher."}]},` +
+		`{"type":"message","role":"user","content":[{"type":"input_text","text":"Summarize the source."}]},` +
+		`{"type":"function_call","call_id":"call_1","name":"fetch_source","arguments":"{\"url\":\"https://sources.example.test/call_1\"}"},` +
+		`{"type":"function_call_output","call_id":"call_1","output":"{\"status\":\"ok\",\"body\":\"first source\"}"},` +
+		`{"type":"function_call","call_id":"call_2","name":"fetch_source","arguments":"{\"url\":\"https://sources.example.test/call_2\"}"},` +
+		`{"type":"function_call_output","call_id":"call_2","output":"{\"status\":\"ok\",\"body\":\"second source\"}"}]`
+	if string(got) != want {
+		t.Fatalf("multi-turn items =\n%s\nwant\n%s", got, want)
+	}
+}
+
 func TestOpenAIRefusesPartsWithoutADocumentedShape(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -280,11 +364,13 @@ func TestOpenAIRefusesPartsWithoutADocumentedShape(t *testing.T) {
 			} else {
 				opts = append(opts, withAction(func(a *wireResponsesParameters) { a.ContinuationReference = "resp_prev" }))
 			}
-			h := openaiHarness(t, 200, openaiConversationBody, 200, openaiCompletedBody, opts...)
+			h := openaiHarness(t, 200, openaiCompletedBody, opts...)
 			storeAttachment(h.blobs)
 			_, err := h.adapter.Invoke(context.Background(), h.dispatch)
 			f := mustFault(t, err, contract.CodeCapabilityUnsupported)
-			if !strings.Contains(f.Message, tc.want) || h.transport.count() != 0 {
+			// openaiHarness bootstraps with its own prepare_session call
+			// (1); the refused model_step must add no more.
+			if !strings.Contains(f.Message, tc.want) || h.transport.count() != 1 {
 				t.Fatalf("message %q, calls %d", f.Message, h.transport.count())
 			}
 		})
@@ -312,6 +398,14 @@ func TestOpenAIDecodeOutcomes(t *testing.T) {
 			contract.DispositionSucceeded, "length_limit", "", "observed", 3510, 0},
 		{"incomplete by content filter", 200, response("incomplete", `"incomplete_details":{"reason":"content_filter"},`),
 			contract.DispositionSucceeded, "refused", "", "unknown", 0, 0},
+		// The exact proposed runtime stop behavior (P13 card step 6): an
+		// incomplete step for any other documented reason is a completed,
+		// billed step whose proposed disposition is neither success nor
+		// refusal -- "interrupted" -- so the runtime decides whether to
+		// resume, never inferred as either outcome by this adapter.
+		{"incomplete for an undocumented-here reason stops as interrupted, not refused or failed", 200,
+			response("incomplete", `"incomplete_details":{"reason":"max_messages"},`),
+			contract.DispositionSucceeded, "interrupted", "", "unknown", 0, 0},
 		{"refusal content", 200, `{"id":"resp_r","object":"response","status":"completed","output":[{"type":"message","id":"m","role":"assistant","status":"completed","content":[{"type":"refusal","refusal":"I cannot help with that."}]}]}`,
 			contract.DispositionSucceeded, "refused", "", "unknown", 0, 0},
 		{"function call", 200, `{"id":"resp_f","object":"response","status":"completed","output":[{"type":"function_call","id":"fc_1","call_id":"call_9","name":"fetch_source","arguments":"{\"url\":\"x\"}","status":"completed"}],"usage":{"input_tokens":5,"input_tokens_details":{"cached_tokens":0,"cache_write_tokens":0},"output_tokens":5,"output_tokens_details":{"reasoning_tokens":0},"total_tokens":10}}`,
@@ -336,7 +430,7 @@ func TestOpenAIDecodeOutcomes(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			h := openaiHarness(t, 200, openaiConversationBody, tc.status, tc.body)
+			h := openaiHarness(t, tc.status, tc.body)
 			obs, err := h.adapter.Invoke(context.Background(), h.dispatch)
 			if err != nil {
 				t.Fatalf("Invoke: %v", err)
@@ -361,7 +455,7 @@ func TestOpenAIDecodeOutcomes(t *testing.T) {
 
 func TestOpenAIErrorMessageIsCarriedAndBounded(t *testing.T) {
 	t.Parallel()
-	h := openaiHarness(t, 200, openaiConversationBody, 400, `{"error":{"message":"Invalid value for max_output_tokens","type":"invalid_request_error","param":"max_output_tokens","code":null}}`)
+	h := openaiHarness(t, 400, `{"error":{"message":"Invalid value for max_output_tokens","type":"invalid_request_error","param":"max_output_tokens","code":null}}`)
 	obs, err := h.adapter.Invoke(context.Background(), h.dispatch)
 	if err != nil {
 		t.Fatalf("Invoke: %v", err)
@@ -372,31 +466,53 @@ func TestOpenAIErrorMessageIsCarriedAndBounded(t *testing.T) {
 	}
 }
 
-func TestOpenAIConversationFailureLeavesTheStepUnsent(t *testing.T) {
+// TestOpenAIPrepareSessionRejectionIsAuthoritative proves the real OpenAI
+// protocol's prepare_session error text is honestly surfaced through the
+// split: a rejected or undecodable conversation-create response is now the
+// prepare_session action's OWN disposition (revision 3, P00-009), not the
+// old "the model step was never sent" framing -- there is no model step in
+// play at all here, since prepare_session and model_step are separate
+// dispatches.
+func TestOpenAIPrepareSessionRejectionIsAuthoritative(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
-		name   string
-		status int
-		body   string
-		want   string
+		name        string
+		status      int
+		body        string
+		disposition string
+		confirm     string
+		code        string
+		want        string
 	}{
-		{"unauthorized", 401, `{"error":{"message":"Incorrect API key","type":"invalid_request_error","param":null,"code":"invalid_api_key"}}`, "invalid_request_error/invalid_api_key: Incorrect API key"},
-		{"not a conversation", 200, `{"id":"resp_1","object":"response"}`, "not a conversation object"},
-		{"unsafe id", 200, `{"id":"../etc","object":"conversation"}`, "not a conversation object"},
+		{"unauthorized", 401, `{"error":{"message":"Incorrect API key","type":"invalid_request_error","param":null,"code":"invalid_api_key"}}`,
+			contract.DispositionFailed, "authoritative_failure", "http_401", "invalid_request_error/invalid_api_key: Incorrect API key"},
+		{"not a conversation", 200, `{"id":"resp_1","object":"response"}`,
+			contract.DispositionUnknown, "unknown", "response_undecodable", "not a conversation object"},
+		{"unsafe id", 200, `{"id":"../etc","object":"conversation"}`,
+			contract.DispositionUnknown, "unknown", "response_undecodable", "not a conversation object"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			h := openaiHarness(t, tc.status, tc.body, 200, openaiCompletedBody)
-			obs, err := h.adapter.Invoke(context.Background(), h.dispatch)
+			h := newHarness(t, respond(tc.status, tc.body), withProfile(openaiProfile))
+			deps := contract.AdapterDependencies{HTTP: &http.Client{Transport: h.transport}, Secrets: h.secrets, Clock: newFakeClock(), Blobs: h.blobs}
+			a, err := New(deps, bindProfile(t, h.profile))
+			if err != nil {
+				t.Fatalf("New: %v", err)
+			}
+			obs, err := a.Invoke(context.Background(), testDispatch(t, defaultPrepareSessionAction()))
 			if err != nil {
 				t.Fatalf("Invoke: %v", err)
 			}
-			if h.transport.count() != 1 || obs.Disposition != contract.DispositionNotSent {
-				t.Fatalf("calls %d, disposition %q", h.transport.count(), obs.Disposition)
+			if h.transport.count() != 1 || obs.Disposition != tc.disposition || obs.ProviderReference != "" {
+				t.Fatalf("calls %d, disposition %q reference %q", h.transport.count(), obs.Disposition, obs.ProviderReference)
 			}
-			ev := decodeEvidence(t, obs)
-			if ev.PhysicalCall.ErrorCode != "prepare_rejected" || !strings.Contains(ev.PhysicalCall.ErrorMessage, tc.want) {
+			// KNOWN CONTRACT GAP (see PROTOCOL.md, and the P13 PR): a
+			// handle-less prepare_session evidence cannot satisfy the
+			// frozen ResponsesEvidence.session_handle's minLength 1, so
+			// this decodes without schema validation.
+			ev := decodePrepareSessionEvidenceLenient(t, obs)
+			if ev.PhysicalCall.Confirmation != tc.confirm || ev.PhysicalCall.ErrorCode != tc.code || !strings.Contains(ev.PhysicalCall.ErrorMessage, tc.want) {
 				t.Fatalf("physical = %+v", ev.PhysicalCall)
 			}
 		})
@@ -426,16 +542,18 @@ func TestOpenAIReconcile(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			h := openaiHarness(t, 200, openaiConversationBody, tc.status, tc.body)
+			h := openaiHarness(t, tc.status, tc.body)
 			h.dispatch.ProviderKey = "conv_abc123"
 			obs, err := h.adapter.Reconcile(context.Background(), h.dispatch)
 			if err != nil {
 				t.Fatalf("Reconcile: %v", err)
 			}
-			if h.transport.count() != 1 {
+			// openaiHarness bootstraps with its own prepare_session call
+			// (request 0); the lookup is request 1.
+			if h.transport.count() != 2 {
 				t.Fatalf("physical calls = %d", h.transport.count())
 			}
-			req := h.transport.requests[0]
+			req := h.transport.requests[1]
 			if req.Method != http.MethodGet || req.URL.String() != openaiConversations+"/conv_abc123/items?limit=100&order=asc" || req.Header.Get("Authorization") != "Bearer "+testToken {
 				t.Fatalf("lookup = %s %s", req.Method, req.URL)
 			}
@@ -454,11 +572,11 @@ func TestOpenAIReconcile(t *testing.T) {
 
 	t.Run("unsafe provider key", func(t *testing.T) {
 		t.Parallel()
-		h := openaiHarness(t, 200, openaiConversationBody, 200, itemsWithOutput)
+		h := openaiHarness(t, 200, itemsWithOutput)
 		h.dispatch.ProviderKey = "conv/../items"
 		_, err := h.adapter.Reconcile(context.Background(), h.dispatch)
 		assertFault(t, err, contract.CodeInvalidInput)
-		if h.transport.count() != 0 {
+		if h.transport.count() != 1 {
 			t.Fatalf("calls = %d", h.transport.count())
 		}
 	})
@@ -471,14 +589,17 @@ func TestOpenAIInputBoundIsAQualificationClaim(t *testing.T) {
 	t.Parallel()
 	unqualified := func(p *wireResponsesProfile) { p.CapabilityEvidence.Capabilities = []string{} }
 
-	h := openaiHarness(t, 200, openaiConversationBody, 200, openaiCompletedBody, withProfile(unqualified))
+	h := openaiHarness(t, 200, openaiCompletedBody, withProfile(unqualified))
 	_, err := h.adapter.Invoke(context.Background(), h.dispatch)
 	f := mustFault(t, err, contract.CodeCapabilityUnsupported)
-	if !strings.Contains(f.Message, "cannot bound billed input tokens") || h.transport.count() != 0 {
+	// prepare_session does not depend on the input-token-bound
+	// capability, so openaiHarness's own bootstrap call succeeds
+	// (request 0); the refused model_step must add no more.
+	if !strings.Contains(f.Message, "cannot bound billed input tokens") || h.transport.count() != 1 {
 		t.Fatalf("message %q, calls %d", f.Message, h.transport.count())
 	}
 
-	advisory := openaiHarness(t, 200, openaiConversationBody, 200, openaiCompletedBody, withProfile(unqualified),
+	advisory := openaiHarness(t, 200, openaiCompletedBody, withProfile(unqualified),
 		withProfile(func(p *wireResponsesProfile) { p.Enforcement.Cost = enforcementAdvisory }))
 	obs, err := advisory.adapter.Invoke(context.Background(), advisory.dispatch)
 	if err != nil {

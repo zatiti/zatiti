@@ -137,6 +137,62 @@ func TestInvokeRefusesUntrustworthyContextBytes(t *testing.T) {
 		_, err := h.adapter.Invoke(context.Background(), h.dispatch)
 		assertFault(t, err, contract.CodePrerequisiteMissing)
 	})
+
+	// A tool_call's ModelToolProposal.source_context is a provenance
+	// claim (which earlier context this proposal was made under). P13
+	// card step 1: runtime-created actions/context are validated against
+	// the real adapter without a schema bypass, so a proposal whose claim
+	// cannot be honestly verified must fail like any other referenced
+	// artifact, never pass through unchecked.
+	t.Run("tool proposal source_context is malformed", func(t *testing.T) {
+		t.Parallel()
+		proposal := wireModelToolProposal{
+			ID: "call-9", Tool: testTool, OperationID: "artifact.read", OperationVersion: 1,
+			Input: json.RawMessage(`{}`),
+			// Not 64 lowercase hex characters: fails the frozen Digest
+			// schema pattern before loadContext ever runs.
+			SourceContext: wireArtifactRef{ID: "eeeeeeee-0000-4000-8000-000000000099", Digest: "not-a-real-digest"},
+		}
+		raw, err := json.Marshal(wireContextToolCall{Kind: partToolCall, Proposal: proposal})
+		if err != nil {
+			t.Fatalf("marshal tool_call part: %v", err)
+		}
+		h := newHarness(t, respond(200, `{}`), withContext(func(c *wireContextArtifact) {
+			c.Messages[1].Parts = append(c.Messages[1].Parts, raw)
+		}))
+		_, err = h.adapter.Invoke(context.Background(), h.dispatch)
+		f := mustFault(t, err, contract.CodeInvalidInput)
+		if !strings.Contains(f.Message, "zatiti.context/v1") {
+			t.Fatalf("message = %q", f.Message)
+		}
+		if h.transport.count() != 0 {
+			t.Fatalf("calls = %d", h.transport.count())
+		}
+	})
+
+	t.Run("tool proposal source_context is foreign", func(t *testing.T) {
+		t.Parallel()
+		proposal := wireModelToolProposal{
+			ID: "call-9", Tool: testTool, OperationID: "artifact.read", OperationVersion: 1,
+			Input: json.RawMessage(`{}`),
+			// Structurally a valid digest, but this installation's blob
+			// store never staged or published anything under it: an
+			// unverifiable claim of provenance, never fabricated trust.
+			SourceContext: wireArtifactRef{ID: "eeeeeeee-0000-4000-8000-000000000099", Digest: contract.Hash([]byte("never stored source context"))},
+		}
+		raw, err := json.Marshal(wireContextToolCall{Kind: partToolCall, Proposal: proposal})
+		if err != nil {
+			t.Fatalf("marshal tool_call part: %v", err)
+		}
+		h := newHarness(t, respond(200, `{}`), withContext(func(c *wireContextArtifact) {
+			c.Messages[1].Parts = append(c.Messages[1].Parts, raw)
+		}))
+		_, err = h.adapter.Invoke(context.Background(), h.dispatch)
+		assertFault(t, err, contract.CodeArtifactFault)
+		if h.transport.count() != 0 {
+			t.Fatalf("calls = %d", h.transport.count())
+		}
+	})
 }
 
 func TestLoadContextDecodesEveryPartInOrderAndRaisesClassification(t *testing.T) {
@@ -144,10 +200,11 @@ func TestLoadContextDecodesEveryPartInOrderAndRaisesClassification(t *testing.T)
 	blobs := newFakeBlobStore()
 	storeAttachment(blobs)
 	resultDigest := blobs.put([]byte(`{"status":"ok"}`))
+	sourceContextDigest := blobs.put([]byte("prior"))
 	c := defaultContext(t)
 	proposal := wireModelToolProposal{
 		ID: "call-1", Tool: testTool, OperationID: "artifact.read", OperationVersion: 1,
-		Input: json.RawMessage(`{"q":"x"}`), SourceContext: wireArtifactRef{ID: "eeeeeeee-0000-4000-8000-000000000001", Digest: contract.Hash([]byte("prior"))},
+		Input: json.RawMessage(`{"q":"x"}`), SourceContext: wireArtifactRef{ID: "eeeeeeee-0000-4000-8000-000000000001", Digest: sourceContextDigest},
 	}
 	mustJSON := func(v any) json.RawMessage {
 		raw, err := json.Marshal(v)
@@ -190,7 +247,12 @@ func TestLoadContextDecodesEveryPartInOrderAndRaisesClassification(t *testing.T)
 	if doc.Classification != "restricted" {
 		t.Fatalf("classification = %q, want restricted", doc.Classification)
 	}
-	// Referenced bytes are loaded and verified for artifact and tool_result parts only.
+	// Referenced bytes are retained in part.Bytes for artifact and
+	// tool_result parts only. A tool_call's source_context is verified
+	// (readArtifact must resolve it, or loadContext fails -- see the
+	// "foreign source_context" test) but its bytes are not re-disclosed,
+	// so parts[2].Bytes stays nil like the parts with no referenced
+	// artifact at all.
 	if string(parts[1].Bytes) != attachmentBytes || string(parts[3].Bytes) != `{"status":"ok"}` || parts[0].Bytes != nil || parts[2].Bytes != nil || parts[4].Bytes != nil {
 		t.Fatalf("part bytes = %q / %q", parts[1].Bytes, parts[3].Bytes)
 	}
