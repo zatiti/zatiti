@@ -172,7 +172,7 @@ func TestEvidenceRecordRejectsUndeclaredOutputName(t *testing.T) {
 		"task_id": id, "attempt_id": env.ids.New(), "expected_version": int64(v),
 		"acceptance_digest": row.AcceptanceDigest, "verification_artifact": verifier,
 		"output_bindings": []wireOutputBinding{{Name: "not-declared.bin", Artifact: other}},
-		"verdict":          verdictPassed,
+		"verdict":         verdictPassed,
 	}, contract.CodeInvalidInput)
 }
 
@@ -241,6 +241,6 @@ func TestEvidenceRecordRejectsUnresolvableBinding(t *testing.T) {
 		"task_id": id, "attempt_id": env.ids.New(), "expected_version": int64(v),
 		"acceptance_digest": row.AcceptanceDigest, "verification_artifact": verifier,
 		"output_bindings": []wireOutputBinding{{Name: "report.bin", Artifact: unresolvable}},
-		"verdict":          verdictPassed,
+		"verdict":         verdictPassed,
 	}, contract.CodeArtifactFault)
 }
