@@ -1457,6 +1457,41 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   into their initial dispatch brief (report ready, wait for the lead to
   clear by name -- no self-checking the lease in a loop). P37's PR stays
   uncommitted/held until all four land.
+- 2026-09-20 12:21-13:00 PT -- MACHINE REBOOTED overnight (confirmed via
+  `uptime`), killing the previous session and all 9 in-flight subagents
+  (P03/P05/P06/P07/P09/P10/P11/P13/P37) around 2026-09-19 ~20:00 PT --
+  ~16.5 hours of downtime before the reboot, then resumed. No work was
+  lost: every worktree's uncommitted changes survived on disk, and all 9
+  refs/claims/* locks were still held on origin. SSH auth to GitHub broke
+  (ssh-agent had no identities post-reboot); fixed with `gh auth
+  setup-git`. David's 12-hour autonomous-work window (started ~17:15 PT
+  2026-09-19) had expired ~7.5 hours earlier; checked in and got explicit
+  confirmation to keep driving, plus the P37/P09 sequencing decision below.
+  Landing from here is done directly by the lead (no subagents -- they
+  were all lost in the reboot, and doing it directly is if anything safer,
+  fully serialized by construction).
+  Refined finding on the P37/P09 question: P09 (internal/artifacts) embeds
+  the Artifact/Operation shared types directly, so it is STRUCTURALLY
+  blocked from landing until P37's catalog fix is in -- there is no order
+  that avoids this (unlike P08, which doesn't reference those types at
+  all and was landing-order-independent). Given this, David decided: land
+  P37 now, extend expected-red.txt to cover the newly-exposed packages,
+  then land P06/P07/P09/P10 (and now also P03, since landing P37 revealed
+  `_identity.activate` has the same shared-defs mismatch) as fast as
+  possible to shrink the allowlist back down.
+  P37 LANDED (PR #7, 62aa5c3): catalog.json now 201 operations at the
+  correct revision-3 $defs shapes. expected-red.txt extended with cmd/
+  zatiti, internal/application, tests/integration, tests/qualification
+  (comment explains why, references this entry).
+  P09 LANDED (PR #8, 720cbed): rebased onto post-P37 main, reverified,
+  all pre-commit failures traced only to the already-tracked
+  `_identity.activate` issue -- nothing new. internal/artifacts is not
+  itself on expected-red.txt (never was).
+  P10 landing now: hit a real merge conflict in expected-red.txt during
+  rebase (its own pre-reboot removal of `internal/messaging` vs. P37's
+  removal of `internal/registry` from the same list position) -- resolved
+  by dropping both lines (both are now correctly fixed), not by picking
+  one side blindly.
 
 ## Planned
 
