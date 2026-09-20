@@ -40,6 +40,7 @@ type harness struct {
 	cancel      context.CancelFunc
 	serverConn  net.Conn
 	clientConn  net.Conn
+	closeOnce   sync.Once
 }
 
 func newHarness(t *testing.T, op contract.Operator, descriptors []contract.Descriptor) *harness {
@@ -73,16 +74,23 @@ func newHarness(t *testing.T, op contract.Operator, descriptors []contract.Descr
 	return h
 }
 
+// close tears the harness down: it is safe to call explicitly (for example,
+// to simulate a client disconnecting mid-test) as well as from t.Cleanup,
+// since closeOnce makes only the first call actually wait on serveErr — a
+// later, Cleanup-driven call is then a no-op instead of blocking for
+// serveErr's 5-second timeout on a channel nothing will ever fill again.
 func (h *harness) close() {
-	_ = h.session.Close()
-	h.cancel()
-	_ = h.serverConn.Close()
-	_ = h.clientConn.Close()
-	select {
-	case <-h.serveErr:
-	case <-time.After(5 * time.Second):
-		h.t.Fatal("mcp.Serve did not return after the session closed and ctx was cancelled")
-	}
+	h.closeOnce.Do(func() {
+		_ = h.session.Close()
+		h.cancel()
+		_ = h.serverConn.Close()
+		_ = h.clientConn.Close()
+		select {
+		case <-h.serveErr:
+		case <-time.After(5 * time.Second):
+			h.t.Fatal("mcp.Serve did not return after the session closed and ctx was cancelled")
+		}
+	})
 }
 
 // syncBuffer is a concurrency-safe io.Writer: the SDK's logger and the
