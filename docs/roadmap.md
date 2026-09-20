@@ -1641,6 +1641,31 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   Restorable-style seam question for P31 that P29 flagged. Both queued
   behind P29, which is committing now (needed a rebase first -- its
   worktree also predated P26/P34).
+- 2026-09-20 14:00-14:23 PT -- P29 LANDED (PR #18, 2a634f6). Restorable
+  interface (embeds contract.Database, satisfied by Open's return value)
+  as a lower-level seam for P31/installation to compose; documented at
+  length in restore.go so P31 doesn't have to re-derive the reasoning.
+  Crash-safe journaled atomic swap with generation fencing, 15 new tests,
+  two real red->green spot checks. Confirmed foundation-tier: no
+  schemaDefs section, nothing to fix there.
+  Landing had a cross-talk episode worth naming: the agent rebased and
+  was waiting out ambient load (24-49, mostly this session's own
+  concurrent verification work) before pushing, exactly per the
+  load-caution lesson -- but the lead had, in parallel, already pulled
+  its rebased commit directly and landed it as PR #18. No harm (the
+  agent's next step would have been a no-op push to an already-merged
+  branch), and the agent correctly flagged afterward that it could not
+  independently re-verify the merge once its worktree was torn down,
+  rather than asserting confirmation it didn't have. Lesson: when the
+  lead takes over a landing mid-flight, message the lane immediately so
+  it doesn't keep polling for a step that's already done.
+  Wrote /sitrep's first report for this effort while P29 was in flight
+  (docs/sitrep/2026-09-20.md) -- caught and fixed a real accuracy issue
+  in the process: internal/memory was still on expected-red.txt despite
+  P26 landing it fully green, the same "forgot to remove own line"
+  category as P03/P05. Fixed before the report went out.
+  P30 cleared next (rebase first, then commit) -- its security fix gets
+  a careful manual diff review before merging, not just a report-trust.
 
 ## Planned
 
