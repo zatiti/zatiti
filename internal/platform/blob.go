@@ -441,6 +441,61 @@ func (bs *blobStore) RemoveStaged(ctx context.Context, ref string) error {
 	return removeFile(filepath.Join(bs.stagedDir, id))
 }
 
+// inventory lists every published (not staged) object by decrypting only
+// each envelope's authenticated header/meta section (constant-size, cheap),
+// never the chunk bodies: full per-chunk integrity is established when the
+// object is actually opened or republished, not here. A corrupt or
+// otherwise unreadable entry is skipped rather than failing the whole
+// listing -- Open/Publish are the authoritative places that surface
+// corruption for a specific object; Inventory is a best-effort enumeration
+// for backup-manifest construction.
+func (bs *blobStore) inventory(ctx context.Context) ([]BlobRecord, error) {
+	if err := bs.closed(); err != nil {
+		return nil, err
+	}
+	shards, err := os.ReadDir(bs.objects)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, errWrap(contractCodeControllerUnavailable, "object store cannot be listed", err)
+	}
+	gcm, err := newCipher(bs.key)
+	if err != nil {
+		return nil, err
+	}
+	var out []BlobRecord
+	for _, shard := range shards {
+		if ctx.Err() != nil {
+			return nil, errWrap(contractCodeControllerUnavailable, "inventory was cancelled", ctx.Err())
+		}
+		if !shard.IsDir() {
+			continue
+		}
+		shardPath := filepath.Join(bs.objects, shard.Name())
+		objs, err := os.ReadDir(shardPath)
+		if err != nil {
+			return nil, errWrap(contractCodeControllerUnavailable, "object shard cannot be listed", err)
+		}
+		for _, obj := range objs {
+			if obj.IsDir() || !validDigest(obj.Name()) {
+				continue
+			}
+			f, err := openPrivate(filepath.Join(shardPath, obj.Name()), os.O_RDONLY, 0)
+			if err != nil {
+				continue
+			}
+			meta, _, verr := readEnvelopeMeta(f, gcm)
+			_ = f.Close()
+			if verr != nil || meta.Digest != obj.Name() {
+				continue
+			}
+			out = append(out, BlobRecord{Digest: contract.Digest(obj.Name()), Size: meta.Size})
+		}
+	}
+	return out, nil
+}
+
 // checkPressure refuses new artifact-producing admissions when free disk
 // space is below the reserve. Fail-closed: an unreadable filesystem is
 // treated as pressure, never as room.

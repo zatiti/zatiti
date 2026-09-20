@@ -29,11 +29,20 @@ func ListenPrivate(path string) (net.Listener, error) {
 		return nil, errf(contractCodeInvalidInput, "socket path is too long")
 	}
 	dir := filepath.Dir(path)
-	// Resolve pre-existing parent symlinks (OS-managed aliases such as
-	// /var) so the strict directory walk below applies to the real location.
-	if resolved, err := filepath.EvalSymlinks(dir); err == nil {
-		dir = resolved
-		path = filepath.Join(dir, filepath.Base(path))
+	// Resolve pre-existing symlinks in dir's ANCESTORS only (OS-managed
+	// aliases such as /var -> /private/var), never dir itself: dir is the
+	// directory that must directly hold the socket, and mkdirPrivate below
+	// enforces the no-symlink property there. Resolving dir itself before
+	// that check would silently follow an attacker-planted (or otherwise
+	// unexpected) symlink at the run directory and defeat the check
+	// entirely -- confirmed by CI run 35473210732, where this call used to
+	// resolve dir unconditionally and TestListenPrivateRefusesSymlinkedRunDirectory
+	// accepted a symlinked run directory on both Linux and macOS.
+	if parent := filepath.Dir(dir); parent != dir {
+		if resolved, err := filepath.EvalSymlinks(parent); err == nil {
+			dir = filepath.Join(resolved, filepath.Base(dir))
+			path = filepath.Join(dir, filepath.Base(path))
+		}
 	}
 	if err := mkdirPrivate(dir); err != nil {
 		return nil, err

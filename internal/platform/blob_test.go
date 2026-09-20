@@ -298,11 +298,20 @@ func TestBlobPublishTamperedStagingRefused(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f, err := os.OpenFile(path, os.O_WRONLY, 0o600)
+	f, err := os.OpenFile(path, os.O_RDWR, 0o600)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.WriteAt([]byte{0xFF}, info.Size()-1); err != nil {
+	// XOR-flip rather than overwrite with a fixed value: the last byte is
+	// part of a GCM authentication tag, effectively random, and a fixed
+	// overwrite has a ~1/256 chance of coincidentally matching the
+	// pre-existing byte and leaving the file genuinely unmodified (see
+	// TestBlobTamperedObjectFailsPublishOverExisting).
+	var cur [1]byte
+	if _, err := f.ReadAt(cur[:], info.Size()-1); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteAt([]byte{cur[0] ^ 0xFF}, info.Size()-1); err != nil {
 		t.Fatal(err)
 	}
 	_ = f.Close()
@@ -423,12 +432,26 @@ func TestBlobTamperedObjectFailsClosed(t *testing.T) {
 	digest := stageAndPublish(t, p, data, 0)
 	objPath := p.blobs.objectPath(digest)
 
+	// tamper XOR-flips the byte at offset rather than overwriting it with a
+	// fixed value: several of these offsets fall inside a random AES-GCM
+	// nonce or ciphertext, where a fixed overwrite value has a small but
+	// real (~1/256) chance of coincidentally matching the pre-existing
+	// byte and leaving the file genuinely unmodified (see
+	// TestBlobTamperedObjectFailsPublishOverExisting for the confirmed
+	// mechanism and empirical reproduction; CI run 35473210732). XOR with
+	// a nonzero mask guarantees an actual change regardless of the
+	// original byte value.
 	tamper := func(offset int64) error {
-		f, err := os.OpenFile(objPath, os.O_WRONLY, 0o600)
+		f, err := os.OpenFile(objPath, os.O_RDWR, 0o600)
 		if err != nil {
 			return err
 		}
-		if _, err := f.WriteAt([]byte{0x5A}, offset); err != nil {
+		var cur [1]byte
+		if _, err := f.ReadAt(cur[:], offset); err != nil {
+			_ = f.Close()
+			return err
+		}
+		if _, err := f.WriteAt([]byte{cur[0] ^ 0xFF}, offset); err != nil {
 			_ = f.Close()
 			return err
 		}
@@ -663,11 +686,30 @@ func TestBlobTamperedObjectFailsPublishOverExisting(t *testing.T) {
 	digest := stageAndPublish(t, p, data, 0)
 	objPath := p.blobs.objectPath(digest)
 
-	f, err := os.OpenFile(objPath, os.O_WRONLY, 0o600)
+	// The byte at this offset falls inside the first chunk's per-object
+	// random AES-GCM nonce (CI run 35473210732: this test previously
+	// overwrote it with the fixed value 0x11, which -- roughly 1 run in
+	// 256, since the nonce byte is uniformly random -- coincidentally
+	// matched the pre-existing byte, making the "tamper" a no-op. Publish
+	// then legitimately accepted genuinely untampered bytes, which from
+	// outside looked exactly like "accepted tampered content" without
+	// actually exercising Publish's tamper-detection path at all. Verified
+	// locally across 3000 runs: false-accepts occurred in precisely the
+	// runs where the pre-existing byte already equaled 0x11 (12/3000,
+	// matching the expected ~11.7 at p=1/256) -- a fixture bug, not an
+	// implementation defect. XOR-flipping the existing byte guarantees an
+	// actual change regardless of its original value, so this reliably
+	// exercises the real rejection path on every run.
+	off := chunksStartOffset() + 5
+	f, err := os.OpenFile(objPath, os.O_RDWR, 0o600)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.WriteAt([]byte{0x11}, chunksStartOffset()+5); err != nil {
+	var cur [1]byte
+	if _, err := f.ReadAt(cur[:], off); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteAt([]byte{cur[0] ^ 0xFF}, off); err != nil {
 		t.Fatal(err)
 	}
 	_ = f.Close()
@@ -681,4 +723,9 @@ func TestBlobTamperedObjectFailsPublishOverExisting(t *testing.T) {
 	}
 	err = p.Blobs().Publish(ctx(), ref, digest)
 	wantCode(t, err, contractCodeArtifactFaultAlias)
+	// The tampered object must not have been treated as republished: the
+	// fresh, untampered staging file must still be present, not consumed.
+	if _, serr := os.Stat(objPath); serr != nil {
+		t.Fatalf("existing object vanished after a refused republish: %v", serr)
+	}
 }

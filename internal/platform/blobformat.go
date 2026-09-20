@@ -1,6 +1,7 @@
 package platform
 
 import (
+	"bytes"
 	"crypto/cipher"
 	"crypto/sha256"
 	"encoding/binary"
@@ -166,6 +167,23 @@ func verifyEnvelope(f *os.File, gcm cipher.AEAD) (blobMeta, error) {
 	if err != nil {
 		return blobMeta{}, err
 	}
+	if err := decryptChunksInto(f, gcm, pos, meta, nil); err != nil {
+		return blobMeta{}, err
+	}
+	return meta, nil
+}
+
+// decryptChunksInto decrypts and authenticates every chunk starting at pos,
+// comparing the running plaintext hash and byte count against the
+// authenticated meta. When sink is non-nil, each chunk's verified plaintext
+// is written to it before being wiped -- the sole use is cross-installation
+// blob import (Platform.ImportForeignBlob), which must collect the
+// authenticated plaintext instead of discarding it. Every other caller
+// (Open, Publish, verifyObject via verifyEnvelope) passes a nil sink and
+// gets byte-for-byte the same verification behavior as before this
+// function existed: this is a pure refactor, not a new code path for the
+// ordinary read/publish verification.
+func decryptChunksInto(f *os.File, gcm cipher.AEAD, pos int64, meta blobMeta, sink io.Writer) error {
 	h := sha256.New()
 	var total int64
 	idx := uint64(0)
@@ -177,29 +195,59 @@ func verifyEnvelope(f *os.File, gcm cipher.AEAD) (blobMeta, error) {
 			if n == 0 && errors.Is(err, io.EOF) {
 				break // clean end at a chunk boundary
 			}
-			return blobMeta{}, artifactFault("artifact bytes failed integrity verification")
+			return artifactFault("artifact bytes failed integrity verification")
 		}
 		ctLen := binary.BigEndian.Uint32(lenBuf[:])
 		if ctLen < blobNonceLen+blobTagLen || ctLen > uint32(blobNonceLen+meta.Chunk+blobTagLen) {
-			return blobMeta{}, artifactFault("artifact bytes failed integrity verification")
+			return artifactFault("artifact bytes failed integrity verification")
 		}
 		sealed := make([]byte, ctLen)
 		if _, err := f.ReadAt(sealed, pos+4); err != nil {
-			return blobMeta{}, artifactFault("artifact bytes failed integrity verification")
+			return artifactFault("artifact bytes failed integrity verification")
 		}
 		plain, err := openWith(gcm, sealed, chunkAAD(idx))
 		if err != nil {
-			return blobMeta{}, artifactFault("artifact bytes failed integrity verification")
+			return artifactFault("artifact bytes failed integrity verification")
 		}
 		h.Write(plain)
 		total += int64(len(plain))
+		if sink != nil {
+			if _, werr := sink.Write(plain); werr != nil {
+				zero(plain)
+				return errWrap(contractCodeControllerUnavailable, "artifact bytes cannot be staged", werr)
+			}
+		}
 		zero(plain)
 		pos = pos + 4 + int64(ctLen)
 	}
 	if total != meta.Size || hex.EncodeToString(h.Sum(nil)) != meta.Digest {
-		return blobMeta{}, artifactFault("artifact bytes failed integrity verification")
+		return artifactFault("artifact bytes failed integrity verification")
 	}
-	return meta, nil
+	return nil
+}
+
+// decryptForeignFile fully verifies f (an envelope-formatted file sealed
+// under gcm, a key that need not be this store's own) and returns its
+// authenticated plaintext, bounded by maxBytes. It is verifyEnvelope's
+// plaintext-collecting counterpart, used only by Platform.ImportForeignBlob
+// to recover a cross-installation backup artifact's verified bytes before
+// they are re-staged and re-published under the destination's own key.
+// meta.Size is checked against maxBytes BEFORE any chunk is decrypted, so an
+// oversized (or corrupt-metadata) envelope is refused without allocating a
+// buffer for attacker-influenced content.
+func decryptForeignFile(f *os.File, gcm cipher.AEAD, maxBytes int64) ([]byte, blobMeta, error) {
+	meta, pos, err := readEnvelopeMeta(f, gcm)
+	if err != nil {
+		return nil, blobMeta{}, err
+	}
+	if meta.Size < 0 || meta.Size > maxBytes {
+		return nil, blobMeta{}, artifactFault("artifact exceeds the configured size limit")
+	}
+	buf := bytes.NewBuffer(make([]byte, 0, meta.Size))
+	if err := decryptChunksInto(f, gcm, pos, meta, buf); err != nil {
+		return nil, blobMeta{}, err
+	}
+	return buf.Bytes(), meta, nil
 }
 
 // readChunkAt returns the decrypted plaintext of chunk idx (1-based).
