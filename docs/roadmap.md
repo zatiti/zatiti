@@ -1366,6 +1366,65 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   its landing commit once its package's tests genuinely go fully green.
   Remaining wave-3 cards not yet dispatched (P06, P07, P12, P26, P29, P30,
   P34) queue for the next free lane slots as these 8 land.
+- 2026-09-19 18:20 PT -- P03 found a real gap in P00's contract freeze and
+  fixed a real pre-existing security bug, correctly declining to invent a
+  seam for the gap. contract-proposals.md section 2 specified
+  `identity.current` (public, principal kind/scope only) and
+  `_identity.worker.resolve` (internal, worker-subject resolution) as
+  operations for P00 to turn into exact schemas -- exactly P03's card steps
+  1-2 -- but neither landed in the frozen output (absent from
+  operations.json, contracts.md, requirements.json,
+  internal/identity/AGENTS.md); confirmed not a doc-prose gap since
+  internal/identity's own TestDescriptorsMatchFrozenCatalog passes today
+  against exactly the pre-existing 18 ops. P03 did not invent them (would
+  break that same parity test and create an uncatalogued CLI/MCP surface)
+  and instead completed everything else the card's required tests actually
+  needed. ACTION NEEDED before P41 (CLI) or P42 (desktop) dispatch: a small
+  P00-revision-4-style contract addendum adding these two operations,
+  through tools/specgen/render.py like P00 did -- NOT done yet, deliberately
+  deferred (see load-incident entry below for why). Also flagged: even once
+  `_identity.worker.resolve` exists in the contract, `contract.WorkerOperator`
+  (P01's revision3.go) is injected only into application/execution's trusted
+  composition, not identity -- so the operation's actual Go implementation
+  may belong outside internal/identity. Left as an open question for
+  whoever picks up the addendum or eventually implements it (likely P14).
+  Separately, P03 found and fixed a real authorization bug while
+  implementing revocation-recheck: principal.get/update/revoke,
+  grant.get/update/revoke and credential.provision/revoke checked only the
+  request's own `scope` field against the caller's envelope, never the
+  by-id TARGET's own scope -- letting a narrowly-scoped worker read/revoke
+  the owner's principal or mint the owner a credential by ID. Fixed, proved
+  with a test that fails without the fix (pending landing, see below).
+- 2026-09-19 18:25-18:35 PT -- NEAR-REPEAT of the 2026-09-18 load incident,
+  caught and stopped, root cause found and documented
+  (docs/lore.md, "R-build-lease is advisory only"). Once P37 and P08
+  finished coding and hit the commit-time full-module test, they correctly
+  paused instead of forcing through (load was ~26-66 already from the
+  other 6 lanes' own package-level work) -- but they had no live watcher,
+  so I resumed them (and shortly after P10) with "acquire the lease and
+  proceed regardless of ambient load," reasoning the LEASE (not a load
+  threshold) was the real serialization mechanism. That reasoning had a
+  hole: hooks/pre-commit does not actually check who holds the lease --
+  it's pure convention. P37 (holding the lease correctly) and P10
+  (resumed, did not actually hold it) ended up running two concurrent
+  full-module `go test -p 2 -timeout 30m ./...` runs; P09 nearly became a
+  third before self-aborting on its own initiative. 1-minute load went
+  from ~26 to 150+ in under 10 minutes -- past the 2026-09-18 incident's
+  ~130 failure point. Neither P37's nor P10's commit actually landed
+  (both failed/were interrupted under the spike); no work was lost, both
+  worktrees' changes were intact and recovered. Separately compounding
+  this: several agents, once done coding, stopped their turn claiming to
+  be "waiting for a monitor" with no actual live watcher, and re-polling
+  (when resumed, or via a self-started retry loop) at 30-90s intervals,
+  each poll re-paying 300-400K+ tokens of accumulated context for zero new
+  information -- a real, expensive anti-pattern independent of the load
+  incident itself.
+  Response: stopped all 8 lanes from running `git commit` or any
+  multi-package command until explicitly cleared by name, one at a time --
+  abandoning lease-based self-coordination entirely until the hook is
+  fixed to actually enforce it (tracked as future work, not yet
+  scheduled). Landing the current queue (P37, P10, then P03/P08/P09/P05/
+  P11/P13 in the order they reported ready) fully serialized from here.
 
 ## Planned
 
