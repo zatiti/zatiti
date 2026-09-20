@@ -295,6 +295,7 @@ func TestCancelCompletedRefusesConflict(t *testing.T) {
 	ch := env.challengeOf(env.beginChallenge(conn, methodBrowser).Payload)
 	receipt := mintReceipt(helperReceiptKeyMaterial, helperPayload{
 		ChallengeID: ch.ID, CredentialRef: conn.CredentialRef, AccountIdentity: conn.AccountIdentity,
+		ExpiresAt: ch.ExpiresAt,
 	})
 	env.mustIO("connection.setup.complete", completeInput{
 		Scope: env.scope, ChallengeID: ch.ID, ExpectedVersion: ch.Version, HelperRef: receipt,
@@ -312,6 +313,7 @@ func TestCompleteHappyPathRecordsOpaqueReceipt(t *testing.T) {
 	ch := env.challengeOf(env.beginChallenge(conn, methodBrowser).Payload)
 	receipt := mintReceipt(helperReceiptKeyMaterial, helperPayload{
 		ChallengeID: ch.ID, CredentialRef: conn.CredentialRef, AccountIdentity: conn.AccountIdentity,
+		ExpiresAt: ch.ExpiresAt,
 	})
 
 	run := env.mustIO("connection.setup.complete", completeInput{

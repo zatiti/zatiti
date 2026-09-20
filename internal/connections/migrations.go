@@ -13,8 +13,12 @@ import (
 // only with a new release). connections_connections holds connection
 // definitions applied through the compiler, connections_challenges the typed
 // credential setup challenges, connections_validations the recorded probe
-// observations, and connections_applied_plans the activation replay fence.
-const migrationV1 = `
+// observations, connections_applied_plans the activation replay fence, and
+// connections_pending_probes the callback ownership linking one outstanding
+// connection.validate/connection.rotate job to the connection it probes, so
+// _connections.validation.record can complete the execution-side job when
+// the observation lands.
+const migrationV1Head = `
 CREATE TABLE connections_contracts (
     id          TEXT PRIMARY KEY,
     version     INTEGER NOT NULL CHECK (version >= 1),
@@ -100,37 +104,72 @@ CREATE TABLE connections_applied_plans (
     applied_at  TEXT NOT NULL
 );
 
+CREATE TABLE connections_pending_probes (
+    connection_id TEXT PRIMARY KEY REFERENCES connections_connections(id),
+    job_id        TEXT NOT NULL,
+    job_version   INTEGER NOT NULL CHECK (job_version >= 1),
+    kind          TEXT NOT NULL CHECK (kind IN ('validate', 'rotate')),
+    created_at    TEXT NOT NULL
+);
+`
+
+// migrationV1Tail seeds the built-in trusted adapter contracts: exact
+// executable tool contracts for model calls, public HTTP reads, repository
+// operations (split into a read-only and a mutating tool, since Tool.effect
+// is a single classification) and supported memory reads, using the exact
+// schemas frozen in docs/implementation/adapter-schemas.json (builtin_tools.go).
+// These identities are separate from ExecutionProfile IDs: a Tool contract
+// names an adapter action shape, never a hosted execution profile. Cost
+// bounds and pinned public destinations are placeholders until integration
+// qualification pins real prices and real destinations; they never claim
+// upstream compatibility.
+var migrationV1Tail = `
 INSERT INTO connections_contracts
 	(id, version, name, input_schema, output_schema, effect, destinations_json,
 	 credential_kind, cost_bound_json, timeout_seconds, idempotency,
 	 key_retention_seconds, confirmation, reconciliation, adapter, created_at, updated_at)
 VALUES
-	('0a000000-0000-4000-8000-0000000000c1', 1, 'model-responses',
-	 '{"type":"object","additionalProperties":false,"properties":{},"required":[]}',
-	 '{"type":"object","additionalProperties":false,"properties":{},"required":[]}',
+	('0a000000-0000-4000-8000-0000000000c1', 1, '` + toolNameModelResponses + `',
+	 '` + schemaModelResponsesIn + `',
+	 '` + schemaModelResponsesOut + `',
 	 'disclosure', '["api.openai.com"]', 'api_key',
 	 '{"currency":"USD","micro_units":0}', 600, 'none', 0, 'advisory', 'none',
 	 'zatiti/model-responses/v1', '1970-01-01T00:00:00Z', '1970-01-01T00:00:00Z'),
-	('0a000000-0000-4000-8000-0000000000c2', 1, 'provider-rest-read',
-	 '{"type":"object","additionalProperties":false,"properties":{},"required":[]}',
-	 '{"type":"object","additionalProperties":false,"properties":{},"required":[]}',
+	('0a000000-0000-4000-8000-0000000000c2', 1, '` + toolNameGitHubRead + `',
+	 '` + schemaGitHubReadIn + `',
+	 '` + schemaGitHubEvidenceOut + `',
 	 'external_read', '["api.github.com"]', 'token',
 	 '{"currency":"USD","micro_units":0}', 60, 'authoritative_nonexecution', 0,
 	 'synchronous', 'none', 'zatiti/provider-rest-read/v1',
 	 '1970-01-01T00:00:00Z', '1970-01-01T00:00:00Z'),
-	('0a000000-0000-4000-8000-0000000000c3', 1, 'provider-rest-mutate',
-	 '{"type":"object","additionalProperties":false,"properties":{},"required":[]}',
-	 '{"type":"object","additionalProperties":false,"properties":{},"required":[]}',
+	('0a000000-0000-4000-8000-0000000000c3', 1, '` + toolNameGitHubMutate + `',
+	 '` + schemaGitHubMutateIn + `',
+	 '` + schemaGitHubEvidenceOut + `',
 	 'external_mutation', '["api.github.com"]', 'token',
 	 '{"currency":"USD","micro_units":0}', 60, 'qualified_key', 86400,
 	 'asynchronous', 'attempt-status', 'zatiti/provider-rest-mutate/v1',
+	 '1970-01-01T00:00:00Z', '1970-01-01T00:00:00Z'),
+	('0a000000-0000-4000-8000-0000000000c4', 1, '` + toolNameHTTPPublicRead + `',
+	 '` + schemaHTTPPublicReadIn + `',
+	 '` + schemaHTTPPublicReadOut + `',
+	 'external_read', '["example.com"]', 'none',
+	 '{"currency":"USD","micro_units":0}', 60, 'none', 0,
+	 'synchronous', 'none', 'zatiti/public-http-read/v1',
+	 '1970-01-01T00:00:00Z', '1970-01-01T00:00:00Z'),
+	('0a000000-0000-4000-8000-0000000000c5', 1, '` + toolNameMemoryRead + `',
+	 '` + schemaMemoryReadIn + `',
+	 '` + schemaMemoryReadOut + `',
+	 'external_read', '[]', 'token',
+	 '{"currency":"USD","micro_units":0}', 60, 'none', 0,
+	 'synchronous', 'none', 'zatiti/memory-read/v1',
 	 '1970-01-01T00:00:00Z', '1970-01-01T00:00:00Z');
 `
 
+// migrationV1 is the complete owned migration body: schema plus seed data.
+var migrationV1 = migrationV1Head + migrationV1Tail
+
 // Migrations returns the owned migration set. Bodies are pinned by digest so
-// storage refuses any later byte change. The seeded contracts carry zero cost
-// bounds and pinned public destinations until integration qualification pins
-// real prices; they never claim upstream compatibility.
+// storage refuses any later byte change.
 func connectionsMigrations() []contract.Migration {
 	return []contract.Migration{{
 		Owner:   "connections",

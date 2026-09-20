@@ -32,6 +32,7 @@ func TestZ01CredentialCustody(t *testing.T) {
 	ch := env.challengeOf(run.Payload)
 	receipt := mintReceipt(helperReceiptKeyMaterial, helperPayload{
 		ChallengeID: ch.ID, CredentialRef: conn.CredentialRef, AccountIdentity: conn.AccountIdentity,
+		ExpiresAt: ch.ExpiresAt,
 	})
 	completed := env.mustIO("connection.setup.complete", completeInput{
 		Scope: env.scope, ChallengeID: ch.ID, ExpectedVersion: ch.Version, HelperRef: receipt,
@@ -175,6 +176,7 @@ func TestHelperForgeryRefuses(t *testing.T) {
 	ch := env.challengeOf(env.beginChallenge(conn, methodBrowser).Payload)
 	genuine := mintReceipt(helperReceiptKeyMaterial, helperPayload{
 		ChallengeID: ch.ID, CredentialRef: conn.CredentialRef, AccountIdentity: conn.AccountIdentity,
+		ExpiresAt: ch.ExpiresAt,
 	})
 	env.mustIO("connection.setup.complete", completeInput{
 		Scope: env.scope, ChallengeID: ch.ID, ExpectedVersion: ch.Version, HelperRef: genuine,
@@ -199,31 +201,39 @@ func TestHelperForgeryRefuses(t *testing.T) {
 		{"wrong-signing-key", func(id contract.ID) string {
 			return mintReceipt([]byte("forged-key-material-0000"), helperPayload{
 				ChallengeID: id, CredentialRef: conn.CredentialRef, AccountIdentity: conn.AccountIdentity,
+				ExpiresAt: ch.ExpiresAt,
 			})
 		}, "does not verify"},
 		{"tampered-payload", func(id contract.ID) string {
 			return tampered(mintReceipt(helperReceiptKeyMaterial, helperPayload{
 				ChallengeID: id, CredentialRef: conn.CredentialRef, AccountIdentity: conn.AccountIdentity,
+				ExpiresAt: ch.ExpiresAt,
 			}))
 		}, "does not verify"},
 		{"wrong-challenge-binding", func(contract.ID) string {
 			return mintReceipt(helperReceiptKeyMaterial, helperPayload{
 				ChallengeID: env.ids.New(), CredentialRef: conn.CredentialRef,
-				AccountIdentity: conn.AccountIdentity,
+				AccountIdentity: conn.AccountIdentity, ExpiresAt: ch.ExpiresAt,
 			})
 		}, "is bound to challenge"},
 		{"wrong-account-binding", func(id contract.ID) string {
 			return mintReceipt(helperReceiptKeyMaterial, helperPayload{
 				ChallengeID: id, CredentialRef: conn.CredentialRef,
-				AccountIdentity: "acct-impersonated",
+				AccountIdentity: "acct-impersonated", ExpiresAt: ch.ExpiresAt,
 			})
 		}, "substitution is refused"},
 		{"unheld-credential-reference", func(id contract.ID) string {
 			return mintReceipt(helperReceiptKeyMaterial, helperPayload{
 				ChallengeID: id, CredentialRef: "connections/credentials/ghost",
-				AccountIdentity: conn.AccountIdentity,
+				AccountIdentity: conn.AccountIdentity, ExpiresAt: ch.ExpiresAt,
 			})
 		}, "does not hold"},
+		{"wrong-expiry-binding", func(id contract.ID) string {
+			return mintReceipt(helperReceiptKeyMaterial, helperPayload{
+				ChallengeID: id, CredentialRef: conn.CredentialRef,
+				AccountIdentity: conn.AccountIdentity, ExpiresAt: ch.ExpiresAt.Add(time.Hour),
+			})
+		}, "expiry"},
 	}
 	for _, tc := range variants {
 		t.Run(tc.name, func(t *testing.T) {
@@ -436,4 +446,141 @@ func parseConsent(t *testing.T, consent string) *url.URL {
 		t.Fatalf("consent URL %q does not parse: %v", consent, err)
 	}
 	return parsed
+}
+
+// TestSetupCompleteAppliesVerifiedCredentialReference is the custody-
+// application local property: a genuine receipt naming a credential
+// reference distinct from the connection's current one is applied
+// atomically at Finish — the connection's stored credential_ref moves to
+// the verified reference, its version advances, and it re-enters
+// unverified, all inside the same completion transaction as the challenge's
+// own terminal transition.
+func TestSetupCompleteAppliesVerifiedCredentialReference(t *testing.T) {
+	env := newEnv(t)
+	conn := env.seedConnection(nil)
+	env.secrets.seed(t, conn.CredentialRef, []byte(markedSecret))
+	env.secrets.seed(t, helperReceiptKeyRef, helperReceiptKeyMaterial)
+	rotated := "connections/credentials/" + string(env.ids.New())
+	env.secrets.seed(t, rotated, []byte("rotated-material"))
+
+	ch := env.challengeOf(env.beginChallenge(conn, methodStoreReference).Payload)
+	receipt := mintReceipt(helperReceiptKeyMaterial, helperPayload{
+		ChallengeID: ch.ID, CredentialRef: rotated, AccountIdentity: conn.AccountIdentity,
+		ExpiresAt: ch.ExpiresAt,
+	})
+	env.mustIO("connection.setup.complete", completeInput{
+		Scope: env.scope, ChallengeID: ch.ID, ExpectedVersion: ch.Version, HelperRef: receipt,
+	})
+
+	payload := env.mustOK("connection.get", connGetIn{Scope: env.scope, ID: conn.ID})
+	var out resourceOut
+	env.decode(payload.Data, &out)
+	if out.Resource.CredentialRef != rotated {
+		t.Fatalf("credential_ref after completion = %q, want the verified reference %q",
+			out.Resource.CredentialRef, rotated)
+	}
+	if out.Resource.Version != conn.Version+1 {
+		t.Fatalf("connection version after custody application = %d, want %d", out.Resource.Version, conn.Version+1)
+	}
+	if out.Resource.ValidationState != connStateUnverified {
+		t.Fatalf("connection state after new custody = %q, want unverified", out.Resource.ValidationState)
+	}
+	var applied bool
+	for _, ev := range env.events(0) {
+		if ev.Kind == "connections.connection.credential_applied" {
+			applied = true
+		}
+	}
+	if !applied {
+		t.Fatalf("no connections.connection.credential_applied event among %v", env.kindsOf())
+	}
+}
+
+// TestSetupCompleteRefusesChangedConnection is the changed-connection local
+// property: a connection mutated after setup began — even one whose
+// definition change lands and activates before the challenge completes —
+// refuses completion; the pinned begin-time version is never silently
+// carried forward onto a connection that has since moved.
+func TestSetupCompleteRefusesChangedConnection(t *testing.T) {
+	env := newEnv(t)
+	conn := env.seedConnection(nil)
+	env.secrets.seed(t, conn.CredentialRef, []byte(markedSecret))
+	env.secrets.seed(t, helperReceiptKeyRef, helperReceiptKeyMaterial)
+	ch := env.challengeOf(env.beginChallenge(conn, methodStoreReference).Payload)
+
+	// The connection changes after begin, before complete: destinations move
+	// and the version advances.
+	changed := conn
+	changed.Version = conn.Version + 1
+	changed.Destinations = []string{"api.github.com", "api.newdestination.test"}
+	env.activate(wireChange{
+		Kind: kindConnection, Action: actionUpdate, ID: conn.ID, ExpectedVersion: conn.Version,
+		Definition: mustRaw(changed),
+	})
+
+	receipt := mintReceipt(helperReceiptKeyMaterial, helperPayload{
+		ChallengeID: ch.ID, CredentialRef: conn.CredentialRef, AccountIdentity: conn.AccountIdentity,
+		ExpiresAt: ch.ExpiresAt,
+	})
+	f := env.expectIOFault("connection.setup.complete", completeInput{
+		Scope: env.scope, ChallengeID: ch.ID, ExpectedVersion: ch.Version, HelperRef: receipt,
+	}, contract.CodeStaleVersion)
+	if !strings.Contains(f.Message, "changed") {
+		t.Fatalf("refusal message %q does not name the connection change", f.Message)
+	}
+
+	// The refusal left the connection at the new (changed) definition,
+	// never silently overwritten by the stale completion.
+	payload := env.mustOK("connection.get", connGetIn{Scope: env.scope, ID: conn.ID})
+	var out resourceOut
+	env.decode(payload.Data, &out)
+	if out.Resource.Version != changed.Version {
+		t.Fatalf("connection version after refused stale completion = %d, want %d", out.Resource.Version, changed.Version)
+	}
+}
+
+// TestHelperReceiptReplayRefuses is the replay local property: a genuine
+// receipt that already completed its challenge cannot complete it again —
+// the challenge is terminal, and replay never re-applies the credential or
+// re-emits completion.
+func TestHelperReceiptReplayRefuses(t *testing.T) {
+	env := newEnv(t)
+	conn := env.seedConnection(nil)
+	env.secrets.seed(t, conn.CredentialRef, []byte(markedSecret))
+	env.secrets.seed(t, helperReceiptKeyRef, helperReceiptKeyMaterial)
+	ch := env.challengeOf(env.beginChallenge(conn, methodStoreReference).Payload)
+	receipt := mintReceipt(helperReceiptKeyMaterial, helperPayload{
+		ChallengeID: ch.ID, CredentialRef: conn.CredentialRef, AccountIdentity: conn.AccountIdentity,
+		ExpiresAt: ch.ExpiresAt,
+	})
+	first := env.mustIO("connection.setup.complete", completeInput{
+		Scope: env.scope, ChallengeID: ch.ID, ExpectedVersion: ch.Version, HelperRef: receipt,
+	})
+	done := env.challengeOf(first.Payload)
+
+	completedBefore := 0
+	for _, ev := range env.events(0) {
+		if ev.Kind == "connections.challenge.completed" {
+			completedBefore++
+		}
+	}
+
+	// Replaying the exact same genuine receipt against its own now-terminal
+	// challenge refuses: the challenge is already completed.
+	f := env.expectIOFault("connection.setup.complete", completeInput{
+		Scope: env.scope, ChallengeID: ch.ID, ExpectedVersion: done.Version, HelperRef: receipt,
+	}, contract.CodeConflict)
+	if !strings.Contains(f.Message, "already") {
+		t.Fatalf("replay refusal message %q does not name the terminal state", f.Message)
+	}
+
+	completedAfter := 0
+	for _, ev := range env.events(0) {
+		if ev.Kind == "connections.challenge.completed" {
+			completedAfter++
+		}
+	}
+	if completedAfter != completedBefore {
+		t.Fatalf("replay emitted another completion event: before=%d after=%d", completedBefore, completedAfter)
+	}
 }

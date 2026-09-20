@@ -42,16 +42,20 @@ const helperReceiptKeyRef = "connections/helper/receipt-key"
 type ioPrivate struct {
 	CredentialRef   string         `json:"credential_ref,omitempty"`
 	AccountIdentity string         `json:"account_identity,omitempty"`
+	ExpiresAt       *time.Time     `json:"expires_at,omitempty"`
 	ConsentURL      string         `json:"consent_url,omitempty"`
 	Receipt         *helperPayload `json:"receipt,omitempty"`
 }
 
 // helperPayload is the owner-decoded receipt body. It binds the receipt to
-// one challenge, one credential reference and one account identity.
+// the challenge, the account and the challenge's own expiry, and custodies
+// the real credential reference the helper wrote the verified material
+// under.
 type helperPayload struct {
 	ChallengeID     contract.ID `json:"challenge_id"`
 	CredentialRef   string      `json:"credential_ref"`
 	AccountIdentity string      `json:"account_identity"`
+	ExpiresAt       time.Time   `json:"expires_at"`
 }
 
 // credentialMeta is the owner-decoded subset of stored credential metadata
@@ -351,6 +355,8 @@ func (s *Service) transitionPlan(ctx context.Context, unit contract.Unit, inv co
 	if found {
 		private.CredentialRef = conn.CredentialRef
 		private.AccountIdentity = row.AccountIdentity
+		expires := row.ExpiresAt
+		private.ExpiresAt = &expires
 	}
 	prepared, err := marshalData(ioEnvelope{Resource: row.wireAddr(), XConnections: private})
 	if err != nil {
@@ -504,6 +510,14 @@ func (s *Service) performComplete(ctx context.Context, plan contract.IOPlan) (co
 			"helper receipt reports account %q but the challenge is bound to %q; substitution is refused",
 			payload.AccountIdentity, private.AccountIdentity)}, nil
 	}
+	if private.ExpiresAt == nil {
+		return contract.IOResult{Fault: internalError("complete plan carries no bound challenge expiry")}, nil
+	}
+	if !payload.ExpiresAt.Equal(*private.ExpiresAt) {
+		return contract.IOResult{Fault: verificationFailed(
+			"helper receipt names expiry %s but the challenge expects %s; the receipt is stale or misdirected",
+			formatStamp(payload.ExpiresAt), formatStamp(*private.ExpiresAt))}, nil
+	}
 	if _, gerr := s.secrets.Get(ctx, payload.CredentialRef); gerr != nil {
 		return contract.IOResult{Fault: verificationFailed(
 			"helper receipt names credential reference %s which the store does not hold", payload.CredentialRef)}, nil
@@ -540,7 +554,7 @@ func verifyReceipt(receipt string, key []byte) (*helperPayload, *contract.Fault)
 	if err := json.Unmarshal(payloadBytes, &payload); err != nil {
 		return nil, verificationFailed("helper receipt is malformed")
 	}
-	if payload.ChallengeID == "" || payload.CredentialRef == "" || payload.AccountIdentity == "" {
+	if payload.ChallengeID == "" || payload.CredentialRef == "" || payload.AccountIdentity == "" || payload.ExpiresAt.IsZero() {
 		return nil, verificationFailed("helper receipt is missing its binding fields")
 	}
 	return &payload, nil
@@ -651,9 +665,12 @@ func (s *Service) finishBegin(ctx context.Context, unit contract.Unit, row chall
 	return s.completed(resourceChallengeOut{Resource: updated.wire()})
 }
 
-// finishComplete commits the verified completion. Every binding check ran in
-// Perform; Finish revalidates versions and records the terminal state with
-// the opaque receipt reference.
+// finishComplete commits the verified completion. Every receipt binding
+// check ran in Perform; Finish additionally re-checks the connection itself
+// is unchanged since setup began (revalidatePins alone only round-trips the
+// challenge row's own snapshot, never the live connection), atomically
+// applies the helper's verified credential reference, and records the
+// terminal state with the opaque receipt reference.
 func (s *Service) finishComplete(ctx context.Context, unit contract.Unit, row challengeRow, plan contract.IOPlan, data json.RawMessage) (contract.Payload, error) {
 	in, err := decodeInto[struct {
 		Scope           wireScope   `json:"scope"`
@@ -668,6 +685,21 @@ func (s *Service) finishComplete(ctx context.Context, unit contract.Unit, row ch
 	if private.Receipt == nil {
 		return contract.Payload{}, internalError("completion result carries no verified helper receipt")
 	}
+	live, found, lerr := s.loadConnection(ctx, unit, row.ConnectionID)
+	if lerr != nil {
+		return contract.Payload{}, lerr
+	}
+	if !found {
+		return contract.Payload{}, notFound("connection %s no longer exists", row.ConnectionID)
+	}
+	if pinned, ok := plan.ExpectedVersions[row.ConnectionID]; ok && pinned != contract.Version(live.Version) {
+		return contract.Payload{}, staleVersion(
+			"connection %s changed from version %d to %d since setup began; cancel and begin setup again against the current connection",
+			row.ConnectionID, pinned, live.Version)
+	}
+	if err := s.applyVerifiedCredential(ctx, unit, live, private.Receipt.CredentialRef); err != nil {
+		return contract.Payload{}, err
+	}
 	if err := s.updateChallenge(ctx, unit, row, challengeCompleted, row.ConsentURL, in.HelperRef); err != nil {
 		return contract.Payload{}, err
 	}
@@ -681,4 +713,31 @@ func (s *Service) finishComplete(ctx context.Context, unit contract.Unit, row ch
 		return contract.Payload{}, uerr
 	}
 	return s.completed(resourceChallengeOut{Resource: updated.wire()})
+}
+
+// applyVerifiedCredential atomically custodies the helper's verified
+// credential reference onto the connection at Finish (implementation
+// assignment step 2). Reaffirming the same reference the connection already
+// holds is a no-op: only a materially different custody bumps the version
+// and re-enters unverified, matching the same rule connection.update's
+// candidate validation already states for a credential_ref change.
+func (s *Service) applyVerifiedCredential(ctx context.Context, unit contract.Unit, live connectionRow, credentialRef string) error {
+	if credentialRef == live.CredentialRef {
+		return nil
+	}
+	res, err := unit.ExecContext(ctx, `
+		UPDATE connections_connections
+		SET version = ?, credential_ref = ?, validation_state = ?, validated_at = NULL, valid_until = NULL, updated_at = ?
+		WHERE id = ? AND version = ?`,
+		live.Version+1, credentialRef, connStateUnverified, formatStamp(s.clock.Now()),
+		string(live.ID), live.Version)
+	if err != nil {
+		return fmt.Errorf("connections: apply verified credential: %w", err)
+	}
+	if err := expectOneRow(res, "connection", live.ID); err != nil {
+		return err
+	}
+	return s.emit(ctx, unit, "connections.connection.credential_applied", live.ID, live.Version+1, map[string]any{
+		"id": live.ID, "version": live.Version + 1,
+	})
 }
