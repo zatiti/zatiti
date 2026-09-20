@@ -52,6 +52,19 @@ func verificationFailed(format string, args ...any) error {
 	return fault(contract.CodeVerificationFailed, false, format, args...)
 }
 
+// submissionConflict marks a differing repeat of an identity-keyed durable
+// record (a proposal, a turn/message link) that already recorded a different
+// result: the original record is never silently overwritten.
+func submissionConflict(format string, args ...any) error {
+	return fault(contract.CodeSubmissionConflict, false, format, args...)
+}
+
+// artifactFault marks a staged (unpublished) locator presented where only a
+// published artifact is accepted: an unpublished obligation, never success.
+func artifactFault(format string, args ...any) error {
+	return fault(contract.CodeArtifactFault, false, format, args...)
+}
+
 // fault builds a fault with a formatted message. controller_unavailable is
 // never raised here: busy storage exhaustion surfaces from the shared
 // storage layer itself.

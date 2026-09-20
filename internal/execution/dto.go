@@ -249,6 +249,183 @@ func runOut(r *runRow) wireRun {
 	return out
 }
 
+// Revision 3 wire shapes: the durable WorkerTurn/ProposalRecord pipeline.
+
+// wireTurnSource mirrors TurnSource.
+type wireTurnSource struct {
+	Kind              string           `json:"kind"`
+	SourceID          contract.ID      `json:"source_id"`
+	SourceVersion     contract.Version `json:"source_version"`
+	RecipientWorkerID contract.ID      `json:"recipient_worker_id,omitempty"`
+}
+
+// wireWorkerTurn mirrors WorkerTurn.
+type wireWorkerTurn struct {
+	ID                    contract.ID      `json:"id"`
+	WorkerID              contract.ID      `json:"worker_id"`
+	PrincipalID           contract.ID      `json:"principal_id"`
+	Scope                 contract.Scope   `json:"scope"`
+	Source                wireTurnSource   `json:"source"`
+	RequesterID           contract.ID      `json:"requester_id"`
+	Version               contract.Version `json:"version"`
+	ConfigurationRevision contract.Version `json:"configuration_revision"`
+	State                 string           `json:"state"`
+	Generation            int64            `json:"generation"`
+	Limits                wireLimits       `json:"limits"`
+	RootID                contract.ID      `json:"root_id"`
+	StepsUsed             int64            `json:"steps_used"`
+	CreatedAt             string           `json:"created_at"`
+	UpdatedAt             string           `json:"updated_at"`
+	ConversationID        contract.ID      `json:"conversation_id,omitempty"`
+	TaskID                contract.ID      `json:"task_id,omitempty"`
+	RunID                 contract.ID      `json:"run_id,omitempty"`
+	AttemptID             contract.ID      `json:"attempt_id,omitempty"`
+	WaitingReason         string           `json:"waiting_reason,omitempty"`
+	WaitingResourceID     contract.ID      `json:"waiting_resource_id,omitempty"`
+	NextWake              string           `json:"next_wake,omitempty"`
+	LeaseID               contract.ID      `json:"lease_id,omitempty"`
+	LeaseExpiresAt        string           `json:"lease_expires_at,omitempty"`
+	ContextArtifact       *wireArtifactRef `json:"context_artifact,omitempty"`
+	LastObservationID     contract.ID      `json:"last_observation_id,omitempty"`
+}
+
+// wireProposalRecord mirrors ProposalRecord.
+type wireProposalRecord struct {
+	TurnID              contract.ID      `json:"turn_id"`
+	StepIndex           int64            `json:"step_index"`
+	ProposalID          string           `json:"proposal_id"`
+	SourceContextDigest contract.Digest  `json:"source_context_digest"`
+	NormalizedProposal  json.RawMessage  `json:"normalized_proposal"`
+	State               string           `json:"state"`
+	CreatedAt           string           `json:"created_at"`
+	UpdatedAt           string           `json:"updated_at"`
+	CommandID           contract.ID      `json:"command_id,omitempty"`
+	EffectOperationID   contract.ID      `json:"effect_operation_id,omitempty"`
+	ResultArtifact      *wireArtifactRef `json:"result_artifact,omitempty"`
+}
+
+// wireContextPlan mirrors ContextPlan.
+type wireContextPlan struct {
+	ID                    contract.ID       `json:"id"`
+	TurnID                contract.ID       `json:"turn_id"`
+	ExpectedVersion       contract.Version  `json:"expected_version"`
+	Generation            int64             `json:"generation"`
+	Refs                  []wireArtifactRef `json:"refs"`
+	ConfigurationRevision contract.Version  `json:"configuration_revision"`
+	ByteBound             int64             `json:"byte_bound"`
+	TokenBound            int64             `json:"token_bound"`
+}
+
+// wireWorkItem mirrors WorkItem.
+type wireWorkItem struct {
+	ID    contract.ID    `json:"id"`
+	Kind  string         `json:"kind"`
+	Scope contract.Scope `json:"scope"`
+	Turn  wireWorkerTurn `json:"turn"`
+	RunID contract.ID    `json:"run_id,omitempty"`
+}
+
+// wireArtifactLocator mirrors Adapter_ArtifactLocator: kind "artifact" names
+// a published ArtifactRef, kind "staged" names an unpublished staging
+// reference/digest. The schema's oneOf enforces the exact field set for
+// each kind; strict decoding here only shapes the fields, never chooses
+// between them.
+type wireArtifactLocator struct {
+	Kind       string           `json:"kind"`
+	Artifact   *wireArtifactRef `json:"artifact,omitempty"`
+	StagingRef string           `json:"staging_ref,omitempty"`
+	Digest     contract.Digest  `json:"digest,omitempty"`
+}
+
+// turnOut renders a turn row as its wire shape.
+func turnOut(t *turnRow) wireWorkerTurn {
+	out := wireWorkerTurn{
+		WorkerID:              t.WorkerID,
+		PrincipalID:           t.PrincipalID,
+		Scope:                 t.Scope,
+		Source:                t.Source,
+		RequesterID:           t.RequesterID,
+		Version:               t.Version,
+		ConfigurationRevision: t.ConfigurationRevision,
+		State:                 t.State,
+		Generation:            t.Generation,
+		Limits:                t.Limits,
+		RootID:                t.RootID,
+		StepsUsed:             t.StepsUsed,
+		CreatedAt:             formatStamp(t.CreatedAt),
+		UpdatedAt:             formatStamp(t.UpdatedAt),
+		ConversationID:        t.ConversationID,
+		TaskID:                t.TaskID,
+		RunID:                 t.RunID,
+		AttemptID:             t.AttemptID,
+		WaitingReason:         t.WaitingReason,
+		WaitingResourceID:     t.WaitingResourceID,
+		NextWake:              formatStamp(t.NextWake),
+		LeaseID:               t.LeaseID,
+		LeaseExpiresAt:        formatStamp(t.LeaseExpiresAt),
+		LastObservationID:     t.LastObservationID,
+	}
+	out.ID = t.ID
+	if t.ContextArtifact != nil {
+		ref := *t.ContextArtifact
+		out.ContextArtifact = &ref
+	}
+	return out
+}
+
+// proposalOut renders a proposal row as its wire shape.
+func proposalOut(p *proposalRow) wireProposalRecord {
+	out := wireProposalRecord{
+		TurnID:              p.TurnID,
+		StepIndex:           p.StepIndex,
+		ProposalID:          p.ProposalID,
+		SourceContextDigest: p.SourceContextDigest,
+		NormalizedProposal:  p.NormalizedProposal,
+		State:               p.State,
+		CreatedAt:           formatStamp(p.CreatedAt),
+		UpdatedAt:           formatStamp(p.UpdatedAt),
+		CommandID:           p.CommandID,
+		EffectOperationID:   p.EffectOperationID,
+	}
+	if len(out.NormalizedProposal) == 0 {
+		out.NormalizedProposal = json.RawMessage(`{}`)
+	}
+	if p.ResultArtifact != nil {
+		ref := *p.ResultArtifact
+		out.ResultArtifact = &ref
+	}
+	return out
+}
+
+// contextPlanOut renders a context plan row as its wire shape.
+func contextPlanOut(p *contextPlanRow) wireContextPlan {
+	out := wireContextPlan{
+		TurnID:                p.TurnID,
+		ExpectedVersion:       p.ExpectedVersion,
+		Generation:            p.Generation,
+		Refs:                  p.Refs,
+		ConfigurationRevision: p.ConfigurationRevision,
+		ByteBound:             p.ByteBound,
+		TokenBound:            p.TokenBound,
+	}
+	out.ID = p.ID
+	if out.Refs == nil {
+		out.Refs = []wireArtifactRef{}
+	}
+	return out
+}
+
+// workItemOut renders one turn as a work item of the given kind.
+func workItemOut(kind string, t *turnRow) wireWorkItem {
+	return wireWorkItem{
+		ID:    t.ID,
+		Kind:  kind,
+		Scope: t.Scope,
+		Turn:  turnOut(t),
+		RunID: t.RunID,
+	}
+}
+
 // jobOut renders a job row as its wire shape.
 func jobOut(j *jobRow) wireJob {
 	out := wireJob{

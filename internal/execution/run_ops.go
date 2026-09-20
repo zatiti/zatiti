@@ -3,6 +3,7 @@ package execution
 import (
 	"context"
 	"encoding/json"
+	"time"
 
 	"github.com/zatiti/zatiti/internal/contract"
 )
@@ -82,6 +83,41 @@ func (s *Service) handleEnqueue(ctx context.Context, unit contract.Unit, in enqu
 	if err := emitTransition(ctx, unit, eventRunEnqueued, r.ID, r.Version); err != nil {
 		return contract.Outcome[runBody]{}, err
 	}
+
+	// A hosted-executor task additionally admits a task-triggered
+	// WorkerTurn in the same transaction, so the durable worker loop
+	// (_execution.work.pending/.claim) can drive it without a human ever
+	// calling run.claim. A cooperative-executor task never gets a turn: it
+	// stays reachable only through the public run.claim path, structurally
+	// ruling out an automatic hosted claim of a cooperative run.
+	if snapshot.Worker != nil && snapshot.Worker.Profile != nil && snapshot.Worker.Profile.Executor == "hosted" {
+		// The task's own pinned Limits is the accountable envelope for a
+		// task-triggered turn — the same resource-limit source run.claim's
+		// budget reservation already uses (task.Limits, not the worker's
+		// general limits), so the turn's cumulative bound matches the one
+		// governing its run.
+		taskLimits := in.Task.Limits
+		rootID := in.Task.RootID
+		if rootID == "" {
+			rootID = in.Task.ID
+		}
+		if _, _, err := s.admitTurn(ctx, unit, turnAdmitParams{
+			Source: wireTurnSource{
+				Kind: "task", SourceID: in.Task.ID, SourceVersion: in.Task.Version,
+				RecipientWorkerID: workerID,
+			},
+			WorkerID:       workerID,
+			Scope:          in.Task.Scope,
+			RequesterID:    in.Task.OwnerID,
+			ConfigRevision: snapshot.Revision,
+			Limits:         &taskLimits,
+			RootID:         rootID,
+			TaskID:         in.Task.ID,
+			RunID:          r.ID,
+		}, now); err != nil {
+			return contract.Outcome[runBody]{}, err
+		}
+	}
 	return completedOutcome(runBody{Resource: runOut(r)})
 }
 
@@ -148,9 +184,21 @@ func (s *Service) handleRunClaim(ctx context.Context, unit contract.Unit, in run
 	if err := narrowRunScope(in.Scope, r); err != nil {
 		return contract.Outcome[claimBody]{}, err
 	}
+	return s.admitAttempt(ctx, unit, r, in.WorkerID, in.Capabilities, s.now())
+}
 
+// admitAttempt performs the fenced attempt claim shared by the public
+// run.claim path (an explicit cooperative or hosted caller) and the
+// automatic hosted work.claim path (the controller claiming a queued hosted
+// run without a human calling run.claim): worker-pause gate, one-owner
+// fence and lost-ack replay, task/cancellation check, required-capability
+// check, budget reservation, attempt/lease creation and run/task
+// transition. declaredCapabilities is the caller's declared capability set
+// — for an automatic hosted claim this is the worker's own profile
+// capabilities, self-satisfying by construction.
+func (s *Service) admitAttempt(ctx context.Context, unit contract.Unit, r *runRow, workerID contract.ID, declaredCapabilities []string, now time.Time) (contract.Outcome[claimBody], error) {
 	// A paused worker blocks new admissions without inference or spending.
-	gate, err := loadGate(ctx, unit, in.WorkerID)
+	gate, err := loadGate(ctx, unit, workerID)
 	if err != nil {
 		return contract.Outcome[claimBody]{}, err
 	}
@@ -171,12 +219,12 @@ func (s *Service) handleRunClaim(ctx context.Context, unit contract.Unit, in run
 		if err != nil {
 			return contract.Outcome[claimBody]{}, err
 		}
-		if len(rows) == 1 && rows[0].WorkerID == in.WorkerID {
+		if len(rows) == 1 && rows[0].WorkerID == workerID {
 			return s.claimReplay(ctx, unit, r, rows[0])
 		}
 		return contract.Outcome[claimBody]{}, conflict("run already has a live attempt owner")
 	}
-	if r.WorkerID != in.WorkerID {
+	if r.WorkerID != workerID {
 		return contract.Outcome[claimBody]{}, permissionDenied("run is bound to worker %s", r.WorkerID)
 	}
 	if !liveRunStates[r.State] {
@@ -196,15 +244,15 @@ func (s *Service) handleRunClaim(ctx context.Context, unit contract.Unit, in run
 
 	// Required executor guarantees: the declared capabilities must cover the
 	// pinned execution profile's capabilities.
-	snapshot, err := s.callScopeSnapshot(ctx, unit, in.Scope)
+	snapshot, err := s.callScopeSnapshot(ctx, unit, r.Scope)
 	if err != nil {
 		return contract.Outcome[claimBody]{}, err
 	}
 	executor := "cooperative"
 	if snapshot.Worker != nil && snapshot.Worker.Profile != nil {
 		executor = snapshot.Worker.Profile.Executor
-		declared := make(map[string]bool, len(in.Capabilities))
-		for _, c := range in.Capabilities {
+		declared := make(map[string]bool, len(declaredCapabilities))
+		for _, c := range declaredCapabilities {
 			declared[c] = true
 		}
 		for _, required := range snapshot.Worker.Profile.Capabilities {
@@ -240,7 +288,6 @@ func (s *Service) handleRunClaim(ctx context.Context, unit contract.Unit, in run
 			"controller generation has not been started; a claim cannot bind generation %d", gen)
 	}
 
-	now := s.now()
 	a := &attemptRow{
 		ReservationID:      reservation.ID,
 		ReservationVersion: reservation.Version,
@@ -248,20 +295,20 @@ func (s *Service) handleRunClaim(ctx context.Context, unit contract.Unit, in run
 		Version:            1,
 		RunID:              r.ID,
 		TaskID:             r.TaskID,
-		WorkerID:           in.WorkerID,
+		WorkerID:           workerID,
 		Executor:           executor,
 		InstallationID:     r.InstallationID,
 		OrganizationID:     r.OrganizationID,
 		ProjectID:          r.ProjectID,
 		TaskScopeID:        r.TaskScopeID,
-		WorkerScopeID:      in.WorkerID,
+		WorkerScopeID:      workerID,
 		Scope:              r.Scope,
 		Generation:         gen,
 		LeaseID:            s.newID(),
 		LeaseExpiresAt:     leaseExpiryAt(now, task.Limits.RootDeadline),
 		LastHeartbeat:      now,
 		State:              "claimed",
-		Capabilities:       nonEmptyStrings(in.Capabilities),
+		Capabilities:       nonEmptyStrings(declaredCapabilities),
 		CreatedAt:          now,
 		UpdatedAt:          now,
 	}
@@ -269,7 +316,7 @@ func (s *Service) handleRunClaim(ctx context.Context, unit contract.Unit, in run
 		return contract.Outcome[claimBody]{}, err
 	}
 	if err := insertLease(ctx, unit, &leaseRow{
-		ID: a.LeaseID, AttemptID: a.ID, RunID: r.ID, WorkerID: in.WorkerID,
+		ID: a.LeaseID, AttemptID: a.ID, RunID: r.ID, WorkerID: workerID,
 		InstallationID: r.InstallationID, Generation: a.Generation, State: "active",
 		ExpiresAt: a.LeaseExpiresAt, LastHeartbeat: now, CreatedAt: now,
 	}); err != nil {

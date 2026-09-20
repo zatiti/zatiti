@@ -35,11 +35,12 @@ type jobClaimInput struct {
 }
 
 type jobCreateInput struct {
-	Scope     contract.Scope  `json:"scope"`
-	Owner     string          `json:"owner"`
-	Operation string          `json:"operation"`
-	Input     json.RawMessage `json:"input"`
-	SourceID  contract.ID     `json:"source_id"`
+	Scope       contract.Scope  `json:"scope"`
+	Owner       string          `json:"owner"`
+	Operation   string          `json:"operation"`
+	Input       json.RawMessage `json:"input"`
+	SourceID    contract.ID     `json:"source_id"`
+	OperationID contract.ID     `json:"operation_id,omitempty"`
 }
 
 type jobPendingInput struct {
@@ -145,6 +146,96 @@ type workerGateInput struct {
 	Scope           contract.Scope   `json:"scope"`
 	ID              contract.ID      `json:"id"`
 	ExpectedVersion contract.Version `json:"expected_version"`
+}
+
+// Revision 3 internal inputs: the durable worker turn pipeline.
+
+type turnAdmitInput struct {
+	Source      wireTurnSource `json:"source"`
+	WorkerID    contract.ID    `json:"worker_id"`
+	Scope       contract.Scope `json:"scope"`
+	RequesterID contract.ID    `json:"requester_id"`
+}
+
+type workPendingInput struct {
+	Limit int64 `json:"limit"`
+}
+
+type workClaimInput struct {
+	WorkID          contract.ID      `json:"work_id"`
+	ExpectedVersion contract.Version `json:"expected_version"`
+	Generation      int64            `json:"generation"`
+}
+
+type contextPrepareInput struct {
+	TurnID          contract.ID      `json:"turn_id"`
+	ExpectedVersion contract.Version `json:"expected_version"`
+	Generation      int64            `json:"generation"`
+}
+
+type contextCommitInput struct {
+	PlanID          contract.ID         `json:"plan_id"`
+	ExpectedVersion contract.Version    `json:"expected_version"`
+	Generation      int64               `json:"generation"`
+	StagedContext   wireArtifactLocator `json:"staged_context"`
+}
+
+type proposalPrepareInput struct {
+	TurnID          contract.ID      `json:"turn_id"`
+	StepIndex       int64            `json:"step_index"`
+	ProposalID      string           `json:"proposal_id"`
+	ExpectedVersion contract.Version `json:"expected_version"`
+}
+
+type proposalRecordInput struct {
+	ProposalID        string           `json:"proposal_id"`
+	ExpectedVersion   contract.Version `json:"expected_version"`
+	CommandID         contract.ID      `json:"command_id,omitempty"`
+	EffectOperationID contract.ID      `json:"effect_operation_id,omitempty"`
+	ResultArtifact    *wireArtifactRef `json:"result_artifact,omitempty"`
+}
+
+type verificationPendingInput struct {
+	Limit int64 `json:"limit"`
+}
+
+type verificationClaimInput struct {
+	RequestID       contract.ID      `json:"request_id"`
+	ExpectedVersion contract.Version `json:"expected_version"`
+	Generation      int64            `json:"generation"`
+}
+
+// Revision 3 output bodies.
+
+type turnBody struct {
+	Resource wireWorkerTurn `json:"resource"`
+}
+
+type workPendingBody struct {
+	Items []wireWorkItem `json:"items"`
+}
+
+type workClaimBody struct {
+	Item       wireWorkItem     `json:"item"`
+	ClaimToken string           `json:"claim_token"`
+	Version    contract.Version `json:"version"`
+}
+
+type contextPlanBody struct {
+	Resource wireContextPlan `json:"resource"`
+}
+
+type proposalBody struct {
+	Resource wireProposalRecord `json:"resource"`
+}
+
+type verificationPendingBody struct {
+	Items []wireVerificationRequest `json:"items"`
+}
+
+type verificationClaimBody struct {
+	Request    wireVerificationRequest `json:"request"`
+	ClaimToken string                  `json:"claim_token"`
 }
 
 // Output bodies. Every output revalidates against its merged output schema,

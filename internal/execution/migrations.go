@@ -216,6 +216,115 @@ CREATE INDEX execution_operations_attempt_idx
 	ON execution_operations (attempt_id, created_at);
 `
 
+// schemaV2 adds the revision-3 durable worker turn pipeline: the WorkerTurn
+// store (execution_turns), its ProposalRecord store (execution_proposals),
+// the versioned immutable ContextPlan store (execution_context_plans) and a
+// narrow claim/generation tracker for sealed verification requests
+// (execution_verification_claims), kept separate from the existing
+// execution_verification_jobs table so its shape stays untouched.
+//
+// execution_turns carries the P00-001 unique admission key
+// (installation_id, source_kind, source_id, source_version, worker_id) so
+// _execution.turn.admit is idempotent by construction, and a second partial
+// index enforces one live (non-terminal) decision stream per worker lane —
+// a concurrent admission race can create at most one active turn per worker,
+// exactly as the storage-level one-owner fence already does for attempts.
+const schemaV2 = `
+CREATE TABLE execution_turns (
+	id                     TEXT PRIMARY KEY,
+	version                INTEGER NOT NULL CHECK (version >= 1),
+	worker_id              TEXT NOT NULL,
+	principal_id           TEXT NOT NULL,
+	installation_id        TEXT NOT NULL,
+	organization_id        TEXT NOT NULL DEFAULT '',
+	project_id             TEXT NOT NULL DEFAULT '',
+	task_scope_id          TEXT NOT NULL DEFAULT '',
+	scope_json             TEXT NOT NULL,
+	source_kind            TEXT NOT NULL CHECK (source_kind IN ('message','task','responsibility','continuation')),
+	source_id              TEXT NOT NULL,
+	source_version         INTEGER NOT NULL CHECK (source_version >= 1),
+	recipient_worker_id    TEXT NOT NULL DEFAULT '',
+	requester_id           TEXT NOT NULL,
+	configuration_revision INTEGER NOT NULL CHECK (configuration_revision >= 1),
+	state                  TEXT NOT NULL CHECK (state IN ('pending','claimed','context_pending','model_pending','proposal_pending','waiting','reporting','completed','failed','cancelled')),
+	generation             INTEGER NOT NULL CHECK (generation >= 1),
+	limits_json            TEXT NOT NULL,
+	root_id                TEXT NOT NULL,
+	steps_used             INTEGER NOT NULL DEFAULT 0 CHECK (steps_used >= 0),
+	created_at             TEXT NOT NULL,
+	updated_at             TEXT NOT NULL,
+	conversation_id        TEXT NOT NULL DEFAULT '',
+	task_id                TEXT NOT NULL DEFAULT '',
+	run_id                 TEXT NOT NULL DEFAULT '',
+	attempt_id             TEXT NOT NULL DEFAULT '',
+	waiting_reason         TEXT NOT NULL DEFAULT '' CHECK (waiting_reason IN ('','setup','clarification','review','effect','dependency','budget','recovery')),
+	waiting_resource_id    TEXT NOT NULL DEFAULT '',
+	next_wake              TEXT NOT NULL DEFAULT '',
+	lease_id               TEXT NOT NULL DEFAULT '',
+	lease_expires_at       TEXT NOT NULL DEFAULT '',
+	context_artifact_json  TEXT NOT NULL DEFAULT '',
+	last_observation_id    TEXT NOT NULL DEFAULT ''
+);
+CREATE UNIQUE INDEX execution_turns_source_idx
+	ON execution_turns (installation_id, source_kind, source_id, source_version, worker_id);
+CREATE UNIQUE INDEX execution_turns_active_worker_idx
+	ON execution_turns (installation_id, worker_id) WHERE state NOT IN ('completed','failed','cancelled');
+CREATE INDEX execution_turns_pending_idx
+	ON execution_turns (installation_id, state, created_at);
+CREATE INDEX execution_turns_task_idx
+	ON execution_turns (task_id) WHERE task_id != '';
+CREATE INDEX execution_turns_run_idx
+	ON execution_turns (run_id) WHERE run_id != '';
+
+CREATE TABLE execution_proposals (
+	id                        TEXT PRIMARY KEY,
+	installation_id           TEXT NOT NULL,
+	turn_id                   TEXT NOT NULL,
+	step_index                INTEGER NOT NULL CHECK (step_index >= 0),
+	proposal_id               TEXT NOT NULL,
+	source_context_digest     TEXT NOT NULL,
+	normalized_proposal_json  TEXT NOT NULL DEFAULT '{}',
+	state                     TEXT NOT NULL CHECK (state IN ('prepared','recorded','duplicate','stale','superseded')),
+	created_at                TEXT NOT NULL,
+	updated_at                TEXT NOT NULL,
+	command_id                TEXT NOT NULL DEFAULT '',
+	effect_operation_id       TEXT NOT NULL DEFAULT '',
+	result_artifact_json      TEXT NOT NULL DEFAULT ''
+);
+CREATE UNIQUE INDEX execution_proposals_key_idx
+	ON execution_proposals (turn_id, step_index, proposal_id);
+CREATE INDEX execution_proposals_id_idx
+	ON execution_proposals (installation_id, proposal_id, created_at);
+
+CREATE TABLE execution_context_plans (
+	id                     TEXT PRIMARY KEY,
+	installation_id        TEXT NOT NULL,
+	turn_id                TEXT NOT NULL,
+	expected_version       INTEGER NOT NULL CHECK (expected_version >= 1),
+	generation             INTEGER NOT NULL CHECK (generation >= 1),
+	refs_json              TEXT NOT NULL DEFAULT '[]',
+	configuration_revision INTEGER NOT NULL CHECK (configuration_revision >= 1),
+	byte_bound             INTEGER NOT NULL DEFAULT 0 CHECK (byte_bound >= 0),
+	token_bound            INTEGER NOT NULL DEFAULT 0 CHECK (token_bound >= 0),
+	committed              INTEGER NOT NULL DEFAULT 0 CHECK (committed IN (0,1)),
+	created_at             TEXT NOT NULL
+);
+CREATE INDEX execution_context_plans_turn_idx
+	ON execution_context_plans (turn_id, created_at);
+
+CREATE TABLE execution_verification_claims (
+	request_id         TEXT PRIMARY KEY,
+	claimed_generation INTEGER NOT NULL CHECK (claimed_generation >= 1),
+	claim_token        TEXT NOT NULL,
+	claimed_at         TEXT NOT NULL
+);
+
+-- _execution.verification.claim fences its claim by exact version+generation
+-- (P00's frozen schema); the existing table carried no version column, so
+-- this adds one additively, defaulting every already-inserted row to 1.
+ALTER TABLE execution_verification_jobs ADD COLUMN version INTEGER NOT NULL DEFAULT 1;
+`
+
 // migrations returns the execution-owned migration set. Bodies are pinned
 // by SHA-256 so storage can detect any drift from the reviewed schema.
 func migrations() []contract.Migration {
@@ -224,5 +333,10 @@ func migrations() []contract.Migration {
 		Version: 1,
 		SQL:     schemaV1,
 		SHA256:  contract.Hash([]byte(schemaV1)),
+	}, {
+		Owner:   owner,
+		Version: 2,
+		SQL:     schemaV2,
+		SHA256:  contract.Hash([]byte(schemaV2)),
 	}}
 }

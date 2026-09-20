@@ -35,6 +35,17 @@ const (
 	opObservation       = "_execution.observation"
 	opTick              = "_execution.tick"
 	opVerificationRec   = "_execution.verification.record"
+	opTurnAdmit         = "_execution.turn.admit"
+	opWorkPending       = "_execution.work.pending"
+	opWorkClaim         = "_execution.work.claim"
+	opContextPrepare    = "_execution.context.prepare"
+	opContextCommit     = "_execution.context.commit"
+	opProposalPrepare   = "_execution.proposal.prepare"
+	opProposalRecord    = "_execution.proposal.record"
+	opExecutionReport   = "_execution.report"
+	opVerificationPend  = "_execution.verification.pending"
+	opVerificationClaim = "_execution.verification.claim"
+
 	opAttemptCancel     = "attempt.cancel"
 	opAttemptCheckpoint = "attempt.checkpoint"
 	opAttemptGet        = "attempt.get"
@@ -52,14 +63,15 @@ const (
 	opWorkerPause       = "worker.pause"
 	opWorkerResume      = "worker.resume"
 
-	peerConfigSnapshot = "_configuration.snapshot"
-	peerAccountReserve = "_accounting.reserve"
-	peerAccountSettle  = "_accounting.settle"
-	peerArtifactsMeta  = "_artifacts.metadata"
-	peerEffectsPrepare = "_effects.prepare"
-	peerTasksReady     = "_tasks.ready"
-	peerTasksSnapshot  = "_tasks.snapshot"
-	peerTasksTransit   = "_tasks.transition"
+	peerConfigSnapshot     = "_configuration.snapshot"
+	peerAccountReserve     = "_accounting.reserve"
+	peerAccountSettle      = "_accounting.settle"
+	peerArtifactsMeta      = "_artifacts.metadata"
+	peerEffectsPrepare     = "_effects.prepare"
+	peerTasksReady         = "_tasks.ready"
+	peerTasksSnapshot      = "_tasks.snapshot"
+	peerTasksTransit       = "_tasks.transition"
+	peerMessagingProcessed = "_messaging.processed"
 )
 
 // opMeta is the static registration record for one operation.
@@ -71,6 +83,12 @@ type opMeta struct {
 	expected   bool // descriptor advertises optimistic version fencing
 	callers    []string
 	cli        string // CLI tokens below the root command, space separated; empty for internal operations
+	// noScopeRequired forces an empty ScopeRequired despite the input schema
+	// requiring a scope field: the frozen catalog's revision-3 additions
+	// (_execution.turn.admit, _execution.report) carry an explicit scope
+	// input but are not scope-required in the frozen catalog, the same
+	// documented quirk tasks.task.start already carries.
+	noScopeRequired bool
 }
 
 // opMetas lists every owned operation: internal first, then the public
@@ -80,7 +98,7 @@ var opMetas = []opMeta{
 	{id: opContext, visibility: "internal", mode: "mutation",
 		callers: []string{"controller"}},
 	{id: opEnqueue, visibility: "internal", mode: "mutation",
-		callers: []string{"tasks", "scheduling", "application"}},
+		callers: []string{"tasks", "scheduling", "application", "controller"}},
 	{id: opFence, visibility: "internal", mode: "mutation",
 		callers: []string{"controller", "installation"}},
 	{id: opJobClaim, visibility: "internal", mode: "mutation", expected: true,
@@ -98,6 +116,27 @@ var opMetas = []opMeta{
 	{id: opTick, visibility: "internal", mode: "mutation",
 		callers: []string{"controller"}},
 	{id: opVerificationRec, visibility: "internal", mode: "mutation", expected: true,
+		callers: []string{"controller"}},
+
+	{id: opTurnAdmit, visibility: "internal", mode: "mutation", noScopeRequired: true,
+		callers: []string{"controller", "scheduling"}},
+	{id: opWorkPending, visibility: "internal", mode: "query",
+		callers: []string{"controller"}},
+	{id: opWorkClaim, visibility: "internal", mode: "mutation", expected: true,
+		callers: []string{"controller"}},
+	{id: opContextPrepare, visibility: "internal", mode: "mutation", expected: true,
+		callers: []string{"controller"}},
+	{id: opContextCommit, visibility: "internal", mode: "mutation", expected: true,
+		callers: []string{"controller"}},
+	{id: opProposalPrepare, visibility: "internal", mode: "mutation", expected: true,
+		callers: []string{"controller"}},
+	{id: opProposalRecord, visibility: "internal", mode: "mutation", expected: true,
+		callers: []string{"controller"}},
+	{id: opExecutionReport, visibility: "internal", mode: "mutation", expected: true, noScopeRequired: true,
+		callers: []string{"controller"}},
+	{id: opVerificationPend, visibility: "internal", mode: "query",
+		callers: []string{"controller"}},
+	{id: opVerificationClaim, visibility: "internal", mode: "mutation", expected: true,
 		callers: []string{"controller"}},
 
 	{id: opAttemptCancel, visibility: "public", mode: "mutation", submission: true,
@@ -197,6 +236,10 @@ func (s *Service) assemble() error {
 		if err != nil {
 			return fmt.Errorf("execution: operation %s output schema: %w", m.id, err)
 		}
+		var scopeRequired []string
+		if !m.noScopeRequired {
+			scopeRequired = scopeRequirement(inputSchema)
+		}
 		d := contract.Descriptor{
 			ID:              m.id,
 			Version:         1,
@@ -206,7 +249,7 @@ func (s *Service) assemble() error {
 			Effect:          contract.EffectLocal,
 			InputSchema:     inputSchema,
 			OutputSchema:    outputSchema,
-			ScopeRequired:   scopeRequirement(inputSchema),
+			ScopeRequired:   scopeRequired,
 			Callers:         m.callers,
 			ExpectedVersion: m.expected,
 			SubmissionKey:   m.submission,
@@ -272,6 +315,26 @@ func (s *Service) bindHandler(d contract.Descriptor) (contract.Handler, error) {
 		return bind(d, s.handleTick)
 	case opVerificationRec:
 		return bind(d, s.handleVerificationRecord)
+	case opTurnAdmit:
+		return bind(d, s.handleTurnAdmit)
+	case opWorkPending:
+		return bind(d, s.handleWorkPending)
+	case opWorkClaim:
+		return bind(d, s.handleWorkClaim)
+	case opContextPrepare:
+		return bind(d, s.handleContextPrepare)
+	case opContextCommit:
+		return bind(d, s.handleContextCommit)
+	case opProposalPrepare:
+		return bind(d, s.handleProposalPrepare)
+	case opProposalRecord:
+		return bind(d, s.handleProposalRecord)
+	case opExecutionReport:
+		return bind(d, s.handleExecutionReport)
+	case opVerificationPend:
+		return bind(d, s.handleVerificationPending)
+	case opVerificationClaim:
+		return bind(d, s.handleVerificationClaim)
 	case opAttemptCancel:
 		return bind(d, s.handleAttemptCancel)
 	case opAttemptCheckpoint:

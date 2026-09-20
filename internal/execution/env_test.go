@@ -68,6 +68,13 @@ type recordedSettle struct {
 	Nonexec       bool
 }
 
+// recordedProcessed is one _messaging.processed call.
+type recordedProcessed struct {
+	MessageID   contract.ID
+	RecipientID contract.ID
+	TurnID      contract.ID
+}
+
 // fakePorts serves the peer fixtures per installation and task, records the
 // calls handlers make, and carries injectable faults and raw errors.
 type fakePorts struct {
@@ -80,6 +87,7 @@ type fakePorts struct {
 	transitions []recordedTransition
 	settles     []recordedSettle
 	prepared    []contract.ID
+	processed   []recordedProcessed
 	seq         int
 }
 
@@ -142,6 +150,12 @@ func (p *fakePorts) PreparedOps() []contract.ID {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return append([]contract.ID(nil), p.prepared...)
+}
+
+func (p *fakePorts) Processed() []recordedProcessed {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return append([]recordedProcessed(nil), p.processed...)
 }
 
 func (p *fakePorts) Transitions() []recordedTransition {
@@ -274,6 +288,25 @@ func (p *fakePorts) Call(ctx context.Context, unit contract.Unit, inv contract.I
 		body = map[string]any{"artifacts": found}
 	case peerTasksReady:
 		body = map[string]any{"items": []any{}}
+	case peerMessagingProcessed:
+		var in struct {
+			MessageID   contract.ID `json:"message_id"`
+			RecipientID contract.ID `json:"recipient_id"`
+			TurnID      contract.ID `json:"turn_id"`
+		}
+		if err := contract.DecodeStrict(inv.Input, &in); err != nil {
+			p.mu.Unlock()
+			return contract.Payload{}, err
+		}
+		p.processed = append(p.processed, recordedProcessed{
+			MessageID: in.MessageID, RecipientID: in.RecipientID, TurnID: in.TurnID,
+		})
+		body = map[string]any{"resource": map[string]any{
+			"id": in.MessageID, "version": 2, "sender_id": p.nextID(),
+			"recipient_ids": []contract.ID{in.RecipientID}, "scope": map[string]any{"installation_id": p.nextID()},
+			"task_ids": []any{}, "body": "", "attachments": []any{}, "state": "acknowledged",
+			"created_at": "2026-09-10T12:00:00.000000000Z",
+		}}
 	case "_effects.prepare":
 		var in map[string]any
 		if err := contract.DecodeStrict(inv.Input, &in); err != nil {
@@ -730,6 +763,76 @@ func (e *testEnv) readLease(id contract.ID) *leaseRow {
 		return err
 	})
 	return l
+}
+
+// readTurn loads one worker turn row directly.
+func (e *testEnv) readTurn(id contract.ID) *turnRow {
+	e.t.Helper()
+	var row *turnRow
+	e.inWrite(func(unit contract.Unit) error {
+		var err error
+		row, err = loadTurn(e.ctx, unit, id)
+		return err
+	})
+	return row
+}
+
+// findTurnForSource looks up the turn admitted for one exact source
+// identity directly, or nil.
+func (e *testEnv) findTurnForSource(sourceKind string, sourceID contract.ID, sourceVersion contract.Version, workerID contract.ID) *turnRow {
+	e.t.Helper()
+	var row *turnRow
+	e.inWrite(func(unit contract.Unit) error {
+		var err error
+		row, err = findTurnBySource(e.ctx, unit, e.install, sourceKind, sourceID, sourceVersion, workerID)
+		return err
+	})
+	return row
+}
+
+// countLiveTurnsForWorker counts the worker's non-terminal turns directly.
+func (e *testEnv) countLiveTurnsForWorker(workerID contract.ID) int {
+	e.t.Helper()
+	var rows []*turnRow
+	e.inWrite(func(unit contract.Unit) error {
+		var err error
+		rows, err = listTurns(e.ctx, unit,
+			[]string{"installation_id = ?", "worker_id = ?", "state NOT IN ('completed','failed','cancelled')"},
+			[]any{e.install, workerID}, 4096)
+		return err
+	})
+	return len(rows)
+}
+
+// seedProposal directly inserts a durable proposal record, simulating a
+// model step's normalized evidence already persisted by the interpretation
+// stage (P16) that _execution.proposal.prepare/.record build on.
+func (e *testEnv) seedProposal(turnID contract.ID, stepIndex int64, proposalID string) *proposalRow {
+	e.t.Helper()
+	row := &proposalRow{
+		ID:                  e.ids.New(),
+		InstallationID:      e.install,
+		TurnID:              turnID,
+		StepIndex:           stepIndex,
+		ProposalID:          proposalID,
+		SourceContextDigest: fixtureDigest,
+		NormalizedProposal:  json.RawMessage(`{"kind":"reply","text":"ok"}`),
+		State:               "prepared",
+		CreatedAt:           e.clock.Now(),
+		UpdatedAt:           e.clock.Now(),
+	}
+	e.inWrite(func(unit contract.Unit) error {
+		return insertProposal(e.ctx, unit, row)
+	})
+	return row
+}
+
+// fixtureCooperativeProfile builds a cooperative execution profile: never
+// auto-claimed, always reachable only through the public run.claim path.
+func fixtureCooperativeProfile(workerID contract.ID) *wireExecutionProfile {
+	p := fixtureHostedProfile(workerID)
+	p.Executor = "cooperative"
+	return p
 }
 
 // readGate reads one worker pause gate directly.

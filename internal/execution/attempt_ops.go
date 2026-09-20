@@ -2,6 +2,7 @@ package execution
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 
 	"github.com/zatiti/zatiti/internal/contract"
@@ -203,8 +204,18 @@ func (s *Service) handleAttemptReport(ctx context.Context, unit contract.Unit, i
 	if err := narrowAttemptScope(in.Scope, a); err != nil {
 		return contract.Outcome[attemptBody]{}, err
 	}
+	return s.reportAttempt(ctx, unit, a, in.LeaseID, in.Generation, in.Outputs, in.Observations, in.Usage)
+}
+
+// reportAttempt is the report/verification transition shared by the public
+// cooperative attempt.report and the controller-driven internal
+// _execution.report: persist observations, seal the independent
+// verification request and enter verifying. Neither path directly succeeds
+// the task; only the trusted verifier path (_execution.verification.record)
+// does.
+func (s *Service) reportAttempt(ctx context.Context, unit contract.Unit, a *attemptRow, leaseID contract.ID, generation int64, outputs []wireArtifactRef, observations json.RawMessage, usage wireUsage) (contract.Outcome[attemptBody], error) {
 	now := s.now()
-	if err := checkWorkerCall(a, in.Scope, in.LeaseID, in.Generation, now); err != nil {
+	if err := checkWorkerCall(a, contract.Scope{WorkerID: a.WorkerID}, leaseID, generation, now); err != nil {
 		return contract.Outcome[attemptBody]{}, err
 	}
 	r, err := loadRun(ctx, unit, a.RunID)
@@ -219,11 +230,11 @@ func (s *Service) handleAttemptReport(ctx context.Context, unit contract.Unit, i
 	now = s.now()
 	a.Observations = append(a.Observations, wireObservation{
 		Disposition: "accepted",
-		Evidence:    in.Observations,
-		Usage:       in.Usage,
+		Evidence:    observations,
+		Usage:       usage,
 		ConfirmedAt: formatStamp(now),
 	})
-	a.Outputs = in.Outputs
+	a.Outputs = outputs
 	a.State = "reported"
 	a.UpdatedAt = now
 	if err := updateAttempt(ctx, unit, a); err != nil {
@@ -255,7 +266,7 @@ func (s *Service) handleAttemptReport(ctx context.Context, unit contract.Unit, i
 	if err := insertVerificationJob(ctx, unit, jobID, a, requestJSON, sha256Hex(acceptanceJSON), now); err != nil {
 		return contract.Outcome[attemptBody]{}, err
 	}
-	if in.Usage.Unknown > 0 || in.Usage.Advisory {
+	if usage.Unknown > 0 || usage.Advisory {
 		// Uncertain cost stays in accounting: the reservation is not released
 		// without conclusive usage evidence, and recovery surfaces the debt.
 		if err := insertObligation(ctx, unit, s.newID(), "cost_unresolved",
@@ -265,7 +276,7 @@ func (s *Service) handleAttemptReport(ctx context.Context, unit contract.Unit, i
 		}
 	} else if a.ReservationID != "" {
 		if err := s.settleBudget(ctx, unit, a.ReservationID, a.ReservationVersion,
-			in.Usage, false); err != nil {
+			usage, false); err != nil {
 			return contract.Outcome[attemptBody]{}, err
 		}
 	}
