@@ -18,6 +18,20 @@ type opMeta struct {
 	expectedVersion bool
 	callers         []string
 	cli             string // CLI tokens below the root command, space separated; empty for internal operations
+
+	// noScopeRequired forces an empty ScopeRequired despite the input schema
+	// requiring a scope member. task.start is the sole owned operation where
+	// this is set: every sibling operation whose input requires scope
+	// carries scope_required ["installation_id"] in the frozen catalog
+	// (docs/implementation/operations.json), but task.start's frozen entry
+	// carries scope_required null even though its own input schema requires
+	// scope exactly like task.create's and task.assign's do. Catalog
+	// conformance is pinned by TestDescriptorsMatchFrozenCatalog against
+	// that frozen file, which this package must not edit, so the descriptor
+	// here matches the frozen value as authored. Flagged to the plan's
+	// integration owner as a likely generator gap; the real scope
+	// containment check in handleTaskStart does not depend on this field.
+	noScopeRequired bool
 }
 
 // opMetas lists every owned operation: the four internal peer operations
@@ -26,6 +40,10 @@ var opMetas = []opMeta{
 	// Internal operations.
 	{id: "_tasks.create", visibility: "internal", mode: "mutation", submission: false,
 		callers: []string{"scheduling", "messaging", "execution"}},
+	{id: "_tasks.dependencies.wake", visibility: "internal", mode: "mutation", submission: false,
+		callers: []string{"execution", "controller"}},
+	{id: "_tasks.evidence.record", visibility: "internal", mode: "mutation", submission: false, expectedVersion: true,
+		callers: []string{"execution"}},
 	{id: "_tasks.ready", visibility: "internal", mode: "query", submission: false,
 		callers: []string{"execution", "controller"}},
 	{id: "_tasks.snapshot", visibility: "internal", mode: "query", submission: false,
@@ -43,6 +61,7 @@ var opMetas = []opMeta{
 	{id: "task.get", visibility: "public", mode: "query", cli: "task get"},
 	{id: "task.list", visibility: "public", mode: "query", cli: "task list"},
 	{id: "task.retry", visibility: "public", mode: "mutation", submission: true, expectedVersion: true, cli: "task retry"},
+	{id: "task.start", visibility: "public", mode: "mutation", submission: true, expectedVersion: true, cli: "task start", noScopeRequired: true},
 	{id: "task.update", visibility: "public", mode: "mutation", submission: true, expectedVersion: true, cli: "task update"},
 }
 
@@ -100,6 +119,10 @@ func (s *Service) Descriptors() []contract.Descriptor { return s.descriptors }
 func buildDescriptors(catalog map[string]contract.Descriptor) []contract.Descriptor {
 	out := make([]contract.Descriptor, 0, len(opMetas))
 	for _, m := range opMetas {
+		var scopeRequired []string
+		if !m.noScopeRequired {
+			scopeRequired = scopeRequirement(inputSchema(m.id))
+		}
 		d := contract.Descriptor{
 			ID:              m.id,
 			Version:         1,
@@ -109,7 +132,7 @@ func buildDescriptors(catalog map[string]contract.Descriptor) []contract.Descrip
 			Effect:          "local",
 			InputSchema:     inputSchema(m.id),
 			OutputSchema:    outputSchema(m.id),
-			ScopeRequired:   scopeRequirement(inputSchema(m.id)),
+			ScopeRequired:   scopeRequired,
 			Callers:         m.callers,
 			ExpectedVersion: m.expectedVersion,
 			SubmissionKey:   m.submission,
@@ -144,10 +167,12 @@ type handlerFunc func(ctx context.Context, s *Service, unit contract.Unit, inv c
 
 // handlers is the strict dispatch table; every registered operation has one.
 var handlers = map[string]handlerFunc{
-	"_tasks.create":     handleTasksCreate,
-	"_tasks.ready":      handleTasksReady,
-	"_tasks.snapshot":   handleTasksSnapshot,
-	"_tasks.transition": handleTasksTransition,
+	"_tasks.create":            handleTasksCreate,
+	"_tasks.dependencies.wake": handleTasksDependenciesWake,
+	"_tasks.evidence.record":   handleTasksEvidenceRecord,
+	"_tasks.ready":             handleTasksReady,
+	"_tasks.snapshot":          handleTasksSnapshot,
+	"_tasks.transition":        handleTasksTransition,
 
 	"task.accept":       handleTaskAccept,
 	"task.assign":       handleTaskAssign,
@@ -158,6 +183,7 @@ var handlers = map[string]handlerFunc{
 	"task.get":          handleTaskGet,
 	"task.list":         handleTaskList,
 	"task.retry":        handleTaskRetry,
+	"task.start":        handleTaskStart,
 	"task.update":       handleTaskUpdate,
 }
 

@@ -141,7 +141,7 @@ func handleTasksTransition(ctx context.Context, s *Service, unit contract.Unit, 
 	if in.ExpectedVersion < 1 {
 		return contract.Payload{}, invalidInput("expected_version must be at least 1")
 	}
-	row, err := s.applyTransition(ctx, unit, &transitionRequest{
+	row, _, err := s.applyTransition(ctx, unit, &transitionRequest{
 		TaskID:          in.TaskID,
 		ExpectedVersion: in.ExpectedVersion,
 		Target:          in.State,
@@ -157,4 +157,165 @@ func handleTasksTransition(ctx context.Context, s *Service, unit contract.Unit, 
 		return contract.Payload{}, err
 	}
 	return s.completed(map[string]any{"resource": wire})
+}
+
+// handleTasksEvidenceRecord binds trusted verifier evidence to the pinned
+// acceptance digest and named output bindings for one run attempt, before
+// any task state depends on it. Only this recorded lineage, or eligible
+// explicit manual acceptance, can ever establish succeeded: evaluateSuccess
+// consults exactly the bindings this handler writes, never a raw,
+// untrusted evidence_ids submission.
+func handleTasksEvidenceRecord(ctx context.Context, s *Service, unit contract.Unit, inv contract.Invocation) (contract.Payload, error) {
+	in, err := decodeInto[struct {
+		TaskID               contract.ID         `json:"task_id"`
+		AttemptID            contract.ID         `json:"attempt_id"`
+		ExpectedVersion      int64               `json:"expected_version"`
+		AcceptanceDigest     string              `json:"acceptance_digest"`
+		VerificationArtifact wireArtifactRef     `json:"verification_artifact"`
+		OutputBindings       []wireOutputBinding `json:"output_bindings"`
+		Verdict              string              `json:"verdict"`
+	}](s, "_tasks.evidence.record", inv.Input)
+	if err != nil {
+		return contract.Payload{}, err
+	}
+	row, err := getTask(ctx, unit, in.TaskID)
+	if err != nil {
+		return contract.Payload{}, err
+	}
+	if row == nil {
+		return contract.Payload{}, notFound("task %s does not exist", in.TaskID)
+	}
+	if unit.Scope().InstallationID != "" && row.InstallationID != unit.Scope().InstallationID {
+		return contract.Payload{}, permissionDenied("task %s is outside the authenticated installation", row.ID)
+	}
+	if row.Version != in.ExpectedVersion {
+		return contract.Payload{}, staleVersion("task %s is at version %d, not the expected %d",
+			row.ID, row.Version, in.ExpectedVersion)
+	}
+	if isTerminal(row.State) {
+		return contract.Payload{}, conflictFault("task %s is terminal in state %s and cannot record new evidence", row.ID, row.State)
+	}
+	if row.State == stateDraft || row.State == stateReady {
+		return contract.Payload{}, conflictFault("task %s has not started; evidence cannot be recorded before a live attempt", row.ID)
+	}
+	if row.AcceptanceDigest != in.AcceptanceDigest {
+		return contract.Payload{}, verificationFailed(
+			"recorded evidence targets acceptance digest %s, task %s is currently sealed to %s",
+			in.AcceptanceDigest, row.ID, row.AcceptanceDigest)
+	}
+	if err := s.verifySeal(ctx, unit, row); err != nil {
+		return contract.Payload{}, err
+	}
+
+	acceptance, err := row.decodeAcceptance()
+	if err != nil {
+		return contract.Payload{}, err
+	}
+	declared := map[string]bool{}
+	for _, o := range acceptance.ExpectedObservations {
+		if o.ArtifactName != "" {
+			declared[o.ArtifactName] = true
+		}
+	}
+	seen := map[string]bool{}
+	refs := []wireArtifactRef{in.VerificationArtifact}
+	for _, b := range in.OutputBindings {
+		if !declared[b.Name] {
+			return contract.Payload{}, invalidInput("output binding %q is not a declared output slot on task %s", b.Name, row.ID)
+		}
+		if seen[b.Name] {
+			return contract.Payload{}, invalidInput("output binding %q is duplicated", b.Name)
+		}
+		seen[b.Name] = true
+		refs = append(refs, b.Artifact)
+	}
+
+	scope, err := row.decodeScope()
+	if err != nil {
+		return contract.Payload{}, err
+	}
+	if _, err := s.validateArtifacts(ctx, unit, scope.toContract(), refs); err != nil {
+		return contract.Payload{}, err
+	}
+
+	now := s.clock.Now().UTC()
+	if _, err := s.recordEvidence(ctx, unit, row, []contract.ID{in.VerificationArtifact.ID}, now); err != nil {
+		return contract.Payload{}, err
+	}
+	for _, b := range in.OutputBindings {
+		if err := upsertOutputBinding(ctx, unit, &outputBindingRow{
+			TaskID: row.ID, Attempt: row.Attempt, Name: b.Name,
+			ArtifactID: b.Artifact.ID, Digest: string(b.Artifact.Digest),
+			Installation: row.InstallationID, RecordedAt: now,
+		}); err != nil {
+			return contract.Payload{}, internalError("recording output binding %q failed: %v", b.Name, err)
+		}
+	}
+	if err := s.emitTaskEvent(ctx, unit, row, "tasks.task.evidence_recorded", map[string]any{
+		"task_id": row.ID, "attempt_id": in.AttemptID, "verdict": in.Verdict,
+		"bound_outputs": len(in.OutputBindings),
+	}); err != nil {
+		return contract.Payload{}, err
+	}
+	wire, err := row.toWire()
+	if err != nil {
+		return contract.Payload{}, err
+	}
+	return s.completed(map[string]any{"resource": wire})
+}
+
+// handleTasksDependenciesWake bounded-scans the dependents of a
+// just-completed task and returns their current, honestly observed state.
+// It never transitions a dependent itself and never reports success for one
+// whose required child failed: it hands back exactly what is durably
+// stored, so the caller (execution or the controller) can decide whether
+// each dependent is now eligible to start.
+func handleTasksDependenciesWake(ctx context.Context, s *Service, unit contract.Unit, inv contract.Invocation) (contract.Payload, error) {
+	in, err := decodeInto[struct {
+		CompletedTaskID contract.ID `json:"completed_task_id"`
+		Limit           int64       `json:"limit"`
+		Cursor          string      `json:"cursor"`
+	}](s, "_tasks.dependencies.wake", inv.Input)
+	if err != nil {
+		return contract.Payload{}, err
+	}
+	if in.Limit < 1 || in.Limit > 100 {
+		return contract.Payload{}, invalidInput("wake scan limit must be between 1 and 100")
+	}
+	completed, err := getTask(ctx, unit, in.CompletedTaskID)
+	if err != nil {
+		return contract.Payload{}, err
+	}
+	if completed == nil {
+		return contract.Payload{}, notFound("completed task %s does not exist", in.CompletedTaskID)
+	}
+	if unit.Scope().InstallationID != "" && completed.InstallationID != unit.Scope().InstallationID {
+		return contract.Payload{}, permissionDenied("task %s is outside the authenticated installation", completed.ID)
+	}
+	fingerprint := string(in.CompletedTaskID)
+	offset, err := decodeCursor(unit, "_tasks.dependencies.wake", fingerprint, in.Cursor)
+	if err != nil {
+		return contract.Payload{}, err
+	}
+	rows, err := listDependents(ctx, unit, completed.ID, completed.InstallationID, int(in.Limit), offset)
+	if err != nil {
+		return contract.Payload{}, err
+	}
+	items := make([]*wireTask, 0, len(rows))
+	for _, row := range rows {
+		wire, err := row.toWire()
+		if err != nil {
+			return contract.Payload{}, err
+		}
+		items = append(items, wire)
+	}
+	out := map[string]any{"dependents": items}
+	if len(items) == int(in.Limit) {
+		next, err := encodeCursor(unit, "_tasks.dependencies.wake", fingerprint, offset+int64(in.Limit))
+		if err != nil {
+			return contract.Payload{}, err
+		}
+		out["next_cursor"] = next
+	}
+	return s.completed(out)
 }

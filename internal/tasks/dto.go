@@ -172,6 +172,36 @@ type wireTask struct {
 	ManualAcceptance      bool              `json:"manual_acceptance,omitempty"`
 }
 
+// wireRun mirrors #/$defs/Run: the execution-owned run record returned by
+// _execution.enqueue and, through task.start, the public caller.
+type wireRun struct {
+	ID                    contract.ID      `json:"id"`
+	Version               contract.Version `json:"version"`
+	TaskID                contract.ID      `json:"task_id"`
+	ConfigurationRevision int64            `json:"configuration_revision"`
+	InputVersions         []wireRef        `json:"input_versions"`
+	State                 string           `json:"state"`
+	AttemptIDs            []contract.ID    `json:"attempt_ids"`
+}
+
+// wireOutputBinding mirrors the inline output_bindings entry of
+// _tasks.evidence.record: a declared output slot name bound to the exact
+// published artifact that satisfies it for the current attempt.
+type wireOutputBinding struct {
+	Name     string          `json:"name"`
+	Artifact wireArtifactRef `json:"artifact"`
+}
+
+const (
+	// verdictPassed and verdictFailed name the two _tasks.evidence.record
+	// verdict values. Tasks never trusts the verdict alone: evaluateSuccess
+	// independently recomputes whether the pinned observations are
+	// established from the bound artifacts, regardless of what verdict a
+	// caller asserts.
+	verdictPassed = "passed"
+	verdictFailed = "failed"
+)
+
 // Task states.
 const (
 	stateDraft     = "draft"

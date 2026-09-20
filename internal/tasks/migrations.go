@@ -68,6 +68,17 @@ CREATE TABLE tasks_evidence (
 	PRIMARY KEY (task_id, artifact_id, attempt)
 );
 CREATE INDEX tasks_evidence_task ON tasks_evidence (task_id, attempt);
+CREATE TABLE tasks_output_bindings (
+	task_id TEXT NOT NULL,
+	attempt INTEGER NOT NULL,
+	name TEXT NOT NULL,
+	artifact_id TEXT NOT NULL,
+	digest TEXT NOT NULL,
+	installation_id TEXT NOT NULL,
+	recorded_at TEXT NOT NULL,
+	PRIMARY KEY (task_id, attempt, name)
+);
+CREATE INDEX tasks_output_bindings_task ON tasks_output_bindings (task_id, attempt);
 CREATE TABLE tasks_manual_decisions (
 	id TEXT PRIMARY KEY,
 	task_id TEXT NOT NULL,

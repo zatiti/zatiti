@@ -114,12 +114,7 @@ type peerEnqueueIn struct {
 }
 
 type peerEnqueueOut struct {
-	Resource struct {
-		ID      contract.ID `json:"id"`
-		Version int64       `json:"version"`
-		TaskID  contract.ID `json:"task_id"`
-		State   string      `json:"state"`
-	} `json:"resource"`
+	Resource wireRun `json:"resource"`
 }
 
 type peerReserveIn struct {

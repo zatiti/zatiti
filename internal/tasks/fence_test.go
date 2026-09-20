@@ -130,10 +130,11 @@ func TestFenceRequiredChildren(t *testing.T) {
 		cv = env.runToVerifying(child, cv, nil)
 		env.transition(child, cv, stateFailed, nil)
 
-		verifier := env.verifierArtifactFixture("parent-verifier")
+		verifier := env.verifierArtifactRefFixture("parent-verifier")
 		pv := env.runToReady(parent)
 		pv = env.runToRunning(parent, pv)
-		pv = env.runToVerifying(parent, pv, []contract.ID{content.ID, verifier})
+		pv = env.runToVerifying(parent, pv, nil)
+		env.recordEvidence(parent, pv, verifier, []wireOutputBinding{{Name: "report.bin", Artifact: content}}, verdictPassed)
 		f := env.expectFault("_tasks.transition", map[string]any{
 			"task_id": parent, "expected_version": pv, "state": stateSucceeded,
 			"evidence_ids": []contract.ID{},
@@ -160,10 +161,11 @@ func TestFenceRequiredChildren(t *testing.T) {
 		def.Acceptance.RequiredChildIDs = []contract.ID{manual}
 		parent := env.createTask(def)
 
-		verifier := env.verifierArtifactFixture("parent-verifier")
+		verifier := env.verifierArtifactRefFixture("parent-verifier")
 		pv := env.runToReady(parent)
 		pv = env.runToRunning(parent, pv)
-		pv = env.runToVerifying(parent, pv, []contract.ID{content.ID, verifier})
+		pv = env.runToVerifying(parent, pv, nil)
+		env.recordEvidence(parent, pv, verifier, []wireOutputBinding{{Name: "report.bin", Artifact: content}}, verdictPassed)
 		f := env.expectFault("_tasks.transition", map[string]any{
 			"task_id": parent, "expected_version": pv, "state": stateSucceeded,
 			"evidence_ids": []contract.ID{},
@@ -177,10 +179,11 @@ func TestFenceRequiredChildren(t *testing.T) {
 		env := newEnv(t)
 		child := env.createDefaultTask()
 		content := env.artifactFixture("default-output")
-		verifier := env.verifierArtifactFixture("child-verifier")
+		childVerifier := env.verifierArtifactRefFixture("child-verifier")
 		cv := env.runToReady(child)
 		cv = env.runToRunning(child, cv)
-		cv = env.runToVerifying(child, cv, []contract.ID{content.ID, verifier})
+		cv = env.runToVerifying(child, cv, nil)
+		env.recordEvidence(child, cv, childVerifier, []wireOutputBinding{{Name: "report.bin", Artifact: content}}, verdictPassed)
 		env.transition(child, cv, stateSucceeded, nil)
 
 		pcontent := env.artifactFixture("parent-output")
@@ -189,10 +192,11 @@ func TestFenceRequiredChildren(t *testing.T) {
 		def.Acceptance.RequiredChildIDs = []contract.ID{child}
 		parent := env.createTask(def)
 
-		pverifier := env.verifierArtifactFixture("parent-verifier")
+		pverifier := env.verifierArtifactRefFixture("parent-verifier")
 		pv := env.runToReady(parent)
 		pv = env.runToRunning(parent, pv)
-		pv = env.runToVerifying(parent, pv, []contract.ID{pcontent.ID, pverifier})
+		pv = env.runToVerifying(parent, pv, nil)
+		env.recordEvidence(parent, pv, pverifier, []wireOutputBinding{{Name: "report.bin", Artifact: pcontent}}, verdictPassed)
 		wire := env.transition(parent, pv, stateSucceeded, nil)
 		if wire.State != stateSucceeded {
 			t.Fatalf("parent state %s, want succeeded", wire.State)

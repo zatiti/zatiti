@@ -44,35 +44,36 @@ type transitionRequest struct {
 }
 
 // applyTransition validates and applies one state transition inside the
-// caller's unit, returning the updated row.
-func (s *Service) applyTransition(ctx context.Context, unit contract.Unit, req *transitionRequest) (*taskRow, error) {
+// caller's unit, returning the updated row and, when the transition entered
+// ready, the freshly enqueued (or deduplicated) run.
+func (s *Service) applyTransition(ctx context.Context, unit contract.Unit, req *transitionRequest) (*taskRow, *wireRun, error) {
 	row, err := getTask(ctx, unit, req.TaskID)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if row == nil {
-		return nil, notFound("task %s does not exist", req.TaskID)
+		return nil, nil, notFound("task %s does not exist", req.TaskID)
 	}
 	if row.InstallationID != unit.Scope().InstallationID && unit.Scope().InstallationID != "" {
-		return nil, permissionDenied("task %s is outside the authenticated installation", row.ID)
+		return nil, nil, permissionDenied("task %s is outside the authenticated installation", row.ID)
 	}
 	if row.Version != req.ExpectedVersion {
-		return nil, staleVersion("task %s is at version %d, not the expected %d",
+		return nil, nil, staleVersion("task %s is at version %d, not the expected %d",
 			row.ID, row.Version, req.ExpectedVersion)
 	}
 	if isTerminal(row.State) {
-		return nil, conflictFault("task %s is terminal in state %s", row.ID, row.State)
+		return nil, nil, conflictFault("task %s is terminal in state %s", row.ID, row.State)
 	}
 
 	// Waiting resumes to its stored prior state; the recorded-intent gate
 	// inside the cancelled case covers terminal cancellation from waiting.
 	if row.State == stateWaiting {
 		if req.Target != row.PriorState && req.Target != stateCancelled {
-			return nil, conflictFault("task %s is waiting and may only resume to %s, not %s",
+			return nil, nil, conflictFault("task %s is waiting and may only resume to %s, not %s",
 				row.ID, row.PriorState, req.Target)
 		}
 	} else if !legalTransitions[row.State][req.Target] {
-		return nil, conflictFault("transition %s to %s is not legal for task %s",
+		return nil, nil, conflictFault("transition %s to %s is not legal for task %s",
 			row.State, req.Target, row.ID)
 	}
 
@@ -81,23 +82,28 @@ func (s *Service) applyTransition(ctx context.Context, unit contract.Unit, req *
 	switch req.Target {
 	case stateReady:
 		if row.CancellationRequested {
-			return nil, conflictFault("task %s has a recorded cancellation intent and cannot start", row.ID)
+			return nil, nil, conflictFault("task %s has a recorded cancellation intent and cannot start", row.ID)
 		}
-		if err := s.checkPrerequisites(ctx, unit, row); err != nil {
-			return nil, err
+		// Every start-time fence: declared dependencies succeeded, the
+		// sealed acceptance still hashes to its pinned digest, the
+		// intersected budget still admits the task's currency, every pinned
+		// input and sealed-input artifact still resolves, and the assigned
+		// worker is still active.
+		if err := s.readyPreconditions(ctx, unit, row); err != nil {
+			return nil, nil, err
 		}
 		row.State = stateReady
 	case stateRunning:
 		if row.CancellationRequested {
-			return nil, conflictFault("task %s has a recorded cancellation intent and cannot start", row.ID)
+			return nil, nil, conflictFault("task %s has a recorded cancellation intent and cannot start", row.ID)
 		}
 		row.State = stateRunning
 	case stateVerifying:
 		if row.CancellationRequested {
-			return nil, conflictFault("task %s has a recorded cancellation intent and cannot enter verification", row.ID)
+			return nil, nil, conflictFault("task %s has a recorded cancellation intent and cannot enter verification", row.ID)
 		}
 		if _, err := s.recordEvidence(ctx, unit, row, req.EvidenceIDs, now); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		row.State = stateVerifying
 	case stateSucceeded:
@@ -107,14 +113,14 @@ func (s *Service) applyTransition(ctx context.Context, unit contract.Unit, req *
 		// with anything submitted alongside this call.
 		evidence, err := s.recordEvidence(ctx, unit, row, req.EvidenceIDs, now)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		evaluation, err := s.evaluateSuccess(ctx, unit, row, evidence, req.Manual)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if err := s.checkRequiredChildren(ctx, unit, row); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		row.State = stateSucceeded
 		row.EstablishedBy = evaluation.established
@@ -122,18 +128,18 @@ func (s *Service) applyTransition(ctx context.Context, unit contract.Unit, req *
 		row.State = stateFailed
 	case stateWaiting:
 		if req.WaitingReason == "" {
-			return nil, invalidInput("entering waiting requires an explicit waiting_reason")
+			return nil, nil, invalidInput("entering waiting requires an explicit waiting_reason")
 		}
 		row.PriorState = row.State
 		row.WaitingReason = req.WaitingReason
 		row.State = stateWaiting
 	case stateCancelled:
 		if !row.CancellationRequested {
-			return nil, conflictFault("task %s has no recorded cancellation intent; record intent before terminal cancellation", row.ID)
+			return nil, nil, conflictFault("task %s has no recorded cancellation intent; record intent before terminal cancellation", row.ID)
 		}
 		row.State = stateCancelled
 	default:
-		return nil, invalidInput("target state %q is not recognized", req.Target)
+		return nil, nil, invalidInput("target state %q is not recognized", req.Target)
 	}
 
 	row.Version++
@@ -144,31 +150,172 @@ func (s *Service) applyTransition(ctx context.Context, unit contract.Unit, req *
 		row.PriorState = ""
 	}
 	if err := updateTaskState(ctx, unit, row); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	// A task entering ready is enqueued for execution inside this same
 	// transaction; execution creates one run for the task/version pair and
 	// deduplicates, so recovery rescans cannot duplicate work.
+	var run *wireRun
 	if row.State == stateReady {
-		wire, err := row.toWire()
+		run, err = s.enqueueRun(ctx, unit, row)
 		if err != nil {
-			return nil, err
-		}
-		var enq peerEnqueueOut
-		if err := s.callPeer(ctx, unit, "_execution.enqueue", peerEnqueueIn{Task: *wire}, &enq); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 	}
 	if err := s.recordTransitionLog(ctx, unit, row, fromState, req); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if err := s.emitTaskEvent(ctx, unit, row, "tasks.task.transition", map[string]any{
 		"task_id": row.ID, "from": fromState, "to": row.State,
 		"waiting_reason": row.WaitingReason, "established_by": row.EstablishedBy,
 	}); err != nil {
+		return nil, nil, err
+	}
+	return row, run, nil
+}
+
+// enqueueRun calls _execution.enqueue with the task's current pinned
+// contract and returns the created (or, for an unchanged task/version,
+// deduplicated) run. Every caller that needs a run -- entering ready,
+// retrying, task.start's idempotent restart, and a mid-flight reassignment
+// or pending-input change that re-pins an already-queued task -- shares
+// this one path, so the enqueue dedup key (task id, version) is the single
+// place "the current accepted task version" is defined.
+func (s *Service) enqueueRun(ctx context.Context, unit contract.Unit, row *taskRow) (*wireRun, error) {
+	wire, err := row.toWire()
+	if err != nil {
 		return nil, err
 	}
-	return row, nil
+	var enq peerEnqueueOut
+	if err := s.callPeer(ctx, unit, "_execution.enqueue", peerEnqueueIn{Task: *wire}, &enq); err != nil {
+		return nil, err
+	}
+	run := enq.Resource
+	return &run, nil
+}
+
+// readyPreconditions revalidates every fence a task must clear before its
+// run may be enqueued: declared dependencies have succeeded, the sealed
+// acceptance contract still hashes to its pinned digest, the intersected
+// budget envelope still admits the task's currency, every pinned input and
+// sealed-input artifact (plus the verifier profile's capability evidence)
+// still resolves, and the assigned worker is still active. Shared by the
+// draft->ready transition, task.start's idempotent restart of an
+// already-ready task, and retry's fresh attempt under the unchanged
+// accepted contract.
+func (s *Service) readyPreconditions(ctx context.Context, unit contract.Unit, row *taskRow) error {
+	if err := s.checkPrerequisites(ctx, unit, row); err != nil {
+		return err
+	}
+	if err := s.verifySeal(ctx, unit, row); err != nil {
+		return err
+	}
+	if err := s.recheckBudget(ctx, unit, row); err != nil {
+		return err
+	}
+	if err := s.recheckArtifacts(ctx, unit, row); err != nil {
+		return err
+	}
+	scope, err := row.decodeScope()
+	if err != nil {
+		return err
+	}
+	if err := s.validateWorker(ctx, unit, scope, row.WorkerID); err != nil {
+		return err
+	}
+	return nil
+}
+
+// recheckBudget confirms the intersected accounting envelope still admits
+// the task's pinned currency. The original reservation stays in force from
+// admission; this is a lightweight consistency recheck, not a second
+// reservation, so calling it repeatedly (every idempotent restart) never
+// double-reserves.
+func (s *Service) recheckBudget(ctx context.Context, unit contract.Unit, row *taskRow) error {
+	limits, err := row.decodeLimits()
+	if err != nil {
+		return err
+	}
+	scope, err := row.decodeScope()
+	if err != nil {
+		return err
+	}
+	var inspect peerInspectOut
+	if err := s.callPeer(ctx, unit, "_accounting.inspect", peerInspectIn{Scope: scope}, &inspect); err != nil {
+		return err
+	}
+	if inspect.Usage.Currency != "" && limits.Currency != "" && inspect.Usage.Currency != limits.Currency {
+		return budgetUnavailable("accounting currency %s no longer matches task %s currency %s",
+			inspect.Usage.Currency, row.ID, limits.Currency)
+	}
+	return nil
+}
+
+// recheckArtifacts revalidates that every pinned input, sealed input and
+// the verifier profile's capability evidence artifact still resolve, match
+// their pinned digest, stay in scope and remain available -- the same
+// fence admission itself passed, rechecked because time has passed since.
+func (s *Service) recheckArtifacts(ctx context.Context, unit contract.Unit, row *taskRow) error {
+	scope, err := row.decodeScope()
+	if err != nil {
+		return err
+	}
+	inputs, err := row.decodeInputs()
+	if err != nil {
+		return err
+	}
+	if _, err := s.validateArtifacts(ctx, unit, scope.toContract(), inputs); err != nil {
+		return err
+	}
+	acceptance, err := row.decodeAcceptance()
+	if err != nil {
+		return err
+	}
+	if _, err := s.validateArtifacts(ctx, unit, scope.toContract(), acceptance.SealedInputs); err != nil {
+		return err
+	}
+	evidence, err := profileEvidence(acceptance.Profile)
+	if err != nil {
+		return err
+	}
+	if _, err := s.validateArtifacts(ctx, unit, contract.Scope{InstallationID: row.InstallationID}, []wireArtifactRef{evidence}); err != nil {
+		return err
+	}
+	return nil
+}
+
+// startTask implements task.start: transition an eligible draft task to
+// ready and enqueue its run in the same transaction, using the existing
+// applyTransition machinery, or -- when the task is already ready --
+// idempotently recheck every start-time fence and re-enqueue, so a caller
+// recovering from a lost acknowledgement gets the same ready task and run
+// rather than a spurious conflict or a second run. A task outside draft or
+// ready (running, verifying, waiting, or terminal) cannot start.
+func (s *Service) startTask(ctx context.Context, unit contract.Unit, row *taskRow, expectedVersion int64) (*taskRow, *wireRun, error) {
+	if row.Version != expectedVersion {
+		return nil, nil, staleVersion("task %s is at version %d, not the expected %d",
+			row.ID, row.Version, expectedVersion)
+	}
+	if row.CancellationRequested {
+		return nil, nil, conflictFault("task %s has a recorded cancellation intent and cannot start", row.ID)
+	}
+	switch row.State {
+	case stateDraft:
+		return s.applyTransition(ctx, unit, &transitionRequest{
+			TaskID: row.ID, ExpectedVersion: expectedVersion, Target: stateReady,
+		})
+	case stateReady:
+		if err := s.readyPreconditions(ctx, unit, row); err != nil {
+			return nil, nil, err
+		}
+		run, err := s.enqueueRun(ctx, unit, row)
+		if err != nil {
+			return nil, nil, err
+		}
+		return row, run, nil
+	default:
+		return nil, nil, conflictFault("task %s in state %s cannot start; only a draft or ready task may", row.ID, row.State)
+	}
 }
 
 // checkPrerequisites enforces that every declared dependency is succeeded
@@ -305,7 +452,9 @@ func (s *Service) retryTask(ctx context.Context, unit contract.Unit, row *taskRo
 	if row.State != stateFailed && row.State != stateCancelled {
 		return nil, conflictFault("task %s in state %s cannot retry; only failed or cancelled tasks retry", row.ID, row.State)
 	}
-	if err := s.checkPrerequisites(ctx, unit, row); err != nil {
+	// The same start-time fences task.start rechecks: retry opens a fresh
+	// attempt under the unchanged accepted contract, not a bypass of them.
+	if err := s.readyPreconditions(ctx, unit, row); err != nil {
 		return nil, err
 	}
 	fromState := row.State
@@ -323,12 +472,7 @@ func (s *Service) retryTask(ctx context.Context, unit contract.Unit, row *taskRo
 	}
 	// Re-admission: execution deduplicates task/version and returns the
 	// fresh run for the bumped version.
-	wire, err := row.toWire()
-	if err != nil {
-		return nil, err
-	}
-	var enq peerEnqueueOut
-	if err := s.callPeer(ctx, unit, "_execution.enqueue", peerEnqueueIn{Task: *wire}, &enq); err != nil {
+	if _, err := s.enqueueRun(ctx, unit, row); err != nil {
 		return nil, err
 	}
 	if err := s.recordTransitionLog(ctx, unit, row, fromState, &transitionRequest{
@@ -362,6 +506,16 @@ func (s *Service) assignWorker(ctx context.Context, unit contract.Unit, row *tas
 	row.UpdatedAt = now
 	if err := updateTaskState(ctx, unit, row); err != nil {
 		return nil, err
+	}
+	// Reassigning an already-queued (ready) task pins the new contract
+	// immediately: the run enqueued for the bumped version reflects the new
+	// worker, rather than leaving the caller to rediscover the change
+	// through a later task.start. The dedup key is (task id, version), so
+	// this never collides with the run tied to the pre-reassignment version.
+	if row.State == stateReady {
+		if _, err := s.enqueueRun(ctx, unit, row); err != nil {
+			return nil, err
+		}
 	}
 	if err := s.emitTaskEvent(ctx, unit, row, "tasks.task.assigned", map[string]any{
 		"task_id": row.ID, "worker_id": workerID,
@@ -398,6 +552,15 @@ func (s *Service) updatePendingContract(ctx context.Context, unit contract.Unit,
 	row.UpdatedAt = now
 	if err := updateTaskContract(ctx, unit, row); err != nil {
 		return nil, err
+	}
+	// A pending-input change to an already-queued (ready) task re-pins the
+	// contract the same way reassignment does: the run enqueued for the
+	// bumped version carries the updated inputs, so nothing can start
+	// executing the superseded ones.
+	if row.State == stateReady {
+		if _, err := s.enqueueRun(ctx, unit, row); err != nil {
+			return nil, err
+		}
 	}
 	if err := s.emitTaskEvent(ctx, unit, row, "tasks.task.updated", map[string]any{
 		"task_id": row.ID, "version": row.Version,

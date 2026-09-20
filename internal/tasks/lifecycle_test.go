@@ -72,7 +72,7 @@ func TestCreateRefusesParentAttachment(t *testing.T) {
 func TestLifecycleThroughSuccess(t *testing.T) {
 	env := newEnv(t)
 	content := env.artifactFixture("report-output")
-	verifier := env.verifierArtifactFixture("verifier-result")
+	verifier := env.verifierArtifactRefFixture("verifier-result")
 	def := env.taskDef()
 	def.RequiredOutputs = []string{"output.bin"}
 	def.Acceptance = acceptanceFixture(presenceObservation("output-present", "output.bin", content))
@@ -88,9 +88,13 @@ func TestLifecycleThroughSuccess(t *testing.T) {
 		t.Fatalf("enqueue calls %d after ready, want 1", len(runs))
 	}
 
-	// ready -> running -> verifying with evidence -> succeeded.
+	// ready -> running -> verifying. Execution records trusted evidence
+	// through _tasks.evidence.record, binding the declared output.bin slot
+	// to the published artifact, before the transition to succeeded
+	// consults that binding -- then succeeded.
 	v = env.runToRunning(id, v)
-	v = env.runToVerifying(id, v, []contract.ID{content.ID, verifier})
+	v = env.runToVerifying(id, v, nil)
+	env.recordEvidence(id, v, verifier, []wireOutputBinding{{Name: "output.bin", Artifact: content}}, verdictPassed)
 	wire := env.transition(id, v, stateSucceeded, nil)
 	if wire.State != stateSucceeded || wire.Version != contract.Version(v+1) {
 		t.Fatalf("success drifted: state %s version %d", wire.State, wire.Version)
