@@ -1425,6 +1425,38 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   fixed to actually enforce it (tracked as future work, not yet
   scheduled). Landing the current queue (P37, P10, then P03/P08/P09/P05/
   P11/P13 in the order they reported ready) fully serialized from here.
+- 2026-09-19 19:00-19:40 PT -- P37's escalation deepened: fixing
+  internal/registry correctly (its own package fully green, 65 tests)
+  exposed that revision 3 changed the SHAPE of shared $defs (Operation/
+  Artifact/Responsibility/Conversation: 65->68 defs, contents differ), not
+  just added 4 operations. Every real (non-fake) module still shipping the
+  old shape fails registry assembly with "operation schema redefines the
+  shared definition X" once registry enforces the correct one -- confirmed
+  by reading cmd/zatiti/assembly.go, internal/application/assembly_test.go
+  and tests/integration/fixture_test.go, all of which wire every domain
+  module into one real registry.New(...). This would turn cmd/zatiti,
+  internal/application, tests/integration and tests/qualification red --
+  all four currently green, none tracked -- and implicates internal/
+  connections (P06) and internal/policy (P07), neither dispatched yet, plus
+  P08/P09 (dispatched, not yet landed). Before P37's fix this was silently
+  masked: registry's stale catalog happened to agree with connections/
+  policy's equally stale descriptors. P37 correctly declined to decide
+  this alone (a merge-gating/allowlist call spanning lanes outside
+  "internal/registry ONLY") and escalated with full evidence instead of
+  guessing. Given three options (extend expected-red.txt to cover the four
+  newly-exposed packages and land P37 now / hold P37 and land P06+P07+P08+
+  P09 first so the end-to-end proof suites never go red / a different
+  order), David chose: hold P37, land P06/P07/P08/P09 first, P37 last.
+  P08 landed clean as the empirical test case (PR #6, ed2d161) -- its full
+  pre-commit run showed NO "redefines the shared definition" errors, only
+  the already-tracked expected-red.txt gaps, which is a real, positive
+  signal that David's chosen order avoids the red window as intended (at
+  least for accounting; artifacts (P09) touches the Artifact type more
+  directly and is the next test of this). Dispatched P06 and P07 to close
+  the remaining gap, this time with the commit-serialization lesson baked
+  into their initial dispatch brief (report ready, wait for the lead to
+  clear by name -- no self-checking the lease in a loop). P37's PR stays
+  uncommitted/held until all four land.
 
 ## Planned
 
