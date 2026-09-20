@@ -1263,6 +1263,36 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   "Expected red: catalog/descriptor-parity tests" -- check there before
   treating any of those specific tests as a fresh regression. P00's claim
   released; P01 claimed and dispatched next.
+- 2026-09-19 17:20 PT -- cleaned up the three leftover wave3/* worktrees from
+  the 2026-09-18 push (they predate this plan and were left on disk after
+  landing -- see the hygiene rule this violated). wave3/cmd and
+  wave3/integration were fully merged already (content-identical to commits
+  already on main under different SHAs from the rebase-merge, confirmed via
+  `git cherry main <branch>`, not just ref ancestry); removed both, worktree
+  and branch. wave3/responses's committed history was equally fully merged,
+  but the worktree held real uncommitted WIP: a LIVE qualification of the
+  Responses adapter already run against the real https://api.openai.com
+  (model gpt-5.6-luna, founder credential resolved from the macOS keychain
+  via keychain:zatiti-responses/zatiti, real spend of 53 micro-USD) --
+  documented in internal/adapters/responses/PROTOCOL.md's new "Live
+  qualification (performed 2026-09-19)" section and a new
+  tests/qualification/responses_live_test.go (gated behind
+  ZATITI_QUALIFY_RESPONSES_LIVE=1, so it does not run in normal CI). This is
+  NOT recorded anywhere else in this file, in docs/lore.md, or in any sitrep
+  -- the morning sitrep (docs/sitrep/2026-09-19.md) was still asking David to
+  run a much smaller manual curl probe, which this live run supersedes, so
+  it most likely happened after that sitrep from a session with no roadmap
+  trail. Flagged to David directly rather than silently absorbed. Banked
+  as-is (wip: commit 4aa219b, pushed to origin/wave3/responses) rather than
+  merged -- it predates P00's revision-3 contract (built against the old
+  single-call ResponsesParameters shape, not the new prepare_session/
+  model_step split) and needs real review, which is P13's job once wave 3
+  opens. P13's owner should pull this branch first and read its PROTOCOL.md
+  diff before writing anything new -- it is real evidence of live endpoint
+  behavior (billing/tool_usage/frequency_penalty fields the pinned OpenAPI
+  document doesn't list, defaults echoed live, the byte-based input-token
+  bound holding on both observed steps), not something to redo. Worktree
+  removed after the push was verified on origin.
 
 ## Planned
 
