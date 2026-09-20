@@ -1,10 +1,15 @@
 package accounting
 
 import (
+	"context"
+	"encoding/json"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/zatiti/zatiti/internal/contract"
+	"github.com/zatiti/zatiti/internal/storage"
 )
 
 // Acceptance cases assigned to accounting. Each test drives the full flow
@@ -382,5 +387,241 @@ func TestAcceptanceCancelKeepsUnknownInspect(t *testing.T) {
 	p, _ := e.readPosition(posInstallation, e.install)
 	if p.Unknown != 0 || p.Spent != 1_000 || p.Concurrency != 0 {
 		t.Fatalf("position after resolution %+v, want the unknown resolved to spent 1000", p)
+	}
+}
+
+// Z20.bounded_idle_spend: a responsibility's reasoning cycles share one
+// aggregate root position keyed by the responsibility itself. Many cycles
+// admit while live slots remain; the configured aggregate concurrency bound
+// stops the next one the instant it is exhausted, and settling a cycle
+// (finding no useful work, authoritative nonexecution) frees the slot for
+// the next wake -- proving the bound is a live gauge across an unbounded
+// sequence of cycles, not a one-time lockout. Every step spends exactly
+// zero: an idle responsibility never requires a configured currency or
+// installation budget to keep reasoning, which is the zero-spend bootstrap
+// this case also proves.
+func TestAcceptanceBoundedIdleSpend(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	// Deliberately no installation budget anywhere in this test: idle
+	// reasoning must stay usable before the operator selects a currency.
+	responsibility := e.ids.New()
+	const aggregateConcurrency = int64(3)
+
+	cycle := func() reserveInput {
+		in := e.reserveIn(e.scope, e.ids.New(), unconfiguredCurrency, 0)
+		in.RootTaskID = &responsibility
+		in.Limits = limits(unconfiguredCurrency, 0, aggregateConcurrency)
+		return in
+	}
+
+	// Three empty cycles admit and share the one aggregate position; a
+	// fourth concurrent cycle is refused at the configured bound.
+	first := e.mustReserve(cycle())
+	e.mustReserve(cycle())
+	e.mustReserve(cycle())
+	_ = e.expectFault(opReserve, cycle(), contract.CodeBudgetUnavailable)
+
+	p, ok := e.readPosition(posRootTask, responsibility)
+	if !ok || p.Concurrency != aggregateConcurrency || p.Reserved != 0 || p.Spent != 0 || p.Unknown != 0 {
+		t.Fatalf("responsibility position %+v, want %d live zero-spend cycles and no money moved", p, aggregateConcurrency)
+	}
+
+	// A reasoning cycle that finds no useful work settles with authoritative
+	// nonexecution: the freed slot lets the next wake's cycle through.
+	e.mustSettle(settleInput{
+		ReservationID: first.ID, ExpectedVersion: first.Version,
+		Usage: wireUsage{Currency: unconfiguredCurrency}, Nonexecution: true,
+	})
+	next := e.mustReserve(cycle())
+	if next.ID == "" || next.State != "reserved" {
+		t.Fatalf("freed aggregate slot did not admit the next cycle: %+v", next)
+	}
+	p, ok = e.readPosition(posRootTask, responsibility)
+	if !ok || p.Concurrency != aggregateConcurrency {
+		t.Fatalf("responsibility position after cycling %+v, want %d live slots", p, aggregateConcurrency)
+	}
+}
+
+// Restart persistence: an unknown reservation and the position it charged
+// survive closing and reopening the installation database -- exactly what a
+// controller restart or a restore's post-recovery reconciliation depends on.
+// Verification success at the effects layer is never provider cost
+// evidence, and neither is surviving a restart: the retained unknown stays
+// exactly as uncertain after reopening, and only a later, explicit
+// authoritative settlement resolves it.
+func TestAcceptanceRestartPreservesUnknown(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "restart-accounting.db")
+
+	clock := &fakeClock{now: time.Date(2026, 9, 10, 12, 0, 0, 0, time.UTC)}
+	ids := &seqIDs{}
+	ports := newFakePorts()
+
+	db, err := storage.Open(ctx, storage.Config{Path: path})
+	if err != nil {
+		t.Fatalf("storage.Open: %v", err)
+	}
+	svc, err := New(contract.Dependencies{Clock: clock, IDs: ids, Ports: ports})
+	if err != nil {
+		t.Fatalf("accounting.New: %v", err)
+	}
+	if err := db.Migrate(ctx, svc.Migrations()); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+
+	install := ids.New()
+	owner := ids.New()
+	actor := contract.Actor{PrincipalID: owner, Kind: contract.KindService}
+	scope := wireScope{InstallationID: install}
+
+	call := func(db contract.Database, svc *Service, op string, in any) contract.Payload {
+		t.Helper()
+		raw, err := json.Marshal(in)
+		if err != nil {
+			t.Fatalf("marshal %s input: %v", op, err)
+		}
+		var payload contract.Payload
+		if err := db.Write(ctx, actor, scope.toContract(), func(unit contract.Unit) error {
+			p, err := svc.Handle(ctx, unit, contract.Invocation{Operation: op, Version: 1, Input: raw})
+			payload = p
+			return err
+		}); err != nil {
+			t.Fatalf("%s: %v", op, err)
+		}
+		if payload.Error != nil {
+			t.Fatalf("%s returned fault %s: %s", op, payload.Error.Code, payload.Error.Message)
+		}
+		return payload
+	}
+
+	// Before the simulated crash: a configured budget, one reservation and a
+	// settle that retains unresolved provider uncertainty.
+	call(db, svc, opActivate, candidateEnvelope{Candidate: wireCandidate{
+		PlanID: ids.New(), BaseRevision: 1, CandidateDigest: digest64, Dependencies: []wireRef{},
+		Changes: []wireChange{budgetChange(changeActionCreate, install, 0, limits("USD", 10_000, 4))},
+	}})
+	reservePayload := call(db, svc, opReserve, reserveInput{
+		Scope: scope, OperationID: ids.New(),
+		Amount: wireMoney{Currency: "USD", MicroUnits: 1_000},
+		Limits: limits("USD", 2_000, 4),
+	})
+	var reserved reservationResourceBody
+	if err := json.Unmarshal(reservePayload.Data, &reserved); err != nil {
+		t.Fatalf("decode reserve: %v", err)
+	}
+	settlePayload := call(db, svc, opSettle, settleInput{
+		ReservationID: reserved.Resource.ID, ExpectedVersion: reserved.Resource.Version,
+		Usage: wireUsage{Currency: "USD", Unknown: 1_000},
+	})
+	var settled reservationResourceBody
+	if err := json.Unmarshal(settlePayload.Data, &settled); err != nil {
+		t.Fatalf("decode settle: %v", err)
+	}
+	if settled.Resource.State != "unknown" {
+		t.Fatalf("state before restart %q, want unknown", settled.Resource.State)
+	}
+
+	// Simulate a controller restart: close the database handle and every
+	// in-memory service, then reopen the same file and reconstruct both from
+	// nothing but the persisted rows.
+	if err := db.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	db2, err := storage.Open(ctx, storage.Config{Path: path})
+	if err != nil {
+		t.Fatalf("reopen storage: %v", err)
+	}
+	t.Cleanup(func() { _ = db2.Close() })
+	svc2, err := New(contract.Dependencies{Clock: clock, IDs: ids, Ports: ports})
+	if err != nil {
+		t.Fatalf("accounting.New after restart: %v", err)
+	}
+	if err := db2.Migrate(ctx, svc2.Migrations()); err != nil {
+		t.Fatalf("re-migrate after restart: %v", err)
+	}
+
+	// The retained unknown reservation, its charged position and the
+	// concurrency slot it held read back exactly as left before the restart.
+	var row *reservationRow
+	if err := db2.Write(ctx, actor, scope.toContract(), func(unit contract.Unit) error {
+		var loadErr error
+		row, loadErr = loadReservation(ctx, unit, reserved.Resource.ID)
+		return loadErr
+	}); err != nil {
+		t.Fatalf("read reservation after restart: %v", err)
+	}
+	if row == nil || row.State != "unknown" {
+		t.Fatalf("reservation after restart %+v, want unknown", row)
+	}
+	var pos *position
+	if err := db2.Write(ctx, actor, scope.toContract(), func(unit contract.Unit) error {
+		var loadErr error
+		pos, loadErr = loadPosition(ctx, unit, posInstallation, install)
+		return loadErr
+	}); err != nil {
+		t.Fatalf("read position after restart: %v", err)
+	}
+	if pos == nil || pos.Unknown != 1_000 || pos.Concurrency != 1 || pos.Spent != 0 {
+		t.Fatalf("position after restart %+v, want 1000 unknown and the slot held", pos)
+	}
+
+	// Recovery then resolves the retained unknown exactly once, on the same
+	// terms as ordinary post-restart settlement -- proving the restart
+	// itself settled nothing and manufactured no cost evidence.
+	final := call(db2, svc2, opSettle, settleInput{
+		ReservationID: reserved.Resource.ID, ExpectedVersion: row.Version,
+		Usage: wireUsage{Currency: "USD", Spent: 1_000},
+	})
+	var resolved reservationResourceBody
+	if err := json.Unmarshal(final.Data, &resolved); err != nil {
+		t.Fatalf("decode resolved settle: %v", err)
+	}
+	if resolved.Resource.State != "settled" {
+		t.Fatalf("post-restart resolution %q, want settled", resolved.Resource.State)
+	}
+}
+
+// Doctor/desktop projection: aggregate spending and outstanding
+// reservations are visible through the same _accounting.inspect and
+// usage.get views a real admission decision uses, and a refused admission
+// names the exact reason -- so a doctor report or a desktop budget screen
+// never has to guess why a worker cannot proceed.
+func TestInspectSurfacesOutstandingReservationsAndReasons(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	e.applyBudget(e.install, limits("USD", 2_000, 4))
+	e.mustReserve(e.reserveIn(e.scope, e.ids.New(), "USD", 1_200))
+
+	payload := e.mustOK(opInspect, scopeInput{Scope: e.scope})
+	var out inspectOutput
+	e.decode(payload.Data, &out)
+	if out.Usage.Reserved != 1_200 {
+		t.Fatalf("inspect usage %+v, want the outstanding reservation visible as 1200 reserved", out.Usage)
+	}
+	if out.Limits.SpendMicroUnits != 2_000 {
+		t.Fatalf("inspect limits %+v, want the configured 2000 ceiling", out.Limits)
+	}
+	// The doctor/desktop projection derives remaining headroom from exactly
+	// these two views: reserved plus spent plus unknown is the enforceable
+	// exposure the reserve boundary itself checks.
+	exposure := out.Usage.Reserved + out.Usage.Spent + out.Usage.Unknown
+	if room := out.Limits.SpendMicroUnits - exposure; room != 800 {
+		t.Fatalf("derivable headroom %d, want exactly 800", room)
+	}
+
+	// A worker attempting to proceed past that headroom is refused with a
+	// named, specific reason instead of a bare denial.
+	f := e.expectFault(opReserve, e.reserveIn(e.scope, e.ids.New(), "USD", 801), contract.CodeBudgetUnavailable)
+	if !strings.Contains(f.Message, "budget exhausted") {
+		t.Fatalf("refusal message %q does not name why the worker cannot proceed", f.Message)
+	}
+
+	// usage.get -- the public operation doctor and desktop actually call --
+	// reports the identical outstanding exposure.
+	usage := e.usageGet(e.scope)
+	if usage.Reserved != 1_200 || usage.Currency != "USD" {
+		t.Fatalf("usage.get %+v, want the same 1200 outstanding reservation", usage)
 	}
 }
