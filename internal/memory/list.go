@@ -150,3 +150,82 @@ func (s *Service) handleBindingList(ctx context.Context, unit contract.Unit, in 
 	}
 	return outcome, nil
 }
+
+// memory.list: authorized scoped claim refs (source, freshness, lineage) for
+// brains the caller can access, entirely from the local cache -- never an
+// unauthorized brain and never a paid Serenity retrieval (R15-007/P00-017).
+// binding_ids is the sole authorization input: every named id is authorized
+// for read exactly as memory.recall authorizes it, so an id the caller
+// cannot read fails permission_denied/not_found instead of being silently
+// dropped from the page.
+
+// listFilter is the cursor-binding form for memory.list: the exact
+// authorized brain set a page was computed against, so a cursor minted for
+// one binding_ids selection can never continue a different one.
+type listFilter struct {
+	BrainIDs []contract.ID `json:"brain_ids"`
+}
+
+// handleList authorizes every named binding for read, resolves the distinct
+// authorized brain set, and returns one keyset page of the latest cached
+// version of every claim in those brains.
+func (s *Service) handleList(ctx context.Context, unit contract.Unit, in listInput) (contract.Outcome[listOutput], error) {
+	if err := s.checkScope(unit, in.Scope); err != nil {
+		return contract.Outcome[listOutput]{}, err
+	}
+	bindings, err := s.selectBindings(ctx, unit, in.Scope, in.BindingIDs, permRead, time.Time{})
+	if err != nil {
+		return contract.Outcome[listOutput]{}, err
+	}
+	seen := map[contract.ID]bool{}
+	var brainIDs []contract.ID
+	for _, b := range bindings {
+		if seen[b.BrainID] {
+			continue
+		}
+		seen[b.BrainID] = true
+		brainIDs = append(brainIDs, b.BrainID)
+	}
+	filter := listFilter{BrainIDs: brainIDs}
+
+	limit := defaultListLimit
+	if in.Limit != nil {
+		limit = *in.Limit
+		if limit < 1 || limit > maxListLimit {
+			return contract.Outcome[listOutput]{}, invalidInput("limit %d must be between 1 and %d", limit, maxListLimit)
+		}
+	}
+	var afterRecorded time.Time
+	var afterID contract.ID
+	if in.Cursor != "" {
+		recorded, id, cerr := s.readCursor(opList, unit.Scope(), filter, in.Cursor)
+		if cerr != nil {
+			return contract.Outcome[listOutput]{}, cerr
+		}
+		afterRecorded, afterID = recorded, id
+	}
+
+	// Fetch one extra row to learn whether a following page exists.
+	page, err := listClaimsByBrains(ctx, unit, brainIDs, afterRecorded, afterID, limit+1)
+	if err != nil {
+		return contract.Outcome[listOutput]{}, err
+	}
+	hasMore := int64(len(page)) > limit
+	if hasMore {
+		page = page[:limit]
+	}
+	items := make([]wireClaim, 0, len(page))
+	for _, c := range page {
+		items = append(items, renderClaim(c))
+	}
+	outcome := contract.Outcome[listOutput]{Status: contract.StatusCompleted, Data: listOutput{Items: items}}
+	if hasMore && len(page) > 0 {
+		last := page[len(page)-1]
+		cursor, err := s.mintCursor(opList, unit.Scope(), filter, last.RecordedAt, last.ID, s.now())
+		if err != nil {
+			return contract.Outcome[listOutput]{}, err
+		}
+		outcome.NextCursor = &cursor
+	}
+	return outcome, nil
+}

@@ -228,6 +228,7 @@ type testEnv struct {
 	t       *testing.T
 	ctx     context.Context
 	db      contract.Database
+	dbPath  string // the on-disk sqlite file backing db, for restart tests
 	svc     *Service
 	ports   *fakePorts
 	clock   *fakeClock
@@ -240,12 +241,13 @@ type testEnv struct {
 func newEnv(t *testing.T) *testEnv {
 	t.Helper()
 	ctx := context.Background()
-	db, err := storage.Open(ctx, storage.Config{Path: filepath.Join(t.TempDir(), "memory-test.db")})
+	dbPath := filepath.Join(t.TempDir(), "memory-test.db")
+	db, err := storage.Open(ctx, storage.Config{Path: dbPath})
 	if err != nil {
 		t.Fatalf("storage.Open: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	env := &testEnv{t: t, ctx: ctx, db: db,
+	env := &testEnv{t: t, ctx: ctx, db: db, dbPath: dbPath,
 		clock: &fakeClock{now: time.Date(2026, 9, 11, 12, 0, 0, 0, time.UTC)}, ids: &seqIDs{}}
 	env.ports = newFakePorts(env.ids)
 	svc, err := New(contract.Dependencies{Clock: env.clock, IDs: env.ids, Ports: env.ports})

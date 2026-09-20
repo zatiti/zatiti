@@ -17,7 +17,8 @@ func validPhysicalCall(now time.Time) serenityPhysicalCall {
 		OperationID: "00000000-0000-4000-8000-000000000002", AttemptID: "00000000-0000-4000-8000-000000000003",
 		AccountIdentity: "serenity-writer", RequestedDestination: "serenity://test", ResolvedDestination: "serenity://test",
 		ProfileDigest: fakeDigest, CapabilityEvidence: fakeArtifact, StartedAt: now, FinishedAt: now,
-		RequestContext: fakeArtifact, RequestSent: "yes", Confirmation: "authoritative_success",
+		RequestContext: serenityArtifactLocator{Kind: "artifact", Artifact: &fakeArtifact},
+		RequestSent:    "yes", Confirmation: "authoritative_success",
 	}
 }
 

@@ -438,6 +438,16 @@ type retractInput struct {
 	Reason  string      `json:"reason"`
 }
 
+// listInput is memory.list's request: authorized scoped claim refs for the
+// named bindings, keyset paginated. No query text and no Limits/freshness
+// bound -- this is a local cache read, never a paid Serenity retrieval.
+type listInput struct {
+	Scope      wireScope     `json:"scope"`
+	BindingIDs []contract.ID `json:"binding_ids"`
+	Cursor     string        `json:"cursor,omitempty"`
+	Limit      *int64        `json:"limit,omitempty"`
+}
+
 // Operation outputs.
 
 type versionsOutput struct {
@@ -480,6 +490,10 @@ type bindingListOutput struct {
 
 type claimResourceOutput struct {
 	Resource wireClaim `json:"resource"`
+}
+
+type listOutput struct {
+	Items []wireClaim `json:"items"`
 }
 
 // Peer payload bodies.
@@ -681,18 +695,18 @@ type serenityEvidence struct {
 // serenityPhysicalCall decodes the one-physical-request evidence fields this
 // owner acts on; the full document stays inert JSON in intent detail.
 type serenityPhysicalCall struct {
-	OperationID          contract.ID     `json:"operation_id"`
-	AttemptID            contract.ID     `json:"attempt_id"`
-	AccountIdentity      string          `json:"account_identity"`
-	RequestedDestination string          `json:"requested_destination"`
-	ResolvedDestination  string          `json:"resolved_destination"`
-	ProfileDigest        contract.Digest `json:"profile_digest"`
-	CapabilityEvidence   wireArtifactRef `json:"capability_evidence"`
-	StartedAt            time.Time       `json:"started_at"`
-	FinishedAt           time.Time       `json:"finished_at"`
-	RequestContext       wireArtifactRef `json:"request_context"`
-	RequestSent          string          `json:"request_sent"`
-	Confirmation         string          `json:"confirmation"`
+	OperationID          contract.ID             `json:"operation_id"`
+	AttemptID            contract.ID             `json:"attempt_id"`
+	AccountIdentity      string                  `json:"account_identity"`
+	RequestedDestination string                  `json:"requested_destination"`
+	ResolvedDestination  string                  `json:"resolved_destination"`
+	ProfileDigest        contract.Digest         `json:"profile_digest"`
+	CapabilityEvidence   wireArtifactRef         `json:"capability_evidence"`
+	StartedAt            time.Time               `json:"started_at"`
+	FinishedAt           time.Time               `json:"finished_at"`
+	RequestContext       serenityArtifactLocator `json:"request_context"`
+	RequestSent          string                  `json:"request_sent"`
+	Confirmation         string                  `json:"confirmation"`
 }
 
 // serenityBrainRevision decodes one brain revision attestation.
