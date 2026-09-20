@@ -55,6 +55,16 @@ const (
 	attemptStateRecorded = "recorded"
 )
 
+// Attempt kinds. A dispatch attempt is the original mutation; a
+// reconciliation attempt is a separately admitted bounded read linked to a
+// prior dispatch attempt (R10-008, P00-007). Claiming a reconciliation
+// attempt never advances the operation to executing, and only
+// _effects.reconciliation.record may record its first observation.
+const (
+	attemptKindDispatch       = "dispatch"
+	attemptKindReconciliation = "reconciliation"
+)
+
 // Observation kinds. The first observation of an attempt is physical;
 // correction and dispute append contradictory late evidence without
 // rewriting history.
@@ -83,36 +93,38 @@ const (
 // operationRow is one logical effect: immutable action reference, state
 // machine position and links to related operations.
 type operationRow struct {
-	ID              contract.ID
-	Version         int64
-	InstallID       contract.ID
-	OrganizationID  contract.ID
-	ProjectID       contract.ID
-	WorkerID        contract.ID
-	TaskID          contract.ID
-	ActionID        contract.ID
-	ActionDigest    string
-	SourceKey       string
-	State           string
-	LinkedOperation contract.ID
-	Relationship    string
-	JobID           contract.ID
-	AttemptCount    int64
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
+	ID                contract.ID
+	Version           int64
+	InstallID         contract.ID
+	OrganizationID    contract.ID
+	ProjectID         contract.ID
+	WorkerID          contract.ID
+	TaskID            contract.ID
+	ActionID          contract.ID
+	ActionDigest      string
+	SourceKey         string
+	State             string
+	LinkedOperation   contract.ID
+	Relationship      string
+	JobID             contract.ID
+	AttemptCount      int64
+	CallbackRouteJSON string
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
 }
 
 const operationColumns = `id, version, installation_id, organization_id, project_id, worker_id, task_id,
 	action_id, action_digest, source_key, state, linked_operation_id, relationship, job_id,
-	attempt_count, created_at, updated_at`
+	attempt_count, callback_route_json, created_at, updated_at`
 
 func scanOperation(scan func(dest ...any) error) (*operationRow, error) {
 	var o operationRow
 	var organization, project, worker, task, sourceKey, linked, relationship, jobID string
+	var callbackRoute string
 	var created, updated string
 	err := scan(&o.ID, &o.Version, &o.InstallID, &organization, &project, &worker, &task,
 		&o.ActionID, &o.ActionDigest, &sourceKey, &o.State, &linked, &relationship, &jobID,
-		&o.AttemptCount, &created, &updated)
+		&o.AttemptCount, &callbackRoute, &created, &updated)
 	if err != nil {
 		return nil, err
 	}
@@ -130,6 +142,7 @@ func scanOperation(scan func(dest ...any) error) (*operationRow, error) {
 	if jobID != "" {
 		o.JobID = contract.ID(jobID)
 	}
+	o.CallbackRouteJSON = callbackRoute
 	var perr error
 	o.CreatedAt, perr = parseStamp(created)
 	if perr != nil {
@@ -167,11 +180,11 @@ func loadOperationBySource(ctx context.Context, unit contract.Unit, install cont
 // insertOperation persists a new operation row.
 func insertOperation(ctx context.Context, unit contract.Unit, o *operationRow) error {
 	_, err := unit.ExecContext(ctx, `INSERT INTO effects_operations (`+operationColumns+`)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		string(o.ID), o.Version, string(o.InstallID), string(o.OrganizationID), string(o.ProjectID),
 		string(o.WorkerID), string(o.TaskID), string(o.ActionID), o.ActionDigest, o.SourceKey,
 		o.State, string(o.LinkedOperation), o.Relationship, string(o.JobID),
-		o.AttemptCount, formatStamp(o.CreatedAt), formatStamp(o.UpdatedAt))
+		o.AttemptCount, o.CallbackRouteJSON, formatStamp(o.CreatedAt), formatStamp(o.UpdatedAt))
 	return err
 }
 
@@ -242,7 +255,10 @@ func loadActionByDigest(ctx context.Context, unit contract.Unit, install contrac
 	return &a, nil
 }
 
-// attemptRow is one physical provider invocation.
+// attemptRow is one physical provider invocation. Kind separates the
+// original dispatch attempt from a reconciliation bounded read; a
+// reconciliation attempt's TargetAttemptID names the exact prior attempt it
+// reconciles (R10-008, P00-007).
 type attemptRow struct {
 	ID                 contract.ID
 	Version            int64
@@ -263,22 +279,26 @@ type attemptRow struct {
 	ProviderReference  string
 	ConfirmedAt        time.Time
 	Generation         int64
+	Kind               string
+	TargetAttemptID    contract.ID
 	CreatedAt          time.Time
 	RecordedAt         time.Time
 }
 
 const attemptColumns = `id, version, operation_id, attempt_no, state, disposition, adapter, credential_ref,
 	deadline, dispatch_json, reservation_id, reservation_version, connection_id, connection_version,
-	evidence_json, usage_json, provider_reference, confirmed_at, generation, created_at, recorded_at`
+	evidence_json, usage_json, provider_reference, confirmed_at, generation, kind, target_attempt_id,
+	created_at, recorded_at`
 
 func scanAttempt(scan func(dest ...any) error) (*attemptRow, error) {
 	var a attemptRow
 	var disposition, evidence, usage, providerRef, confirmed, recorded string
 	var deadline, created string
+	var kind, targetAttempt string
 	err := scan(&a.ID, &a.Version, &a.OperationID, &a.AttemptNo, &a.State, &disposition, &a.Adapter,
 		&a.CredentialRef, &deadline, &a.DispatchJSON, &a.ReservationID, &a.ReservationVersion,
 		&a.ConnectionID, &a.ConnectionVersion, &evidence, &usage, &providerRef, &confirmed,
-		&a.Generation, &created, &recorded)
+		&a.Generation, &kind, &targetAttempt, &created, &recorded)
 	if err != nil {
 		return nil, err
 	}
@@ -286,6 +306,10 @@ func scanAttempt(scan func(dest ...any) error) (*attemptRow, error) {
 	a.EvidenceJSON = evidence
 	a.UsageJSON = usage
 	a.ProviderReference = providerRef
+	a.Kind = kind
+	if targetAttempt != "" {
+		a.TargetAttemptID = contract.ID(targetAttempt)
+	}
 	var perr error
 	a.Deadline, perr = parseStamp(deadline)
 	if perr != nil {
@@ -339,15 +363,37 @@ func listAttempts(ctx context.Context, unit contract.Unit, operationID contract.
 	return out, rows.Err()
 }
 
-// insertAttempt persists a new attempt with its dispatch intent.
+// lastDispatchAttempt returns the most recent dispatch-kind (original
+// mutation) attempt of one operation, ignoring reconciliation reads, or nil
+// when the operation has never been dispatched. Reconciliation links to this
+// exact prior attempt rather than re-resolving a connection/tool.
+func lastDispatchAttempt(attempts []*attemptRow) *attemptRow {
+	var last *attemptRow
+	for _, a := range attempts {
+		if a.Kind == attemptKindReconciliation {
+			continue
+		}
+		last = a
+	}
+	return last
+}
+
+// insertAttempt persists a new attempt with its dispatch intent. Kind
+// defaults to attemptKindDispatch when unset, so every existing caller that
+// builds an attemptRow without naming Kind keeps writing ordinary dispatch
+// attempts.
 func insertAttempt(ctx context.Context, unit contract.Unit, a *attemptRow) error {
+	kind := a.Kind
+	if kind == "" {
+		kind = attemptKindDispatch
+	}
 	_, err := unit.ExecContext(ctx, `INSERT INTO effects_attempts (`+attemptColumns+`)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		string(a.ID), a.Version, string(a.OperationID), a.AttemptNo, a.State, a.Disposition,
 		a.Adapter, a.CredentialRef, formatStamp(a.Deadline), a.DispatchJSON,
 		string(a.ReservationID), a.ReservationVersion, string(a.ConnectionID), a.ConnectionVersion,
 		a.EvidenceJSON, a.UsageJSON, a.ProviderReference, formatStamp(a.ConfirmedAt),
-		a.Generation, formatStamp(a.CreatedAt), formatStamp(a.RecordedAt))
+		a.Generation, kind, string(a.TargetAttemptID), formatStamp(a.CreatedAt), formatStamp(a.RecordedAt))
 	return err
 }
 
@@ -602,27 +648,54 @@ func listOpenObligationsForOperation(ctx context.Context, unit contract.Unit, op
 	return out, rows.Err()
 }
 
-// pendingStates are the operation states the controller must act on:
-// staged operations awaiting admission, admitted operations whose one-use
-// claim is unconsumed, claimed operations whose observation is still owed,
-// accepted calls awaiting confirmation and uncertain operations awaiting
-// reconciliation. Ready and executing are listed so a restarted controller
-// can name every admitted-but-unfinished attempt (attempt_ids) and settle
-// it from its own journal: unclaimed as not sent, claimed as unknown, never
-// as ready for resend.
-var pendingStates = []string{
-	opStatePrepared, opStateReady, opStateExecuting,
-	opStateAwaitingConfirmation, opStateOutcomeUnknown,
-}
+// pendingDispatchableStates are operations the controller can act on right
+// now: staged operations awaiting admission, admitted operations whose
+// one-use claim is unconsumed and claimed operations whose observation is
+// still owed. Ready and executing are listed so a restarted controller can
+// name every admitted-but-unfinished attempt (attempt_ids) and settle it
+// from its own journal: unclaimed as not sent, claimed as unknown, never as
+// ready for resend.
+var pendingDispatchableStates = []string{opStatePrepared, opStateReady, opStateExecuting}
+
+// pendingBlockedStates are operations awaiting an outcome the controller
+// does not yet control: accepted calls awaiting confirmation and uncertain
+// operations awaiting reconciliation.
+var pendingBlockedStates = []string{opStateAwaitingConfirmation, opStateOutcomeUnknown}
 
 // listPendingOperations returns the controller-actionable operations of one
-// installation in submission order.
+// installation. Dispatchable operations are scanned before blocked ones so
+// any number of unresolved (awaiting_confirmation/outcome_unknown)
+// operations beyond the batch limit can never hide newer dispatchable work:
+// the dispatchable scan runs its own bounded query, unaffected by how many
+// blocked rows exist, and only the remaining budget after it is spent on
+// blocked operations.
 func listPendingOperations(ctx context.Context, unit contract.Unit, install contract.ID, limit int64) ([]*operationRow, error) {
-	placeholders := strings.Repeat("?,", len(pendingStates))
+	dispatchable, err := queryOperationsByStates(ctx, unit, install, pendingDispatchableStates, limit)
+	if err != nil {
+		return nil, err
+	}
+	out := dispatchable
+	if remaining := limit - int64(len(dispatchable)); remaining > 0 {
+		blocked, err := queryOperationsByStates(ctx, unit, install, pendingBlockedStates, remaining)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, blocked...)
+	}
+	return out, nil
+}
+
+// queryOperationsByStates returns up to limit operations of one installation
+// in one of the named states, in submission order.
+func queryOperationsByStates(ctx context.Context, unit contract.Unit, install contract.ID, states []string, limit int64) ([]*operationRow, error) {
+	if limit <= 0 {
+		return nil, nil
+	}
+	placeholders := strings.Repeat("?,", len(states))
 	placeholders = placeholders[:len(placeholders)-1]
-	args := make([]any, 0, len(pendingStates)+2)
+	args := make([]any, 0, len(states)+2)
 	args = append(args, string(install))
-	for _, state := range pendingStates {
+	for _, state := range states {
 		args = append(args, state)
 	}
 	args = append(args, limit)

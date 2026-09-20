@@ -103,12 +103,29 @@ CREATE TABLE effects_obligations (
 );
 `
 
-// migrations returns the single effects schema migration.
+// schemaV2 carries revision 3: the persisted callback route alongside the
+// immutable action (P00-006), and the attempt kind/target-attempt linkage
+// that separates a reconciliation bounded read from the original dispatch
+// (P00-007). kind defaults dispatch so every attempt written before this
+// migration reads back as an ordinary physical invocation.
+const schemaV2 = `
+ALTER TABLE effects_operations ADD COLUMN callback_route_json TEXT NOT NULL DEFAULT '';
+ALTER TABLE effects_attempts ADD COLUMN kind TEXT NOT NULL DEFAULT 'dispatch';
+ALTER TABLE effects_attempts ADD COLUMN target_attempt_id TEXT NOT NULL DEFAULT '';
+`
+
+// migrations returns the effects schema migrations. Bodies are pinned by
+// digest so storage refuses any later byte change.
 func migrations() []contract.Migration {
 	return []contract.Migration{{
 		Owner:   ownerName,
 		Version: 1,
 		SQL:     schemaV1,
 		SHA256:  contract.Hash([]byte(schemaV1)),
+	}, {
+		Owner:   ownerName,
+		Version: 2,
+		SQL:     schemaV2,
+		SHA256:  contract.Hash([]byte(schemaV2)),
 	}}
 }

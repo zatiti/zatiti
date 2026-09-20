@@ -124,6 +124,72 @@ func validatePreconditions(action wireAction) error {
 	return nil
 }
 
+// validateCallbackRoute enforces that a supplied callback route can only
+// name the exact source the caller is already declaring for this effect
+// (P00-006): arbitrary JSON cannot select an execution callback belonging to
+// some other turn or job. Effects has no visibility into execution's turn
+// table and needs none for this -- the caller can never legitimately
+// declare one source identity while routing to a different one, so the
+// turn_id/job_id a route names must equal the effect's own source_id.
+func validateCallbackRoute(route *wireCallbackRoute, sourceID contract.ID) error {
+	if route == nil {
+		return nil
+	}
+	switch route.Kind {
+	case callbackKindWorkerTurn:
+		if route.TurnID == nil || *route.TurnID == "" {
+			return invalidInput("callback_route kind %q requires turn_id", route.Kind)
+		}
+		if *route.TurnID != sourceID {
+			return permissionDenied(
+				"callback_route turn_id %s does not match the effect's own source_id %s; arbitrary JSON cannot select an execution callback",
+				*route.TurnID, sourceID)
+		}
+		if route.JobID != nil && *route.JobID != "" {
+			return invalidInput("callback_route kind %q must not also carry job_id", route.Kind)
+		}
+	case callbackKindJob:
+		if route.JobID == nil || *route.JobID == "" {
+			return invalidInput("callback_route kind %q requires job_id", route.Kind)
+		}
+		if *route.JobID != sourceID {
+			return permissionDenied(
+				"callback_route job_id %s does not match the effect's own source_id %s; arbitrary JSON cannot select an execution callback",
+				*route.JobID, sourceID)
+		}
+		if route.TurnID != nil && *route.TurnID != "" {
+			return invalidInput("callback_route kind %q must not also carry turn_id", route.Kind)
+		}
+	case callbackKindMemory, callbackKindSkill, callbackKindConnection:
+		if route.TurnID != nil && *route.TurnID != "" {
+			return invalidInput("callback_route kind %q must not carry turn_id", route.Kind)
+		}
+		if route.JobID != nil && *route.JobID != "" {
+			return invalidInput("callback_route kind %q must not carry job_id", route.Kind)
+		}
+	default:
+		return invalidInput("callback_route kind %q is not supported", route.Kind)
+	}
+	if route.StepIndex != nil && route.Kind != callbackKindWorkerTurn {
+		return invalidInput("callback_route step_index is only valid for kind worker_turn")
+	}
+	return nil
+}
+
+// decodeCallbackRoute decodes one operation's persisted callback route, or
+// nil when none was supplied at prepare time.
+func decodeCallbackRoute(raw string) (*wireCallbackRoute, error) {
+	if raw == "" {
+		return nil, nil
+	}
+	var route wireCallbackRoute
+	if err := json.Unmarshal([]byte(raw), &route); err != nil {
+		return nil, &contract.Fault{Code: contract.CodeInternalError,
+			Message: "stored callback_route does not decode"}
+	}
+	return &route, nil
+}
+
 // ensureAction canonicalizes and persists the immutable action, returning the
 // existing row when an identical action is already bound by digest.
 func (s *Service) ensureAction(ctx context.Context, unit contract.Unit, install contract.ID, action wireAction, now time.Time) (*actionRow, error) {
@@ -183,8 +249,10 @@ func renderOperation(ctx context.Context, unit contract.Unit, o *operationRow) (
 		return wireOperation{}, err
 	}
 	ids := make([]contract.ID, 0, len(attempts))
+	wireAttempts := make([]wireOperationAttempt, 0, len(attempts))
 	for _, a := range attempts {
 		ids = append(ids, a.ID)
+		wireAttempts = append(wireAttempts, wireOperationAttempt{AttemptID: a.ID, Generation: a.Generation})
 	}
 	out := wireOperation{
 		ID:           o.ID,
@@ -194,6 +262,9 @@ func renderOperation(ctx context.Context, unit contract.Unit, o *operationRow) (
 		State:        o.State,
 		AttemptIDs:   ids,
 	}
+	if len(wireAttempts) > 0 {
+		out.Attempts = wireAttempts
+	}
 	if o.LinkedOperation != "" {
 		linked := o.LinkedOperation
 		out.LinkedOperationID = &linked
@@ -202,6 +273,11 @@ func renderOperation(ctx context.Context, unit contract.Unit, o *operationRow) (
 		relationship := o.Relationship
 		out.Relationship = &relationship
 	}
+	route, err := decodeCallbackRoute(o.CallbackRouteJSON)
+	if err != nil {
+		return wireOperation{}, err
+	}
+	out.CallbackRoute = route
 	return out, nil
 }
 
@@ -297,7 +373,9 @@ func requirementFromPolicy(reqs []wireDecisionRequirement, digest string, now ti
 // denied. It is the shared core of prepare, propose and the linked propose
 // operations. A submission-key replay returns the original operation
 // unchanged; a different action behind the same key is a submission_conflict.
-func (s *Service) stageOperation(ctx context.Context, unit contract.Unit, scope wireScope, action wireAction, sourceKey string, linked contract.ID, relationship string) (*operationRow, error) {
+// route is the already-validated callback route, present only for _effects.
+// prepare; propose and the linked proposes always pass nil.
+func (s *Service) stageOperation(ctx context.Context, unit contract.Unit, scope wireScope, action wireAction, sourceKey string, linked contract.ID, relationship string, route *wireCallbackRoute) (*operationRow, error) {
 	if err := s.checkInstallation(unit, scope.InstallationID); err != nil {
 		return nil, err
 	}
@@ -329,22 +407,31 @@ func (s *Service) stageOperation(ctx context.Context, unit contract.Unit, scope 
 			return existing, nil
 		}
 	}
+	var routeJSON string
+	if route != nil {
+		raw, err := canonicalJSON(route)
+		if err != nil {
+			return nil, err
+		}
+		routeJSON = string(raw)
+	}
 	o := &operationRow{
-		ID:              s.deps.IDs.New(),
-		Version:         1,
-		InstallID:       scope.InstallationID,
-		OrganizationID:  action.Scope.OrganizationID,
-		ProjectID:       action.Scope.ProjectID,
-		WorkerID:        action.Scope.WorkerID,
-		TaskID:          action.Scope.TaskID,
-		ActionID:        a.ID,
-		ActionDigest:    string(a.Digest),
-		SourceKey:       sourceKey,
-		State:           opStatePrepared,
-		LinkedOperation: linked,
-		Relationship:    relationship,
-		CreatedAt:       now,
-		UpdatedAt:       now,
+		ID:                s.deps.IDs.New(),
+		Version:           1,
+		InstallID:         scope.InstallationID,
+		OrganizationID:    action.Scope.OrganizationID,
+		ProjectID:         action.Scope.ProjectID,
+		WorkerID:          action.Scope.WorkerID,
+		TaskID:            action.Scope.TaskID,
+		ActionID:          a.ID,
+		ActionDigest:      string(a.Digest),
+		SourceKey:         sourceKey,
+		State:             opStatePrepared,
+		LinkedOperation:   linked,
+		Relationship:      relationship,
+		CallbackRouteJSON: routeJSON,
+		CreatedAt:         now,
+		UpdatedAt:         now,
 	}
 	if err := insertOperation(ctx, unit, o); err != nil {
 		return nil, err
@@ -386,9 +473,15 @@ func (s *Service) stageOperation(ctx context.Context, unit contract.Unit, scope 
 
 // _effects.prepare persists the immutable action and logical effect for
 // hosted steps, memory writes, probes and evaluation. No physical call
-// happens here; admission and dispatch follow through admit and claim.
+// happens here; admission and dispatch follow through admit and claim. An
+// optional callback_route is validated against the effect's own source_id
+// before it is persisted alongside the action (P00-006): a route naming a
+// turn or job other than this effect's own source is refused outright.
 func (s *Service) handlePrepare(ctx context.Context, unit contract.Unit, in prepareInput) (contract.Outcome[operationResourceBody], error) {
-	o, err := s.stageOperation(ctx, unit, in.Scope, in.Action, string(in.SourceID), "", "")
+	if err := validateCallbackRoute(in.CallbackRoute, in.SourceID); err != nil {
+		return contract.Outcome[operationResourceBody]{}, err
+	}
+	o, err := s.stageOperation(ctx, unit, in.Scope, in.Action, string(in.SourceID), "", "", in.CallbackRoute)
 	if err != nil {
 		return contract.Outcome[operationResourceBody]{}, err
 	}
@@ -399,7 +492,7 @@ func (s *Service) handlePrepare(ctx context.Context, unit contract.Unit, in prep
 // current prerequisites and policy and creates the logical operation. No
 // provider call happens in the handler.
 func (s *Service) handlePropose(ctx context.Context, unit contract.Unit, in proposeInput) (contract.Outcome[operationResourceBody], error) {
-	o, err := s.stageOperation(ctx, unit, in.Scope, in.Action, "", "", "")
+	o, err := s.stageOperation(ctx, unit, in.Scope, in.Action, "", "", "", nil)
 	if err != nil {
 		return contract.Outcome[operationResourceBody]{}, err
 	}
@@ -433,7 +526,7 @@ func (s *Service) linkedPropose(ctx context.Context, unit contract.Unit, in link
 		return contract.Outcome[operationResourceBody]{}, conflict(
 			"operation %s is %s; %s requires a concluded original", o.ID, o.State, relationship)
 	}
-	n, err := s.stageOperation(ctx, unit, in.Scope, in.Action, "", o.ID, relationship)
+	n, err := s.stageOperation(ctx, unit, in.Scope, in.Action, "", o.ID, relationship, nil)
 	if err != nil {
 		return contract.Outcome[operationResourceBody]{}, err
 	}
@@ -608,11 +701,17 @@ func (s *Service) resolveDispatch(ctx context.Context, unit contract.Unit, scope
 	return out.Tool, out.Connection, nil
 }
 
-// createAttempt persists the physical attempt with its dispatch intent and
-// bumps the operation's attempt counter. The dispatch intent embeds the
-// stored canonical action bytes so the claim response replays the exact
-// digest-bound action.
+// createAttempt persists the physical dispatch attempt with its dispatch
+// intent and bumps the operation's attempt counter. The dispatch intent
+// embeds the stored canonical action bytes so the claim response replays the
+// exact digest-bound action, plus the operation's persisted callback route
+// (P00-006), returned to the controller unmodified at claim and never seen
+// by the adapter's own strict action parameters.
 func (s *Service) createAttempt(ctx context.Context, unit contract.Unit, o *operationRow, a *actionRow, action wireAction, tool wireTool, conn wireConnection, reservation wireReservation, now time.Time) (*attemptRow, error) {
+	route, err := decodeCallbackRoute(o.CallbackRouteJSON)
+	if err != nil {
+		return nil, err
+	}
 	dispatch := wireDispatch{
 		OperationID:   o.ID,
 		AttemptID:     s.deps.IDs.New(),
@@ -621,6 +720,7 @@ func (s *Service) createAttempt(ctx context.Context, unit contract.Unit, o *oper
 		Action:        json.RawMessage(a.ActionJSON),
 		CredentialRef: conn.CredentialRef,
 		Deadline:      action.ExpiresAt,
+		CallbackRoute: route,
 	}
 	if reservation.ID != "" && reservation.OperationID != o.ID {
 		return nil, prerequisiteMissing(
@@ -646,6 +746,7 @@ func (s *Service) createAttempt(ctx context.Context, unit contract.Unit, o *oper
 		ConnectionID:       conn.ID,
 		ConnectionVersion:  conn.Version,
 		Generation:         unit.Generation(),
+		Kind:               attemptKindDispatch,
 		CreatedAt:          now,
 	}
 	if err := insertAttempt(ctx, unit, attempt); err != nil {
@@ -698,7 +799,19 @@ func (s *Service) handleClaim(ctx context.Context, unit contract.Unit, in claimI
 			"dispatch generation %d does not match claim generation %d and current generation %d",
 			in.Generation, c.Generation, unit.Generation())
 	}
-	if o.State != opStateReady {
+	// A reconciliation attempt's claim never advances the operation past its
+	// own outcome_unknown/awaiting_confirmation state: that state describes
+	// the original write's disposition, and the bounded read claiming here
+	// is a distinct, separately admitted attempt (R10-008). Every other
+	// attempt is the operation's own dispatch and requires ready.
+	if a.Kind == attemptKindReconciliation {
+		switch o.State {
+		case opStateOutcomeUnknown, opStateAwaitingConfirmation:
+		default:
+			return contract.Outcome[dispatchResourceBody]{}, conflict(
+				"operation %s is %s; reconciliation claim requires outcome_unknown or awaiting_confirmation", o.ID, o.State)
+		}
+	} else if o.State != opStateReady {
 		return contract.Outcome[dispatchResourceBody]{}, conflict(
 			"operation %s is %s; claim requires ready", o.ID, o.State)
 	}
@@ -713,8 +826,10 @@ func (s *Service) handleClaim(ctx context.Context, unit contract.Unit, in claimI
 	if err := updateAttemptState(ctx, unit, a, attemptStateClaimed); err != nil {
 		return contract.Outcome[dispatchResourceBody]{}, err
 	}
-	if err := transitionOperation(ctx, unit, o, opStateExecuting, "", now); err != nil {
-		return contract.Outcome[dispatchResourceBody]{}, err
+	if a.Kind != attemptKindReconciliation {
+		if err := transitionOperation(ctx, unit, o, opStateExecuting, "", now); err != nil {
+			return contract.Outcome[dispatchResourceBody]{}, err
+		}
 	}
 	if err := emitTransition(ctx, unit, eventAttemptClaimed, a.ID, contract.Version(a.Version)); err != nil {
 		return contract.Outcome[dispatchResourceBody]{}, err
@@ -902,6 +1017,66 @@ func (s *Service) recordDisposition(ctx context.Context, unit contract.Unit, o *
 	}
 }
 
+// resolveSuccessorGenerationAttempt implements _effects.record's optional
+// current_generation successor-generation rule (P00-006,
+// P00.effects_successor_generation_resolves_stray_attempt): after a
+// controller restart moves to a later generation, a stray attempt whose
+// claim journal spans that change is resolved from durable claim state
+// alone, never from the caller's assertion of what happened -- the caller
+// admits uncertainty by naming current_generation at all, so the supplied
+// observation disposition is never trusted here. An attempt whose one-use
+// claim was never actually consumed under its recorded generation records
+// not_sent (authoritative non-execution); a claimed-but-unconfirmed attempt
+// records outcome_unknown, never succeeded or failed. Neither call silently
+// drops the attempt or its reservation, and a stray attempt already resolved
+// by an earlier successor call replays idempotently.
+func (s *Service) resolveSuccessorGenerationAttempt(ctx context.Context, unit contract.Unit, o *operationRow, a *attemptRow, currentGeneration int64, observations []*observationRow, now time.Time) (contract.Outcome[operationResourceBody], error) {
+	if currentGeneration != unit.Generation() {
+		return contract.Outcome[operationResourceBody]{}, invalidInput(
+			"current_generation %d does not match the caller's actual current generation %d",
+			currentGeneration, unit.Generation())
+	}
+	if currentGeneration <= a.Generation {
+		return contract.Outcome[operationResourceBody]{}, invalidInput(
+			"current_generation %d is not later than attempt %s's own generation %d",
+			currentGeneration, a.ID, a.Generation)
+	}
+	for _, obs := range observations {
+		if obs.AttemptID == a.ID {
+			// Already resolved by an earlier successor-generation call.
+			return s.renderBody(ctx, unit, o)
+		}
+	}
+	switch o.State {
+	case opStateReady, opStateExecuting:
+	default:
+		return contract.Outcome[operationResourceBody]{}, conflict(
+			"operation %s is %s and cannot resolve a stray attempt", o.ID, o.State)
+	}
+	wasClaimed := a.State == attemptStateClaimed
+	disposition := dispNotSent
+	if wasClaimed {
+		disposition = dispUnknown
+	}
+	obs := wireObservation{Disposition: disposition, Evidence: json.RawMessage(`{}`), Usage: wireUsage{}}
+	if err := recordAttempt(ctx, unit, a, obs.Disposition, "", usageJSON(obs.Usage), "", time.Time{}, now); err != nil {
+		return contract.Outcome[operationResourceBody]{}, err
+	}
+	if err := emitTransition(ctx, unit, eventAttemptRecorded, a.ID, contract.Version(a.Version)); err != nil {
+		return contract.Outcome[operationResourceBody]{}, err
+	}
+	if err := insertObservation(ctx, unit, &observationRow{
+		ID: s.deps.IDs.New(), OperationID: o.ID, AttemptID: a.ID, Kind: obsKindPhysical,
+		Disposition: obs.Disposition, UsageJSON: usageJSON(obs.Usage), RecordedAt: now,
+	}); err != nil {
+		return contract.Outcome[operationResourceBody]{}, err
+	}
+	if err := s.recordDisposition(ctx, unit, o, a, obs, wasClaimed, observations, now); err != nil {
+		return contract.Outcome[operationResourceBody]{}, err
+	}
+	return s.renderBody(ctx, unit, o)
+}
+
 // _effects.record appends one observation for one attempt, settles the
 // attempt's reservation or retains its uncertainty, and replays corrections
 // and disputes for late evidence without rewriting history.
@@ -924,16 +1099,27 @@ func (s *Service) handleRecord(ctx context.Context, unit contract.Unit, in recor
 		return contract.Outcome[operationResourceBody]{}, notFound(
 			"attempt %s of operation %s not found", in.AttemptID, in.OperationID)
 	}
+	if a.Kind == attemptKindReconciliation {
+		return contract.Outcome[operationResourceBody]{}, invalidInput(
+			"attempt %s is a reconciliation read; use _effects.reconciliation.record", a.ID)
+	}
 	if in.Generation != a.Generation {
 		return contract.Outcome[operationResourceBody]{}, conflict(
 			"record generation %d does not match attempt generation %d", in.Generation, a.Generation)
 	}
 	now := s.now()
-	if err := s.recordConnectionValidation(ctx, unit, in.Observation); err != nil {
-		return contract.Outcome[operationResourceBody]{}, err
-	}
 	observations, err := listObservations(ctx, unit, o.ID)
 	if err != nil {
+		return contract.Outcome[operationResourceBody]{}, err
+	}
+	if in.CurrentGeneration != nil {
+		// The successor-generation rule (P00-006): a controller restart that
+		// advances generation before recording a claimed-or-not attempt
+		// resolves it from durable claim state alone, never a caller
+		// assertion of what happened.
+		return s.resolveSuccessorGenerationAttempt(ctx, unit, o, a, *in.CurrentGeneration, observations, now)
+	}
+	if err := s.recordConnectionValidation(ctx, unit, in.Observation); err != nil {
 		return contract.Outcome[operationResourceBody]{}, err
 	}
 	var prior *observationRow
@@ -1125,10 +1311,330 @@ func correctedState(disposition string) string {
 	}
 }
 
-// operation.reconcile opens a bounded external read job asking the provider
-// for the authoritative outcome of one uncertain or unconfirmed operation.
-// The original row is not mutated; the job coordinates live on the
-// reconciliation obligation.
+// reconciliationDeadline bounds how long a reconciliation read's dispatch
+// intent stays valid once claimed: short, because a bounded status lookup
+// never waits as long as the original mutation's own deadline.
+const reconciliationDeadline = 5 * time.Minute
+
+// reconciliationCost is the reservation amount for one bounded reconciliation
+// read: a status/history lookup on an already-dispatched action, distinct
+// from the original mutation's own cost_bound. No tool contract currently
+// prices a reconciliation read separately, so it reserves zero cost in the
+// original action's currency -- the full reserve/settle pipeline still runs,
+// proving the read is genuinely accounted (R10-008), without inventing an
+// unsupported price.
+func reconciliationCost(currency string) wireMoney {
+	return wireMoney{Currency: currency, MicroUnits: 0}
+}
+
+// admitReconciliationRead performs the separately admitted, separately
+// authorized and accounted bounded read reconciliation requires (R10-008,
+// P00-007): current authority and policy/review recheck against the
+// operation's own already-persisted action -- the exact same action, same
+// digest, no replay -- and a nominal accounted reservation, producing a
+// fresh physical attempt (Kind reconciliation) linked to the exact prior
+// dispatch attempt and its provider reference. The one-use claim this
+// attempt gets is consumed through the ordinary _effects.claim, exactly
+// like a dispatch attempt's; only the disposition rules at claim and record
+// differ (R10-008: reconciliation never advances the operation to
+// executing, and only reaches Adapter.Reconcile, never Invoke). The
+// operation's own row is otherwise untouched: only a new attempt/claim is
+// added to it.
+func (s *Service) admitReconciliationRead(ctx context.Context, unit contract.Unit, o *operationRow, now time.Time) (*attemptRow, error) {
+	switch o.State {
+	case opStateOutcomeUnknown, opStateAwaitingConfirmation:
+	default:
+		return nil, conflict(
+			"operation %s is %s; reconciliation requires uncertainty or pending confirmation", o.ID, o.State)
+	}
+	if err := s.requireActiveAuthority(ctx, unit); err != nil {
+		return nil, err
+	}
+	actionRow, action, err := loadStoredAction(ctx, unit, o)
+	if err != nil {
+		return nil, err
+	}
+	attempts, err := listAttempts(ctx, unit, o.ID)
+	if err != nil {
+		return nil, err
+	}
+	target := lastDispatchAttempt(attempts)
+	if target == nil {
+		return nil, prerequisiteMissing("operation %s has never been dispatched; nothing to reconcile", o.ID)
+	}
+	policy, err := s.policyDecision(ctx, unit, action.Scope, action)
+	if err != nil {
+		return nil, err
+	}
+	switch policy.Decision {
+	case policyDeny:
+		return nil, permissionDenied("policy no longer authorizes reconciling operation %s", o.ID)
+	case policyPrerequisiteMissing:
+		return nil, prerequisiteMissing("policy refuses reconciliation of operation %s: %s",
+			o.ID, strings.Join(policy.Reasons, "; "))
+	case policyReview:
+		out, err := s.reviewsCheck(ctx, unit, reviewsCheckInput{Scope: action.Scope, ActionDigest: o.ActionDigest})
+		if err != nil {
+			return nil, err
+		}
+		if !out.Eligible || out.Decision == nil || out.Decision.Decision != decisionApprove {
+			return nil, reviewRequired("review for action digest %s is not satisfied", o.ActionDigest)
+		}
+	}
+	limits, err := s.accountingInspect(ctx, unit, accountingInspectInput{Scope: action.Scope})
+	if err != nil {
+		return nil, err
+	}
+	var rootTask *contract.ID
+	if action.Scope.TaskID != "" {
+		task, err := s.tasksSnapshot(ctx, unit, tasksSnapshotInput{Scope: action.Scope, ID: action.Scope.TaskID})
+		if err != nil {
+			return nil, err
+		}
+		if task.Resource.RootID != nil {
+			rootTask = task.Resource.RootID
+		}
+	}
+	reservation, err := s.accountingReserve(ctx, unit, accountingReserveInput{
+		Scope: action.Scope, RootTaskID: rootTask, OperationID: o.ID,
+		Amount: reconciliationCost(action.CostBound.Currency), Limits: limits.Limits,
+	})
+	if err != nil {
+		return nil, err
+	}
+	route, err := decodeCallbackRoute(o.CallbackRouteJSON)
+	if err != nil {
+		return nil, err
+	}
+	dispatch := wireDispatch{
+		OperationID:   o.ID,
+		AttemptID:     s.deps.IDs.New(),
+		Generation:    unit.Generation(),
+		Adapter:       target.Adapter,
+		Action:        json.RawMessage(actionRow.ActionJSON),
+		CredentialRef: target.CredentialRef,
+		Deadline:      now.Add(reconciliationDeadline),
+		ProviderKey:   target.ProviderReference,
+		CallbackRoute: route,
+	}
+	raw, err := canonicalJSON(dispatch)
+	if err != nil {
+		return nil, err
+	}
+	attempt := &attemptRow{
+		ID:                 dispatch.AttemptID,
+		Version:            1,
+		OperationID:        o.ID,
+		AttemptNo:          o.AttemptCount + 1,
+		State:              attemptStatePrepared,
+		Adapter:            target.Adapter,
+		CredentialRef:      target.CredentialRef,
+		Deadline:           dispatch.Deadline,
+		DispatchJSON:       string(raw),
+		ReservationID:      reservation.Resource.ID,
+		ReservationVersion: reservation.Resource.Version,
+		ConnectionID:       target.ConnectionID,
+		ConnectionVersion:  target.ConnectionVersion,
+		Generation:         unit.Generation(),
+		Kind:               attemptKindReconciliation,
+		TargetAttemptID:    target.ID,
+		CreatedAt:          now,
+	}
+	if err := insertAttempt(ctx, unit, attempt); err != nil {
+		return nil, err
+	}
+	if err := bumpAttemptCount(ctx, unit, o.ID); err != nil {
+		return nil, err
+	}
+	o.AttemptCount++
+	if err := insertClaim(ctx, unit, &claimRow{
+		AttemptID: attempt.ID, Generation: unit.Generation(), ExpiresAt: now.Add(claimTTL), CreatedAt: now,
+	}); err != nil {
+		return nil, err
+	}
+	return attempt, nil
+}
+
+// _effects.reconciliation.prepare admits a bounded reconciliation read for
+// one already-uncertain operation. Controller-driven reconciliation sweeps
+// call this directly; operation.reconcile drives the identical admission
+// inline in its own transaction (the dispatcher refuses a recursive call
+// back into Handle) so it can attach the durable job handle in the same
+// commit.
+func (s *Service) handleReconciliationPrepare(ctx context.Context, unit contract.Unit, in admitInput) (contract.Outcome[operationResourceBody], error) {
+	o, err := loadOperation(ctx, unit, in.OperationID)
+	if err != nil {
+		return contract.Outcome[operationResourceBody]{}, err
+	}
+	if o == nil {
+		return contract.Outcome[operationResourceBody]{}, notFound("operation %s not found", in.OperationID)
+	}
+	if err := requireRowInstallation(unit, o.InstallID); err != nil {
+		return contract.Outcome[operationResourceBody]{}, err
+	}
+	if o.Version != in.ExpectedVersion {
+		return contract.Outcome[operationResourceBody]{}, staleVersion("operation %s is at version %d, not %d",
+			o.ID, o.Version, in.ExpectedVersion)
+	}
+	if _, err := s.admitReconciliationRead(ctx, unit, o, s.now()); err != nil {
+		return contract.Outcome[operationResourceBody]{}, err
+	}
+	return s.renderBody(ctx, unit, o)
+}
+
+// _effects.reconciliation.record merges the qualified reconciliation
+// observation into the original operation's uncertainty (R10-008, P00-007).
+// succeeded/failed is authoritative and settles the original (target)
+// attempt exactly as a correction would; unknown/not_sent is
+// non-authoritative eventual-consistency evidence and leaves the original
+// operation's uncertainty untouched (Z08.delayed_confirmation) -- it never
+// establishes nonexecution. The original action and its history are never
+// overwritten or replayed, and a duplicate callback for the same
+// reconciliation attempt settles only once.
+func (s *Service) handleReconciliationRecord(ctx context.Context, unit contract.Unit, in recordInput) (contract.Outcome[operationResourceBody], error) {
+	o, err := loadOperation(ctx, unit, in.OperationID)
+	if err != nil {
+		return contract.Outcome[operationResourceBody]{}, err
+	}
+	if o == nil {
+		return contract.Outcome[operationResourceBody]{}, notFound("operation %s not found", in.OperationID)
+	}
+	if err := requireRowInstallation(unit, o.InstallID); err != nil {
+		return contract.Outcome[operationResourceBody]{}, err
+	}
+	a, err := loadAttempt(ctx, unit, in.AttemptID)
+	if err != nil {
+		return contract.Outcome[operationResourceBody]{}, err
+	}
+	if a == nil || a.OperationID != o.ID || a.Kind != attemptKindReconciliation {
+		return contract.Outcome[operationResourceBody]{}, notFound(
+			"reconciliation attempt %s of operation %s not found", in.AttemptID, in.OperationID)
+	}
+	if in.Generation != a.Generation {
+		return contract.Outcome[operationResourceBody]{}, conflict(
+			"record generation %d does not match attempt generation %d", in.Generation, a.Generation)
+	}
+	now := s.now()
+	observations, err := listObservations(ctx, unit, o.ID)
+	if err != nil {
+		return contract.Outcome[operationResourceBody]{}, err
+	}
+	var prior *observationRow
+	for _, obs := range observations {
+		if obs.AttemptID == a.ID {
+			prior = obs
+		}
+	}
+	if prior != nil {
+		if prior.Disposition == in.Observation.Disposition {
+			// Duplicate callback: the read already settled once, and it
+			// never settles twice.
+			return s.renderBody(ctx, unit, o)
+		}
+		// A repeat callback for the same reconciliation attempt disagreeing
+		// with its own first answer disputes the read itself; the merge
+		// already applied from the first answer stands unchanged.
+		if err := appendObservation(ctx, unit, s.deps.IDs.New(), o.ID, a.ID, obsKindDispute, in.Observation, now); err != nil {
+			return contract.Outcome[operationResourceBody]{}, err
+		}
+		if err := emitTransition(ctx, unit, eventOperationDisputed, o.ID, contract.Version(o.Version)); err != nil {
+			return contract.Outcome[operationResourceBody]{}, err
+		}
+		if err := s.openObligation(ctx, unit, o.ID, oblDispute, map[string]any{
+			"operation_id": o.ID, "attempt_id": a.ID,
+		}, o.Version, now); err != nil {
+			return contract.Outcome[operationResourceBody]{}, err
+		}
+		return s.renderBody(ctx, unit, o)
+	}
+	switch o.State {
+	case opStateOutcomeUnknown, opStateAwaitingConfirmation:
+	default:
+		return contract.Outcome[operationResourceBody]{}, conflict(
+			"operation %s is %s and cannot record a reconciliation observation", o.ID, o.State)
+	}
+	evidenceJSON := ""
+	if len(in.Observation.Evidence) > 0 {
+		evidenceJSON = string(in.Observation.Evidence)
+	}
+	// The read's own observation: the physical call executed and returned
+	// this evidence, whatever it says about the target attempt.
+	if err := recordAttempt(ctx, unit, a, in.Observation.Disposition, evidenceJSON,
+		usageJSON(in.Observation.Usage), in.Observation.ProviderReference,
+		confirmedAt(in.Observation.ConfirmedAt), now); err != nil {
+		return contract.Outcome[operationResourceBody]{}, err
+	}
+	if err := emitTransition(ctx, unit, eventAttemptRecorded, a.ID, contract.Version(a.Version)); err != nil {
+		return contract.Outcome[operationResourceBody]{}, err
+	}
+	if err := insertObservation(ctx, unit, &observationRow{
+		ID: s.deps.IDs.New(), OperationID: o.ID, AttemptID: a.ID, Kind: obsKindPhysical,
+		Disposition: in.Observation.Disposition, EvidenceJSON: evidenceJSON,
+		UsageJSON: usageJSON(in.Observation.Usage), ProviderReference: in.Observation.ProviderReference,
+		ConfirmedAt: confirmedAt(in.Observation.ConfirmedAt), RecordedAt: now,
+	}); err != nil {
+		return contract.Outcome[operationResourceBody]{}, err
+	}
+	if err := s.settleReservation(ctx, unit, a, in.Observation.Usage, false); err != nil {
+		return contract.Outcome[operationResourceBody]{}, err
+	}
+	switch in.Observation.Disposition {
+	case dispSucceeded, dispFailed:
+		// Authoritative: merge into the target (original) attempt's history
+		// as a correction, exactly as supported late evidence would.
+		target, err := loadAttempt(ctx, unit, a.TargetAttemptID)
+		if err != nil {
+			return contract.Outcome[operationResourceBody]{}, err
+		}
+		if target == nil {
+			return contract.Outcome[operationResourceBody]{}, &contract.Fault{Code: contract.CodeInternalError,
+				Message: fmt.Sprintf("reconciliation attempt %s names an unknown target attempt", a.ID)}
+		}
+		if err := appendObservation(ctx, unit, s.deps.IDs.New(), o.ID, target.ID, obsKindCorrection, in.Observation, now); err != nil {
+			return contract.Outcome[operationResourceBody]{}, err
+		}
+		if err := s.settleReservation(ctx, unit, target, in.Observation.Usage, false); err != nil {
+			return contract.Outcome[operationResourceBody]{}, err
+		}
+		if in.Observation.Disposition == dispFailed {
+			others := make([]*observationRow, 0, len(observations))
+			for _, obs := range observations {
+				if obs.AttemptID != target.ID {
+					others = append(others, obs)
+				}
+			}
+			if priorUnknownEvidence(others) {
+				if err := transitionOperation(ctx, unit, o, opStateOutcomeUnknown, "", now); err != nil {
+					return contract.Outcome[operationResourceBody]{}, err
+				}
+				return s.renderBody(ctx, unit, o)
+			}
+			if err := transitionOperation(ctx, unit, o, opStateFailed, "", now); err != nil {
+				return contract.Outcome[operationResourceBody]{}, err
+			}
+		} else {
+			if err := transitionOperation(ctx, unit, o, opStateSucceeded, "", now); err != nil {
+				return contract.Outcome[operationResourceBody]{}, err
+			}
+		}
+		if err := s.resolveOpenObligations(ctx, unit, o.ID, o.Version, now); err != nil {
+			return contract.Outcome[operationResourceBody]{}, err
+		}
+	default:
+		// unknown/not_sent: non-authoritative eventual-consistency evidence
+		// never establishes nonexecution (Z08.delayed_confirmation). The
+		// original operation's uncertainty and open reconcile obligation
+		// stand untouched until an authoritative read resolves them.
+	}
+	return s.renderBody(ctx, unit, o)
+}
+
+// operation.reconcile admits a bounded external read for one uncertain or
+// unconfirmed operation and publishes it as a durable job the controller
+// dispatches outside this transaction (R10-008, P00-007). The original
+// operation row is not otherwise mutated; only a fresh reconciliation
+// attempt is added to it, and the job's owner-linked input lets the owner
+// resolve it directly at completion without scanning another owner's table.
 func (s *Service) handleReconcile(ctx context.Context, unit contract.Unit, in reconcileInput) (contract.Outcome[jobResourceBody], error) {
 	if err := s.checkInstallation(unit, in.Scope.InstallationID); err != nil {
 		return contract.Outcome[jobResourceBody]{}, err
@@ -1147,24 +1653,15 @@ func (s *Service) handleReconcile(ctx context.Context, unit contract.Unit, in re
 		return contract.Outcome[jobResourceBody]{}, staleVersion("operation %s is at version %d, not %d",
 			o.ID, o.Version, in.ExpectedVersion)
 	}
-	switch o.State {
-	case opStateOutcomeUnknown, opStateAwaitingConfirmation:
-	default:
-		return contract.Outcome[jobResourceBody]{}, conflict(
-			"operation %s is %s; reconciliation requires uncertainty or pending confirmation", o.ID, o.State)
-	}
-	attempts, err := listAttempts(ctx, unit, o.ID)
+	now := s.now()
+	attempt, err := s.admitReconciliationRead(ctx, unit, o, now)
 	if err != nil {
 		return contract.Outcome[jobResourceBody]{}, err
 	}
-	attemptIDs := make([]contract.ID, 0, len(attempts))
-	for _, a := range attempts {
-		attemptIDs = append(attemptIDs, a.ID)
-	}
 	jobBody, err := canonicalJSON(map[string]any{
 		"operation_id":  o.ID,
+		"attempt_id":    attempt.ID,
 		"action_digest": o.ActionDigest,
-		"attempt_ids":   attemptIDs,
 	})
 	if err != nil {
 		return contract.Outcome[jobResourceBody]{}, err
@@ -1174,7 +1671,7 @@ func (s *Service) handleReconcile(ctx context.Context, unit contract.Unit, in re
 		Owner:     ownerName,
 		Operation: opReconcile,
 		Input:     jobBody,
-		SourceID:  s.deps.IDs.New(),
+		SourceID:  attempt.ID,
 	})
 	if err != nil {
 		return contract.Outcome[jobResourceBody]{}, err
@@ -1182,7 +1679,8 @@ func (s *Service) handleReconcile(ctx context.Context, unit contract.Unit, in re
 	if err := s.openObligation(ctx, unit, o.ID, oblReconcile, map[string]any{
 		"operation_id": o.ID,
 		"job_id":       job.Resource.ID,
-	}, o.Version, s.now()); err != nil {
+		"attempt_id":   attempt.ID,
+	}, o.Version, now); err != nil {
 		return contract.Outcome[jobResourceBody]{}, err
 	}
 	return completedOutcome(job)
