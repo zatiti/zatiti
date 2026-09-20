@@ -1724,6 +1724,24 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   discipline as wave 3's last batch: report ready, wait for lead
   clearance, proactive schemaDefs check, rebase before commit given main
   will keep moving.
+- 2026-09-20 15:05 PT -- P27 DONE, no commit needed. internal/adapters/
+  serenity at current main already fully satisfies the card: re-verified
+  independently (own go test run clean, plus the agent's own build/vet/
+  test/-race/schemaDefs-diff/caller-compatibility checks against P26's
+  landed DTOs). Confirmed via PROTOCOL.md's own gap table: the pinned
+  Serenity commit's 3-request MCP handshake can't be accounted as one
+  physical call under the frozen one-Invoke-one-call rule, so ALL 6
+  action kinds (recall/remember/inspect/promote/retract/export_revision)
+  stay correctly refused -- no partial credit exists at this pin, and
+  the card explicitly allows "a precise upstream blocker per required
+  capability" as a valid outcome, which is what this is. Every refusal
+  is capability_unsupported, non-retryable, proven zero-physical-call by
+  probes in every test; a misconfigured profile claiming an unsupported
+  capability is independently rejected (13 overclaim test cases). The
+  one real gap (no live qualification against an actual pinned Serenity
+  host) is an environment/credential blocker already logged since
+  2026-09-10, not something this package can close. Claim released,
+  worktree already self-cleaned (nothing to commit).
 
 ## Planned
 
