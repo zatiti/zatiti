@@ -572,6 +572,52 @@ func (e *testEnv) ack(messageID, recipient contract.ID, expectedVersion int64) *
 	return &out.Resource
 }
 
+// readyItems runs _messaging.ready and returns the decoded page.
+func (e *testEnv) readyItems(limit int64) []*wireMessage {
+	e.t.Helper()
+	payload := e.mustOK("_messaging.ready", map[string]any{"limit": limit})
+	var out struct {
+		Items []*wireMessage `json:"items"`
+	}
+	e.decode(payload.Data, &out)
+	return out.Items
+}
+
+// processed runs _messaging.processed for one (message, recipient) pair
+// under the given turn id and returns the resulting message resource.
+func (e *testEnv) processed(messageID, recipientID, turnID contract.ID, contextArtifact *wireArtifactRef) *wireMessage {
+	e.t.Helper()
+	in := map[string]any{
+		"message_id": messageID, "recipient_id": recipientID, "turn_id": turnID,
+	}
+	if contextArtifact != nil {
+		in["context_artifact"] = contextArtifact
+	}
+	payload := e.mustOK("_messaging.processed", in)
+	var out struct {
+		Resource wireMessage `json:"resource"`
+	}
+	e.decode(payload.Data, &out)
+	return &out.Resource
+}
+
+// messageListPage runs conversation.message.list and returns the page.
+func (e *testEnv) messageListPage(conversationID contract.ID, in map[string]any) (items []*wireMessage, next string) {
+	e.t.Helper()
+	if in == nil {
+		in = map[string]any{}
+	}
+	in["scope"] = e.scope
+	in["conversation_id"] = conversationID
+	payload := e.mustOK("conversation.message.list", in)
+	var out struct {
+		Items      []*wireMessage `json:"items"`
+		NextCursor string         `json:"next_cursor"`
+	}
+	e.decode(payload.Data, &out)
+	return out.Items, out.NextCursor
+}
+
 // listConversationsPage runs conversation.list and returns the decoded page.
 func (e *testEnv) listConversationsPage(in map[string]any) (items []*wireConversation, next string) {
 	e.t.Helper()

@@ -20,6 +20,22 @@ func conversationParticipantFence(unit contract.Unit, row *conversationRow) erro
 	return nil
 }
 
+// applyCallerProjection fills each wire conversation's caller_unread_count
+// and caller_last_read_marker from its parallel row: revision 3's addition
+// to conversation.get/.list, computed per caller and never stored on the
+// conversation itself. rows and wires must be the same length and order.
+func applyCallerProjection(ctx context.Context, unit contract.Unit, principal contract.ID, rows []*conversationRow, wires []*wireConversation) error {
+	unread, marker, err := hydrateCallerProjection(ctx, unit, principal, rows)
+	if err != nil {
+		return err
+	}
+	for i, row := range rows {
+		wires[i].CallerUnreadCount = unread[row.ID]
+		wires[i].CallerLastReadMarker = marker[row.ID]
+	}
+	return nil
+}
+
 // handleConversationCreate creates a conversation. It changes neither the
 // home organization, memory access nor tool grants: the only state written
 // is conversation membership. Participants must be distinct and include
@@ -121,6 +137,9 @@ func handleConversationGet(ctx context.Context, s *Service, unit contract.Unit, 
 	if err != nil {
 		return contract.Payload{}, err
 	}
+	if err := applyCallerProjection(ctx, unit, unit.Actor().PrincipalID, []*conversationRow{row}, []*wireConversation{wire}); err != nil {
+		return contract.Payload{}, err
+	}
 	return s.completed(map[string]any{"resource": wire})
 }
 
@@ -168,6 +187,79 @@ func handleConversationList(ctx context.Context, s *Service, unit contract.Unit,
 		return contract.Payload{}, err
 	}
 	items := make([]*wireConversation, 0, len(rows))
+	for _, row := range rows {
+		wire, err := row.toWire()
+		if err != nil {
+			return contract.Payload{}, err
+		}
+		items = append(items, wire)
+	}
+	if err := applyCallerProjection(ctx, unit, unit.Actor().PrincipalID, rows, items); err != nil {
+		return contract.Payload{}, err
+	}
+	out := map[string]any{"items": items}
+	if len(items) == limit {
+		next, err := s.encodeCursor(unit, fingerprint, snapshot, s.clock.Now(), offset+int64(limit))
+		if err != nil {
+			return contract.Payload{}, err
+		}
+		out["next_cursor"] = next
+	}
+	return s.completed(out)
+}
+
+// handleConversationMessageList reads one conversation's authorized message
+// history: sender-inclusive (the caller's own sent messages, which carry no
+// recipient row for the caller, are included alongside admitted mail), and
+// bounded to the caller's disclosed membership interval, since a message
+// from before the caller joined has neither a sender nor a recipient row for
+// them. The caller must be a CURRENT participant; paging is stable through
+// the same principal/query/evidence-bound cursor every other list uses.
+func handleConversationMessageList(ctx context.Context, s *Service, unit contract.Unit, inv contract.Invocation) (contract.Payload, error) {
+	in, err := decodeInto[struct {
+		Scope          wireScope   `json:"scope"`
+		ConversationID contract.ID `json:"conversation_id"`
+		Cursor         string      `json:"cursor"`
+		Limit          int64       `json:"limit"`
+	}](s, "conversation.message.list", inv.Input)
+	if err != nil {
+		return contract.Payload{}, err
+	}
+	if err := checkUnitScope(unit, in.Scope); err != nil {
+		return contract.Payload{}, err
+	}
+	conv, err := getConversation(ctx, unit, in.ConversationID)
+	if err != nil {
+		return contract.Payload{}, err
+	}
+	if conv == nil || conv.InstallationID != unit.Scope().InstallationID {
+		return contract.Payload{}, notFound("conversation %s not found", in.ConversationID)
+	}
+	if err := checkStoredConversationScope(unit, in.Scope, conv); err != nil {
+		return contract.Payload{}, err
+	}
+	if err := conversationParticipantFence(unit, conv); err != nil {
+		return contract.Payload{}, err
+	}
+	fingerprint := cursorFingerprint("conversation.message.list", string(in.ConversationID))
+	offset, snapshot, err := s.decodeCursor(unit, fingerprint, in.Cursor)
+	if err != nil {
+		return contract.Payload{}, err
+	}
+	if in.Cursor == "" {
+		if snapshot, err = s.peerEvidenceSnapshot(ctx, unit, unit.Scope()); err != nil {
+			return contract.Payload{}, err
+		}
+	}
+	limit := limitOf(in.Limit)
+	rows, err := listConversationMessages(ctx, unit, in.ConversationID, unit.Actor().PrincipalID, limit, int(offset))
+	if err != nil {
+		return contract.Payload{}, err
+	}
+	if err := hydrateRecipients(ctx, unit, rows); err != nil {
+		return contract.Payload{}, err
+	}
+	items := make([]*wireMessage, 0, len(rows))
 	for _, row := range rows {
 		wire, err := row.toWire()
 		if err != nil {
@@ -355,32 +447,8 @@ func handleMailboxAck(ctx context.Context, s *Service, unit contract.Unit, inv c
 			in.MessageID, message.Version, in.ExpectedVersion)
 	}
 	now := s.clock.Now()
-	if err := updateRecipientState(ctx, unit, in.MessageID, in.RecipientID, recipientAcknowledged, now); err != nil {
+	if err := s.acknowledgeRecipient(ctx, unit, message, in.RecipientID, now); err != nil {
 		return contract.Payload{}, err
-	}
-	if err := insertReceipt(ctx, unit, s.ids.New(), in.MessageID, in.RecipientID, unit.Scope().InstallationID, now); err != nil {
-		return contract.Payload{}, err
-	}
-	if message.ConversationID != "" {
-		if err := upsertReadMarker(ctx, unit, message.ConversationID, in.RecipientID,
-			unit.Scope().InstallationID, in.MessageID, now); err != nil {
-			return contract.Payload{}, err
-		}
-	}
-	remaining, err := countUnacknowledged(ctx, unit, in.MessageID)
-	if err != nil {
-		return contract.Payload{}, err
-	}
-	if remaining == 0 {
-		message.State = messageStateAcknowledged
-		message.Version++
-		message.UpdatedAt = now
-		if err := updateMessageState(ctx, unit, message); err != nil {
-			return contract.Payload{}, err
-		}
-		if err := s.emitMessageEvent(ctx, unit, message, eventMessageAcknowledged); err != nil {
-			return contract.Payload{}, err
-		}
 	}
 	if err := hydrateRecipients(ctx, unit, []*messageRow{message}); err != nil {
 		return contract.Payload{}, err

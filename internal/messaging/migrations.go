@@ -80,12 +80,41 @@ CREATE TABLE messaging_read_markers (
 	PRIMARY KEY (conversation_id, principal_id)
 );`
 
+// migrationV2 adds the durable message-to-turn admission link: revision 3's
+// _messaging.processed records exactly one turn per (message_id,
+// recipient_id) pair here, in the same transaction as the execution owner's
+// turn admission/context commit. _messaging.ready's bounded fair scan reads
+// messaging_recipients left-joined against this table: a recipient row with
+// no matching link is still awaiting a durable worker turn. The added index
+// on messaging_recipients supports that scan, which is not scoped to one
+// recipient_id and so cannot use the existing (recipient_id, state,
+// admitted_at) index.
+const migrationV2 = `CREATE TABLE messaging_turn_links (
+	message_id TEXT NOT NULL,
+	recipient_id TEXT NOT NULL,
+	installation_id TEXT NOT NULL,
+	turn_id TEXT NOT NULL,
+	context_artifact_json TEXT NOT NULL DEFAULT '',
+	created_at TEXT NOT NULL,
+	PRIMARY KEY (message_id, recipient_id)
+);
+CREATE INDEX messaging_turn_links_recipient ON messaging_turn_links (recipient_id);
+CREATE INDEX messaging_recipients_ready ON messaging_recipients (state, admitted_at);`
+
 // messagingMigrations returns the owned migration list.
 func messagingMigrations() []contract.Migration {
-	return []contract.Migration{{
-		Owner:   ownerName,
-		Version: 1,
-		SQL:     migrationV1,
-		SHA256:  contract.Hash([]byte(migrationV1)),
-	}}
+	return []contract.Migration{
+		{
+			Owner:   ownerName,
+			Version: 1,
+			SQL:     migrationV1,
+			SHA256:  contract.Hash([]byte(migrationV1)),
+		},
+		{
+			Owner:   ownerName,
+			Version: 2,
+			SQL:     migrationV2,
+			SHA256:  contract.Hash([]byte(migrationV2)),
+		},
+	}
 }

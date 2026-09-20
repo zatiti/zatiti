@@ -48,8 +48,8 @@ func TestNewRejectsMissingDependencies(t *testing.T) {
 func TestMigrationsShape(t *testing.T) {
 	env := newEnv(t)
 	migs := env.svc.Migrations()
-	if len(migs) != 1 {
-		t.Fatalf("migrations count %d, want 1", len(migs))
+	if len(migs) != 2 {
+		t.Fatalf("migrations count %d, want 2", len(migs))
 	}
 	m := migs[0]
 	if m.Owner != "messaging" || m.Version != 1 {
@@ -67,8 +67,20 @@ func TestMigrationsShape(t *testing.T) {
 			t.Fatalf("migration SQL missing %s", table)
 		}
 	}
-	if strings.Contains(m.SQL, "DROP") || strings.Contains(m.SQL, "ALTER") {
-		t.Fatalf("migration SQL must be additive only")
+	m2 := migs[1]
+	if m2.Owner != "messaging" || m2.Version != 2 {
+		t.Fatalf("migration owner/version %s/%d, want messaging/2", m2.Owner, m2.Version)
+	}
+	if m2.SHA256 == "" || len(m2.SHA256) != 64 {
+		t.Fatalf("migration sha256 %q is not a digest", m2.SHA256)
+	}
+	if !strings.Contains(m2.SQL, "CREATE TABLE messaging_turn_links") {
+		t.Fatalf("migration v2 SQL missing messaging_turn_links")
+	}
+	for _, mig := range migs {
+		if strings.Contains(mig.SQL, "DROP") || strings.Contains(mig.SQL, "ALTER") {
+			t.Fatalf("migration SQL must be additive only")
+		}
 	}
 }
 
@@ -95,7 +107,12 @@ func TestDescriptorsExactness(t *testing.T) {
 		if d.Owner != "messaging" || d.Version != 1 {
 			t.Fatalf("%s owner/version %s/%d, want messaging/1", d.ID, d.Owner, d.Version)
 		}
-		if d.Visibility == "public" && (len(d.ScopeRequired) != 1 || d.ScopeRequired[0] != "installation_id") {
+		// conversation.message.list is the one confirmed exception: its
+		// frozen catalog entry omits scope_required despite requiring scope
+		// in its input schema (see opMeta.noScopeRequired), so this package
+		// matches that frozen entry instead of the general rule.
+		if d.Visibility == "public" && d.ID != "conversation.message.list" &&
+			(len(d.ScopeRequired) != 1 || d.ScopeRequired[0] != "installation_id") {
 			t.Fatalf("%s scope_required %v, want [installation_id]", d.ID, d.ScopeRequired)
 		}
 		if len(d.InputSchema) == 0 || len(d.OutputSchema) == 0 {
@@ -136,6 +153,8 @@ func TestDescriptorEffectsAndBindings(t *testing.T) {
 		"_messaging.admit":     {"execution", "controller", "scheduling"},
 		"_messaging.bootstrap": {"installation"},
 		"_messaging.pending":   {"execution", "scheduling"},
+		"_messaging.ready":     {"execution", "controller"},
+		"_messaging.processed": {"execution"},
 	}
 	for op, callers := range internal {
 		d := byID[op]

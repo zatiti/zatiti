@@ -38,7 +38,6 @@ internal/identity
 internal/installation
 internal/mcp
 internal/memory
-internal/messaging
 internal/scheduling
 internal/skills
 internal/tasks
