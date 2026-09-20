@@ -16,6 +16,55 @@ import (
 // oversubscribe a shared position. Task effects share the root-task position
 // with every sibling; administrative effects use their operation id as the
 // accountable admission root.
+//
+// Reservation ownership by caller identity. Every call names two distinct
+// identities and must never confuse them: operation_id is the unique,
+// never-shared fingerprint of THIS call (its replay key — a repeat of the
+// same operation_id with the same request returns the original reservation
+// instead of booking a second one), while root_task_id (when present) is the
+// shared aggregate ref whose position every sibling call charges into. The
+// five callers this package's incoming boundaries name resolve as:
+//
+//   - Root task: operation_id is the task's own accountable admission (an
+//     administrative-style charge with no separate root); root_task_id is
+//     absent because the root task IS the root.
+//   - Attempt: operation_id is that attempt's own identity (a retry mints a
+//     new attempt and therefore a new operation_id — R10-007's "separate
+//     attempt record"); root_task_id names the task the attempt executes
+//     under, so every attempt of every task branch shares one root position
+//     and a failed or unknown attempt never frees or duplicates another
+//     attempt's charge.
+//   - Physical model/tool call: operation_id is the dispatched effect's
+//     operation identity (one per claimed Dispatch, per the effects
+//     three-transaction admit/claim/record contract); root_task_id is the
+//     owning task attempt's root, so concurrent model and tool calls inside
+//     one task compete for the same shared ceiling rather than each getting
+//     an independent allowance.
+//   - Evaluation: operation_id is the evaluation's own identity; root_task_id
+//     is the task under evaluation when the evaluation is task-scoped work,
+//     or absent when the evaluation is standalone (for example a skill
+//     qualification run with no task), in which case it is its own
+//     accountable admission root like any administrative effect.
+//   - Responsibility reasoning cycle: operation_id is that one cycle's own
+//     identity (never reused across cycles, so a duplicate wake cannot
+//     silently skip charging); root_task_id is the responsibility's own id,
+//     shared by every cycle the responsibility ever runs, so its position
+//     enforces the responsibility's aggregate_limits across the whole
+//     sequence of cycles rather than resetting per cycle. A cycle's
+//     caller-declared limits bind that one call's own ceiling (its
+//     cycle_limits, checked as the "amount exceeds the caller-declared root
+//     spend ceiling" case below); the shared position enforces the lifetime
+//     aggregate_limits.concurrency/spend the responsibility was configured
+//     with. These are two different bounds on two different questions (one
+//     call's own size vs. the whole responsibility's running total), never
+//     the same ceiling reserved twice as if it were independent spend.
+//
+// In every case the anti-double-reservation rule is the same one mechanism:
+// operation_id uniqueness plus fingerprint replay (below) is what stops a
+// retried admission, a redelivered message or a replayed command from
+// booking the same logical spend against a shared ceiling more than once;
+// which identities feed operation_id and root_task_id is the caller's
+// choice, not a distinction accounting enforces beyond that one rule.
 
 // reserveRequest is the canonical replay fingerprint of one reservation
 // request. A repeated operation id with an identical fingerprint returns the
