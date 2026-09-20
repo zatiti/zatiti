@@ -191,8 +191,21 @@ func TestListenPrivateRefusesNonSocketEntries(t *testing.T) {
 	})
 }
 
+// TestListenPrivateRefusesSymlinkedRunDirectory proves a symlinked run
+// directory is refused rather than silently traversed (CI run 35473210732:
+// this accepted a symlinked directory on both Linux and macOS). It uses
+// shortTempDir, not t.TempDir(), deliberately: on a machine whose default
+// TMPDIR nests deep enough that the resulting socket path exceeds
+// socketPathMax (observed locally: a plain t.TempDir() path here already
+// runs ~106 bytes, over the 104-byte sun_path bound), ListenPrivate refuses
+// with the SAME contractCodeInvalidInput for an unrelated reason -- "socket
+// path is too long" -- before it ever reaches the symlink check, which lets
+// the assertion below pass without ever exercising the defense it names.
+// That incidental masking is exactly what let this defect go unnoticed by
+// local reproduction before. Asserting on the message, not just the code,
+// keeps that regression from recurring silently.
 func TestListenPrivateRefusesSymlinkedRunDirectory(t *testing.T) {
-	dir := t.TempDir()
+	dir := shortTempDir(t)
 	outside := filepath.Join(dir, "elsewhere")
 	if err := os.Mkdir(outside, 0o700); err != nil {
 		t.Fatal(err)
@@ -201,8 +214,21 @@ func TestListenPrivateRefusesSymlinkedRunDirectory(t *testing.T) {
 	if err := os.Symlink(outside, link); err != nil {
 		t.Fatal(err)
 	}
-	_, err := ListenPrivate(filepath.Join(link, "controller.sock"))
+	sockPath := filepath.Join(link, "controller.sock")
+	if len(sockPath) >= socketPathMax {
+		t.Fatalf("fixture socket path is %d bytes, at/over socketPathMax (%d); shorten shortTempDir's prefix so this test exercises the symlink check, not the length guard", len(sockPath), socketPathMax)
+	}
+	_, err := ListenPrivate(sockPath)
 	wantCode(t, err, contractCodeInvalidInput)
+	if err == nil || !strings.Contains(err.Error(), "symbolic link") {
+		t.Fatalf("expected a symlink refusal, got: %v", err)
+	}
+	// The symlink itself must still be there and unresolved: ListenPrivate
+	// must refuse, not repair, an unexpected entry in the run-directory
+	// chain.
+	if fi, lerr := os.Lstat(link); lerr != nil || fi.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("run directory symlink was altered by a refused ListenPrivate call: %v", lerr)
+	}
 }
 
 // bytesReader aliases bytes.NewReader for the attack-path tests.
