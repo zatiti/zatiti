@@ -1782,10 +1782,19 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   `git merge --ff-only` rather than forcing or guessing; waited for its
   own genuine background commit notification instead of self-polling).
   P41 (internal/server) and P04 (internal/application) both also
-  reported ready in the meantime -- both found their packages' production
-  code already substantially complete from earlier work and added only
-  proof tests, same pattern as P13/P27/P35. P41 cleared next; P04 queued
-  behind it. P14 (critical path) still working.
+  reported ready in the meantime. P41 found its package's production
+  code already substantially complete and added only proof tests, same
+  pattern as P13/P27/P35. P04 is different -- it DID add real new
+  production code (worker.go, a genuine ExecuteWorker implementation),
+  correcting an earlier mischaracterization in this same entry. P41
+  cleared next; P04 queued behind it. P14 (critical path) still working.
+- 2026-09-20 15:13-15:19 PT -- P41 LANDED (PR #23, b51ccd9), test-only
+  (569 insertions across admission_test.go/envelope_status_test.go/
+  fakes_test.go, 3 files, zero production changes) -- confirmed via own
+  `go test ./internal/server` run before merging. Clean execution
+  end-to-end by its own agent again, including correctly falling back to
+  `git merge --ff-only` when rebase refused on its dirty zero-commits
+  tree, same pattern P38 established. P04 cleared next.
 
 ## Planned
 
