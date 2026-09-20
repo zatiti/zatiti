@@ -6,14 +6,23 @@ import (
 	"github.com/zatiti/zatiti/internal/contract"
 )
 
-// kindModelStep is the only action kind the frozen
-// zatiti.responses.action/v1 schema accepts.
-const kindModelStep = "model_step"
+// The two action kinds the frozen zatiti.responses.action/v1 schema
+// accepts, revision 3's kind-discriminated oneOf of
+// ResponsesPrepareSessionParameters and ResponsesModelStepParameters (see
+// "OpenAI Responses session preparation" in AGENTS.md, P00-009). Each
+// Adapter.Invoke performs exactly one of the two physical calls the split
+// requires, never both.
+const (
+	kindPrepareSession = "prepare_session"
+	kindModelStep      = "model_step"
+)
 
-// decodeAction validates raw against the zatiti.responses.action/v1 schema,
-// strict-decodes it, and rejects a tool_contract_versions list that pins
-// the same tool twice: a tool closure with two versions of one tool cannot
-// identify which contract a model proposal was made under.
+// decodeAction validates raw against the zatiti.responses.action/v1 schema
+// (the oneOf that keeps a prepare_session action from carrying any
+// model_step-only field, and a model_step action from omitting any of
+// them), strict-decodes it, and rejects a tool_contract_versions list that
+// pins the same tool twice: a tool closure with two versions of one tool
+// cannot identify which contract a model proposal was made under.
 func decodeAction(raw json.RawMessage) (*wireResponsesParameters, error) {
 	schema, err := parametersSchema()
 	if err != nil {

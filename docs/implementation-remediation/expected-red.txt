@@ -29,7 +29,6 @@
 # check passes clean again; see docs/roadmap.md's 2026-09-20 entry.
 
 cmd/zatiti
-internal/adapters/responses
 internal/application
 internal/effects
 internal/execution

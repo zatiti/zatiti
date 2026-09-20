@@ -18,10 +18,25 @@ import (
 const completedBody = `{"ref":"resp-001","state":"completed","finish":"completed","texts":["A cited brief.","A second part."],"tokens":{"in":120,"out":3},"usage_ref":"usage-77"}`
 
 // defaultWorstCase is the charge the default action is admitted under: the
-// synthetic protocol bounds input at one token per request body byte (2
-// micro-units each) and the action allows 1000 output tokens at 7/2.
+// synthetic protocol bounds input at one token per byte of the request it
+// would encode with an EMPTY session handle (testProtocol.inputBound always
+// measures with handle "", matching the qualified OpenAI protocol's own
+// bound, which does not count the conversation handle as model-visible
+// text) -- 2 micro-units each -- and the action allows 1000 output tokens
+// at 7/2. h.transport.bodies[0] carries the real, non-empty session handle,
+// so its synthetic_handle field is cleared and the body re-measured before
+// pricing, exactly mirroring what admitStep actually admitted under.
 func defaultWorstCase(h *harness) int64 {
-	return int64(len(h.transport.bodies[0]))*2 + 3500
+	var sent testWireRequest
+	if err := json.Unmarshal(h.transport.bodies[0], &sent); err != nil {
+		panic("defaultWorstCase: decode sent body: " + err.Error())
+	}
+	sent.Handle = ""
+	body, err := json.Marshal(sent)
+	if err != nil {
+		panic("defaultWorstCase: re-marshal sent body: " + err.Error())
+	}
+	return int64(len(body))*2 + 3500
 }
 
 // ---------- the unspecified wire boundary ----------
@@ -153,12 +168,20 @@ func TestInvokeRecordsCompletedOutputAndObservedUsage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Invoke: %v", err)
 	}
-	if obs.Disposition != contract.DispositionSucceeded || obs.ProviderReference != "resp-001" {
+	// Observation.ProviderReference is the session handle (the
+	// reconciliation key, echoed from the action's own session_handle),
+	// not the response id: revision 3 (P00-009) keys Reconcile by the
+	// session a prepare_session minted, and this model_step's evidence
+	// still carries its own response id separately.
+	if obs.Disposition != contract.DispositionSucceeded || obs.ProviderReference != testSessionHandle {
 		t.Fatalf("observation = %q / %q", obs.Disposition, obs.ProviderReference)
 	}
 	ev := decodeEvidence(t, obs)
 	if obs.ConfirmedAt == nil || !obs.ConfirmedAt.Equal(ev.PhysicalCall.FinishedAt) {
 		t.Fatalf("ConfirmedAt = %v", obs.ConfirmedAt)
+	}
+	if ev.SessionHandle != testSessionHandle {
+		t.Fatalf("evidence session_handle = %q", ev.SessionHandle)
 	}
 	if ev.ResponseID != "resp-001" || ev.Output.ResponseID != "resp-001" || ev.PhysicalCall.ProviderReference != "resp-001" {
 		t.Fatalf("response ids = %q / %q / %q", ev.ResponseID, ev.Output.ResponseID, ev.PhysicalCall.ProviderReference)
@@ -683,8 +706,11 @@ func TestSecretIsScrubbedFromEveryDiagnostic(t *testing.T) {
 		}
 		assertNoSecret(t, h, obs, nil)
 		ev := decodeEvidence(t, obs)
-		if ev.Output.Refusal != "saw [redacted]" || obs.ProviderReference != "id-[redacted]" {
-			t.Fatalf("scrubbed fields = %q / %q", ev.Output.Refusal, obs.ProviderReference)
+		// obs.ProviderReference is the session handle (never secret-derived
+		// here); the response id the credential leaked into is scrubbed on
+		// the physical call's own provider_reference instead.
+		if ev.Output.Refusal != "saw [redacted]" || ev.PhysicalCall.ProviderReference != "id-[redacted]" || obs.ProviderReference != testSessionHandle {
+			t.Fatalf("scrubbed fields = %q / %q / %q", ev.Output.Refusal, ev.PhysicalCall.ProviderReference, obs.ProviderReference)
 		}
 	})
 
@@ -928,10 +954,12 @@ func TestReconcileOutcomes(t *testing.T) {
 	}
 }
 
-// ---------- the preparatory call ----------
+// ---------- prepare_session and model_step: separately admitted, journaled
+// single-call effects (revision 3, P00-009) ----------
 
 // prepareThenStep answers the synthetic prepare resource with a handle and
-// the step with body.
+// the step with body -- used only to prove a model_step Invoke never also
+// calls the prepare resource, now that the two are separate actions.
 func prepareThenStep(handleStatus int, handleBody, stepBody string) func(*http.Request) (*http.Response, error) {
 	return func(r *http.Request) (*http.Response, error) {
 		if strings.HasSuffix(r.URL.Path, "/prepare") {
@@ -941,67 +969,136 @@ func prepareThenStep(handleStatus int, handleBody, stepBody string) func(*http.R
 	}
 }
 
-func TestPreparatoryCallMintsTheHandleBeforeTheStep(t *testing.T) {
+// TestPrepareSessionAndModelStepAreSeparatelyDispatchedSingleCallEffects is
+// the P00-009 split end to end: prepare_session and model_step are
+// admitted as two separate dispatches, each Invoke performs exactly the one
+// physical call its own kind describes, the model_step names the handle a
+// prior prepare_session minted, and the two are never chained inside one
+// Invoke (a crash between them cannot repeat either call, because there is
+// no code path in which one Invoke could ever attempt both).
+func TestPrepareSessionAndModelStepAreSeparatelyDispatchedSingleCallEffects(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t, prepareThenStep(200, `{"handle":"conv-42"}`, completedBody),
 		withProtocol(func(p *testProtocol) { p.withPrepare = true }),
 		withProfile(func(p *wireResponsesProfile) {
 			p.Enforcement.ProviderDestinations = []string{"https://models.example.test"}
 		}))
-	obs, err := h.adapter.Invoke(context.Background(), h.dispatch)
+
+	// 1. prepare_session: exactly one physical call, to the prepare
+	// resource only, no context_artifact, no model output.
+	prepObs, err := h.adapter.Invoke(context.Background(), testDispatch(t, defaultPrepareSessionAction()))
 	if err != nil {
-		t.Fatalf("Invoke: %v", err)
+		t.Fatalf("prepare_session Invoke: %v", err)
+	}
+	if h.transport.count() != 1 || !strings.HasSuffix(h.transport.requests[0].URL.Path, "/prepare") {
+		t.Fatalf("physical calls after prepare_session = %d, want exactly 1 to the prepare resource", h.transport.count())
+	}
+	if prepObs.Disposition != contract.DispositionSucceeded || prepObs.ProviderReference != "conv-42" {
+		t.Fatalf("prepare_session disposition %q, provider reference %q", prepObs.Disposition, prepObs.ProviderReference)
+	}
+	prepEv := decodePrepareSessionEvidence(t, prepObs)
+	if prepEv.SessionHandle != "conv-42" || prepEv.PhysicalCall.Confirmation != "authoritative_success" {
+		t.Fatalf("prepare_session evidence = %+v", prepEv)
+	}
+	if len(prepEv.StagedOutputs) != 2 || prepEv.StagedOutputs[0].Purpose != "context" || prepEv.StagedOutputs[1].Purpose != "provider_response" {
+		t.Fatalf("prepare_session staged outputs = %+v", prepEv.StagedOutputs)
+	}
+	if prepObs.Usage == nil {
+		t.Fatal("prepare_session observation carries no usage document")
+	}
+	var prepUsage wireUsage
+	if err := json.Unmarshal(prepObs.Usage, &prepUsage); err != nil {
+		t.Fatalf("decode prepare_session usage: %v", err)
+	}
+	if prepUsage != (wireUsage{Currency: "USD"}) {
+		t.Fatalf("prepare_session usage = %+v; session creation is never billed", prepUsage)
+	}
+
+	// 2. model_step, naming that handle: exactly one MORE physical call
+	// (never a second prepare call -- the model_step action carries no
+	// mechanism to request one), to the step resource only.
+	action := h.action
+	action.SessionHandle = prepObs.ProviderReference
+	stepObs, err := h.adapter.Invoke(context.Background(), testDispatch(t, action))
+	if err != nil {
+		t.Fatalf("model_step Invoke: %v", err)
 	}
 	if h.transport.count() != 2 {
-		t.Fatalf("physical calls = %d, want the preparatory call and the step", h.transport.count())
+		t.Fatalf("physical calls after model_step = %d, want exactly 2 total (the prepare call is never repeated)", h.transport.count())
 	}
-	prep, stepReq := h.transport.requests[0], h.transport.requests[1]
-	if prep.URL.String() != testEndpoint+"/prepare" || prep.Header.Get(testCredentialHeader) != testToken {
-		t.Fatalf("preparatory request = %s %v", prep.URL, prep.Header)
+	stepReq := h.transport.requests[1]
+	if stepReq.URL.String() != testEndpoint {
+		t.Fatalf("model_step request went to %q, want the step resource", stepReq.URL)
 	}
 	var sent testWireRequest
-	if err := json.Unmarshal(h.transport.bodies[1], &sent); err != nil || sent.Handle != "conv-42" || stepReq.URL.String() != testEndpoint {
-		t.Fatalf("step did not carry the handle: %+v (%v)", sent, err)
+	if err := json.Unmarshal(h.transport.bodies[1], &sent); err != nil || sent.Handle != "conv-42" {
+		t.Fatalf("model_step did not carry the handle: %+v (%v)", sent, err)
 	}
-	if obs.Disposition != contract.DispositionSucceeded || obs.ProviderReference != "conv-42" {
-		t.Fatalf("disposition %q, provider reference %q; the handle is the reconciliation key", obs.Disposition, obs.ProviderReference)
+	if stepObs.Disposition != contract.DispositionSucceeded || stepObs.ProviderReference != "conv-42" {
+		t.Fatalf("model_step disposition %q, provider reference %q; the session handle is the reconciliation key", stepObs.Disposition, stepObs.ProviderReference)
 	}
-	ev := decodeEvidence(t, obs)
-	// Both request records and both responses are retained; the step's
-	// record is the request context and it was staged before the step
-	// was sent.
-	purposes := []string{}
-	for _, s := range ev.StagedOutputs {
-		purposes = append(purposes, s.Purpose)
+	stepEv := decodeEvidence(t, stepObs)
+	if stepEv.SessionHandle != "conv-42" || stepEv.Output.Usage.Accounting.Spent != 251 {
+		t.Fatalf("model_step evidence session_handle %q, usage %+v", stepEv.SessionHandle, stepEv.Output.Usage)
 	}
-	if strings.Join(purposes, ",") != "context,provider_response,context,provider_response,model_text,model_text" {
-		t.Fatalf("staged purposes = %v", purposes)
+
+	// 3. Reconciling the model_step by that same handle never invents
+	// usage a lookup cannot see.
+	reconcileDispatch := testDispatch(t, action)
+	reconcileDispatch.ProviderKey = "conv-42"
+	reconcileObs, err := h.adapter.Reconcile(context.Background(), reconcileDispatch)
+	if err != nil {
+		t.Fatalf("Reconcile: %v", err)
 	}
-	if ev.PhysicalCall.RequestContext.StagingRef != ev.StagedOutputs[2].StagingRef || ev.PhysicalCall.RequestedDestination != testEndpoint {
-		t.Fatalf("request_context = %+v, destination %q", ev.PhysicalCall.RequestContext, ev.PhysicalCall.RequestedDestination)
+	if h.transport.count() != 3 {
+		t.Fatalf("physical calls after Reconcile = %d, want exactly 3 total", h.transport.count())
 	}
-	record := requestRecordOf(t, h, ev)
-	if !strings.Contains(record.BodyBase64, "") || record.Destination != testEndpoint {
-		t.Fatalf("record = %+v", record)
+	reconcileEv := decodeEvidence(t, reconcileObs)
+	if reconcileEv.Output.Usage.Billing != "unknown" || reconcileEv.Output.Usage.Accounting.Spent != 0 {
+		t.Fatalf("reconcile usage = %+v; a lookup never sees usage and never invents it", reconcileEv.Output.Usage)
 	}
-	if ev.Output.Usage.Accounting.Spent != 251 {
-		t.Fatalf("usage = %+v", ev.Output.Usage)
+
+	// 4. There is no mechanism by which "a crash between prepare_session
+	// and model_step" could make this adapter repeat the prepare_session
+	// call: reconciliation is refused for it outright (no documented
+	// lookup), so the only way to obtain a session at all is a brand new,
+	// deliberately dispatched prepare_session -- a caller decision, never
+	// an adapter-internal retry.
+	prepareDispatch := testDispatch(t, defaultPrepareSessionAction())
+	prepareDispatch.ProviderKey = "conv-42"
+	_, err = h.adapter.Reconcile(context.Background(), prepareDispatch)
+	f := mustFault(t, err, contract.CodeCapabilityUnsupported)
+	if !strings.Contains(f.Message, "no documented authoritative lookup") || h.transport.count() != 3 {
+		t.Fatalf("message %q, calls %d; reconciling prepare_session must never call out", f.Message, h.transport.count())
 	}
 }
 
-func TestPreparatoryFailureLeavesTheStepUnsent(t *testing.T) {
+// TestPrepareSessionOutcomesAreHonestAndNeverBilled proves prepare_session
+// reports its OWN outcome -- not the "model step was never sent" framing
+// the pre-split adapter used -- and that session creation is never charged
+// on any disposition, including a failure or an unresolved one.
+func TestPrepareSessionOutcomesAreHonestAndNeverBilled(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
-		name string
-		fn   func(*http.Request) (*http.Response, error)
-		code string
+		name        string
+		fn          func(*http.Request) (*http.Response, error)
+		disposition string
+		confirm     string
+		requestSent string
+		code        string
 	}{
-		{"rejected", prepareThenStep(401, `{"error":"bad key"}`, completedBody), "prepare_rejected"},
-		{"undecodable", prepareThenStep(200, `{"nothing":true}`, completedBody), "prepare_rejected"},
-		{"server error", prepareThenStep(503, ``, completedBody), "prepare_rejected"},
-		{"transport failure", func(*http.Request) (*http.Response, error) {
+		{"rejected credential is an authoritative failure", respond(401, `{"error":"bad key"}`),
+			contract.DispositionFailed, "authoritative_failure", "yes", "http_401"},
+		{"undecodable success body cannot rule out creation", respond(200, `{"nothing":true}`),
+			contract.DispositionUnknown, "unknown", "yes", "response_undecodable"},
+		{"server error cannot rule out creation", respond(503, ``),
+			contract.DispositionUnknown, "unknown", "yes", "http_503"},
+		{"unclassified transport error cannot rule out creation", func(*http.Request) (*http.Response, error) {
 			return nil, errors.New("connection reset by peer")
-		}, "prepare_transport_error"},
+		}, contract.DispositionUnknown, "unknown", "unknown", "transport_error"},
+		{"dial failure never left", func(*http.Request) (*http.Response, error) {
+			return nil, &net.OpError{Op: "dial", Net: "tcp", Err: errors.New("connection refused")}
+		}, contract.DispositionNotSent, "authoritative_nonexecution", "no", "transport_error"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1011,37 +1108,66 @@ func TestPreparatoryFailureLeavesTheStepUnsent(t *testing.T) {
 				withProfile(func(p *wireResponsesProfile) {
 					p.Enforcement.ProviderDestinations = []string{"https://models.example.test"}
 				}))
-			obs, err := h.adapter.Invoke(context.Background(), h.dispatch)
+			obs, err := h.adapter.Invoke(context.Background(), testDispatch(t, defaultPrepareSessionAction()))
 			if err != nil {
 				t.Fatalf("Invoke: %v", err)
 			}
-			if h.transport.count() != 1 || !strings.HasSuffix(h.transport.requests[0].URL.Path, "/prepare") {
-				t.Fatalf("calls = %d; the step must not be sent without a handle", h.transport.count())
+			if h.transport.count() != 1 {
+				t.Fatalf("physical calls = %d, want exactly 1 (no hidden retry)", h.transport.count())
 			}
-			if obs.Disposition != contract.DispositionNotSent || obs.ProviderReference != "" {
-				t.Fatalf("disposition %q reference %q", obs.Disposition, obs.ProviderReference)
+			if obs.Disposition != tc.disposition || obs.ProviderReference != "" {
+				t.Fatalf("disposition %q reference %q, want %q with no handle", obs.Disposition, obs.ProviderReference, tc.disposition)
 			}
-			ev := decodeEvidence(t, obs)
+			ev := decodePrepareSessionEvidenceLenient(t, obs)
 			pc := ev.PhysicalCall
-			if pc.RequestSent != "no" || pc.Confirmation != "authoritative_nonexecution" || pc.ErrorCode != tc.code {
-				t.Fatalf("physical call = %+v", pc)
+			if pc.RequestSent != tc.requestSent || pc.Confirmation != tc.confirm || pc.ErrorCode != tc.code {
+				t.Fatalf("physical call = %+v, want request_sent %q confirmation %q code %q", pc, tc.requestSent, tc.confirm, tc.code)
 			}
-			if u := ev.Output.Usage; u.Billing != "no_charge" || u.Accounting != (wireUsage{Currency: "USD"}) {
-				t.Fatalf("usage = %+v", u)
+			var usage wireUsage
+			if err := json.Unmarshal(obs.Usage, &usage); err != nil {
+				t.Fatalf("decode usage: %v", err)
+			}
+			if usage != (wireUsage{Currency: "USD"}) {
+				t.Fatalf("usage = %+v; session creation is never billed, on any disposition", usage)
 			}
 		})
 	}
 }
 
-func TestPreparatoryDestinationMustBeDeclared(t *testing.T) {
+func TestPrepareSessionDestinationMustBeDeclared(t *testing.T) {
 	t.Parallel()
 	// The default profile declares only the endpoint itself, not its
 	// sibling prepare resource.
 	h := newHarness(t, prepareThenStep(200, `{"handle":"conv-1"}`, completedBody), withProtocol(func(p *testProtocol) { p.withPrepare = true }))
-	_, err := h.adapter.Invoke(context.Background(), h.dispatch)
+	_, err := h.adapter.Invoke(context.Background(), testDispatch(t, defaultPrepareSessionAction()))
 	f := mustFault(t, err, contract.CodePermissionDenied)
 	if !strings.Contains(f.Message, "provider_destinations") || h.transport.count() != 0 || h.blobs.stageCount() != 0 {
 		t.Fatalf("message %q, calls %d, stages %d", f.Message, h.transport.count(), h.blobs.stageCount())
+	}
+}
+
+// TestModelStepNeverCallsThePrepareResource proves a model_step Invoke
+// makes exactly the one physical call its own action describes, even when
+// the qualified protocol also implements a preparatory call for
+// prepare_session: the two kinds are dispatched, and therefore invoked,
+// independently.
+func TestModelStepNeverCallsThePrepareResource(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t, prepareThenStep(200, `{"handle":"conv-99"}`, completedBody),
+		withProtocol(func(p *testProtocol) { p.withPrepare = true }),
+		withProfile(func(p *wireResponsesProfile) {
+			p.Enforcement.ProviderDestinations = []string{"https://models.example.test"}
+		}))
+	obs, err := h.adapter.Invoke(context.Background(), h.dispatch)
+	if err != nil {
+		t.Fatalf("Invoke: %v", err)
+	}
+	if h.transport.count() != 1 || h.transport.requests[0].URL.String() != testEndpoint {
+		t.Fatalf("physical calls = %d to %v, want exactly 1 to the step resource, never the prepare resource",
+			h.transport.count(), h.transport.requests)
+	}
+	if obs.Disposition != contract.DispositionSucceeded || obs.ProviderReference != testSessionHandle {
+		t.Fatalf("disposition %q, provider reference %q", obs.Disposition, obs.ProviderReference)
 	}
 }
 

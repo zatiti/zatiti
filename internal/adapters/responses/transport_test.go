@@ -2,6 +2,8 @@ package responses
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -61,9 +63,29 @@ func abandonOnArrival(t *testing.T, s *controlledServer) context.Context {
 
 // worstCaseOf prices the default action from the recorded request body:
 // one input token per byte at 2 micro-units, 1000 output tokens at 7/2.
+// testProtocol.inputBound always measures with an EMPTY session handle
+// (matching the qualified OpenAI protocol, which does not count the
+// conversation handle as model-visible text), so the real, non-empty
+// session_handle this request actually carries is cleared before
+// re-measuring, exactly mirroring what admitStep admitted under (see
+// defaultWorstCase in adapter_test.go, the same fix).
 func worstCaseOf(t *testing.T, h *harness, ev wireResponsesEvidence) int64 {
 	t.Helper()
-	return requestRecordOf(t, h, ev).BodySize*2 + 3500
+	record := requestRecordOf(t, h, ev)
+	body, err := base64.StdEncoding.DecodeString(record.BodyBase64)
+	if err != nil {
+		t.Fatalf("decode request record body: %v", err)
+	}
+	var sent testWireRequest
+	if err := json.Unmarshal(body, &sent); err != nil {
+		t.Fatalf("decode sent body: %v", err)
+	}
+	sent.Handle = ""
+	remarshaled, err := json.Marshal(sent)
+	if err != nil {
+		t.Fatalf("re-marshal sent body: %v", err)
+	}
+	return int64(len(remarshaled))*2 + 3500
 }
 
 func TestServerObservesExactlyOneRequestOnSuccess(t *testing.T) {

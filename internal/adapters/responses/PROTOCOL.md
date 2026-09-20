@@ -71,9 +71,19 @@ every step sends the complete persisted context, so nothing server-side may
 be prepended to it. The conversation minted for a step is never reused for
 another step for the same reason.
 
-## Request: the preparatory call (conversation first)
+## Request: prepare_session (revision 3 -- its own admitted, journaled effect)
 
-Before the model step, `POST {conversations}` with body
+Revision 3 (P00-009) splits conversation creation from the model call into
+two separately admitted, journaled single-call effects instead of chaining
+both inside one `Invoke` (see "Where the frozen contract cannot be
+honoured" below, gap 1, formerly a documented deviation this build
+accepted -- it no longer needs to). `ResponsesParameters` is a
+`kind`-discriminated `oneOf`: `prepare_session` (only `schema`/`kind`, no
+`context_artifact`, no `session_handle`) and `model_step` (everything else,
+`session_handle` required). Each `Adapter.Invoke` performs exactly one
+physical call, matching the dispatched kind.
+
+`prepare_session`: `POST {conversations}` with body
 `{"metadata": {"zatiti_operation_id": ..., "zatiti_attempt_id": ...}}`,
 where `{conversations}` is the profile endpoint with its final path segment
 `responses` replaced by `conversations` (`https://api.openai.com/v1/conversations`).
@@ -81,25 +91,54 @@ The profile's `enforcement.provider_destinations` must cover it; an
 origin-wide grant (`https://api.openai.com`) is the simplest.
 
 Documented reply (`ConversationResource`): `{id, object:"conversation",
-created_at, metadata}`. The `id` is the client-known handle: it is staged
-in the model step's request record before the step is sent, reported as
-`Observation.provider_reference`, and returned as
-`ModelOutput.continuation_reference` in evidence.
+created_at, metadata}`. The `id` is the client-known session handle:
+reported as `Observation.provider_reference` and
+`ResponsesEvidence.session_handle` on this attempt's own evidence document,
+which carries no model output (no `response_id`, `output` or
+`output_artifacts` -- "no model-visible content and no context_artifact").
+A later `model_step` action names this handle explicitly
+(`ResponsesParameters.session_handle`); this adapter never mints or reuses
+a handle without it being passed back in.
 
-Why: `POST /responses` has no idempotency key. If the connection drops
-after the step's bytes leave, the client holds nothing that can find the
-call unless it already holds the conversation id. This is the documented
-difference on which the provider was chosen.
+Why a conversation at all: `POST /responses` has no idempotency key. If the
+connection drops after the step's bytes leave, the client holds nothing
+that can find the call unless it already holds the conversation id first.
+This is the documented difference on which the provider was chosen, and
+splitting session creation out as its own effect is exactly what lets the
+controller persist that id *before* the model call is ever attempted
+(P00-009: "Persist the session handle before the model call").
 
-The step's translation (context to items, tools) is validated before the
-preparatory call is sent, so a refusal never follows a sent request.
+Outcome classification (`interpretPrepareSession`, `interpret.go`) mirrors
+the model step's: a decoded 2xx is `succeeded`/`authoritative_success`; a
+2xx this protocol cannot decode into a handle, or a 5xx, is `unknown` (bytes
+may have created a session the reply cannot confirm); any other status is
+`failed`/`authoritative_failure`; a transport failure is classified exactly
+as `classifyNetworkError` would for a model step (dial/DNS failure only is
+`not_sent`). Session creation is never billed by this pinned protocol, so
+usage is `no_charge` on every disposition, including a failure. Unlike the
+pre-split adapter, a rejected or undecodable conversation-create response
+is now this attempt's own honest outcome -- never framed as "the model step
+was never sent", because there is no model step in the same dispatch to
+frame it against.
 
-If the preparatory call fails in any way (transport error, non-2xx, or an
-undecodable reply), the model step is not sent: the observation is
-`not_sent` with `request_sent: "no"`, `error_code: prepare_*`, the
-preparatory request record as this attempt's `request_context`, and its
-response staged as `provider_response`. Nothing is billed and nothing is
-journaled upstream that a later step would reuse.
+If session creation may have succeeded but the reply was lost (`unknown`),
+the caller must not create a second, unlinked conversation by dispatching
+another `prepare_session` for the same turn: `Adapter.Reconcile` refuses a
+`prepare_session` dispatch outright (`capability_unsupported`, no call
+made) because the API documents no way to list conversations or find one
+by metadata -- there is no authoritative lookup this adapter can perform on
+its own initiative. Recovering from a lost `prepare_session` acknowledgment
+is an execution/controller decision (a fresh, deliberately re-admitted
+`prepare_session` effect), never something this adapter retries itself.
+
+Once a `prepare_session` effect has minted a handle, the persisted
+`model_step` action names it directly
+(`ResponsesParameters.session_handle`, required, non-empty) and the model
+step above ("Request: the model step") sends it as `conversation`. The
+model step is now a single physical call with no preparatory request
+inside its own `Invoke` -- the request body fields are unchanged from the
+pre-split adapter; only the handle's origin changed: it is a caller-
+supplied input this attempt names, never one it mints for itself.
 
 ## Response: the model step
 
@@ -131,6 +170,12 @@ cannot rule out that the step ran; 429 (`rate_limit_exceeded`,
 is not acted on: this adapter never retries.
 
 ## Reconcile: the documented authoritative lookup
+
+This is a `model_step` reconciliation only. `Adapter.Reconcile` refuses a
+`prepare_session` dispatch before any call (`capability_unsupported`): see
+"Request: prepare_session" above -- there is no documented way to resolve a
+lost conversation-create by lookup, only by dispatching a brand new,
+deliberately re-admitted `prepare_session` effect.
 
 `GET {conversations}/{handle}/items?limit=100&order=asc`, where `handle`
 is `Dispatch.provider_key` (the conversation id the original attempt
@@ -220,55 +265,158 @@ profile.
 
 ## Where the documented API cannot give the adapter what the frozen contract demands
 
-1. **Two physical calls per Invoke.** The frozen contract says
-   "PhysicalCallEvidence records exactly one physical network request per
-   claimed attempt. No adapter adds preflight ... inside that request." The
-   only documented way to make a dropped `POST /responses` reconcilable is
-   a conversation created beforehand, which is a second request. The
-   adapter does it (`adapter.go`, `Invoke`, the `prep != nil` block) and
-   records it honestly: both request records are staged with purpose
-   `context`, both responses with purpose `provider_response`, and the
-   single `physical_call` describes the model step. Revision-3 item.
-2. **The handle is journaled only as far as the adapter can reach.** The
-   contract's "journal before dispatch" is satisfied by staging the record
-   that names the conversation id before the step is sent; the controller
-   learns the id when Invoke returns. A process crash between the two calls
-   leaves an orphaned conversation upstream (harmless: nothing is journaled
-   under it and nothing billed); a crash after the step is sent loses the
-   handle and the attempt is permanently unknown, because the API documents
-   no way to list conversations or find one by metadata.
-3. **Reconciliation cannot prove non-execution.** Documented above; the
+1. **RESOLVED by revision 3: two physical calls per Invoke.** The frozen
+   contract says "PhysicalCallEvidence records exactly one physical network
+   request per claimed attempt. No adapter adds preflight ... inside that
+   request." The pre-split adapter created the conversation and sent the
+   step inside one `Invoke` -- two physical requests behind a one-call-per-
+   attempt contract (audit finding G27). P00-009 splits this into two
+   separately admitted, journaled, single-call effects
+   (`prepare_session`/`model_step`, `ResponsesParameters`'s
+   `kind`-discriminated `oneOf`); each `Adapter.Invoke` now performs exactly
+   the one physical call its dispatched kind describes. This entry is kept
+   as the historical record of the gap revision 3 closes, not a live one.
+2. **RESOLVED by revision 3, and actually improved: the handle is
+   journaled before the model call, not just as far as one Invoke could
+   reach.** The pre-split adapter could only stage the conversation id
+   inside the SAME `Invoke` that also sent the step, so a crash between the
+   two internal calls was invisible to the controller (the id existed only
+   in adapter-local memory until `Invoke` returned). Splitting them into
+   two dispatches lets the controller durably persist
+   `prepare_session`'s own `Observation.provider_reference` -- the exact
+   P00-009 requirement, "persist the session handle before the model
+   call" -- through its own admit/claim/record transaction before a
+   `model_step` is ever admitted. A crash between the two effects now
+   leaves a durably recorded, successfully created session with no
+   `model_step` dispatched against it yet (recoverable: the next attempt
+   simply admits `model_step` naming that already-known handle), rather
+   than an orphaned conversation the controller never learned about. A
+   crash after `prepare_session`'s own response was sent but before its
+   acknowledgment reached the controller is `unknown`, exactly like any
+   other lost response (see "Request: prepare_session" above); it is never
+   silently resolved by minting a second conversation.
+3. **NEW gap: `ResponsesEvidence.session_handle` is required with
+   `minLength` 1 on every disposition, including one that never minted a
+   handle.** A `prepare_session` attempt that fails, times out or never
+   left (`failed`/`unknown`/`not_sent`) has no handle to report, and this
+   adapter never fabricates one ("never fabricated locally", AGENTS.md).
+   Every sibling field this exact contract uses for an honestly-absent
+   value -- `response_id`, `provider_reference`, `error_code` -- allows
+   `minLength` 0; `session_handle` does not, which reads as an oversight
+   in the frozen schema rather than an intended asymmetry. This build
+   reports an empty string on those dispositions (the honest value) and
+   accepts that the resulting evidence document does not itself validate
+   against the frozen `ResponsesEvidence` schema on that narrow path; see
+   `decodePrepareSessionEvidenceLenient` in `testhelpers_test.go` and the
+   P13 PR, which reports this gap rather than inventing a seam around it
+   (a coordinated revision-4 fix would relax `minLength` to 0, matching
+   every sibling field).
+5. **Reconciliation cannot prove non-execution.** Documented above; the
    contract already says a not-found "cannot establish non-execution", so
    `unknown` is retained, but it means a lost step with no items can never
    be released by this adapter.
-4. **Usage is unavailable on reconcile.** `ConversationItemList` items carry
+6. **Usage is unavailable on reconcile.** `ConversationItemList` items carry
    no usage and no response id, so a reconciled success is billed
    `unknown` with the worst case outstanding. `GET /responses/{id}` would
    give usage but needs the response id, which a lost response never
    delivered.
-5. **Cache and tier pricing.** `ResponsesProfile` has `input_rate` and
+7. **Cache and tier pricing.** `ResponsesProfile` has `input_rate` and
    `output_rate` only. Documented usage distinguishes cached and
    cache-written input tokens with their own prices, and service tiers are
    priced differently. Handled by disabling caching and pinning
    `service_tier: default`; any deviation reported by the provider makes
    the amount `unknown`. Revision-3 item: `cached_input_rate`,
    `cache_write_rate`.
-6. **Tool proposals** (`interpret.go`, the `tool_proposal_mapping_unspecified`
+8. **Tool proposals** (`interpret.go`, the `tool_proposal_mapping_unspecified`
    flag): unchanged from the base adapter; `function_call` items are
    decoded but no typed `ModelToolProposal` can be built without a
    tool-to-operation mapping.
-7. **`max_output_tokens` below 16** is refused (`capability_unsupported`)
+9. **`max_output_tokens` below 16** is refused (`capability_unsupported`)
    because the API cannot enforce a smaller ceiling.
 
-## Qualification seam (not performed)
+## Live qualification (performed 2026-09-19, predates the revision-3 split)
 
-Live qualification against `https://api.openai.com` needs the founder's
-credential and is a separate step (tests/qualification). Its record must
-pin `adapter_version`, `source_revision`, this protocol revision, the
-profile digest and, if the byte bound held across the qualification
-prompts, the capability string `input_token_bound:utf8_bytes`. Nothing in
-this package fakes that step: a profile without it simply cannot claim an
-enforced hard cap.
+`tests/qualification/responses_live_test.go` on `origin/wave3/responses`
+(commit `4aa219b`, banked 2026-09-19, not merged; that branch and P13 are
+disjoint worktrees under `tests/qualification`, outside this card's
+allowed writes, so it was read but not incorporated as code) ran this
+protocol against `https://api.openai.com` with the founder's credential
+resolved by reference from the operating system's secure credential store,
+at source revision `34d291f` (dirty: the test itself), profile digest
+`c91c14ce749b3f7ef807bb7d1b45266e790395e9a51802fcdd6d045d32a0f353`, model
+`gpt-5.6-luna`. It predates this card's `prepare_session`/`model_step`
+split: it drove the pre-split adapter's single `Invoke` (one conversation
+create, then one response create). The two physical calls it observed are
+byte-for-byte what `prepare_session` and `model_step` each still send under
+the split -- `openaiProtocol.prepare`/`encode` are unchanged by P13 -- so
+these facts about the live endpoint remain valid evidence; what changed is
+only how Zatiti sequences and journals the two calls, not what either
+carries over the wire. Observed:
+
+- One text step: exactly 2 physical requests (`POST /v1/conversations`,
+  then `POST /v1/responses`), both bodies unrewindable; `succeeded`,
+  HTTP 200, `finish_reason: completed`, model text `"OK"`;
+  `usage.input_tokens 22, output_tokens 5, total 27, reasoning_tokens 0`,
+  priced at 11 micro-USD by the pinned rates and reported as
+  `billing: observed, spent: 11`; `service_tier: "default"`,
+  `store: true`, `conversation.id` equal to the minted handle.
+- The staged step record named the conversation id before the step was
+  sent and carried only `Content-Type`; no staged byte, evidence document,
+  usage document or provider reference contained the credential.
+- Reconcile by that handle: 1 request, `GET
+  /v1/conversations/{id}/items?limit=100&order=asc`, HTTP 200, items
+  `[system, user, assistant]`, the assistant `output_text` equal to the
+  step's text, `succeeded`. Reconcile of a never-minted id: HTTP 404,
+  `unknown`, `error_code: http_404`.
+- One function-tool step: 2 requests, `succeeded`, one `function_call`
+  item (`call_id`, `name`, `arguments` as a JSON string, `status:
+  completed`), `finish_reason: tool_calls`, flagged
+  `tool_proposal_mapping_unspecified`; `usage 74/22`, 42 micro-USD.
+- Total spend: 53 micro-USD (0.000053 USD) for two model steps and two
+  lookups.
+- The byte-based input bound held on both steps (22 and 74 reported
+  input tokens against far larger byte counts), so
+  `input_token_bound:utf8_bytes` may be recorded in the profile's
+  `capability_evidence`. Two prompts are thin evidence; the runtime flag
+  `input_token_bound_exceeded` stays on so a later violation surfaces.
+
+Where the live endpoint differed from the pinned OpenAPI document:
+
+- The live `Response` object carries fields the pinned `Response` schema
+  does not list: `billing` (`{"payer":"developer"}`), `tool_usage`
+  (per-built-in-tool token counters), `frequency_penalty`,
+  `presence_penalty`, and an echoed `store`. None carries a monetary
+  amount: the API reports tokens, never a price, so the pinned rates are
+  the only source of an amount. The adapter ignores unknown fields (Go's
+  `encoding/json` decode target here, `openaiResponse`, only reads its own
+  declared fields).
+- Documented `Response` fields absent live: `output_text` (SDK-only by
+  its own description), `prompt`, `prompt_cache_diagnostics`.
+- Defaults echoed live and not otherwise documented here:
+  `reasoning: {effort: "medium", context: "all_turns"}`,
+  `prompt_cache_retention: "24h"`, `text.verbosity: "medium"`,
+  `truncation: "disabled"`. Reasoning at `medium` bills reasoning tokens
+  as output tokens (0 on these prompts); the `max_output_tokens` ceiling
+  covers them, so the cost bound is unaffected.
+- No disagreement in any field this protocol reads.
+
+**Not re-run for this card.** Re-running it costs real money against the
+founder's real credential; P13's own required tests are satisfied by the
+package's synthetic-protocol and real-protocol-fixture suites
+(`adapter_test.go`, `openai_test.go`), so this banked record is treated as
+sufficient evidence for the wire-level facts above, not superseded or
+re-verified here. **A fresh live run is still owed** once
+`prepare_session`/`model_step` are wired through the real execution path
+(P15/P23): the observations above are per-physical-call and unaffected by
+the split, but no live run has yet exercised `prepare_session` and
+`model_step` as two independently dispatched, independently journaled
+effects end to end (crash-between-them recovery, in particular, is
+proven only by this package's synthetic-protocol test,
+`TestPrepareSessionAndModelStepAreSeparatelyDispatchedSingleCallEffects`,
+never against the real endpoint). The record must be re-run when this
+protocol revision, the model, or the profile digest changes; a profile
+that claims `input_token_bound:utf8_bytes` without a passing live record
+for its digest has no basis for it.
 
 Every request and response shape above is exercised in `openai_test.go`
 with fixtures shaped by the OpenAPI document. A fixture is not a claim that

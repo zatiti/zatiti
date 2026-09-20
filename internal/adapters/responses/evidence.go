@@ -180,9 +180,13 @@ type builtEvidence struct {
 	usage json.RawMessage
 }
 
-// buildEvidence assembles and marshals the zatiti.responses.evidence/v1
-// document, plus a standalone marshal of its usage for Observation.Usage.
-func buildEvidence(physical wirePhysicalCallEvidence, output wireModelOutput, staged []wireStagedOutput) (builtEvidence, error) {
+// buildModelStepEvidence assembles and marshals the
+// zatiti.responses.evidence/v1 document for a model_step attempt (Invoke or
+// Reconcile), plus a standalone marshal of its usage for Observation.Usage.
+// sessionHandle is the action's own session_handle, echoed back: it is
+// known before any call is dispatched and does not depend on this
+// attempt's outcome.
+func buildModelStepEvidence(sessionHandle string, physical wirePhysicalCallEvidence, output wireModelOutput, staged []wireStagedOutput) (builtEvidence, error) {
 	usageDoc, err := json.Marshal(output.Usage.Accounting)
 	if err != nil {
 		return builtEvidence{}, internalError("encoding responses usage failed: %v", err)
@@ -199,10 +203,47 @@ func buildEvidence(physical wirePhysicalCallEvidence, output wireModelOutput, st
 	ev := wireResponsesEvidence{
 		Schema:          "zatiti.responses.evidence/v1",
 		PhysicalCall:    physical,
+		SessionHandle:   sessionHandle,
 		ResponseID:      output.ResponseID,
-		Output:          output,
+		Output:          &output,
 		StagedOutputs:   staged,
 		OutputArtifacts: []wireArtifactRef{}, // the adapter cannot mint artifact IDs; the controller publishes staged outputs
+	}
+	doc, err := json.Marshal(ev)
+	if err != nil {
+		return builtEvidence{}, internalError("encoding responses evidence failed: %v", err)
+	}
+	return builtEvidence{doc: doc, usage: usageDoc}, nil
+}
+
+// buildPrepareSessionEvidence assembles and marshals the
+// zatiti.responses.evidence/v1 document for a prepare_session attempt: no
+// model output, "no model-visible content and no context_artifact"
+// (AGENTS.md, P00-009) -- response_id/output/output_artifacts stay entirely
+// absent, never a fabricated zero value.
+//
+// sessionHandle is the handle this attempt minted, only on authoritative
+// success. On every other disposition (unknown, failed, not_sent) there is
+// none to report, and the frozen ResponsesEvidence.session_handle is
+// nonetheless required with minLength 1: this is a known, reported gap
+// (see PROTOCOL.md "Where the frozen contract cannot be honoured" and the
+// P13 PR) the adapter cannot close by fabricating a provider handle. An
+// empty string is the honest value; it does not satisfy the frozen
+// schema's minLength, which is the gap being reported, not a local
+// workaround.
+func buildPrepareSessionEvidence(sessionHandle string, physical wirePhysicalCallEvidence, usage wireProviderUsage, staged []wireStagedOutput) (builtEvidence, error) {
+	usageDoc, err := json.Marshal(usage.Accounting)
+	if err != nil {
+		return builtEvidence{}, internalError("encoding responses usage failed: %v", err)
+	}
+	if staged == nil {
+		staged = []wireStagedOutput{}
+	}
+	ev := wireResponsesEvidence{
+		Schema:        "zatiti.responses.evidence/v1",
+		PhysicalCall:  physical,
+		SessionHandle: sessionHandle,
+		StagedOutputs: staged,
 	}
 	doc, err := json.Marshal(ev)
 	if err != nil {

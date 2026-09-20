@@ -418,6 +418,11 @@ const (
 	testModel         = "synthetic-model-a"
 	testCredentialRef = "cred-1"
 	testToken         = "synthetic-credential-0123456789"
+	// testSessionHandle stands in for the handle a prior prepare_session
+	// Invoke minted: every default model_step action already names one,
+	// exactly as P15 would after persisting it (P00-009, revision 3's
+	// prepare_session/model_step split).
+	testSessionHandle = "sess-handle-0000000001"
 )
 
 var testConnectionID = contract.ID("7b1f6c1e-2f65-4d0e-9a53-0c2f4f1f9a11")
@@ -542,10 +547,17 @@ func defaultAction(ref wireArtifactRef) wireResponsesParameters {
 	return wireResponsesParameters{
 		Schema:               "zatiti.responses.action/v1",
 		Kind:                 kindModelStep,
+		SessionHandle:        testSessionHandle,
 		ContextArtifact:      ref,
 		MaxOutputTokens:      1000,
 		ToolContractVersions: []wireVersionRef{testTool},
 	}
+}
+
+// defaultPrepareSessionAction is the sibling prepare_session action: no
+// context_artifact, no session_handle -- it mints one.
+func defaultPrepareSessionAction() wireResponsesParameters {
+	return wireResponsesParameters{Schema: "zatiti.responses.action/v1", Kind: kindPrepareSession}
 }
 
 func testDispatch(t *testing.T, action any) contract.Dispatch {
@@ -711,6 +723,59 @@ func decodeEvidence(t *testing.T, obs contract.Observation) wireResponsesEvidenc
 	}
 	if !bytes.Equal(want, obs.Usage) {
 		t.Fatalf("Observation.Usage = %s, want the evidence accounting %s", obs.Usage, want)
+	}
+	return ev
+}
+
+// decodePrepareSessionEvidence schema-validates and strict-decodes a
+// successful prepare_session observation's evidence: no output, no
+// response_id, no output_artifacts, and a non-empty session_handle.
+func decodePrepareSessionEvidence(t *testing.T, obs contract.Observation) wireResponsesEvidence {
+	t.Helper()
+	schema, err := evidenceSchema()
+	if err != nil {
+		t.Fatalf("evidenceSchema: %v", err)
+	}
+	if err := contract.ValidateSchema(schema, obs.Evidence); err != nil {
+		t.Fatalf("evidence does not match zatiti.responses.evidence/v1: %v\n%s", err, obs.Evidence)
+	}
+	var ev wireResponsesEvidence
+	if err := contract.DecodeStrict(obs.Evidence, &ev); err != nil {
+		t.Fatalf("decode evidence: %v", err)
+	}
+	if ev.Output != nil || ev.ResponseID != "" || len(ev.OutputArtifacts) != 0 {
+		t.Fatalf("prepare_session evidence carries model output: %+v", ev)
+	}
+	if ev.SessionHandle == "" {
+		t.Fatal("successful prepare_session evidence carries no session_handle")
+	}
+	return ev
+}
+
+// decodePrepareSessionEvidenceLenient strict-decodes (but does not
+// schema-validate) a prepare_session observation's evidence for a
+// disposition that minted no handle (failed, unknown or not_sent).
+//
+// KNOWN CONTRACT GAP (reported in the P13 PR, see PROTOCOL.md): the frozen
+// ResponsesEvidence.session_handle is required with minLength 1 on every
+// disposition, but a prepare_session that never minted a handle has none
+// to report and this package never fabricates one. Every sibling
+// "unknown-capable" field in this exact contract (response_id,
+// provider_reference, error_code, ...) allows minLength 0; session_handle
+// does not, and that looks like an oversight rather than an intended
+// asymmetry. Schema validation is skipped here rather than silently
+// declared passing against a schema the adapter cannot honestly satisfy.
+func decodePrepareSessionEvidenceLenient(t *testing.T, obs contract.Observation) wireResponsesEvidence {
+	t.Helper()
+	var ev wireResponsesEvidence
+	if err := contract.DecodeStrict(obs.Evidence, &ev); err != nil {
+		t.Fatalf("decode evidence: %v", err)
+	}
+	if ev.Output != nil || ev.ResponseID != "" || len(ev.OutputArtifacts) != 0 {
+		t.Fatalf("prepare_session evidence carries model output: %+v", ev)
+	}
+	if ev.SessionHandle != "" {
+		t.Fatalf("a prepare_session that minted no handle reported one: %q", ev.SessionHandle)
 	}
 	return ev
 }
