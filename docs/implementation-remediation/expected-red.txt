@@ -31,15 +31,12 @@
 cmd/zatiti
 internal/adapters/responses
 internal/application
-internal/configuration
 internal/effects
 internal/execution
-internal/identity
 internal/installation
 internal/mcp
 internal/memory
 internal/scheduling
 internal/skills
-internal/tasks
 tests/integration
 tests/qualification

@@ -59,6 +59,19 @@ type evidenceRow struct {
 	RecordedAt   time.Time
 }
 
+// outputBindingRow is one sealed named-output binding recorded by
+// _tasks.evidence.record: the exact published artifact that satisfies a
+// declared output slot for one run attempt.
+type outputBindingRow struct {
+	TaskID       contract.ID
+	Attempt      int64
+	Name         string
+	ArtifactID   contract.ID
+	Digest       string
+	Installation contract.ID
+	RecordedAt   time.Time
+}
+
 type decisionRow struct {
 	ID           contract.ID
 	TaskID       contract.ID
@@ -384,6 +397,82 @@ func evidenceForAttempt(ctx context.Context, unit contract.Unit, taskID contract
 			return nil, err
 		}
 		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// upsertOutputBinding records or replaces the bound artifact for one
+// declared output slot of one run attempt. Replacing is safe: only the
+// trusted _tasks.evidence.record port ever writes this table, and a repeat
+// call binding the same name for the same attempt is idempotent rebinding,
+// not a race with an untrusted writer.
+func upsertOutputBinding(ctx context.Context, unit contract.Unit, r *outputBindingRow) error {
+	_, err := unit.ExecContext(ctx,
+		`INSERT OR REPLACE INTO tasks_output_bindings
+		 (task_id, attempt, name, artifact_id, digest, installation_id, recorded_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		string(r.TaskID), r.Attempt, r.Name, string(r.ArtifactID), r.Digest,
+		string(r.Installation), r.RecordedAt.Format(timeLayout))
+	return err
+}
+
+// outputBindingsForAttempt returns the recorded output bindings of one run
+// attempt, keyed by output slot name.
+func outputBindingsForAttempt(ctx context.Context, unit contract.Unit, taskID contract.ID, attempt int64) (map[string]outputBindingRow, error) {
+	rows, err := unit.QueryContext(ctx,
+		`SELECT task_id, attempt, name, artifact_id, digest, installation_id, recorded_at
+		 FROM tasks_output_bindings WHERE task_id = ? AND attempt = ?`,
+		string(taskID), attempt)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	out := map[string]outputBindingRow{}
+	for rows.Next() {
+		var r outputBindingRow
+		var recorded string
+		if err := rows.Scan(&r.TaskID, &r.Attempt, &r.Name, &r.ArtifactID, &r.Digest, &r.Installation, &recorded); err != nil {
+			return nil, err
+		}
+		if r.RecordedAt, err = time.Parse(timeLayout, recorded); err != nil {
+			return nil, err
+		}
+		out[r.Name] = r
+	}
+	return out, rows.Err()
+}
+
+// taskColumnsQualified is taskColumns with every column qualified by the t
+// alias, for queries joining tasks_tasks against a sibling table whose
+// columns would otherwise collide (installation_id, in particular).
+const taskColumnsQualified = `t.id, t.version, t.installation_id, t.organization_id, t.scope_json, t.owner_id, t.worker_id, t.parent_id, t.root_id,
+	t.outcome, t.inputs_json, t.required_outputs_json, t.acceptance_json, t.acceptance_digest, t.limits_json,
+	t.dependencies_json, t.state, t.prior_state, t.waiting_reason, t.cancellation_requested, t.manual_acceptance,
+	t.established_by, t.attempt, t.source_id, t.occurrence_key, t.content_digest, t.created_at, t.updated_at`
+
+// listDependents is the bounded, offset-paginated scan of _tasks.dependencies.wake:
+// every task with a recorded dependency edge onto completedID, oldest edge
+// first, restricted to the completed task's own installation.
+func listDependents(ctx context.Context, unit contract.Unit, completedID, installation contract.ID, limit int, offset int64) ([]*taskRow, error) {
+	rows, err := unit.QueryContext(ctx,
+		`SELECT `+taskColumnsQualified+` FROM tasks_dependencies d
+		 JOIN tasks_tasks t ON t.id = d.task_id
+		 WHERE d.depends_on_id = ? AND t.installation_id = ?
+		 ORDER BY d.task_id LIMIT ? OFFSET ?`,
+		string(completedID), string(installation), limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []*taskRow
+	for rows.Next() {
+		r, err := scanTask(rows)
+		if err != nil {
+			return nil, err
+		}
+		if r != nil {
+			out = append(out, r)
+		}
 	}
 	return out, rows.Err()
 }

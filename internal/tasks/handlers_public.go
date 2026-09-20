@@ -55,6 +55,40 @@ func handleTaskCreate(ctx context.Context, s *Service, unit contract.Unit, inv c
 	return s.completed(map[string]any{"resource": wire})
 }
 
+// handleTaskStart transitions an eligible draft/ready task to ready and
+// enqueues its run in the same transaction: the explicit draft-to-ready
+// public path, distinct from task.create (draft only) and task.assign
+// (worker/version only, never readying).
+func handleTaskStart(ctx context.Context, s *Service, unit contract.Unit, inv contract.Invocation) (contract.Payload, error) {
+	in, err := decodeInto[struct {
+		Scope           wireScope   `json:"scope"`
+		ID              contract.ID `json:"id"`
+		ExpectedVersion int64       `json:"expected_version"`
+	}](s, "task.start", inv.Input)
+	if err != nil {
+		return contract.Payload{}, err
+	}
+	row, err := getTask(ctx, unit, in.ID)
+	if err != nil {
+		return contract.Payload{}, err
+	}
+	if row == nil {
+		return contract.Payload{}, notFound("task %s does not exist", in.ID)
+	}
+	if err := s.checkInputScope(unit, in.Scope, row); err != nil {
+		return contract.Payload{}, err
+	}
+	row, run, err := s.startTask(ctx, unit, row, in.ExpectedVersion)
+	if err != nil {
+		return contract.Payload{}, err
+	}
+	wire, err := row.toWire()
+	if err != nil {
+		return contract.Payload{}, err
+	}
+	return s.completed(map[string]any{"task": wire, "run": run})
+}
+
 // handleTaskDelegate creates a linked child under a narrowed contract.
 func handleTaskDelegate(ctx context.Context, s *Service, unit contract.Unit, inv contract.Invocation) (contract.Payload, error) {
 	in, err := decodeInto[struct {

@@ -52,6 +52,16 @@ type peerRun struct {
 	State   string
 }
 
+// toWireRun renders a fake run as the full frozen Run shape task.start and
+// the internal enqueue path return.
+func (r *peerRun) toWireRun() wireRun {
+	return wireRun{
+		ID: r.ID, Version: contract.Version(r.Version), TaskID: r.TaskID,
+		ConfigurationRevision: 1, InputVersions: []wireRef{}, State: r.State,
+		AttemptIDs: []contract.ID{},
+	}
+}
+
 // fakePorts serves the eight declared peer operations with in-memory
 // registries and injectable decisions and faults, recording every call.
 type fakePorts struct {
@@ -200,12 +210,7 @@ func (p *fakePorts) Call(_ context.Context, _ contract.Unit, inv contract.Invoca
 			}
 			p.enqueueRuns[key] = run
 		}
-		body = peerEnqueueOut{Resource: struct {
-			ID      contract.ID `json:"id"`
-			Version int64       `json:"version"`
-			TaskID  contract.ID `json:"task_id"`
-			State   string      `json:"state"`
-		}{ID: run.ID, Version: run.Version, TaskID: run.TaskID, State: run.State}}
+		body = peerEnqueueOut{Resource: run.toWireRun()}
 	default:
 		return contract.Payload{}, &contract.Fault{
 			Code: contract.CodeInternalError, Message: "fake ports: unexpected peer call " + inv.Operation,
@@ -763,6 +768,34 @@ func (e *testEnv) runToRunning(id contract.ID, version int64) int64 {
 func (e *testEnv) runToVerifying(id contract.ID, version int64, evidence []contract.ID) int64 {
 	e.t.Helper()
 	return int64(e.transition(id, version, stateVerifying, evidence).Version)
+}
+
+// verifierArtifactRefFixture is verifierArtifactFixture, additionally
+// returning the pinned digest as a full reference: _tasks.evidence.record's
+// verification_artifact field is an ArtifactRef, not a bare id.
+func (e *testEnv) verifierArtifactRefFixture(name string) wireArtifactRef {
+	e.t.Helper()
+	id := e.verifierArtifactFixture(name)
+	return wireArtifactRef{ID: id, Digest: contract.Digest(fmt.Sprintf("%064x", sha256sum(name)))}
+}
+
+// recordEvidence calls the trusted internal _tasks.evidence.record port --
+// the only path that can populate a task's sealed named-output bindings --
+// and returns the resulting task resource. attemptID is minted fresh per
+// call, mirroring execution's own run-attempt identity.
+func (e *testEnv) recordEvidence(id contract.ID, version int64, verifier wireArtifactRef, bindings []wireOutputBinding, verdict string) *wireTask {
+	e.t.Helper()
+	row := e.readRow(id)
+	payload := e.mustOK("_tasks.evidence.record", map[string]any{
+		"task_id": id, "attempt_id": e.ids.New(), "expected_version": version,
+		"acceptance_digest": row.AcceptanceDigest, "verification_artifact": verifier,
+		"output_bindings": bindings, "verdict": verdict,
+	})
+	var out struct {
+		Resource wireTask `json:"resource"`
+	}
+	e.decode(payload.Data, &out)
+	return &out.Resource
 }
 
 // listTasksPage runs task.list and returns the decoded page.

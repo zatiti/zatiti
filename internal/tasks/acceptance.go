@@ -134,11 +134,15 @@ func validateObservations(obs []wireExpectedObservation, allowedKinds map[string
 		}
 		switch o.Kind {
 		case obsArtifactPresence:
-			if o.ExpectedDigest == "" {
-				// Presence of named bytes is only structurally provable when
-				// the exact digest is pinned at admission; a contract without
-				// it cannot fence success independently.
-				return invalidInput("expected observation %s kind %s must pin expected_digest", o.CheckID, o.Kind)
+			if o.ArtifactName == "" {
+				// A presence check fences an accepted output slot, sealed by
+				// name; the slot's bytes are frequently unknowable at
+				// admission (a generated report, say), so only the name is
+				// required here. _tasks.evidence.record binds the slot to an
+				// actual published artifact once the run produces one, and
+				// evaluateSuccess consults that trusted binding, never a raw
+				// digest a caller could have pinned to already-known bytes.
+				return invalidInput("expected observation %s kind %s must name the output slot it checks", o.CheckID, o.Kind)
 			}
 		case obsArtifactDigest:
 			if o.ExpectedDigest == "" {
@@ -163,6 +167,26 @@ type acceptanceEvaluation struct {
 	established string
 }
 
+// verifySeal recomputes the canonical digest of the stored acceptance
+// contract and compares it against the digest sealed at admission. A
+// mismatch means the accepted contract was tampered with out of band;
+// dependent qualifications are invalidated immediately and every caller
+// (the success fence, task.start's and retry's readiness recheck, and
+// _tasks.evidence.record) refuses to proceed past it.
+func (s *Service) verifySeal(ctx context.Context, unit contract.Unit, r *taskRow) error {
+	canonical, err := contract.Canonicalize([]byte(r.AcceptanceJSON))
+	if err != nil {
+		return verificationFailed("stored acceptance is not canonicalizable: %v", err)
+	}
+	if contract.Hash(canonical) != contract.Digest(r.AcceptanceDigest) {
+		if ierr := s.invalidateAcceptance(ctx, unit, r, "accepted contract digest mismatch during verification"); ierr != nil {
+			return ierr
+		}
+		return verificationFailed("accepted contract does not match the sealed digest; verification refused")
+	}
+	return nil
+}
+
 // evaluateSuccess applies the acceptance fence for a transition to
 // succeeded. It returns the establishment method (verification or manual)
 // or an error naming every check that is not established.
@@ -170,15 +194,8 @@ func (s *Service) evaluateSuccess(ctx context.Context, unit contract.Unit, r *ta
 	// Seal integrity first: the stored contract must hash to the sealed
 	// digest. A mismatch means the acceptance was tampered with during the
 	// run; dependent qualifications are invalidated immediately.
-	canonical, err := contract.Canonicalize([]byte(r.AcceptanceJSON))
-	if err != nil {
-		return nil, verificationFailed("stored acceptance is not canonicalizable: %v", err)
-	}
-	if contract.Hash(canonical) != contract.Digest(r.AcceptanceDigest) {
-		if ierr := s.invalidateAcceptance(ctx, unit, r, "accepted contract digest mismatch during verification"); ierr != nil {
-			return nil, ierr
-		}
-		return nil, verificationFailed("accepted contract does not match the sealed digest; verification refused")
+	if err := s.verifySeal(ctx, unit, r); err != nil {
+		return nil, err
 	}
 	acceptance, err := r.decodeAcceptance()
 	if err != nil {
@@ -198,9 +215,16 @@ func (s *Service) evaluateSuccess(ctx context.Context, unit contract.Unit, r *ta
 		return nil, verificationFailed("independent contract needs verifier-established observations; a manual label is not proof")
 	}
 
-	// Digest fence: every passing byte-level observation needs an evidence
-	// artifact with exactly the pinned digest. Schema and repository checks
-	// need a verifier-produced result artifact among the evidence.
+	// Digest fence: an unnamed byte-level observation needs an evidence
+	// artifact with exactly the pinned digest (the legacy path, still used
+	// for a sealed-input digest check that names no output slot). Schema and
+	// repository checks need a verifier-produced result artifact among the
+	// evidence. A named observation -- every artifact_presence check, and an
+	// artifact_digest check that also names a slot -- is fenced instead by
+	// the sealed named-output bindings _tasks.evidence.record recorded for
+	// this attempt: the only port that can write that table, so a worker's
+	// self-reported bytes threaded through raw evidence_ids can never
+	// satisfy it, only trusted, independently verified evidence can.
 	digestPresent := map[string]bool{}
 	for _, e := range evidence {
 		digestPresent[e.Digest] = true
@@ -211,6 +235,10 @@ func (s *Service) evaluateSuccess(ctx context.Context, unit contract.Unit, r *ta
 			verifierRan = true
 			break
 		}
+	}
+	bindings, err := outputBindingsForAttempt(ctx, unit, r.ID, r.Attempt)
+	if err != nil {
+		return nil, err
 	}
 	var unestablished []string
 	for _, o := range acceptance.ExpectedObservations {
@@ -223,6 +251,16 @@ func (s *Service) evaluateSuccess(ctx context.Context, unit contract.Unit, r *ta
 		}
 		switch o.Kind {
 		case obsArtifactPresence, obsArtifactDigest:
+			if o.ArtifactName != "" {
+				binding, ok := bindings[o.ArtifactName]
+				switch {
+				case !ok:
+					unestablished = append(unestablished, fmt.Sprintf("%s (no trusted output binding for %q)", o.CheckID, o.ArtifactName))
+				case o.ExpectedDigest != "" && string(o.ExpectedDigest) != binding.Digest:
+					unestablished = append(unestablished, fmt.Sprintf("%s (bound output does not match the pinned digest)", o.CheckID))
+				}
+				continue
+			}
 			if !digestPresent[string(o.ExpectedDigest)] {
 				unestablished = append(unestablished, fmt.Sprintf("%s (no artifact with pinned digest)", o.CheckID))
 			}

@@ -200,12 +200,16 @@ func TestAdmissionAcceptanceSealRefusals(t *testing.T) {
 			},
 		},
 		{
-			"presence observation without pinned digest",
+			"presence observation without an output name",
 			func(d *taskDefInput) {
-				obs := presenceObservation("no-digest", "report.bin", wireArtifactRef{
-					ID: contract.ID("00000000-0000-4000-8000-0000000000a2"),
+				// Bytes may be unknown at admission (a generated report,
+				// say), so expected_digest is optional for presence -- but
+				// the check must still name the output slot it fences, so
+				// _tasks.evidence.record's binding has something to match.
+				obs := presenceObservation("no-name", "report.bin", wireArtifactRef{
+					ID: contract.ID("00000000-0000-4000-8000-0000000000a2"), Digest: contract.Digest(altDigest),
 				})
-				obs.ExpectedDigest = ""
+				obs.ArtifactName = ""
 				d.Acceptance.ExpectedObservations = []wireExpectedObservation{obs}
 				d.RequiredOutputs = nil
 			},

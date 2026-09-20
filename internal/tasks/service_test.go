@@ -73,8 +73,16 @@ func TestDescriptorsExactness(t *testing.T) {
 		if d.Effect != "local" {
 			t.Fatalf("%s effect %q, want local", d.ID, d.Effect)
 		}
-		if d.Visibility == "public" && (len(d.ScopeRequired) != 1 || d.ScopeRequired[0] != "installation_id") {
+		// task.start is the one frozen exception: its input requires scope
+		// exactly like every sibling public mutation's does, but the frozen
+		// catalog (docs/implementation/operations.json) carries scope_required
+		// null for it alone, unlike every other public tasks operation. The
+		// descriptor here matches that frozen value; see opMeta.noScopeRequired.
+		if d.Visibility == "public" && d.ID != "task.start" && (len(d.ScopeRequired) != 1 || d.ScopeRequired[0] != "installation_id") {
 			t.Fatalf("%s scope_required %v, want [installation_id]", d.ID, d.ScopeRequired)
+		}
+		if d.ID == "task.start" && len(d.ScopeRequired) != 0 {
+			t.Fatalf("task.start scope_required %v, want none (frozen-catalog exception)", d.ScopeRequired)
 		}
 		if len(d.InputSchema) == 0 || len(d.OutputSchema) == 0 {
 			t.Fatalf("%s carries empty schemas", d.ID)

@@ -13,10 +13,12 @@ import (
 
 // opSchemas holds the input/output schema bodies for every owned operation.
 var opSchemas = map[string][2]string{
-	"_tasks.create":     {schemaInTasksCreate, schemaOutResource},
-	"_tasks.ready":      {schemaInTasksReady, schemaOutItems},
-	"_tasks.snapshot":   {schemaInScopeID, schemaOutResource},
-	"_tasks.transition": {schemaInTasksTransition, schemaOutResource},
+	"_tasks.create":            {schemaInTasksCreate, schemaOutResource},
+	"_tasks.dependencies.wake": {schemaInDependenciesWake, schemaOutDependenciesWake},
+	"_tasks.evidence.record":   {schemaInEvidenceRecord, schemaOutResource},
+	"_tasks.ready":             {schemaInTasksReady, schemaOutItems},
+	"_tasks.snapshot":          {schemaInScopeID, schemaOutResource},
+	"_tasks.transition":        {schemaInTasksTransition, schemaOutResource},
 
 	"task.accept":       {schemaInTaskAccept, schemaOutResource},
 	"task.assign":       {schemaInTaskAssign, schemaOutResource},
@@ -27,6 +29,7 @@ var opSchemas = map[string][2]string{
 	"task.get":          {schemaInScopeID, schemaOutResource},
 	"task.list":         {schemaInTaskList, schemaOutItems},
 	"task.retry":        {schemaInTaskRetry, schemaOutResource},
+	"task.start":        {schemaInTaskStart, schemaOutTaskStart},
 	"task.update":       {schemaInTaskUpdate, schemaOutResource},
 }
 
@@ -61,6 +64,16 @@ const schemaInTaskList = `{"type":"object","additionalProperties":false,"propert
 const schemaInTaskRetry = `{"type":"object","additionalProperties":false,"properties":{"scope":{"$ref":"#/$defs/Scope"},"id":{"type":"string","format":"uuid"},"expected_version":{"type":"integer","minimum":1,"maximum":9223372036854775807},"reason":{"type":"string","maxLength":8192}},"required":["scope","id","expected_version","reason"]}`
 
 const schemaInTaskUpdate = `{"type":"object","additionalProperties":false,"properties":{"scope":{"$ref":"#/$defs/Scope"},"id":{"type":"string","format":"uuid"},"expected_version":{"type":"integer","minimum":1,"maximum":9223372036854775807},"inputs":{"type":"array","items":{"$ref":"#/$defs/ArtifactRef"},"maxItems":4096},"outcome":{"type":"string","maxLength":8192}},"required":["scope","id","expected_version","inputs"]}`
+
+const schemaInTaskStart = `{"type":"object","additionalProperties":false,"properties":{"scope":{"$ref":"#/$defs/Scope"},"id":{"type":"string","format":"uuid"},"expected_version":{"type":"integer","minimum":1,"maximum":9223372036854775807}},"required":["scope","id","expected_version"]}`
+
+const schemaOutTaskStart = `{"type":"object","additionalProperties":false,"properties":{"task":{"$ref":"#/$defs/Task"},"run":{"$ref":"#/$defs/Run"}},"required":["task","run"]}`
+
+const schemaInEvidenceRecord = `{"type":"object","additionalProperties":false,"properties":{"task_id":{"type":"string","format":"uuid"},"attempt_id":{"type":"string","format":"uuid"},"expected_version":{"type":"integer","minimum":1,"maximum":9223372036854775807},"acceptance_digest":{"type":"string","pattern":"^[0-9a-f]{64}$"},"verification_artifact":{"$ref":"#/$defs/ArtifactRef"},"output_bindings":{"type":"array","items":{"type":"object","additionalProperties":false,"properties":{"name":{"type":"string","maxLength":8192},"artifact":{"$ref":"#/$defs/ArtifactRef"}},"required":["name","artifact"]},"maxItems":4096},"verdict":{"type":"string","enum":["passed","failed"]}},"required":["task_id","attempt_id","expected_version","acceptance_digest","verification_artifact","output_bindings","verdict"]}`
+
+const schemaInDependenciesWake = `{"type":"object","additionalProperties":false,"properties":{"completed_task_id":{"type":"string","format":"uuid"},"limit":{"type":"integer","minimum":1,"maximum":100},"cursor":{"type":"string","maxLength":8192}},"required":["completed_task_id","limit"]}`
+
+const schemaOutDependenciesWake = `{"type":"object","additionalProperties":false,"properties":{"dependents":{"type":"array","items":{"$ref":"#/$defs/Task"},"maxItems":100},"next_cursor":{"type":"string","maxLength":8192}},"required":["dependents"]}`
 
 // withDefs composes an operation schema body with the embedded $defs
 // document. Both bodies are exact JSON objects; the splice inserts the
