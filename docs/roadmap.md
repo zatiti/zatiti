@@ -1685,6 +1685,22 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   THIS COMPLETES WAVE 3 -- all 15 cards (P03, P05, P06, P07, P08, P09,
   P10, P11, P12, P13, P26, P29, P30, P34, P37) now landed, pending only
   P12's own commit (cleared, in flight).
+- 2026-09-20 14:42 PT -- WAVE 3 COMPLETE. P12 LANDED (PR #20, ddb27a6) --
+  callback-route persistence/validation, operation.reconcile rewritten
+  from a stalled unconsumed job into a real bounded reconciliation read,
+  fair pending-scan fix (105 blocked ops no longer starve a ready one).
+  All 15 of wave 3's cards are now on main. Re-ran
+  TestRealRegistryAssemblesLandedModules: confirmed the sole remaining
+  assembly blocker is `_skills.activate` (internal/skills, owned by P19,
+  wave 8, not dispatchable yet -- depends on P18, itself deep in
+  undispatched M1 core work). This matches the honest prediction from
+  the 2026-09-20 13:00ish entry exactly -- no surprises. cmd/zatiti,
+  internal/application, tests/integration, tests/qualification stay on
+  expected-red.txt until that chain clears; every OTHER package that was
+  ever on the list is now off it.
+  Opening wave 4 next (P04, P14, P27, P35, P38, P41 per the wave table)
+  -- verifying actual dependencies before dispatching each rather than
+  assuming wave completion implies readiness.
 
 ## Planned
 
