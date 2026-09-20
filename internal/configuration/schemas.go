@@ -44,6 +44,14 @@ const (
 	schemaBootstrapIn  = `{"type":"object","additionalProperties":false,"properties":{"installation_id":{"type":"string","format":"uuid"},"owner_id":{"type":"string","format":"uuid"},"organization_id":{"type":"string","format":"uuid"},"chief_id":{"type":"string","format":"uuid"}},"required":["installation_id","owner_id","organization_id","chief_id"]}`
 	schemaBootstrapOut = `{"type":"object","additionalProperties":false,"properties":{"organization":{"$ref":"#/$defs/Organization"},"chief":{"$ref":"#/$defs/Worker"}},"required":["organization","chief"]}`
 
+	// schemaExportPrepareIn/schemaExportRecordIn are _configuration.export.prepare
+	// and _configuration.export.record's frozen revision-3 inputs: the
+	// two-phase durable job ledger seam (persist the plan before any bytes
+	// stage, then publish job/artifact metadata once they are staged outside
+	// the transaction) that replaces the prior handler-local ID minting.
+	schemaExportPrepareIn = `{"type":"object","additionalProperties":false,"properties":{"scope":{"$ref":"#/$defs/Scope"},"family":{"type":"string","maxLength":8192},"resource_id":{"type":"string","format":"uuid"}},"required":["scope","family","resource_id"]}`
+	schemaExportRecordIn  = `{"type":"object","additionalProperties":false,"properties":{"job_id":{"type":"string","format":"uuid"},"expected_version":{"type":"integer","minimum":1,"maximum":9223372036854775807},"generation":{"type":"integer","minimum":1,"maximum":9223372036854775807},"artifact":{"$ref":"#/$defs/ArtifactRef"}},"required":["job_id","expected_version","generation","artifact"]}`
+
 	schemaApplyIn       = `{"type":"object","additionalProperties":false,"properties":{"scope":{"$ref":"#/$defs/Scope"},"plan_id":{"type":"string","format":"uuid"},"base_revision":{"type":"integer","minimum":1,"maximum":9223372036854775807},"candidate_digest":{"type":"string","pattern":"^[0-9a-f]{64}$"}},"required":["scope","plan_id","base_revision","candidate_digest"]}`
 	schemaDraftCreateIn = `{"type":"object","additionalProperties":false,"properties":{"scope":{"$ref":"#/$defs/Scope"},"base_revision":{"type":"integer","minimum":1,"maximum":9223372036854775807}},"required":["scope","base_revision"]}`
 	schemaDiscardIn     = `{"type":"object","additionalProperties":false,"properties":{"scope":{"$ref":"#/$defs/Scope"},"id":{"type":"string","format":"uuid"},"expected_version":{"type":"integer","minimum":1,"maximum":9223372036854775807}},"required":["scope","id","expected_version"]}`
@@ -86,12 +94,14 @@ type opSchemas struct {
 // assignment embeds it. Internal operations precede public ones.
 var operationSchemaBodies = map[string]opSchemas{
 	// Internal operations.
-	"_accounting.validate":     {schemaCandidateIn, schemaValidateOut},
-	"_configuration.activate":  {schemaCandidateIn, schemaActivateOut},
-	"_configuration.bootstrap": {schemaBootstrapIn, schemaBootstrapOut},
-	"_configuration.snapshot":  {schemaSnapshotIn, schemaSnapshotOut},
-	"_configuration.stage":     {schemaStageIn, schemaGetOut("Draft")},
-	"_configuration.validate":  {schemaCandidateIn, schemaValidateOut},
+	"_accounting.validate":          {schemaCandidateIn, schemaValidateOut},
+	"_configuration.activate":       {schemaCandidateIn, schemaActivateOut},
+	"_configuration.bootstrap":      {schemaBootstrapIn, schemaBootstrapOut},
+	"_configuration.export.prepare": {schemaExportPrepareIn, schemaGetOut("Job")},
+	"_configuration.export.record":  {schemaExportRecordIn, schemaGetOut("Job")},
+	"_configuration.snapshot":       {schemaSnapshotIn, schemaSnapshotOut},
+	"_configuration.stage":          {schemaStageIn, schemaGetOut("Draft")},
+	"_configuration.validate":       {schemaCandidateIn, schemaValidateOut},
 
 	"binding.archive": {schemaArchiveIn, schemaCreateOut("Binding")},
 	"binding.create":  {schemaCreateIn(schemaBindingDef), schemaCreateOut("Binding")},

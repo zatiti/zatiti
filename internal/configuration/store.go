@@ -111,6 +111,23 @@ type profileRow struct {
 	UpdatedAt           time.Time
 }
 
+// exportJobRow is one configuration_export_jobs row: the durable local
+// record of an export job this owner asked execution's job ledger to
+// create, finalized by _configuration.export.record once its canonical
+// bytes are staged and published outside any transaction.
+type exportJobRow struct {
+	JobID          contract.ID
+	Version        int64
+	InstallationID contract.ID
+	Family         string
+	ResourceID     contract.ID
+	State          string
+	ArtifactID     contract.ID
+	ArtifactDigest string
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+}
+
 type draftRow struct {
 	ID             contract.ID
 	Version        int64
@@ -292,6 +309,30 @@ func scanWorker(row rowScanner) (*workerRow, error) {
 	r.ProfileJSON = normJSON(profile.String)
 	r.LimitsJSON = normJSON(limits.String)
 	r.ExtensionsJSON = normJSON(ext.String)
+	if r.CreatedAt, err = time.Parse(timeLayout, created); err != nil {
+		return nil, err
+	}
+	if r.UpdatedAt, err = time.Parse(timeLayout, updated); err != nil {
+		return nil, err
+	}
+	return &r, nil
+}
+
+// scanExportJob decodes one configuration_export_jobs row.
+func scanExportJob(row rowScanner) (*exportJobRow, error) {
+	var r exportJobRow
+	var artifactID, artifactDigest sql.NullString
+	var created, updated string
+	err := row.Scan(&r.JobID, &r.Version, &r.InstallationID, &r.Family, &r.ResourceID,
+		&r.State, &artifactID, &artifactDigest, &created, &updated)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	r.ArtifactID = contract.ID(artifactID.String)
+	r.ArtifactDigest = artifactDigest.String
 	if r.CreatedAt, err = time.Parse(timeLayout, created); err != nil {
 		return nil, err
 	}

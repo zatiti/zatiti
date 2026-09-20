@@ -246,6 +246,24 @@ type wireArtifactRef struct {
 	Digest contract.Digest `json:"digest"`
 }
 
+// wireArtifact mirrors $defs/Artifact -- the eventual completion_schema
+// resource of an export job, published once its canonical bytes are staged
+// outside the query transaction (RunJob, in jobs.go).
+type wireArtifact struct {
+	ID                contract.ID     `json:"id"`
+	Version           int64           `json:"version"`
+	Scope             wireScope       `json:"scope"`
+	Digest            contract.Digest `json:"digest"`
+	Size              int64           `json:"size"`
+	MediaType         string          `json:"media_type"`
+	Classification    string          `json:"classification"`
+	Encrypted         bool            `json:"encrypted"`
+	State             string          `json:"state"`
+	CreatedAt         time.Time       `json:"created_at"`
+	SourceOperationID contract.ID     `json:"source_operation_id,omitempty"`
+	Purpose           string          `json:"purpose,omitempty"`
+}
+
 // wireDisposition mirrors $defs/Disposition (draft.discard output).
 type wireDisposition struct {
 	ID      contract.ID `json:"id"`

@@ -37,6 +37,15 @@ var opMetas = []opMeta{
 		callers: []string{"configuration", "application"}},
 	{id: "_configuration.bootstrap", visibility: "internal", mode: "mutation", submission: false,
 		callers: []string{"installation"}},
+	// Revision 3: the export/import durable job ledger seam (P00-008). Prepare
+	// persists the export plan through _execution.job.create before any bytes
+	// stage; record publishes the job/artifact once bytes are staged outside
+	// the transaction. Neither call is self-callable by configuration -- both
+	// are invoked by the controller/application orchestrating the job.
+	{id: "_configuration.export.prepare", visibility: "internal", mode: "mutation", submission: false,
+		callers: []string{"controller", "application"}},
+	{id: "_configuration.export.record", visibility: "internal", mode: "mutation", submission: false, expectedVersion: true,
+		callers: []string{"controller"}},
 	{id: "_configuration.snapshot", visibility: "internal", mode: "query", submission: false,
 		callers: internalCallersSnapshot},
 	{id: "_configuration.stage", visibility: "internal", mode: "mutation", submission: false,
@@ -122,8 +131,12 @@ type Service struct {
 	descriptors []contract.Descriptor
 }
 
-// Compile-time proof that *Service implements the shared Module contract.
+// Compile-time proof that *Service implements the shared Module contract
+// and, for the revision-3 export job ledger (jobs.go), LocalJobRunner: the
+// bounded IO organization.export/team.export/project.export and
+// _configuration.export.prepare defer past their owning transaction.
 var _ contract.Module = (*Service)(nil)
+var _ contract.LocalJobRunner = (*Service)(nil)
 
 // New constructs the configuration owner. It never queries peers, touches
 // storage or starts goroutines; all runtime coupling arrives through deps.
@@ -181,6 +194,9 @@ func buildDescriptors(catalog map[string]contract.Descriptor) []contract.Descrip
 			ExpectedVersion:  m.expectedVersion,
 			SubmissionKey:    m.submission,
 		}
+		if scopeRequirementExempt[m.id] {
+			d.ScopeRequired = nil
+		}
 		if m.cli != "" {
 			d.CLI = strings.Split(m.cli, " ")
 		}
@@ -209,16 +225,28 @@ func scopeRequirement(input json.RawMessage) []string {
 	return nil
 }
 
+// scopeRequirementExempt names operations whose frozen catalog entry carries
+// no scope_required despite an input schema that requires "scope": the
+// export job ledger's scope names the RESOURCE'S home installation for the
+// job the caller (controller/application) is preparing, not the enforced
+// envelope of the calling principal, so it is not counted the way an
+// ordinary public operation's scope is.
+var scopeRequirementExempt = map[string]bool{
+	"_configuration.export.prepare": true,
+}
+
 // handlerFunc executes one operation inside the caller's unit.
 type handlerFunc func(ctx context.Context, s *Service, unit contract.Unit, inv contract.Invocation) (contract.Payload, error)
 
 // handlers is the strict dispatch table; every registered operation has one.
 var handlers = map[string]handlerFunc{
-	"_configuration.activate":  handleActivate,
-	"_configuration.bootstrap": handleBootstrap,
-	"_configuration.snapshot":  handleSnapshot,
-	"_configuration.stage":     handleStage,
-	"_configuration.validate":  handleValidate,
+	"_configuration.activate":       handleActivate,
+	"_configuration.bootstrap":      handleBootstrap,
+	"_configuration.export.prepare": handleExportPrepare,
+	"_configuration.export.record":  handleExportRecord,
+	"_configuration.snapshot":       handleSnapshot,
+	"_configuration.stage":          handleStage,
+	"_configuration.validate":       handleValidate,
 
 	"binding.archive": handleArchive("binding"),
 	"binding.create":  handleCreateResource("binding"),
@@ -307,6 +335,17 @@ func (s *Service) completed(data any) (contract.Payload, error) {
 		return contract.Payload{}, err
 	}
 	return contract.Payload{Status: contract.StatusCompleted, Data: raw}, nil
+}
+
+// accepted builds an accepted payload carrying data: the durable job now
+// exists but its eventual result (job.get's Job.result, matching the
+// operation's declared completion_schema) is not yet established.
+func (s *Service) accepted(data any) (contract.Payload, error) {
+	raw, err := marshalData(data)
+	if err != nil {
+		return contract.Payload{}, err
+	}
+	return contract.Payload{Status: contract.StatusAccepted, Data: raw}, nil
 }
 
 // decodeInto validates raw against the operation input schema, then strict-

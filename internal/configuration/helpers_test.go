@@ -51,12 +51,14 @@ func (s *seqIDs) New() contract.ID {
 type fakePorts struct {
 	mu sync.Mutex
 
-	calls     []contract.Invocation
-	decision  string                    // _policy.check decision (default allow)
-	reasons   []string                  // policy reasons
-	decReqs   []wireDecisionRequirement // decision requirements on review
-	approveOK bool                      // _reviews.check approval outcome for any ensured review
-	fail      map[string]*contract.Fault
+	ids          contract.IDSource     // mints _execution.job.create's Job.id, like the real owner would
+	connVersions map[contract.ID]int64 // _connections.validate's reported version for a connection-kind change's id
+	calls        []contract.Invocation
+	decision     string                    // _policy.check decision (default allow)
+	reasons      []string                  // policy reasons
+	decReqs      []wireDecisionRequirement // decision requirements on review
+	approveOK    bool                      // _reviews.check approval outcome for any ensured review
+	fail         map[string]*contract.Fault
 
 	// ensured holds the pending reviews _reviews.ensure created, keyed by
 	// action digest, the way the real reviews owner does; decided records
@@ -66,8 +68,9 @@ type fakePorts struct {
 	decided map[string]string
 }
 
-func newFakePorts() *fakePorts {
+func newFakePorts(ids contract.IDSource) *fakePorts {
 	return &fakePorts{
+		ids:      ids,
 		decision: "allow", approveOK: true, fail: map[string]*contract.Fault{},
 		ensured: map[string]reviewsEnsureInput{}, decided: map[string]string{},
 	}
@@ -122,10 +125,31 @@ func (p *fakePorts) Call(ctx context.Context, unit contract.Unit, inv contract.I
 	var body any
 	switch {
 	case strings.HasSuffix(inv.Operation, ".validate"):
+		deps := []wireRef{}
+		if inv.Operation == "_connections.validate" {
+			// The real connections owner pins the current version of every
+			// connection referenced by the candidate slice it validates; this
+			// simulates that so the generic requireDependencyPins staleness
+			// mechanism (compiler.go) can be exercised against a connection
+			// specifically, as TestStaleConnectionVersionBlocksApply does.
+			var in candidateEnvelope
+			_ = contract.DecodeStrict(inv.Input, &in)
+			p.mu.Lock()
+			versions := p.connVersions
+			p.mu.Unlock()
+			for _, c := range in.Candidate.Changes {
+				if c.Kind != kindConnection {
+					continue
+				}
+				if v, ok := versions[c.ID]; ok {
+					deps = append(deps, wireRef{ID: c.ID, Version: v})
+				}
+			}
+		}
 		body = validateOutputBody{Resource: wireValidation{
 			Diagnostics:  []wireDiagnostic{},
 			Requirements: []wireRequirement{},
-			Dependencies: []wireRef{},
+			Dependencies: deps,
 		}}
 	case strings.HasSuffix(inv.Operation, ".activate"):
 		body = versionsOutput{Versions: []wireRef{}}
@@ -176,6 +200,28 @@ func (p *fakePorts) Call(ctx context.Context, unit contract.Unit, inv contract.I
 		}
 		p.mu.Unlock()
 		body = map[string]any{"resource": map[string]any{"action_digest": digest, "state": "pending"}}
+	case inv.Operation == "_execution.job.create":
+		// The real execution owner validates owner/operation against its
+		// catalog, mints the job identity itself and deduplicates by
+		// source_id -- this simulates that owner-backed lookup so a test can
+		// tell this package never invents that identity locally the way the
+		// pre-revision-3 handler did.
+		var in executionJobCreateIn
+		if err := contract.DecodeStrict(inv.Input, &in); err != nil {
+			return contract.Payload{}, &contract.Fault{Code: contract.CodeInvalidInput, Message: "_execution.job.create: " + err.Error()}
+		}
+		if in.Owner == "" || in.Operation == "" || in.SourceID == "" {
+			return contract.Payload{}, &contract.Fault{Code: contract.CodeInvalidInput,
+				Message: "_execution.job.create: owner, operation and source_id are required"}
+		}
+		if unit.ReadOnly() {
+			return contract.Payload{}, &contract.Fault{Code: contract.CodePermissionDenied,
+				Message: "_execution.job.create cannot run under a read snapshot"}
+		}
+		body = map[string]any{"resource": wireJob{
+			ID: p.ids.New(), Version: 1, Kind: "local", State: "pending",
+			Requirements: []wireRequirement{}, Owner: in.Owner, Operation: in.Operation,
+		}}
 	case inv.Operation == "_reviews.check":
 		var in reviewsCheckInput
 		_ = json.Unmarshal(inv.Input, &in)
@@ -285,6 +331,7 @@ type testEnv struct {
 	t       *testing.T
 	ctx     context.Context
 	db      contract.Database
+	dbPath  string // the on-disk sqlite file backing db, for restart tests
 	svc     *Service
 	ports   *fakePorts
 	blobs   *fakeBlobs
@@ -303,16 +350,18 @@ type testEnv struct {
 func newEnv(t *testing.T) *testEnv {
 	t.Helper()
 	ctx := context.Background()
-	db, err := storage.Open(ctx, storage.Config{Path: filepath.Join(t.TempDir(), "configuration-test.db")})
+	dbPath := filepath.Join(t.TempDir(), "configuration-test.db")
+	db, err := storage.Open(ctx, storage.Config{Path: dbPath})
 	if err != nil {
 		t.Fatalf("storage.Open: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
+	ids := &seqIDs{}
 	env := &testEnv{
-		t: t, ctx: ctx, db: db,
-		ports: newFakePorts(), blobs: newFakeBlobs(),
+		t: t, ctx: ctx, db: db, dbPath: dbPath,
+		ports: newFakePorts(ids), blobs: newFakeBlobs(),
 		clock: &fakeClock{now: time.Date(2026, 9, 10, 12, 0, 0, 0, time.UTC)},
-		ids:   &seqIDs{},
+		ids:   ids,
 	}
 	svc, err := New(contract.Dependencies{Clock: env.clock, IDs: env.ids, Ports: env.ports, Blobs: env.blobs})
 	if err != nil {
@@ -321,6 +370,14 @@ func newEnv(t *testing.T) *testEnv {
 	env.svc = svc
 	if err := db.Migrate(ctx, svc.Migrations()); err != nil {
 		t.Fatalf("migrate configuration: %v", err)
+	}
+	// Entrypoint assembly starts the persisted controller generation exactly
+	// once before admission (contracts.md "Assembly order"); the frozen
+	// _configuration.export.record schema requires generation >= 1, so this
+	// harness mirrors that real startup step instead of leaving it at the
+	// pre-StartGeneration zero value.
+	if _, err := db.StartGeneration(ctx); err != nil {
+		t.Fatalf("start generation: %v", err)
 	}
 	env.install = env.ids.New()
 	env.owner = env.ids.New()
@@ -406,6 +463,35 @@ func (e *testEnv) mustOK(op string, in any) contract.Payload {
 		e.t.Fatalf("%s returned fault %s: %s", op, payload.Error.Code, payload.Error.Message)
 	}
 	return payload
+}
+
+// mustAccepted runs an operation and requires an accepted payload: the
+// durable job ledger pattern (export) where the eventual result is not yet
+// established.
+func (e *testEnv) mustAccepted(op string, in any) contract.Payload {
+	e.t.Helper()
+	payload, err := e.call(op, in)
+	if err != nil {
+		e.t.Fatalf("%s failed: %v", op, err)
+	}
+	if payload.Status != contract.StatusAccepted {
+		e.t.Fatalf("%s status %q, want accepted (error %v)", op, payload.Status, payload.Error)
+	}
+	if payload.Error != nil {
+		e.t.Fatalf("%s returned fault %s: %s", op, payload.Error.Code, payload.Error.Message)
+	}
+	return payload
+}
+
+// exportJob runs kind+".export" and returns its pending job.
+func (e *testEnv) exportJob(kind string, id contract.ID) wireJob {
+	e.t.Helper()
+	payload := e.mustAccepted(kind+".export", getInput{Scope: e.scope, ID: id})
+	var out struct {
+		Job wireJob `json:"job"`
+	}
+	e.decode(payload.Data, &out)
+	return out.Job
 }
 
 // expectFault runs an operation and requires a fault with the exact code.
@@ -652,6 +738,66 @@ func (e *testEnv) head() int64 {
 		e.t.Fatalf("read head: %v", err)
 	}
 	return head
+}
+
+// generation reads the current storage-controller generation inside one
+// write transaction, the same fence _configuration.export.record checks.
+func (e *testEnv) generation() int64 {
+	e.t.Helper()
+	var gen int64
+	if err := e.db.Write(e.ctx, e.actor, e.scope.toContract(), func(unit contract.Unit) error {
+		gen = unit.Generation()
+		return nil
+	}); err != nil {
+		e.t.Fatalf("read generation: %v", err)
+	}
+	return gen
+}
+
+// runExportJob drives an export job to completion the way the controller
+// would: it finds the durable job _execution.job.create minted for the
+// given pending job (fakePorts recorded the call), runs Service.RunJob
+// outside any transaction to stage and publish the canonical bundle bytes,
+// then finalizes this owner's local record through
+// _configuration.export.record. It fails the test if any step does not
+// behave as the revision-3 job-ledger pipeline requires.
+func (e *testEnv) runExportJob(job wireJob) wireArtifactRef {
+	e.t.Helper()
+	if job.State != "pending" || job.ResultArtifact != nil {
+		e.t.Fatalf("export must register a durable pending job, not an invented completed one: %+v", job)
+	}
+	calls := e.ports.callsOf("_execution.job.create")
+	if len(calls) == 0 {
+		e.t.Fatalf("export did not register a job through _execution.job.create")
+	}
+	var created executionJobCreateIn
+	e.decode(calls[len(calls)-1].Input, &created)
+	outcome, err := e.svc.RunJob(e.ctx, contract.JobWork{
+		ID: job.ID, Version: 1, Owner: job.Owner, Operation: job.Operation,
+		Scope: created.Scope.toContract(), Input: created.Input,
+	})
+	if err != nil {
+		e.t.Fatalf("RunJob: %v", err)
+	}
+	if outcome.State != "succeeded" {
+		e.t.Fatalf("RunJob did not succeed: %+v", outcome)
+	}
+	var result struct {
+		Resource wireArtifact `json:"resource"`
+	}
+	e.decode(outcome.Result, &result)
+	payload := e.mustOK("_configuration.export.record", exportRecordIn{
+		JobID: job.ID, ExpectedVersion: 1, Generation: e.generation(),
+		Artifact: wireArtifactRef{ID: result.Resource.ID, Digest: result.Resource.Digest},
+	})
+	var recorded struct {
+		Resource wireJob `json:"resource"`
+	}
+	e.decode(payload.Data, &recorded)
+	if recorded.Resource.State != "succeeded" || recorded.Resource.ResultArtifact == nil {
+		e.t.Fatalf("_configuration.export.record did not finalize the job: %+v", recorded.Resource)
+	}
+	return *recorded.Resource.ResultArtifact
 }
 
 // createChange builds one create wireChange around a typed definition.

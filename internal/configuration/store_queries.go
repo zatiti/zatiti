@@ -99,6 +99,33 @@ func fetchProfileByID(ctx context.Context, unit contract.Unit, install, id contr
 			"FROM configuration_execution_profiles WHERE installation_id = ? AND id = ?", install, id))
 }
 
+// fetchExportJobByID loads one durable local export-job record.
+func fetchExportJobByID(ctx context.Context, unit contract.Unit, install, jobID contract.ID) (*exportJobRow, error) {
+	return scanExportJob(unit.QueryRowContext(ctx,
+		"SELECT job_id, version, installation_id, family, resource_id, state, artifact_id, artifact_digest, created_at, updated_at "+
+			"FROM configuration_export_jobs WHERE installation_id = ? AND job_id = ?", install, jobID))
+}
+
+// insertExportJob records a newly created export job at version 1, pending.
+func insertExportJob(ctx context.Context, unit contract.Unit, r *exportJobRow) error {
+	_, err := unit.ExecContext(ctx,
+		"INSERT INTO configuration_export_jobs (job_id, version, installation_id, family, resource_id, state, artifact_id, artifact_digest, created_at, updated_at) "+
+			"VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+		r.JobID, r.Version, r.InstallationID, r.Family, r.ResourceID, r.State,
+		textOrNull(string(r.ArtifactID)), textOrNull(r.ArtifactDigest),
+		r.CreatedAt.Format(timeLayout), r.UpdatedAt.Format(timeLayout))
+	return err
+}
+
+// writeExportJob rewrites an export-job row after a version advance.
+func writeExportJob(ctx context.Context, unit contract.Unit, r *exportJobRow) error {
+	_, err := unit.ExecContext(ctx,
+		"UPDATE configuration_export_jobs SET version = ?, state = ?, artifact_id = ?, artifact_digest = ?, updated_at = ? WHERE job_id = ? AND installation_id = ?",
+		r.Version, r.State, textOrNull(string(r.ArtifactID)), textOrNull(r.ArtifactDigest),
+		r.UpdatedAt.Format(timeLayout), r.JobID, r.InstallationID)
+	return err
+}
+
 // ---------- effective writes ----------
 
 // insertOrg inserts a new organization at version 1.
