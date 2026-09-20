@@ -160,6 +160,36 @@ report go unaddressed for more than one tick; either it has genuinely
 stopped (resume it explicitly, one at a time) or it's about to spawn a
 wasteful poll loop (tell it to stop and wait for you by name instead).
 
+## [implementation-remediation] expected-red.txt removal must happen AFTER the merge lands on main, never before, 2026-09-20
+
+**The allowlist and the pre-commit hook that reads it are both
+main-checkout-relative, not branch-relative.** While landing P14, removed
+`internal/execution` from `docs/implementation-remediation/expected-red.txt`
+in a standalone commit (3fbdd37) directly on `main` while P14's own fix was
+still sitting unmerged on its PR branch. Main's actual `internal/execution`
+package still failed its tests at that moment (the revision-3 descriptors
+genuinely weren't implemented there yet) -- removing the allowlist entry
+early meant the hook's full-module `go test ./...` now saw that failure as
+unattributable, and the very next commit on main (an unrelated
+`internal/tasks` gofmt fix) was blocked by it.
+
+Caught within one commit cycle because the blocked commit's hook output was
+read in full rather than assumed-passed from a background task's exit
+code. Fixed by restoring the entry (b56d82d) and only removing it again
+(440cc2c) after PR #25 actually merged and `go test ./internal/execution`
+was independently re-run against the real post-merge `main` to confirm
+green.
+
+**The rule going forward:** an allowlist removal commit is the LAST step
+of landing a card, made against `main` only after that card's own PR has
+actually merged there -- never staged ahead of the merge, even when the
+merge is expected imminently and even when the removal commit and the
+card's own PR are for the same package. If a package's fix and its
+allowlist removal must be two separate commits (the fix is confined to its
+own write-root; the allowlist file is outside every card's write-root),
+land the fix first, confirm it green on the real post-merge main, then
+remove the line.
+
 ## [implementation-remediation] "Report ready, wait for clearance" instructions get read as "poll in a background loop," 2026-09-20
 
 Recurring, not a one-off: across wave-3's last 5 cards and wave 4's first

@@ -1829,6 +1829,54 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   claim from a monitor/background task).
   WAVE 4'S OTHER 5 CARDS (P04, P27, P35, P38, P41) ARE ALL LANDED. Only
   P14 (critical path) remains to close wave 4 entirely -- still working.
+- 2026-09-20 15:41-16:19 PT -- P14 LANDED (PR #25, 5c412ca), after the
+  most thorough review of the session given this card's centrality: the
+  execution-owned WorkerTurn/ProposalRecord/ContextPlan pipeline
+  (`_execution.turn.admit` -> `.work.pending`/`.claim` ->
+  `.context.prepare`/`.commit` -> `.proposal.prepare`/`.record` ->
+  `.report` -> `.verification.pending`/`.claim`) -- the actual start of
+  the durable worker loop the original 2026-09-19 audit found completely
+  missing. Independently verified, not just the implementing agent's
+  report: all 20 `_execution.*` operation input/output schemas (10 new +
+  10 pre-existing, including a `_execution.job.create` fix) diffed
+  byte-for-byte against docs/implementation/operations.json -- exact
+  match; the `wireDefs` constant diffed byte-for-byte against
+  internal/execution/AGENTS.md's embedded $defs -- all 62 definitions
+  match; read turn_ops.go and turn_ops_test.go in full and confirmed the
+  three required behavioral tests are real, non-vacuous state-transition
+  assertions, not fake-implementation tests; traced a scope-check
+  refactor in the shared reportAttempt helper and confirmed it is not a
+  security regression (narrowAttemptScope already independently enforces
+  the same check earlier in both call paths); ran go build/vet/test
+  myself rather than trusting the report (121 tests, zero skips, zero
+  failures); ran the full go test ./... suite on both main and the P14
+  branch and diffed the failing-package sets directly -- P14's branch
+  fails exactly main's existing 9 packages minus internal/execution
+  itself, zero new failures anywhere in the module.
+  PROCESS MISTAKE, caught and fixed same-session: removed
+  internal/execution from expected-red.txt in a standalone commit
+  (3fbdd37) BEFORE PR #25 had actually merged to main -- main's own
+  internal/execution still lacked P14's implementation at that point, so
+  this blocked every subsequent commit on main (the pre-commit hook is
+  main-checkout-relative, not branch-relative). Caught within one commit
+  cycle when the next unrelated commit (an internal/tasks gofmt fix)
+  failed the hook; fixed by restoring the entry (b56d82d) until the PR
+  actually merged, THEN removing it for real (440cc2c) with a passing
+  `go test ./internal/execution` confirmed on main first. See
+  docs/lore.md for the standing rule this produced.
+  ALSO FOUND while doing this: internal/effects (P12, landed earlier
+  this session) was also fully green but had never removed itself from
+  expected-red.txt -- the same recurring oversight pattern as P03/P05/
+  internal/memory earlier in the session. Removed in the same 440cc2c
+  commit after independently confirming `go test ./internal/effects`
+  passes.
+  ALSO FIXED while landing: a stray gofmt drift in
+  internal/tasks/evidence_test.go left over from P11's landing (e418f6e)
+  was failing CI's whole-repo static-checks gate for every subsequent
+  PR regardless of what it touched (b56d82d).
+  WAVE 4 IS NOW COMPLETE -- all 6 cards (P04, P14, P27, P35, P38, P41)
+  landed. Next: verify wave 5's actual dependencies (P15, P17, P39, P40)
+  via plan.json before dispatching.
 
 ## Planned
 
