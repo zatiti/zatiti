@@ -73,9 +73,13 @@ func writeHuman(w io.Writer, result contract.Result) {
 
 // humanStatus derives one honest status label from the same result the
 // JSON envelope carries. "accepted" is durable but not finished; an
-// outcome_unknown fault is neither a success nor a proven failure; a
-// review_required fault means a human decision is pending, not that the
-// request itself was rejected.
+// outcome_unknown or controller_unavailable fault means no authoritative
+// disposition was established (never a proven failure); a blocked fault
+// (prerequisite_missing, external_action_required, budget_unavailable,
+// capability_unsupported) means the request is refused only until a named
+// external condition is resolved, distinct from both an ordinary failure
+// and a genuinely unknown outcome; a review_required fault means a human
+// decision is pending, not that the request itself was rejected.
 func humanStatus(result contract.Result) string {
 	switch result.Status {
 	case contract.StatusAccepted:
@@ -87,8 +91,12 @@ func humanStatus(result contract.Result) string {
 		switch result.Error.Code {
 		case contract.CodeOutcomeUnknown:
 			return "failed: outcome unknown (neither success nor failure is established; do not retry with a new key)"
+		case contract.CodeControllerUnavailable:
+			return "failed: controller unavailable (no disposition was established; safe to retry once it recovers)"
 		case contract.CodeReviewRequired:
 			return "failed: manual review required"
+		case contract.CodePrerequisiteMissing, contract.CodeExternalActionRequired, contract.CodeBudgetUnavailable, contract.CodeCapabilityUnsupported:
+			return "failed: blocked (" + result.Error.Code + "; resolve the named condition, then resubmit)"
 		default:
 			return "failed"
 		}
