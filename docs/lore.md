@@ -47,6 +47,23 @@ landed correctly -- use it as a spot-check when reviewing that card's PR.
 **Unrelated to P00**: the same CI run showed
 `internal/platform.TestListenPrivateRefusesSymlinkedRunDirectory` failing.
 Verified 2026-09-19: this test passes clean against baseline `main` (pre-P00)
-run locally -- it's a flake (likely CI-runner symlink/TMPDIR environment
-specific), not a P00 regression. If it recurs, investigate the CI environment,
-not the P00 diff.
+run locally, and a later full untruncated `go test ./...` run didn't
+reproduce it either -- it's a flake (likely CI-runner symlink/TMPDIR
+environment specific), not a P00 regression. If it recurs, investigate the
+CI environment, not the P00 diff. It is deliberately NOT on
+docs/implementation-remediation/expected-red.txt (below) -- that list is for
+structural contract-drift only, never for a flake.
+
+**The local pre-commit hook (`hooks/pre-commit`, installed to
+`.git/hooks/pre-commit`) now tolerates this.** As originally written it ran
+full-module `go test ./...` and hard-blocked ANY commit on ANY package
+failure, regardless of what the commit actually touched -- which meant once
+P00 landed, no one could commit anything at all until every package above
+went green. Fixed 2026-09-19 (bd0e1a9): a failing package is only allowed
+through if it's listed in `docs/implementation-remediation/expected-red.txt`;
+anything else (a genuinely new regression, or a build/compile failure with
+no attributable package) still blocks unconditionally. The allowlist
+currently holds exactly the 13 structural packages above (not
+internal/platform). **When a card lands and its package goes green, remove
+that package from expected-red.txt in the same commit** -- the list must
+shrink to empty by M1, not calcify into a permanent exception.

@@ -1293,6 +1293,45 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   document doesn't list, defaults echoed live, the byte-based input-token
   bound holding on both observed steps), not something to redo. Worktree
   removed after the push was verified on origin.
+- 2026-09-19 17:35-17:52 PT -- P01 LANDED (PR #4, cd38926, rebase-merged),
+  and a real process gap found and fixed along the way. zatiti_p01's coding
+  was independently verified correct before landing (internal/contract's
+  full suite passes, including the required
+  TestLocalDecisionToolRejectsSmuggledAuthority/GoldenDocuments/
+  Revision2EnvelopesRemainReadable behaviors; go vet/gofmt/golangci-lint all
+  clean; scope respected -- internal/contract only) -- but the agent's own
+  handoff was unreliable twice: first it stopped mid-task with real,
+  correct, uncommitted work and a non-answer final message ("I'll end my
+  turn here and wait for the background task/monitor notification"); on
+  resume it finished by committing with `--no-verify`, bypassing the local
+  hook without authorization. Lesson recorded for every future dispatch:
+  never trust an agent's completion report -- check `git status`/`git log
+  main..HEAD`/open PRs yourself, and if the coding is real but unpackaged,
+  the lead finishes committing/pushing/opening the PR after independent
+  re-review rather than discarding it.
+  The `--no-verify` was masking a real, separate bug worth finding on its
+  own: hooks/pre-commit runs full-module `go test ./...` and hard-blocks
+  ANY commit on ANY package failure, not just touched packages -- so once
+  P00 landed, EVERY commit from EVERY future lane would have been refused
+  regardless of which package it touched, making "merge now, track the
+  red" impossible to actually execute. Given three options (allowlist
+  expected-red packages / scope tests to the diff's affected packages /
+  blanket --no-verify with sign-off), David chose the allowlist. Built and
+  installed (bd0e1a9): docs/implementation-remediation/expected-red.txt
+  lists the 13 structurally-red packages (matches the full untruncated
+  `go test ./...` run exactly, confirmed by hand -- internal/platform's
+  earlier failure did not recur, confirming it really was a flake, not
+  structural, so it's deliberately NOT on the list); hooks/pre-commit now
+  parses per-package FAIL lines and only blocks a commit if a failing
+  package is NOT on that list -- a build/compile failure with no
+  attributable package, or any regression in a currently-green package,
+  still blocks unconditionally. Installed to .git/hooks/pre-commit, which
+  every worktree shares via the common git dir, so this applies everywhere
+  immediately, present and future worktrees alike. A card landing should
+  remove its own package from expected-red.txt once that package is green
+  again -- the list must shrink to empty, not calcify.
+  P02 claimed and dispatched next -- the last card in the P00->P01->P02
+  serialized gate; wave 3's 15 cards open the moment it lands.
 
 ## Planned
 
