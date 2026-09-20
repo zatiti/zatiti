@@ -1511,9 +1511,26 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   internal/configuration too (`_configuration.activate` showed the
   identical error pattern once `_identity.activate`'s was fixed) --
   P05's landing needs the same check-and-fix.
-  P07 first commit attempt correctly refused for hitting
-  internal/platform's known flake (docs/lore.md) -- not a real problem,
-  internal/policy itself was clean. Retrying.
+  P07 LANDED (PR #12, c594f9c) on retry -- same code, second attempt
+  passed clean past the flake.
+  P05 LANDED (PR #13, 16025f4) -- confirmed and fixed the predicted
+  schemaDefs staleness in internal/configuration (same technique as P03).
+  PROCESS BUG FOUND while landing P11: neither P03's nor P05's commit
+  actually removed its own line from expected-red.txt, despite both
+  packages being fully green and both commit messages saying they would
+  -- an oversight in how the lead assembled those two commits (fixed the
+  schemas, forgot the allowlist edit). Not a correctness problem (a
+  package that never fails just never triggers the allowlist check for
+  itself), but a real violation of the "remove the moment it lands" rule
+  -- caught and fixed while resolving P11's own rebase conflict on the
+  same file (dropped internal/identity, internal/configuration and
+  internal/tasks all in the same resolution, confirming zero failures in
+  the first two before removing them). Lesson for every remaining
+  landing: after `git reset --soft origin/main && git add -A`, explicitly
+  check whether the landing package's own line is still in
+  expected-red.txt and remove it as part of the same commit -- don't
+  assume the original card's diff already handled it.
+  P11 landing now.
 
 ## Planned
 
