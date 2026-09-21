@@ -33,6 +33,12 @@ var opMetas = []opMeta{
 		callers: []string{"configuration", "application"}},
 	{id: "_skills.validate", visibility: "internal", mode: "query", submission: false,
 		callers: []string{"configuration", "application"}},
+	// _skills.evaluation.record is the sole path that records published
+	// verifier evidence against the exact immutable skill version an
+	// evaluation names, routed through the durable execution job ledger
+	// rather than a handler-local completion (revision 3).
+	{id: "_skills.evaluation.record", visibility: "internal", mode: "mutation", submission: false,
+		expectedVersion: true, callers: []string{"execution", "controller"}},
 
 	// skill.*
 	{id: "skill.archive", visibility: "public", mode: "mutation", submission: true, expectedVersion: true, cli: "skill archive"},
@@ -58,11 +64,13 @@ type Service struct {
 	cursorKey []byte
 }
 
-// Compile-time proof that *Service implements the shared Module contract and
-// the LocalIO seam for skill.import.
+// Compile-time proof that *Service implements the shared Module contract,
+// the LocalIO seam for skill.import and the LocalJobRunner seam for the
+// skill.evaluate durable job (RunJob, jobs.go).
 var (
-	_ contract.Module  = (*Service)(nil)
-	_ contract.LocalIO = (*Service)(nil)
+	_ contract.Module         = (*Service)(nil)
+	_ contract.LocalIO        = (*Service)(nil)
+	_ contract.LocalJobRunner = (*Service)(nil)
 )
 
 // New constructs the skills owner. It never queries peers, touches storage
@@ -159,8 +167,9 @@ type handlerFunc func(ctx context.Context, s *Service, unit contract.Unit, inv c
 // registered local IO operation served through Prepare/Perform/Finish, and
 // Handle refuses it rather than silently running the mutation phases here.
 var handlers = map[string]handlerFunc{
-	"_skills.activate": handleActivate,
-	"_skills.validate": handleValidate,
+	"_skills.activate":          handleActivate,
+	"_skills.validate":          handleValidate,
+	"_skills.evaluation.record": handleEvaluationRecord,
 
 	"skill.archive":           handleArchive,
 	"skill.evaluate":          handleEvaluate,

@@ -206,6 +206,9 @@ func validateTransition(ctx context.Context, unit contract.Unit, installation co
 		if row.State != "draft" {
 			return conflictFault("skill %s version %d is %s; create requires a draft version", c.ID, def.Version, row.State)
 		}
+		if err := rejectFailedEvaluation(ctx, unit, installation, c.ID, int64(def.Version)); err != nil {
+			return err
+		}
 		return nil
 	case "update":
 		if c.ExpectedVersion != def.Version {
@@ -221,6 +224,9 @@ func validateTransition(ctx context.Context, unit contract.Unit, installation co
 		if !active {
 			return conflictFault("skill %s has no active version to supersede; use create", c.ID)
 		}
+		if err := rejectFailedEvaluation(ctx, unit, installation, c.ID, int64(def.Version)); err != nil {
+			return err
+		}
 		return nil
 	case "archive":
 		if c.ExpectedVersion != def.Version {
@@ -233,6 +239,26 @@ func validateTransition(ctx context.Context, unit contract.Unit, installation co
 	default:
 		return invalidInput("skill change action %q is not supported", c.Action)
 	}
+}
+
+// rejectFailedEvaluation blocks activation of the exact immutable
+// (skill_id, skill_version) named by a recorded failing evaluation. A
+// version that was never evaluated is not blocked -- evaluation is never
+// required to activate -- but a fixture that independently failed must
+// never be worked around by activating anyway; see R7.1-004 "failed/skipped
+// evaluation grants nothing" and Z19 dependent-qualification invalidation.
+// The check is scoped to the exact version, so a sibling version's failure
+// (including an older version of the same skill identity) never blocks
+// this one: immutable content-hashed versions never reuse qualification.
+func rejectFailedEvaluation(ctx context.Context, unit contract.Unit, installation contract.ID, id contract.ID, version int64) error {
+	failed, err := hasFailedEvaluation(ctx, unit, installation, id, version)
+	if err != nil {
+		return err
+	}
+	if failed {
+		return conflictFault("skill %s version %d has a failed evaluation and cannot activate", id, version)
+	}
+	return nil
 }
 
 // activate handles _skills.activate: applies the owned exact sealed

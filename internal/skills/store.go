@@ -360,6 +360,49 @@ func skillDependencies(ctx context.Context, unit contract.Unit, installation con
 	return out, nil
 }
 
+// recordEvaluationOutcome durably writes one evaluation's terminal
+// disposition, fenced by its current stored version so a stale or
+// duplicated caller can never silently overwrite a decided outcome.
+func recordEvaluationOutcome(ctx context.Context, unit contract.Unit, now string, installation contract.ID, id contract.ID, expectedVersion int64, state, observationsJSON, evidenceJSON string) error {
+	result, err := unit.ExecContext(ctx, `
+		UPDATE skills_evaluations
+		SET version = version + 1, state = ?, observations_json = ?, evidence_json = ?, updated_at = ?
+		WHERE installation_id = ? AND id = ? AND version = ?`,
+		state, observationsJSON, evidenceJSON, now,
+		string(installation), string(id), expectedVersion)
+	if err != nil {
+		return faultWrap(internalError("evaluation outcome persistence failed"), err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return faultWrap(internalError("evaluation outcome persistence failed"), err)
+	}
+	if affected != 1 {
+		return staleVersion("evaluation %s is not at version %d", id, expectedVersion)
+	}
+	return nil
+}
+
+// hasFailedEvaluation reports whether the exact immutable (skill_id,
+// skill_version) named carries any evaluation recorded as failed. A version
+// with no evaluation at all is not blocked by this check — evaluation is
+// never required to activate, only a definite failing fixture blocks it;
+// see R7.1-004 "failed/skipped evaluation grants nothing".
+func hasFailedEvaluation(ctx context.Context, unit contract.Unit, installation contract.ID, id contract.ID, version int64) (bool, error) {
+	row := unit.QueryRowContext(ctx, `
+		SELECT id FROM skills_evaluations
+		WHERE installation_id = ? AND skill_id = ? AND skill_version = ? AND state = 'failed'
+		LIMIT 1`, string(installation), string(id), version)
+	var found contract.ID
+	if err := row.Scan(&found); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, nil
+		}
+		return false, faultWrap(internalError("evaluation lookup failed"), err)
+	}
+	return true, nil
+}
+
 // evaluationRefs loads the evaluation identities recorded for one version.
 func evaluationRefs(ctx context.Context, unit contract.Unit, installation contract.ID, id contract.ID, version int64) ([]contract.ID, error) {
 	rows, err := unit.QueryContext(ctx, `
