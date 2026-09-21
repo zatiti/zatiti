@@ -465,76 +465,10 @@ func (s *Service) revalidateWaitingTurn(ctx context.Context, unit contract.Unit,
 	return true, nil
 }
 
-// handleContextPrepare is the _execution.context.prepare boundary: build a
-// versioned immutable context plan naming exact authorized refs and
-// byte/token bounds inside the transaction. No IO, no provider call and no
-// blob bytes are read here — refs name pinned artifacts by reference only.
-func (s *Service) handleContextPrepare(ctx context.Context, unit contract.Unit, in contextPrepareInput) (contract.Outcome[contextPlanBody], error) {
-	t, err := loadTurnForUpdate(ctx, unit, in.TurnID, in.ExpectedVersion)
-	if err != nil {
-		return contract.Outcome[contextPlanBody]{}, err
-	}
-	if t.InstallationID != installationOf(unit) {
-		return contract.Outcome[contextPlanBody]{}, permissionDenied("turn %s belongs to another installation", t.ID)
-	}
-	if t.State != "claimed" && t.State != "context_pending" {
-		return contract.Outcome[contextPlanBody]{}, conflict("turn %s is %s and cannot prepare context", t.ID, t.State)
-	}
-	if t.Generation != in.Generation {
-		return contract.Outcome[contextPlanBody]{}, conflict(
-			"turn %s generation %d does not match %d", t.ID, t.Generation, in.Generation)
-	}
-	now := s.now()
-
-	refs := []wireArtifactRef{}
-	if t.TaskID != "" {
-		task, err := s.callTaskSnapshot(ctx, unit, t.Scope, t.TaskID)
-		if err != nil {
-			return contract.Outcome[contextPlanBody]{}, err
-		}
-		refs = task.Inputs
-		if refs == nil {
-			refs = []wireArtifactRef{}
-		}
-	}
-
-	if t.State != "context_pending" {
-		// The first prepare transitions the turn; a rebuild (the turn is
-		// already context_pending from an earlier prepare whose commit was
-		// discarded as stale) creates a fresh plan without moving the turn
-		// again — nothing about the turn itself changed, only the plan did.
-		t.State = "context_pending"
-		t.UpdatedAt = now
-		if err := updateTurn(ctx, unit, t); err != nil {
-			return contract.Outcome[contextPlanBody]{}, err
-		}
-	}
-
-	// The plan pins the turn's version and generation exactly as they
-	// stand once prepare's own transition (if any) has already landed, so
-	// commit's staleness check compares against the version/generation the
-	// turn actually carries afterward, not a value prepare's own bump would
-	// always shift by one.
-	plan := &contextPlanRow{
-		ID:                    s.newID(),
-		InstallationID:        t.InstallationID,
-		TurnID:                t.ID,
-		ExpectedVersion:       t.Version,
-		Generation:            t.Generation,
-		Refs:                  refs,
-		ConfigurationRevision: t.ConfigurationRevision,
-		ByteBound:             defaultContextByteBound,
-		TokenBound:            defaultContextTokenBound,
-		CreatedAt:             now,
-	}
-	if err := insertContextPlan(ctx, unit, plan); err != nil {
-		return contract.Outcome[contextPlanBody]{}, err
-	}
-	if err := emitTransition(ctx, unit, eventContextPrepared, plan.ID, 1); err != nil {
-		return contract.Outcome[contextPlanBody]{}, err
-	}
-	return completedOutcome(contextPlanBody{Resource: contextPlanOut(plan)})
-}
+// handleContextPrepare (the _execution.context.prepare boundary) now lives
+// in context_build.go (P15): it resolves the real
+// configuration/task/inbox/memory/tool references described in this
+// package's mission, not merely the task's input list.
 
 // handleContextCommit is the _execution.context.commit boundary: publish
 // the plan and commit the pinned context after rechecking generation,
@@ -572,6 +506,33 @@ func (s *Service) handleContextCommit(ctx context.Context, unit contract.Unit, i
 		return contract.Outcome[turnBody]{}, conflict("turn %s is %s and cannot commit context", t.ID, t.State)
 	}
 	now := s.now()
+
+	// Validate pins: re-check the plan's referenced artifacts and pinned
+	// configuration revision are still current before this context is
+	// treated as an accepted model step, never trusting that nothing moved
+	// between prepare and this commit.
+	if plan.ConfigurationRevision != t.ConfigurationRevision {
+		return contract.Outcome[turnBody]{}, staleVersion(
+			"context plan %s pinned configuration revision %d, the turn now carries %d; discard and rebuild",
+			plan.ID, plan.ConfigurationRevision, t.ConfigurationRevision)
+	}
+	if len(plan.Refs) > 0 {
+		metas, err := s.callArtifactsMetadata(ctx, unit, t.Scope, plan.Refs)
+		if err != nil {
+			return contract.Outcome[turnBody]{}, err
+		}
+		available := make(map[contract.Digest]bool, len(metas))
+		for _, m := range metas {
+			available[m.Digest] = true
+		}
+		for _, ref := range plan.Refs {
+			if !available[ref.Digest] {
+				return contract.Outcome[turnBody]{}, artifactFault(
+					"context plan %s pins artifact %s, which no longer resolves", plan.ID, ref.ID)
+			}
+		}
+	}
+
 	if err := commitContextPlan(ctx, unit, plan.ID); err != nil {
 		return contract.Outcome[turnBody]{}, err
 	}
@@ -584,6 +545,18 @@ func (s *Service) handleContextCommit(ctx context.Context, unit contract.Unit, i
 	}
 	if err := emitTransition(ctx, unit, eventContextCommitted, t.ID, t.Version); err != nil {
 		return contract.Outcome[turnBody]{}, err
+	}
+	// Publish lineage: record every pinned source that fed this committed
+	// context so it stays inspectable after the source data itself moves
+	// on -- the retained context artifact remains immutable and readable
+	// regardless.
+	if err := insertTurnContextLineage(ctx, unit, s.newID(), t.ID, plan.ID, "instruction", "", "", now); err != nil {
+		return contract.Outcome[turnBody]{}, err
+	}
+	for _, ref := range plan.Refs {
+		if err := insertTurnContextLineage(ctx, unit, s.newID(), t.ID, plan.ID, "history", string(ref.ID), ref.Digest, now); err != nil {
+			return contract.Outcome[turnBody]{}, err
+		}
 	}
 	return completedOutcome(turnBody{Resource: turnOut(t)})
 }

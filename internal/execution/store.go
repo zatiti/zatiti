@@ -1506,6 +1506,11 @@ type contextPlanRow struct {
 	TokenBound            int64
 	Committed             bool
 	CreatedAt             time.Time
+	// Recipe is execution's own private assembly recipe: never part of the
+	// frozen wire ContextPlan (whose schema carries only refs/bounds),
+	// consumed only by stageContext to build the actual zatiti.context/v1
+	// document deterministically from exactly what prepare already pinned.
+	Recipe contextRecipe
 }
 
 // insertContextPlan persists a new immutable context plan.
@@ -1514,26 +1519,30 @@ func insertContextPlan(ctx context.Context, unit contract.Unit, p *contextPlanRo
 	if err != nil {
 		return err
 	}
+	componentsJSON, err := encodeJSON(p.Recipe)
+	if err != nil {
+		return err
+	}
 	_, err = unit.ExecContext(ctx, `INSERT INTO execution_context_plans
 		(id, installation_id, turn_id, expected_version, generation, refs_json,
-		 configuration_revision, byte_bound, token_bound, committed, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
+		 configuration_revision, byte_bound, token_bound, committed, created_at, components_json)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`,
 		p.ID, p.InstallationID, p.TurnID, p.ExpectedVersion, p.Generation, refsJSON,
-		p.ConfigurationRevision, p.ByteBound, p.TokenBound, formatStamp(p.CreatedAt))
+		p.ConfigurationRevision, p.ByteBound, p.TokenBound, formatStamp(p.CreatedAt), componentsJSON)
 	return err
 }
 
 // loadContextPlan reads one context plan by id.
 func loadContextPlan(ctx context.Context, unit contract.Unit, id contract.ID) (*contextPlanRow, error) {
 	row := unit.QueryRowContext(ctx, `SELECT id, installation_id, turn_id, expected_version,
-		generation, refs_json, configuration_revision, byte_bound, token_bound, committed, created_at
+		generation, refs_json, configuration_revision, byte_bound, token_bound, committed, created_at, components_json
 		FROM execution_context_plans WHERE id = ?`, id)
 	var p contextPlanRow
-	var refsJSON string
+	var refsJSON, componentsJSON string
 	var committed int64
 	var created string
 	err := row.Scan(&p.ID, &p.InstallationID, &p.TurnID, &p.ExpectedVersion, &p.Generation,
-		&refsJSON, &p.ConfigurationRevision, &p.ByteBound, &p.TokenBound, &committed, &created)
+		&refsJSON, &p.ConfigurationRevision, &p.ByteBound, &p.TokenBound, &committed, &created, &componentsJSON)
 	if isNoRows(err) {
 		return nil, notFound("context plan %s does not exist", id)
 	}
@@ -1543,11 +1552,47 @@ func loadContextPlan(ctx context.Context, unit contract.Unit, id contract.ID) (*
 	if err := decodeJSON(refsJSON, &p.Refs); err != nil {
 		return nil, err
 	}
+	if err := decodeJSON(componentsJSON, &p.Recipe); err != nil {
+		return nil, err
+	}
 	p.Committed = committed == 1
 	if p.CreatedAt, err = parseStamp(created); err != nil {
 		return nil, err
 	}
 	return &p, nil
+}
+
+// listProposalsForTurn reads every recorded proposal of one turn, oldest
+// step first: the durable disposition history stageContext folds into the
+// next context as prior outputs/tool results, each appearing exactly once.
+func listProposalsForTurn(ctx context.Context, unit contract.Unit, turnID contract.ID) ([]*proposalRow, error) {
+	rows, err := unit.QueryContext(ctx, `SELECT `+proposalColumns+` FROM execution_proposals
+		WHERE turn_id = ? AND state = 'recorded' ORDER BY step_index ASC, created_at ASC`, turnID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []*proposalRow
+	for rows.Next() {
+		p, err := scanProposal(rows.Scan)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+// insertTurnContextLineage records one source that fed a turn's committed
+// context artifact -- the turn-pipeline counterpart of insertLineage, keyed
+// by turn_id/plan_id instead of attempt_id/run_id since a WorkerTurn need
+// not carry an attempt.
+func insertTurnContextLineage(ctx context.Context, unit contract.Unit, id, turnID, planID contract.ID, kind, artifactID string, digest contract.Digest, at time.Time) error {
+	_, err := unit.ExecContext(ctx, `INSERT INTO execution_turn_context_lineage
+		(id, turn_id, plan_id, installation_id, kind, artifact_id, artifact_digest, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		id, turnID, planID, installationOf(unit), kind, artifactID, digest, formatStamp(at))
+	return err
 }
 
 // commitContextPlan marks a plan committed exactly once; a repeated commit

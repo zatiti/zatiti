@@ -325,6 +325,34 @@ CREATE TABLE execution_verification_claims (
 ALTER TABLE execution_verification_jobs ADD COLUMN version INTEGER NOT NULL DEFAULT 1;
 `
 
+// schemaV3 (P15) carries the plan's private assembly recipe -- the ordered,
+// non-wire components (instructions, task, inbox, prior outputs/tool
+// results) StageContext consumes to build the actual zatiti.context/v1
+// document deterministically from exactly what prepare already pinned. It
+// is never exposed through the frozen wire ContextPlan (whose schema is
+// closed to `refs`/bounds only), so it lives in its own column rather than
+// widening `refs_json`. schemaV3 also adds a turn-scoped context lineage
+// record distinct from the existing attempt-scoped execution_context_lineage
+// table: a WorkerTurn need not carry an attempt (a pure chat turn has none),
+// so lineage for the turn pipeline is keyed by turn_id/plan_id instead of
+// attempt_id/run_id.
+const schemaV3 = `
+ALTER TABLE execution_context_plans ADD COLUMN components_json TEXT NOT NULL DEFAULT '[]';
+
+CREATE TABLE execution_turn_context_lineage (
+	id              TEXT PRIMARY KEY,
+	turn_id         TEXT NOT NULL,
+	plan_id         TEXT NOT NULL,
+	installation_id TEXT NOT NULL,
+	kind            TEXT NOT NULL CHECK (kind IN ('instruction','task','inbox','history','tool_result','memory')),
+	artifact_id     TEXT NOT NULL DEFAULT '',
+	artifact_digest TEXT NOT NULL DEFAULT '',
+	created_at      TEXT NOT NULL
+);
+CREATE INDEX execution_turn_context_lineage_turn_idx
+	ON execution_turn_context_lineage (turn_id, created_at);
+`
+
 // migrations returns the execution-owned migration set. Bodies are pinned
 // by SHA-256 so storage can detect any drift from the reviewed schema.
 func migrations() []contract.Migration {
@@ -338,5 +366,10 @@ func migrations() []contract.Migration {
 		Version: 2,
 		SQL:     schemaV2,
 		SHA256:  contract.Hash([]byte(schemaV2)),
+	}, {
+		Owner:   owner,
+		Version: 3,
+		SQL:     schemaV3,
+		SHA256:  contract.Hash([]byte(schemaV3)),
 	}}
 }

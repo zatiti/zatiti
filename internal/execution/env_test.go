@@ -78,26 +78,34 @@ type recordedProcessed struct {
 // fakePorts serves the peer fixtures per installation and task, records the
 // calls handlers make, and carries injectable faults and raw errors.
 type fakePorts struct {
-	mu          sync.Mutex
-	snapshots   map[contract.ID]*peerScopeSnapshot
-	tasks       map[contract.ID]*wireTask
-	artifacts   map[contract.Digest]wireArtifact
-	fail        map[string]*contract.Fault
-	rawFail     map[string]error
-	transitions []recordedTransition
-	settles     []recordedSettle
-	prepared    []contract.ID
-	processed   []recordedProcessed
-	seq         int
+	mu             sync.Mutex
+	snapshots      map[contract.ID]*peerScopeSnapshot
+	tasks          map[contract.ID]*wireTask
+	artifacts      map[contract.Digest]wireArtifact
+	messages       map[contract.ID][]wireMessage
+	memoryBindings map[contract.ID]wireMemoryBinding
+	connections    map[contract.ID]wireConnection
+	tools          map[contract.ID]wireTool
+	fail           map[string]*contract.Fault
+	rawFail        map[string]error
+	transitions    []recordedTransition
+	settles        []recordedSettle
+	prepared       []contract.ID
+	processed      []recordedProcessed
+	seq            int
 }
 
 func newFakePorts() *fakePorts {
 	return &fakePorts{
-		snapshots: map[contract.ID]*peerScopeSnapshot{},
-		tasks:     map[contract.ID]*wireTask{},
-		artifacts: map[contract.Digest]wireArtifact{},
-		fail:      map[string]*contract.Fault{},
-		rawFail:   map[string]error{},
+		snapshots:      map[contract.ID]*peerScopeSnapshot{},
+		tasks:          map[contract.ID]*wireTask{},
+		artifacts:      map[contract.Digest]wireArtifact{},
+		messages:       map[contract.ID][]wireMessage{},
+		memoryBindings: map[contract.ID]wireMemoryBinding{},
+		connections:    map[contract.ID]wireConnection{},
+		tools:          map[contract.ID]wireTool{},
+		fail:           map[string]*contract.Fault{},
+		rawFail:        map[string]error{},
 	}
 }
 
@@ -116,6 +124,28 @@ func (p *fakePorts) setTask(task *wireTask) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.tasks[task.ID] = task
+}
+
+// setMessages installs the pending inbox _messaging.pending serves for one
+// worker.
+func (p *fakePorts) setMessages(workerID contract.ID, msgs []wireMessage) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.messages[workerID] = msgs
+}
+
+// setConnection installs one connection _connections.resolve validates.
+func (p *fakePorts) setConnection(c wireConnection) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.connections[c.ID] = c
+}
+
+// setTool installs one tool _connections.resolve validates.
+func (p *fakePorts) setTool(t wireTool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.tools[t.ID] = t
 }
 
 func (p *fakePorts) setFault(op string, f *contract.Fault) {
@@ -307,6 +337,71 @@ func (p *fakePorts) Call(ctx context.Context, unit contract.Unit, inv contract.I
 			"task_ids": []any{}, "body": "", "attachments": []any{}, "state": "acknowledged",
 			"created_at": "2026-09-10T12:00:00.000000000Z",
 		}}
+	case peerMessagingPending:
+		var in struct {
+			WorkerID contract.ID `json:"worker_id"`
+			Limit    int64       `json:"limit"`
+		}
+		if err := contract.DecodeStrict(inv.Input, &in); err != nil {
+			p.mu.Unlock()
+			return contract.Payload{}, err
+		}
+		items := p.messages[in.WorkerID]
+		if items == nil {
+			items = []wireMessage{}
+		}
+		body = map[string]any{"items": items}
+	case peerMemorySelect:
+		var in struct {
+			Scope            contract.Scope `json:"scope"`
+			BindingIDs       []contract.ID  `json:"binding_ids"`
+			Permission       string         `json:"permission"`
+			MinimumFreshness string         `json:"minimum_freshness"`
+		}
+		if err := contract.DecodeStrict(inv.Input, &in); err != nil {
+			p.mu.Unlock()
+			return contract.Payload{}, err
+		}
+		bindings := []wireMemoryBinding{}
+		for _, id := range in.BindingIDs {
+			b, ok := p.memoryBindings[id]
+			if !ok {
+				p.mu.Unlock()
+				return contract.Payload{}, notFound("memory binding %s is unknown", id)
+			}
+			bindings = append(bindings, b)
+		}
+		body = map[string]any{"bindings": bindings}
+	case peerConnectionsResolve:
+		var in struct {
+			Scope       contract.Scope `json:"scope"`
+			Connection  wireRef        `json:"connection"`
+			Tool        wireRef        `json:"tool"`
+			Destination string         `json:"destination"`
+		}
+		if err := contract.DecodeStrict(inv.Input, &in); err != nil {
+			p.mu.Unlock()
+			return contract.Payload{}, err
+		}
+		conn, ok := p.connections[in.Connection.ID]
+		if !ok {
+			p.mu.Unlock()
+			return contract.Payload{}, notFound("connection %s is unknown", in.Connection.ID)
+		}
+		if conn.Version != in.Connection.Version {
+			p.mu.Unlock()
+			return contract.Payload{}, staleVersion("connection %s is at a different version", in.Connection.ID)
+		}
+		tool, ok := p.tools[in.Tool.ID]
+		if !ok {
+			p.mu.Unlock()
+			return contract.Payload{}, notFound("tool %s is unknown", in.Tool.ID)
+		}
+		if tool.Version != in.Tool.Version {
+			p.mu.Unlock()
+			return contract.Payload{}, staleVersion("tool %s is at a different version", in.Tool.ID)
+		}
+		body = map[string]any{"connection": conn, "tool": tool}
 	case "_effects.prepare":
 		var in map[string]any
 		if err := contract.DecodeStrict(inv.Input, &in); err != nil {
@@ -368,7 +463,7 @@ func newEnv(t *testing.T) *testEnv {
 		clock: &fakeClock{now: time.Date(2026, 9, 10, 12, 0, 0, 0, time.UTC)},
 		ids:   &seqIDs{},
 	}
-	svc, err := New(contract.Dependencies{Clock: env.clock, IDs: env.ids, Ports: env.ports})
+	svc, err := New(contract.Dependencies{Clock: env.clock, IDs: env.ids, Ports: env.ports, Blobs: newFakeBlobStore(nil)})
 	if err != nil {
 		t.Fatalf("execution.New: %v", err)
 	}
@@ -606,7 +701,9 @@ func fixtureHostedProfile(workerID contract.ID) *wireExecutionProfile {
 }
 
 // installWorkerSnapshot pins the configuration snapshot the ports serve for
-// the env installation: the hosted worker profile, revision 1.
+// the env installation: the hosted worker profile, revision 1, non-empty
+// instructions (P15's context builder refuses a worker with none) and no
+// tool/memory bindings (the "empty bindings yield no tools" default).
 func (e *testEnv) installWorkerSnapshot(workerID contract.ID, profile *wireExecutionProfile) {
 	limits := fixtureLimits(4)
 	e.ports.setSnapshot(e.install, &peerScopeSnapshot{
@@ -614,11 +711,44 @@ func (e *testEnv) installWorkerSnapshot(workerID contract.ID, profile *wireExecu
 		Revision: 1,
 		Worker: &wireWorker{
 			ID: workerID, Version: 1, OrganizationID: e.org,
-			Key: "worker", Name: "Worker",
+			Key: "worker", Name: "Worker", Instructions: "You are a test worker; follow the accepted task.",
 			SkillVersions: []wireRef{}, Bindings: []contract.ID{},
 			Profile: profile, Limits: &limits,
 		},
+		Bindings: []wireBinding{},
 	})
+}
+
+// installModelToolBinding extends the installed worker snapshot with one
+// authorized "tool" binding whose resolved Tool carries adapter "responses"
+// -- the model-dispatch tool/connection identity buildResponsesModelStepAction
+// requires. It must run after installWorkerSnapshot for the same worker.
+func (e *testEnv) installModelToolBinding(workerID contract.ID, profile *wireExecutionProfile) (toolID, connectionID contract.ID) {
+	e.t.Helper()
+	snap := e.ports.snapshots[e.install]
+	if snap == nil || snap.Worker == nil {
+		e.t.Fatalf("installModelToolBinding: no worker snapshot installed for %s", workerID)
+	}
+	bindingID := e.ids.New()
+	toolID = e.ids.New()
+	connectionID = profile.ConnectionID
+	snap.Worker.Bindings = append(snap.Worker.Bindings, bindingID)
+	snap.Bindings = append(snap.Bindings, wireBinding{
+		ID: bindingID, Version: 1, Scope: e.scope, Kind: "tool",
+		TargetID: toolID, Permissions: []string{"invoke"},
+		Destinations: []string{profile.ProviderDestination},
+	})
+	e.ports.setConnection(wireConnection{
+		ID: connectionID, Version: defaultResolveVersion, Provider: "openai",
+		AccountIdentity: "acct-test", Destinations: []string{profile.ProviderDestination},
+	})
+	e.ports.setTool(wireTool{
+		ID: toolID, Version: defaultResolveVersion, Name: "model-responses",
+		InputSchema: json.RawMessage(`{}`), OutputSchema: json.RawMessage(`{}`),
+		Effect: "external_mutation", Destinations: []string{profile.ProviderDestination},
+		Adapter: "responses",
+	})
+	return toolID, connectionID
 }
 
 // enqueueTask installs the task fixture on the ports and enqueues it,
@@ -763,6 +893,18 @@ func (e *testEnv) readLease(id contract.ID) *leaseRow {
 		return err
 	})
 	return l
+}
+
+// readContextPlan loads one context plan row directly.
+func (e *testEnv) readContextPlan(id contract.ID) *contextPlanRow {
+	e.t.Helper()
+	var p *contextPlanRow
+	e.inWrite(func(unit contract.Unit) error {
+		var err error
+		p, err = loadContextPlan(e.ctx, unit, id)
+		return err
+	})
+	return p
 }
 
 // readTurn loads one worker turn row directly.

@@ -187,6 +187,75 @@ type wireObservation struct {
 	ConfirmedAt       string          `json:"confirmed_at,omitempty"`
 }
 
+// wireBinding mirrors Binding: the scope's current tool/skill/connection/
+// worker/repository/reporting/memory capability grants, resolved from
+// configuration's scope snapshot. P15's context builder narrows a worker's
+// authorized tools/memory to exactly the entries its own Bindings select.
+type wireBinding struct {
+	ID           contract.ID      `json:"id"`
+	Version      contract.Version `json:"version"`
+	Scope        contract.Scope   `json:"scope"`
+	Kind         string           `json:"kind"`
+	TargetID     contract.ID      `json:"target_id"`
+	Permissions  []string         `json:"permissions"`
+	SourceScope  *contract.Scope  `json:"source_scope,omitempty"`
+	Destinations []string         `json:"destinations,omitempty"`
+}
+
+// wireMessage mirrors Message: one admitted inbox item. Content is always
+// untrusted -- the context builder never treats a message body as a grant.
+type wireMessage struct {
+	ID             contract.ID       `json:"id"`
+	Version        contract.Version  `json:"version"`
+	SenderID       contract.ID       `json:"sender_id"`
+	RecipientIDs   []contract.ID     `json:"recipient_ids"`
+	Scope          contract.Scope    `json:"scope"`
+	TaskIDs        []contract.ID     `json:"task_ids"`
+	Body           string            `json:"body"`
+	Attachments    []wireArtifactRef `json:"attachments"`
+	State          string            `json:"state"`
+	CreatedAt      string            `json:"created_at"`
+	ConversationID contract.ID       `json:"conversation_id,omitempty"`
+}
+
+// wireMemoryBinding mirrors MemoryBinding: one authorized memory grant
+// _memory.select returned after filtering the caller's requested binding
+// IDs to what the current permission/freshness bound actually admits.
+type wireMemoryBinding struct {
+	ID             contract.ID      `json:"id"`
+	Version        contract.Version `json:"version"`
+	Scope          contract.Scope   `json:"scope"`
+	BrainID        contract.ID      `json:"brain_id"`
+	Permissions    []string         `json:"permissions"`
+	Classification string           `json:"classification"`
+}
+
+// wireTool mirrors Tool: the adapter action shape a resolved binding names.
+// P15 carries only fields its context assembly and action construction
+// need; extra frozen fields decode and are ignored by Go's default
+// (non-strict) json.Unmarshal used for peer responses.
+type wireTool struct {
+	ID           contract.ID      `json:"id"`
+	Version      contract.Version `json:"version"`
+	Name         string           `json:"name"`
+	InputSchema  json.RawMessage  `json:"input_schema"`
+	OutputSchema json.RawMessage  `json:"output_schema"`
+	Effect       string           `json:"effect"`
+	Destinations []string         `json:"destinations"`
+	Adapter      string           `json:"adapter"`
+}
+
+// wireConnection mirrors Connection: the validated account/credential
+// binding a resolved model-dispatch or product tool call is authorized
+// under.
+type wireConnection struct {
+	ID              contract.ID      `json:"id"`
+	Version         contract.Version `json:"version"`
+	Provider        string           `json:"provider"`
+	AccountIdentity string           `json:"account_identity"`
+	Destinations    []string         `json:"destinations"`
+}
+
 // wireArtifact mirrors the Artifact definition for peer metadata reads.
 type wireArtifact struct {
 	ID             contract.ID      `json:"id"`
