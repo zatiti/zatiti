@@ -402,7 +402,7 @@ func (s *Service) listRules(ctx context.Context, unit contract.Unit, organizatio
 
 const qualificationColumns = `id, version, scope_json, worker_ref, capability, destinations_json,
 	rule_id, rule_version, model, tool_versions_json, skill_versions_json, evidence_ids_json,
-	window_start, window_end, state, explanation, created_at, updated_at`
+	dependencies_json, window_start, window_end, state, explanation, created_at, updated_at`
 
 // scanQualification reads one policy_qualifications row.
 func scanQualification(scan func(dest ...any) error) (qualificationRow, error) {
@@ -413,12 +413,13 @@ func scanQualification(scan func(dest ...any) error) (qualificationRow, error) {
 		toolJSON             string
 		skillJSON            string
 		evidenceJSON         string
+		dependenciesJSON     string
 		windowStart          string
 		windowEnd            string
 		createdAt, updatedAt string
 	)
 	if err := scan(&r.ID, &r.Version, &scopeJSON, &r.WorkerID, &r.Capability, &destJSON,
-		&r.RuleID, &r.RuleVersion, &r.Model, &toolJSON, &skillJSON, &evidenceJSON,
+		&r.RuleID, &r.RuleVersion, &r.Model, &toolJSON, &skillJSON, &evidenceJSON, &dependenciesJSON,
 		&windowStart, &windowEnd, &r.State, &r.Explanation, &createdAt, &updatedAt); err != nil {
 		return qualificationRow{}, err
 	}
@@ -439,6 +440,10 @@ func scanQualification(scan func(dest ...any) error) (qualificationRow, error) {
 		return qualificationRow{}, err
 	}
 	evidence, err := decodeIDs(evidenceJSON)
+	if err != nil {
+		return qualificationRow{}, err
+	}
+	dependencies, err := decodeIDs(dependenciesJSON)
 	if err != nil {
 		return qualificationRow{}, err
 	}
@@ -463,6 +468,7 @@ func scanQualification(scan func(dest ...any) error) (qualificationRow, error) {
 	r.ToolVersions = tools
 	r.SkillVersions = skills
 	r.EvidenceIDs = evidence
+	r.Dependencies = dependencies
 	r.WindowStart, r.WindowEnd = start, end
 	r.CreatedAt, r.UpdatedAt = created, updated
 	return r, nil
@@ -508,18 +514,22 @@ func (s *Service) insertQualification(ctx context.Context, unit contract.Unit, q
 	if err != nil {
 		return err
 	}
+	dependenciesJSON, err := encodeIDs(q.Dependencies)
+	if err != nil {
+		return err
+	}
 	_, err = unit.ExecContext(ctx, `
 		INSERT INTO policy_qualifications
 			(id, version, installation_id, organization_id, project_id, worker_id, task_id,
 			 scope_json, worker_ref, capability, destinations_json, rule_id, rule_version,
-			 model, tool_versions_json, skill_versions_json, evidence_ids_json,
+			 model, tool_versions_json, skill_versions_json, evidence_ids_json, dependencies_json,
 			 window_start, window_end, state, explanation, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		string(q.ID), q.Version,
 		string(q.Scope.InstallationID), string(q.Scope.OrganizationID), string(q.Scope.ProjectID),
 		string(q.Scope.WorkerID), string(q.Scope.TaskID),
 		scopeJSON, string(q.WorkerID), q.Capability, destJSON,
-		string(q.RuleID), q.RuleVersion, q.Model, toolJSON, skillJSON, evidenceJSON,
+		string(q.RuleID), q.RuleVersion, q.Model, toolJSON, skillJSON, evidenceJSON, dependenciesJSON,
 		formatStamp(q.WindowStart), formatStamp(q.WindowEnd), q.State, q.Explanation,
 		formatStamp(q.CreatedAt), formatStamp(q.UpdatedAt))
 	if err != nil {
@@ -551,18 +561,23 @@ func (s *Service) updateQualificationRow(ctx context.Context, unit contract.Unit
 	if err != nil {
 		return err
 	}
+	dependenciesJSON, err := encodeIDs(q.Dependencies)
+	if err != nil {
+		return err
+	}
 	res, err := unit.ExecContext(ctx, `
 		UPDATE policy_qualifications
 		SET version = ?, organization_id = ?, project_id = ?, worker_id = ?, task_id = ?,
 		    scope_json = ?, worker_ref = ?, capability = ?, destinations_json = ?,
 		    rule_id = ?, rule_version = ?, model = ?, tool_versions_json = ?,
-		    skill_versions_json = ?, evidence_ids_json = ?, window_start = ?, window_end = ?,
+		    skill_versions_json = ?, evidence_ids_json = ?, dependencies_json = ?,
+		    window_start = ?, window_end = ?,
 		    state = ?, explanation = ?, updated_at = ?
 		WHERE id = ? AND installation_id = ? AND version = ?`,
 		q.Version, string(q.Scope.OrganizationID), string(q.Scope.ProjectID),
 		string(q.Scope.WorkerID), string(q.Scope.TaskID),
 		scopeJSON, string(q.WorkerID), q.Capability, destJSON,
-		string(q.RuleID), q.RuleVersion, q.Model, toolJSON, skillJSON, evidenceJSON,
+		string(q.RuleID), q.RuleVersion, q.Model, toolJSON, skillJSON, evidenceJSON, dependenciesJSON,
 		formatStamp(q.WindowStart), formatStamp(q.WindowEnd), q.State, q.Explanation,
 		formatStamp(q.UpdatedAt),
 		string(q.ID), string(q.Scope.InstallationID), q.Version-1)
@@ -661,10 +676,11 @@ func (s *Service) insertEvidence(ctx context.Context, unit contract.Unit, e evid
 	_, err := unit.ExecContext(ctx, `
 		INSERT INTO policy_evidence
 			(qualification_id, evidence_id, kind, first_state, first_version, first_at,
-			 succeeded_at, succeeded_version)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+			 succeeded_at, succeeded_version, acceptance_mode, verifier_id, verifier_version)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		string(e.QualificationID), string(e.EvidenceID), e.Kind, e.FirstState, e.FirstVersion,
-		formatStamp(e.FirstAt), succeededAt, succeededVersion)
+		formatStamp(e.FirstAt), succeededAt, succeededVersion,
+		e.AcceptanceMode, e.VerifierID, e.VerifierVersion)
 	if err != nil {
 		return fmt.Errorf("policy: insert evidence %s for qualification %s: %w", e.EvidenceID, e.QualificationID, err)
 	}
@@ -676,7 +692,7 @@ func (s *Service) insertEvidence(ctx context.Context, unit contract.Unit, e evid
 func (s *Service) loadEvidence(ctx context.Context, unit contract.Unit, qualification contract.ID) ([]evidenceRow, error) {
 	rows, err := unit.QueryContext(ctx, `
 		SELECT qualification_id, evidence_id, kind, first_state, first_version, first_at,
-		       succeeded_at, succeeded_version
+		       succeeded_at, succeeded_version, acceptance_mode, verifier_id, verifier_version
 		FROM policy_evidence
 		WHERE qualification_id = ?
 		ORDER BY evidence_id`, string(qualification))
@@ -693,7 +709,8 @@ func (s *Service) loadEvidence(ctx context.Context, unit contract.Unit, qualific
 			succeededVersion sql.NullInt64
 		)
 		if err := rows.Scan(&e.QualificationID, &e.EvidenceID, &e.Kind, &e.FirstState,
-			&e.FirstVersion, &firstAt, &succeededAt, &succeededVersion); err != nil {
+			&e.FirstVersion, &firstAt, &succeededAt, &succeededVersion,
+			&e.AcceptanceMode, &e.VerifierID, &e.VerifierVersion); err != nil {
 			return nil, fmt.Errorf("policy: scan evidence row: %w", err)
 		}
 		firstAtTime, err := parseStamp(firstAt)

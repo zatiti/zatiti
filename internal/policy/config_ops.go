@@ -473,8 +473,12 @@ func (s *Service) activateRuleChange(ctx context.Context, unit contract.Unit, c 
 
 // dependencyHit reports whether one changed reference invalidates a
 // qualification: a superseded governing rule, a superseded tool or skill
-// version, or a cited evidence id (Z19.version_requalification,
-// Z19.unsupported_evidence).
+// version, a cited evidence id, or a change to any task the credited
+// evidence itself depended on (Z19.version_requalification,
+// Z19.unsupported_evidence). A ref matching none of these -- an unrelated
+// capability's own rule, an unrelated worker's skill, a task nothing here
+// ever cited or depended on -- never invalidates: only a reference that is
+// actually part of this qualification's own recorded foundation does.
 func dependencyHit(q qualificationRow, refs []wireRef) bool {
 	for _, ref := range refs {
 		if q.RuleID == ref.ID && q.RuleVersion != int64(ref.Version) {
@@ -492,6 +496,11 @@ func dependencyHit(q qualificationRow, refs []wireRef) bool {
 		}
 		for _, evidence := range q.EvidenceIDs {
 			if evidence == ref.ID {
+				return true
+			}
+		}
+		for _, dep := range q.Dependencies {
+			if dep == ref.ID {
 				return true
 			}
 		}

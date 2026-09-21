@@ -804,11 +804,27 @@ func (e *testEnv) bindWorkerProfile(id contract.ID, model, classification string
 	})
 }
 
-// setTask registers one task the tasks fake serves.
+// setTask registers one task the tasks fake serves, pinned to an
+// independently verified acceptance identity -- the default shape of a
+// legitimately qualifying evidence task. Use setTaskAcceptance for a task
+// whose acceptance mode, verifier identity or dependency closure a test
+// needs to control directly.
 func (e *testEnv) setTask(id contract.ID, state string, worker contract.ID, version contract.Version) {
+	e.t.Helper()
+	e.setTaskAcceptance(id, state, worker, version, peerAcceptance{
+		Mode: acceptanceModeIndependent, VerifierID: "verifier-fixture", VerifierVersion: "v1",
+	}, nil)
+}
+
+// setTaskAcceptance registers one task the tasks fake serves with an exact
+// acceptance identity and dependency list, for tests that exercise
+// evidence-identity binding, non-independent (manual) evidence rejection, or
+// dependency-closure invalidation directly.
+func (e *testEnv) setTaskAcceptance(id contract.ID, state string, worker contract.ID, version contract.Version, acceptance peerAcceptance, dependencies []contract.ID) {
 	e.t.Helper()
 	e.ports.setTask(peerTask{
 		ID: id, Version: version, Scope: e.scope, WorkerID: worker, State: state,
+		Acceptance: acceptance, Dependencies: dependencies,
 	})
 }
 

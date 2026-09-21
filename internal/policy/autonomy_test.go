@@ -523,3 +523,330 @@ func TestInvalidateDependencyMatching(t *testing.T) {
 		t.Fatalf("restrict calls after no-op invalidation: %d", n)
 	}
 }
+
+// TestAutonomyEvaluateRequiresIndependentVerification proves that a cited
+// evidence task whose own acceptance contract did not require independent
+// verification -- an eligible human's manual label, or short of that the
+// worker's own report -- is never credited toward earned autonomy, however
+// it currently reads (Z19.unsupported_evidence: "no grant activates solely
+// from competence narration or a remembered judgment"). It also proves the
+// converse regression: a task pinned to an independent verifier qualifies
+// normally, and its verifier identity is bound onto the recorded evidence
+// link, so a promotion's audit trail can name exactly which verifier
+// independently established each credited result (pinned evidence
+// identity/verifier versions).
+func TestAutonomyEvaluateRequiresIndependentVerification(t *testing.T) {
+	e := newEnv(t)
+	w := e.ids.New()
+	e.bindWorker(w, "model-w")
+
+	rule := e.createRule(e.scope, "deploy.render", e.ceiling)
+	manual := e.ids.New()
+	e.setTaskAcceptance(manual, "succeeded", w, 1, peerAcceptance{
+		Mode: "manual", VerifierID: "human-review", VerifierVersion: "v1",
+	}, nil)
+	q := e.propose(e.actor, w, ruleRef(rule), []contract.ID{manual})
+	rejected := e.evaluate(e.actor, q.ID, 1)
+	if rejected.State != stateRejected {
+		t.Fatalf("manually established evidence should reject: %+v", rejected)
+	}
+	if !contains(rejected.Explanation, "0 of 1 required successes observed") ||
+		!contains(rejected.Explanation, "evidence not independently verified: "+string(manual)) {
+		t.Fatalf("unverified evidence explanation: %s", rejected.Explanation)
+	}
+	if links := e.mustFindEvidence(q.ID); len(links) != 0 {
+		t.Fatalf("unverified evidence is not recorded as a credited link: %+v", links)
+	}
+
+	rule2 := e.createRule(e.scope, "deploy.render", e.ceiling)
+	verified := e.ids.New()
+	e.setTaskAcceptance(verified, "succeeded", w, 1, peerAcceptance{
+		Mode: acceptanceModeIndependent, VerifierID: "verifier-x", VerifierVersion: "2.3",
+	}, nil)
+	q2 := e.propose(e.actor, w, ruleRef(rule2), []contract.ID{verified})
+	done := e.evaluate(e.actor, q2.ID, 1)
+	if done.State != stateQualified {
+		t.Fatalf("independently verified evidence should qualify: %+v", done)
+	}
+	links := e.mustFindEvidence(q2.ID)
+	if len(links) != 1 || links[0].AcceptanceMode != acceptanceModeIndependent ||
+		links[0].VerifierID != "verifier-x" || links[0].VerifierVersion != "2.3" {
+		t.Fatalf("verifier identity binding: %+v", links)
+	}
+}
+
+// TestAutonomyEvaluateRespectsCeiling proves that fully qualifying,
+// independently established evidence still promotes only within the rule's
+// configured ceiling, never past it (Z19.capability_promotion), and that the
+// ceiling is re-verified against the worker's own current authority at
+// evaluation time -- not merely trusted from whatever the ceiling grant
+// covered when the rule was authored.
+func TestAutonomyEvaluateRespectsCeiling(t *testing.T) {
+	e := newEnv(t)
+	w := e.ids.New()
+	e.bindWorker(w, "model-w")
+
+	narrowCeiling := e.ids.New()
+	e.ports.setAuthority(authorityResource{
+		Principal: e.ports.authority.Principal,
+		Grants: []peerGrant{{
+			ID: narrowCeiling, Version: 1, PrincipalID: e.owner,
+			Scope: contract.Scope{}, Capabilities: []string{"deploy.render"}, Destinations: []string{},
+		}},
+		Restrictions: []string{},
+	})
+
+	// A rule promises a capability the ceiling grant does not cover: even
+	// with sufficient evidence, evaluation refuses to promote past it.
+	rule := e.createRule(e.scope, "deploy.merge", narrowCeiling)
+	t1 := e.ids.New()
+	e.setTask(t1, "succeeded", w, 1)
+	q := e.propose(e.actor, w, ruleRef(rule), []contract.ID{t1})
+	before := len(e.promoteCalls())
+	rejected := e.evaluate(e.actor, q.ID, 1)
+	if rejected.State != stateRejected {
+		t.Fatalf("ceiling-exceeding promotion should reject: %+v", rejected)
+	}
+	if !contains(rejected.Explanation, "no longer covers capability deploy.merge") {
+		t.Fatalf("ceiling explanation: %s", rejected.Explanation)
+	}
+	if n := len(e.promoteCalls()); n != before {
+		t.Fatalf("promote should never be attempted past the ceiling: %d calls", n)
+	}
+
+	// The identical shape of evidence, under a rule whose capability the
+	// ceiling grant does cover, qualifies and promotes within it.
+	rule2 := e.createRule(e.scope, "deploy.render", narrowCeiling)
+	t2 := e.ids.New()
+	e.setTask(t2, "succeeded", w, 1)
+	q2 := e.propose(e.actor, w, ruleRef(rule2), []contract.ID{t2})
+	done := e.evaluate(e.actor, q2.ID, 1)
+	if done.State != stateQualified {
+		t.Fatalf("within-ceiling promotion should qualify: %+v", done)
+	}
+}
+
+// TestAutonomyEvaluatePreservesHumanRequiredClass proves that sufficient,
+// independently established evidence still never auto-qualifies a
+// capability an owner's own standing policy currently governs as mandatory
+// human review: the human-required decision remains mandatory, and it
+// governs the capability itself regardless of this qualification's outcome
+// (Z19.human_review_preserved).
+func TestAutonomyEvaluatePreservesHumanRequiredClass(t *testing.T) {
+	e := newEnv(t)
+	w := e.ids.New()
+	e.bindWorker(w, "model-w")
+	rule := e.createRule(e.scope, "deploy.render", e.ceiling)
+	t1 := e.ids.New()
+	e.setTask(t1, "succeeded", w, 1)
+	q := e.propose(e.actor, w, ruleRef(rule), []contract.ID{t1})
+
+	e.createPolicy(e.scope, standingRule("deploy.render", decisionAllow, true, nil))
+
+	before := len(e.promoteCalls())
+	rejected := e.evaluate(e.actor, q.ID, 1)
+	if rejected.State != stateRejected {
+		t.Fatalf("human-required capability should not auto-qualify: %+v", rejected)
+	}
+	if !contains(rejected.Explanation, "marks capability deploy.render human required") {
+		t.Fatalf("human-required explanation: %s", rejected.Explanation)
+	}
+	if n := len(e.promoteCalls()); n != before {
+		t.Fatalf("promote should never be attempted for a human-required capability: %d calls", n)
+	}
+
+	// Only an explicitly authorized owner policy change under existing
+	// authority can change the mandatory class -- this qualification's own
+	// rejection does not; the capability still requires review.
+	got := e.check(e.scope, "deploy.render", nil, "")
+	if got.Decision != decisionReview {
+		t.Fatalf("standing policy should still require review: %+v", got)
+	}
+}
+
+// TestInvalidateDependencyClosure proves that a change to a credited
+// evidence task's own recorded dependency -- not the evidence id itself --
+// invalidates the qualification that depends on it, and that a ref outside
+// that closure never spuriously invalidates an unrelated, still-current
+// qualification (Z19.version_requalification).
+func TestInvalidateDependencyClosure(t *testing.T) {
+	e := newEnv(t)
+	w := e.ids.New()
+	e.bindWorker(w, "model-w")
+	rule := e.createRule(e.scope, "deploy.render", e.ceiling)
+
+	dep := e.ids.New()
+	evidence := e.ids.New()
+	e.setTaskAcceptance(evidence, "succeeded", w, 1, peerAcceptance{
+		Mode: acceptanceModeIndependent, VerifierID: "verifier-fixture", VerifierVersion: "v1",
+	}, []contract.ID{dep})
+	q := e.propose(e.actor, w, ruleRef(rule), []contract.ID{evidence})
+	qualified := e.evaluate(e.actor, q.ID, 1)
+	if qualified.State != stateQualified {
+		t.Fatalf("setup qualification: %+v", qualified)
+	}
+
+	// A change to the evidence task's own dependency restricts the
+	// qualification, though the dependency id was never itself cited as
+	// evidence.
+	affected := e.invalidate([]wireRef{{ID: dep, Version: 2}}, "dependency moved")
+	sameIDSet(t, affected, []contract.ID{q.ID})
+	if row := e.mustFindQualification(q.ID); row.State != stateRestricted {
+		t.Fatalf("qualification after dependency-closure invalidation: %+v", row)
+	}
+
+	// An unrelated ref -- no evidence task's own dependency -- never
+	// invalidates a still-current, unrelated qualification.
+	rule2 := e.createRule(e.scope, "deploy.render", e.ceiling)
+	evidence2 := e.ids.New()
+	e.setTask(evidence2, "succeeded", w, 1)
+	q2 := e.propose(e.actor, w, ruleRef(rule2), []contract.ID{evidence2})
+	e.evaluate(e.actor, q2.ID, 1)
+	unrelated := e.ids.New()
+	affected2 := e.invalidate([]wireRef{{ID: unrelated, Version: 1}}, "unrelated change")
+	if len(affected2) != 0 {
+		t.Fatalf("unrelated dependency should not invalidate: %v", affected2)
+	}
+	if row := e.mustFindQualification(q2.ID); row.State != stateQualified {
+		t.Fatalf("unrelated qualification should stay qualified: %+v", row)
+	}
+}
+
+// TestInvalidateDeduplicatesRedelivery proves an event is never
+// double-processed: a redelivery of an identical dependency-change event
+// (the shape an at-least-once, crash-retried consumer would produce) finds
+// the qualification no longer "open" and neither reprocesses nor
+// double-restricts it.
+func TestInvalidateDeduplicatesRedelivery(t *testing.T) {
+	e := newEnv(t)
+	w := e.ids.New()
+	e.bindWorker(w, "model-w")
+	rule := e.createRule(e.scope, "deploy.render", e.ceiling)
+	t1 := e.ids.New()
+	e.setTask(t1, "succeeded", w, 1)
+	q := e.propose(e.actor, w, ruleRef(rule), []contract.ID{t1})
+
+	affected := e.invalidate([]wireRef{{ID: rule.ID, Version: 2}}, "rule superseded")
+	sameIDSet(t, affected, []contract.ID{q.ID})
+	restricted := e.mustFindQualification(q.ID)
+	if restricted.State != stateRestricted || restricted.Version != 2 {
+		t.Fatalf("first delivery: %+v", restricted)
+	}
+	if n := len(e.restrictCalls()); n != 1 {
+		t.Fatalf("restrict calls after first delivery: %d", n)
+	}
+
+	// The identical event redelivered: nothing left to invalidate, so
+	// nothing is reprocessed or double-applied.
+	affected = e.invalidate([]wireRef{{ID: rule.ID, Version: 2}}, "rule superseded")
+	if len(affected) != 0 {
+		t.Fatalf("redelivery should affect nothing: %v", affected)
+	}
+	again := e.mustFindQualification(q.ID)
+	if again.Version != 2 {
+		t.Fatalf("redelivery must not re-version the qualification: %+v", again)
+	}
+	if n := len(e.restrictCalls()); n != 1 {
+		t.Fatalf("restrict calls after redelivery: %d", n)
+	}
+}
+
+// TestInvalidateAtomicOnPeerFailure proves a crash (or any transient
+// failure) mid-processing resumes cleanly: a batch that fails partway
+// through leaves every qualification exactly as it stood before the
+// attempt -- nothing half-applied -- so a retry of the same event
+// correctly restricts the whole batch in one clean pass, neither
+// reprocessing nor skipping any of it.
+func TestInvalidateAtomicOnPeerFailure(t *testing.T) {
+	e := newEnv(t)
+	w1, w2 := e.ids.New(), e.ids.New()
+	e.bindWorker(w1, "model-1")
+	e.bindWorker(w2, "model-2")
+	rule := e.createRule(e.scope, "deploy.render", e.ceiling)
+	t1, t2 := e.ids.New(), e.ids.New()
+	e.setTask(t1, "succeeded", w1, 1)
+	e.setTask(t2, "succeeded", w2, 1)
+	q1 := e.propose(e.actor, w1, ruleRef(rule), []contract.ID{t1})
+	q2 := e.propose(e.actor, w2, ruleRef(rule), []contract.ID{t2})
+
+	e.ports.failOp("_identity.restrict", &contract.Fault{
+		Code: contract.CodeInternalError, Message: "identity unavailable",
+	})
+	f := e.expectFault(opInvalidate, invalidateInput{
+		ChangedDependencies: []wireRef{{ID: rule.ID, Version: 2}}, Reason: "rule superseded",
+	}, contract.CodeInternalError)
+	if !contains(f.Message, "identity unavailable") {
+		t.Fatalf("propagated fault: %s", f.Message)
+	}
+	e.ports.failOp("_identity.restrict", nil)
+
+	row1 := e.mustFindQualification(q1.ID)
+	row2 := e.mustFindQualification(q2.ID)
+	if row1.State != stateProposed || row1.Version != 1 {
+		t.Fatalf("q1 must not be half-applied: %+v", row1)
+	}
+	if row2.State != stateProposed || row2.Version != 1 {
+		t.Fatalf("q2 must not be half-applied: %+v", row2)
+	}
+
+	affected := e.invalidate([]wireRef{{ID: rule.ID, Version: 2}}, "rule superseded")
+	sameIDSet(t, affected, []contract.ID{q1.ID, q2.ID})
+}
+
+// TestCheckHonorsRestrictionAtPointOfUse proves that immediate demotion is
+// checked at the point of use, not merely recorded: _policy.check always
+// reads current authority fresh, with nothing cached, so the very next
+// check after a demotion reflects it -- no model call or new spending is
+// required to apply the restriction (Z19.immediate_demotion).
+func TestCheckHonorsRestrictionAtPointOfUse(t *testing.T) {
+	e := newEnv(t)
+	w := e.ids.New()
+	e.bindWorker(w, "model-w")
+	// widget.build (unlike deploy.render) falls outside every default
+	// review-class prefix, isolating the property under test -- whether a
+	// restriction is honored immediately -- from the unrelated standing
+	// default-review-class fence.
+	rule := e.createRule(e.scope, "widget.build", e.ceiling)
+	t1 := e.ids.New()
+	e.setTask(t1, "succeeded", w, 1)
+	q := e.propose(e.actor, w, ruleRef(rule), []contract.ID{t1})
+	qualified := e.evaluate(e.actor, q.ID, 1)
+	if qualified.State != stateQualified {
+		t.Fatalf("setup qualification: %+v", qualified)
+	}
+
+	workerAuthority := func(restrictions []string) authorityResource {
+		return authorityResource{
+			Principal: peerPrincipal{ID: w, Kind: "worker", Name: "w", Scope: e.scope},
+			Grants: []peerGrant{{
+				ID: e.ids.New(), Version: 1, PrincipalID: w, Scope: contract.Scope{},
+				Capabilities: []string{"widget.build"}, Destinations: []string{},
+			}},
+			Restrictions: restrictions,
+		}
+	}
+
+	// Simulate identity's own state immediately after promote: the worker
+	// now holds the earned grant.
+	e.ports.setAuthority(workerAuthority(nil))
+	allowed := e.checkAs(e.workerActor(w), e.scope, "widget.build", nil, "")
+	if allowed.Decision != decisionAllow {
+		t.Fatalf("worker should hold the earned capability: %+v", allowed)
+	}
+
+	demoted := e.demote(q.ID, qualified.Version, "incident", []contract.ID{})
+	if demoted.State != stateRestricted {
+		t.Fatalf("demote: %+v", demoted)
+	}
+	if calls := e.restrictCalls(); len(calls) != 1 || calls[0].Capability != "widget.build" {
+		t.Fatalf("demote should push the restriction to identity: %+v", calls)
+	}
+
+	// The restriction takes effect at the point of use: as soon as it is
+	// in effect, the very next check reflects it.
+	e.ports.setAuthority(workerAuthority([]string{"widget.build"}))
+	blocked := e.checkAs(e.workerActor(w), e.scope, "widget.build", nil, "")
+	if blocked.Decision == decisionAllow {
+		t.Fatalf("restriction must be checked at the point of use, not merely recorded: %+v", blocked)
+	}
+}

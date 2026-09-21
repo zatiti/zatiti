@@ -504,6 +504,18 @@ type reviewsCheckBody struct {
 	Decision *peerDecision `json:"decision,omitempty"`
 }
 
+// peerAcceptance carries the fields of the cited task's own acceptance
+// contract that autonomy evidence verification needs: whether the task's
+// contract required independent verification at all (mode), and the
+// verifier identity/version that pinned it. A task snapshot always carries
+// these (Acceptance is a required Task field), so a zero-value decode only
+// ever happens when a fake test double omits them.
+type peerAcceptance struct {
+	Mode            string `json:"mode"`
+	VerifierID      string `json:"verifier_id"`
+	VerifierVersion string `json:"verifier_version"`
+}
+
 type peerTask struct {
 	ID              contract.ID      `json:"id"`
 	Version         contract.Version `json:"version"`
@@ -511,7 +523,17 @@ type peerTask struct {
 	WorkerID        contract.ID      `json:"worker_id"`
 	State           string           `json:"state"`
 	RequiredOutputs []string         `json:"required_outputs,omitempty"`
+	Acceptance      peerAcceptance   `json:"acceptance"`
+	Dependencies    []contract.ID    `json:"dependencies,omitempty"`
 }
+
+// acceptanceModeIndependent is the only acceptance mode tasks' own
+// evaluateSuccess ever reaches through the automated success fence. A task
+// whose contract instead permits "manual" establishment can succeed purely
+// on an eligible human's label (or, short of that, was never fenced by a
+// verifier at all): real, but not a machine-independently-verified result,
+// so it is never counted toward earned autonomy (Z19.unsupported_evidence).
+const acceptanceModeIndependent = "independent"
 
 type taskBody struct {
 	Resource peerTask `json:"resource"`
@@ -617,21 +639,37 @@ type qualificationRow struct {
 	ToolVersions  []wireRef
 	SkillVersions []wireRef
 	EvidenceIDs   []contract.ID
-	WindowStart   time.Time
-	WindowEnd     time.Time
-	State         string
-	Explanation   string
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
+	// Dependencies is the union of every credited evidence task's own
+	// dependencies (one level, as _tasks.snapshot exposes it), captured at
+	// evaluation time. It is internal bookkeeping, never on the public wire
+	// Qualification: _policy.invalidate treats a change to any of these
+	// refs the same as a change to the evidence itself, so a qualification
+	// stays bound to the unchanged dependency closure its evidence was
+	// established against (Z19.version_requalification).
+	Dependencies []contract.ID
+	WindowStart  time.Time
+	WindowEnd    time.Time
+	State        string
+	Explanation  string
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
 }
 
 type evidenceRow struct {
-	QualificationID  contract.ID
-	EvidenceID       contract.ID
-	Kind             string
-	FirstState       string
-	FirstVersion     int64
-	FirstAt          time.Time
+	QualificationID contract.ID
+	EvidenceID      contract.ID
+	Kind            string
+	FirstState      string
+	FirstVersion    int64
+	FirstAt         time.Time
+	// AcceptanceMode, VerifierID and VerifierVersion pin the cited task's
+	// own acceptance identity at first observation: internal audit/evidence
+	// bookkeeping (never on the public wire), retained so a promotion's
+	// explanation can name exactly which verifier independently established
+	// each credited result.
+	AcceptanceMode   string
+	VerifierID       string
+	VerifierVersion  string
 	SucceededAt      *time.Time
 	SucceededVersion *int64
 }
