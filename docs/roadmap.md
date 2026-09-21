@@ -2210,6 +2210,82 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   WAVE 7 STATUS: P28 and P18 landed (2 of 3). Only P22 (the controller)
   remains -- reported ready, in review now, given the deepest review of
   the session given its centrality.
+- 2026-09-21 16:07 PT -- P22 LANDED (PR #33, 9ba0870). The piece that
+  drives P14/P15/P16/P18's separately-correct pieces as one running
+  loop -- given the deepest review of the entire session. New tick
+  phase (turnWork): discover -> resume mid-flight context stages ->
+  claim/context/proposal work -> drive verification, inserted between
+  the existing execution and jobs phases. Crash-safe context staging
+  (the one physical action in this phase -- building/staging/
+  publishing the context document) is journaled write-ahead before the
+  commit call is attempted. Drives what P16 leaves "prepared": a
+  local_operation proposal through the real contract.WorkerOperator
+  under the worker's own authenticated actor (never a controller-
+  privileged shortcut), an external_tool proposal's completion routed
+  back via an in-memory turn-routing index rebuilt fresh every tick
+  (never a stale one). Independent verification driven through the
+  real contract.Verifier outside any transaction.
+  CONFIRMED, DISCLOSED, OUT-OF-AUTHORITY CONTRACT GAP -- independently
+  re-verified from source by the lead, not just trusted from the
+  report: _effects.prepare's caller allowlist
+  (internal/effects/service.go) is {execution, memory, connections,
+  skills, installation} -- "controller" was never added, and
+  internal/execution/turn_ops.go's handleContextCommit commits a turn
+  to model_pending and stops, never calling _effects.prepare. This
+  means NOTHING landed anywhere in this whole remediation effort could
+  actually dispatch a model call to the provider yet, even after this
+  card. stalledModelDispatch reports every model_pending turn as a
+  controller obligation instead of inventing a seam this package has
+  no authority to add; the crash-recovery test's own fixture openly
+  simulates the intended (documented, not implemented) chain-through
+  so the REST of the pipeline could still be proven correct and
+  crash-safe, rather than skipping proof of everything downstream of
+  the gap. FOUNDER DECISION (David, 2026-09-21, AskUserQuestion): land
+  P22 now with the gap disclosed and tracked -- its own work (turn
+  admission, claiming, crash-safe staging, fair scanning, WorkerOperator/
+  verifier driving) is real, substantial, independently reviewed and
+  tested -- rather than holding it unmerged or routing the fix through
+  a wider caller-allowlist change. Fix it immediately as its own
+  follow-up: internal/execution's own handleContextCommit chains
+  through to _effects.prepare internally (execution is ALREADY an
+  authorized caller), mirroring interpretExternalTool's existing
+  precedent -- no caller-allowlist change needed.
+  Lead's own independent verification: whole-repo go build/go vet run
+  directly (the dispatching agent had deferred this given sustained
+  20-100 load from concurrent wave-7 work) -- clean on both platforms,
+  confirmed again by CI. tests/integration re-run -- same 36
+  pre-existing failures as main. Found and fixed one real lint issue
+  before committing: 13 unused symbols (an 11-value turn-state constant
+  enum never wired in -- the package follows the existing codebase's
+  own convention of raw string literals for wire-level state
+  comparisons, so this was genuinely dead, not a missed refactor -- plus
+  2 unused test query helpers with no test exercising them). go test
+  ./internal/controller: all tests pass including the three required
+  behavioral tests (real message + controlled model reaches a reply and
+  verified result; three independent simulated crashes -- before claim,
+  after context publication, after the provider response was received
+  -- each resume safely with exactly one model call ever reaching the
+  adapter; a fair scan proves a permanently-blocked turn and a paused
+  worker's turn never starve an eligible later item). CI confirmed
+  internal/controller not among the PR's failures on either platform
+  (ubuntu-24.04, macos-15) -- the first card to ever touch this
+  package.
+  WAVE 7 COMPLETE -- all 3 cards (P18, P22, P28) landed. 31 of 50 cards
+  landed (62%). Immediately dispatched the disclosed gap's own fix
+  (not a plan P-number, a same-day follow-up, claimed as
+  R-p22-gap-fix): investigating further before dispatch showed this is
+  bigger than "chain through in one line" -- ResponsesModelStepParameters
+  requires a session_handle the frozen contract says must come from its
+  own separate, distinct prepare_session effect, never guessed or
+  reused across turns, and turnRow has no field to persist one yet. The
+  fix as scoped: add a persisted SessionHandle field to turnRow
+  (additive migration), dispatch prepare_session first for a turn that
+  has none, and only dispatch model_step once a confirmed session_handle
+  is persisted -- with careful handling so a prepare_session
+  observation (ResponsesEvidence) is never misrouted into
+  interpretTurnObservation's strict ModelOutput-only validation path.
+  Briefed the same way P22 was: stop and report rather than invent a
+  workaround if the real scope turns out even bigger once in the code.
 
 ## Planned
 
