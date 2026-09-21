@@ -2521,6 +2521,21 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   subprocess the runner starts, a real production robustness fix, not
   just a test workaround. Red->green verified the command_digest
   tamper check myself. Landing pending CI.
+- 2026-09-21 18:47 PT -- P20 LANDED (PR #37, 624b9a8). CI's build-and-
+  test failures confirmed zero "skill" and zero "execution" mentions
+  (grepped the actual failure logs directly) -- only cmd/zatiti,
+  internal/application, internal/installation, the same pre-existing
+  pattern as every prior PR this session. Rebase-merged. Re-ran go test
+  ./internal/execution myself on the real post-merge main (not the PR
+  branch) -- ok, 161.8s, including the full repository-runner suite.
+  Worktree/branch cleaned up, P20 claim released.
+  WAVE 8 COMPLETE -- all 3 cards (P19, P20, P36) landed. 34 of 50 cards
+  landed (68%, up from 62%). Combined with the same-day model-dispatch
+  gap fix, this closes the loop from "every piece of the worker turn
+  pipeline exists" to "the pipeline can dispatch a real model call,
+  receive a real response, and independently verify real engineering-
+  task outcomes against a real repository" -- the concrete product
+  capability this whole remediation effort exists to deliver.
 
 ## Planned
 
