@@ -366,6 +366,43 @@ func (s *Service) dispatch(ctx context.Context, unit contract.Unit, callerScope 
 	return job, intent, nil
 }
 
+// hardBoundKind reports whether a writer intent kind requires guaranteed
+// enforcement (P28: "hard-bound mode"). remember/promote/retract are
+// governed single-writer commits (R15-009): an unconfirmed, merely-advisory
+// acceptance can never safely be treated as a guaranteed fact, because a
+// second, later write could silently double the claim or resurrect a
+// retracted one. recall is a disclosure read R15-008 explicitly allows to
+// run advisory where policy permits, so it is exempt.
+func hardBoundKind(kind string) bool {
+	switch kind {
+	case intentRemember, intentPromote, intentRetract:
+		return true
+	default:
+		return false
+	}
+}
+
+// peekRefusalDetail extracts a best-effort code/reason pair from one failed
+// or unknown observation's evidence. The controller's own synthesized
+// evidence for an adapter error that produced no schema-valid Observation
+// (perform.go's adapterReturn, `{"schema","code","reason"}`) is not
+// SerenityEvidence-shaped, so decodeSerenityEvidence never runs against it;
+// this is a tolerant, tag-only peek that never fails and never rejects the
+// observation -- an absent code/reason is the common, expected case for a
+// genuine SerenityEvidence document, not a decode error, and only enriches
+// the requirement message when the detail is actually present.
+func peekRefusalDetail(raw json.RawMessage) (code, reason string) {
+	if len(raw) == 0 {
+		return "", ""
+	}
+	var probe struct {
+		Code   string `json:"code"`
+		Reason string `json:"reason"`
+	}
+	_ = json.Unmarshal(raw, &probe)
+	return probe.Code, probe.Reason
+}
+
 // decodeSerenityEvidence validates and strictly decodes one recorded
 // evidence document, checking it names the brain this intent actually
 // targeted.
@@ -564,6 +601,7 @@ func (s *Service) applyRetractSuccess(ctx context.Context, unit contract.Unit, b
 		return nil, invalidInput("evidence claims historical erasure, which retract never performs")
 	}
 	var obligations []wireRequirement
+	var affected []*promotionRow
 	for _, ec := range evidence.Claims {
 		if ec.Active {
 			continue
@@ -573,6 +611,7 @@ func (s *Service) applyRetractSuccess(ctx context.Context, unit contract.Unit, b
 			return nil, err
 		}
 		for _, p := range promotions {
+			affected = append(affected, p)
 			exists, err := openReconciliationExists(ctx, unit, brain.InstallationID, reconcileRetraction, p.ID)
 			if err != nil {
 				return nil, err
@@ -597,12 +636,66 @@ func (s *Service) applyRetractSuccess(ctx context.Context, unit contract.Unit, b
 	if obligations == nil {
 		obligations = []wireRequirement{}
 	}
+	// Propagate the correction to every downstream promoted claim (P28 item
+	// 2, R15-006): the open reconciliation obligation above records *that*
+	// review is needed, but a promoted copy must never keep reading as
+	// current in the meantime. This runs for every affected promotion on
+	// every delivery, not only the first -- propagateRetractionToPromotedClaims
+	// is itself idempotent (it no-ops once the destination claim already
+	// reads inactive), so a redelivered retraction after restart converges
+	// to the same corrected state rather than compounding versions.
+	if err := s.propagateRetractionToPromotedClaims(ctx, unit, affected, now); err != nil {
+		return nil, err
+	}
 	result := struct {
 		Claims            []wireClaim       `json:"claims"`
 		Obligations       []wireRequirement `json:"obligations"`
 		HistoricalErasure bool              `json:"historical_erasure"`
 	}{claims, obligations, false}
 	return canonicalJSON(result)
+}
+
+// propagateRetractionToPromotedClaims marks every promoted (destination)
+// claim copied from a just-retracted source inactive, at a new, immutable
+// version (R15-006: a retraction must never leave a promoted copy falsely
+// presented as current). Provenance is never overwritten: source brain,
+// source claim/version, curator and redaction all carry forward unchanged
+// from the destination claim's last known version -- only the fact that it
+// is no longer current changes, exactly as a genuine Serenity correction
+// would report it. A promotion never completed (no destination claim yet)
+// or a destination claim never actually cached locally has nothing to
+// correct and is skipped; a destination already inactive means an earlier
+// delivery of this same retraction already applied the correction, so this
+// is safe to call on every redelivery without compounding claim versions.
+func (s *Service) propagateRetractionToPromotedClaims(ctx context.Context, unit contract.Unit, promotions []*promotionRow, now time.Time) error {
+	for _, p := range promotions {
+		if p.DestinationClaimID == "" {
+			continue
+		}
+		dest, err := loadLatestClaim(ctx, unit, p.DestinationBrainID, p.DestinationClaimID)
+		if err != nil {
+			if isNoRows(err) {
+				continue
+			}
+			return err
+		}
+		if !dest.Active {
+			continue
+		}
+		corrected := &claimRow{
+			BrainID: dest.BrainID, ID: dest.ID, Version: dest.Version + 1, Text: dest.Text, Sources: dest.Sources,
+			Confidence: dest.Confidence, Freshness: dest.Freshness, Active: false,
+			SourceBrainID: dest.SourceBrainID, SourceClaimID: dest.SourceClaimID, SourceClaimVersion: dest.SourceClaimVersion,
+			CuratorID: dest.CuratorID, Redaction: dest.Redaction, RecordedAt: now,
+		}
+		if err := insertClaim(ctx, unit, corrected); err != nil {
+			return err
+		}
+		if err := emit(ctx, unit, eventClaimRecorded, corrected.ID, contract.Version(corrected.Version)); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // memoryBindingChange is the memory_binding branch of the shared Candidate
@@ -989,16 +1082,38 @@ func execCompletionState(jobState string) string {
 // intent and job it belongs to. A late observation received after a
 // terminal disposition opens a correction obligation instead of silently
 // rewriting recorded claims or lineage (R15-006). Every physical call has
-// exactly one intent, found by the effects operation id the controller
-// names; the caller-supplied job_id is a cross-check against either this
-// owner's own job id or the execution job id it opened.
+// exactly one intent, primarily found by the effects operation id the
+// controller names; a bounded reconciliation read admits its own, separate
+// effects Operation (R15-009), so a redelivered or reconciled observation
+// may name an operation_id this owner never recorded. When that lookup
+// misses, handleRecord falls back to this owner's own stable command
+// identity -- the job_id `_memory.record` always carries, either this
+// owner's own job id or its linked execution job id -- which never changes
+// across any number of reconciliation attempts (P28 item 2).
 func (s *Service) handleRecord(ctx context.Context, unit contract.Unit, in recordInput) (contract.Outcome[jobResourceOutput], error) {
 	intent, err := loadIntentByOperation(ctx, unit, in.OperationID)
-	if err != nil {
-		if isNoRows(err) {
-			return contract.Outcome[jobResourceOutput]{}, notFound("no memory intent is tracking operation %s", in.OperationID)
-		}
+	if err != nil && !isNoRows(err) {
 		return contract.Outcome[jobResourceOutput]{}, err
+	}
+	if intent == nil && in.JobID != "" {
+		byJob, jerr := loadIntentByJob(ctx, unit, in.JobID)
+		switch {
+		case jerr == nil:
+			intent = byJob
+		case isNoRows(jerr):
+			byExec, eerr := loadIntentByExecutionJob(ctx, unit, in.JobID)
+			if eerr == nil {
+				intent = byExec
+			} else if !isNoRows(eerr) {
+				return contract.Outcome[jobResourceOutput]{}, eerr
+			}
+		default:
+			return contract.Outcome[jobResourceOutput]{}, jerr
+		}
+	}
+	if intent == nil {
+		return contract.Outcome[jobResourceOutput]{}, notFound(
+			"no memory intent is tracking operation %s or job %s", in.OperationID, in.JobID)
 	}
 	job, err := loadJob(ctx, unit, intent.JobID)
 	if err != nil {
@@ -1030,6 +1145,23 @@ func (s *Service) handleRecord(ctx context.Context, unit contract.Unit, in recor
 		evidence, err := decodeSerenityEvidence(in.Observation.Evidence, intent)
 		if err != nil {
 			return contract.Outcome[jobResourceOutput]{}, err
+		}
+		// Hard-bound mode (P28): remember/promote/retract are governed
+		// single-writer commits (R15-009) -- a caller depending on one
+		// requires guaranteed enforcement, never a merely advisory
+		// acceptance. Recall is a disclosure read R15-008 explicitly
+		// permits to run advisory where policy allows, so it is exempt.
+		// evidence.lookup_authoritative is optional; its absence is not
+		// itself a refusal (many legitimate evidence documents never set
+		// it), but an explicit false is the adapter affirmatively saying
+		// this outcome cannot be authoritatively confirmed, and hard-bound
+		// mode refuses to silently downgrade that into a guaranteed claim.
+		if hardBoundKind(intent.Kind) && evidence.LookupAuthoritative != nil && !*evidence.LookupAuthoritative {
+			return contract.Outcome[jobResourceOutput]{}, capabilityUnsupported(
+				"Serenity %s for brain %s requires guaranteed enforcement (hard-bound mode), but the provider profile "+
+					"only confirmed this command in an advisory, non-authoritative way (lookup_authoritative=false); "+
+					"refusing to record it as a guaranteed claim rather than silently downgrading to best-effort",
+				intent.Kind, intent.BrainID)
 		}
 		var result json.RawMessage
 		var artifactID contract.ID
@@ -1073,7 +1205,29 @@ func (s *Service) handleRecord(ctx context.Context, unit contract.Unit, in recor
 		if in.Observation.Disposition == contract.DispositionNotSent {
 			requirements = []wireRequirement{{Code: reqWriteNotSent, Message: "the write was never physically sent"}}
 		} else {
-			requirements = []wireRequirement{}
+			// Record the honest refusal, not an empty requirement: the
+			// controller's own synthesized evidence for an adapter error
+			// (including the permanent capability_unsupported refusal every
+			// Serenity kind returns at the pinned protocol revision, per
+			// P27/PROTOCOL.md) carries {"code","reason"} alongside its own
+			// schema field even though it is not SerenityEvidence-shaped.
+			// An actionable setup prerequisite names exactly what refused
+			// and why, rather than a bare "failed" with no detail (P28
+			// item 1/3).
+			code, reason := peekRefusalDetail(in.Observation.Evidence)
+			reqCode := reqWriteFailed
+			message := "the writer refused the request"
+			switch {
+			case code == contract.CodeCapabilityUnsupported:
+				reqCode = reqCapabilityUnsupported
+				message = "Serenity refused this request as capability_unsupported"
+			case code != "":
+				message = fmt.Sprintf("the writer refused the request (%s)", code)
+			}
+			if reason != "" {
+				message += ": " + reason
+			}
+			requirements = []wireRequirement{{Code: reqCode, Message: message}}
 		}
 		if err := setIntentState(ctx, unit, intent, intentFailed, now); err != nil {
 			return contract.Outcome[jobResourceOutput]{}, err
@@ -1095,15 +1249,39 @@ func (s *Service) handleRecord(ctx context.Context, unit contract.Unit, in recor
 		if err := setIntentState(ctx, unit, intent, intentUnknown, now); err != nil {
 			return contract.Outcome[jobResourceOutput]{}, err
 		}
-		requirements := []wireRequirement{{Code: reqWriteUnknown,
-			Message: "writer acknowledgement was lost; outcome is preserved as unknown pending reconciliation"}}
+		// An unknown disposition here almost always means a genuinely
+		// ambiguous outcome (timeout, panic, lost connection) that
+		// reconciliation may eventually resolve -- the frozen effect rules
+		// forbid ever asserting nonexecution from it alone, so the job
+		// state stays outcome_unknown either way. But when the evidence
+		// names capability_unsupported specifically, that is not an
+		// ambiguous acknowledgement: the adapter's own contract guarantees
+		// no physical call was attempted, and reconciliation can never
+		// resolve it (Reconcile refuses identically -- see
+		// internal/adapters/serenity's lookupUnsupported). Saying so
+		// honestly, instead of the generic "pending reconciliation"
+		// message, is what makes this an actionable prerequisite rather
+		// than a permanently pending, misleading promise (P28 item 1/3).
+		message := "writer acknowledgement was lost; outcome is preserved as unknown pending reconciliation"
+		reason := "writer acknowledgement unknown"
+		if code, detail := peekRefusalDetail(in.Observation.Evidence); code == contract.CodeCapabilityUnsupported {
+			message = "the pinned Serenity adapter refused this request as capability_unsupported before any physical " +
+				"call; outcome is preserved as unknown per the frozen effect rules, but this is a permanent upstream " +
+				"limitation, not a transient lost acknowledgement -- reconciliation cannot resolve it until the " +
+				"adapter is requalified against a newer protocol revision"
+			if detail != "" {
+				message += ": " + detail
+			}
+			reason = message
+		}
+		requirements := []wireRequirement{{Code: reqWriteUnknown, Message: message}}
 		if err := updateJob(ctx, unit, job, jobOutcomeUnkown, nil, "", "", requirements, now); err != nil {
 			return contract.Outcome[jobResourceOutput]{}, err
 		}
 		if err := emit(ctx, unit, eventJobRecorded, job.ID, contract.Version(job.Version)); err != nil {
 			return contract.Outcome[jobResourceOutput]{}, err
 		}
-		if err := s.openReconciliation(ctx, unit, reconcileWriterAck, intent, "", "writer acknowledgement unknown", now); err != nil {
+		if err := s.openReconciliation(ctx, unit, reconcileWriterAck, intent, "", reason, now); err != nil {
 			return contract.Outcome[jobResourceOutput]{}, err
 		}
 	default:

@@ -81,12 +81,14 @@ const (
 
 // Requirement codes emitted by this owner.
 const (
-	reqWriterProvision    = "memory_writer_provision"
-	reqWriteUnknown       = "memory_write_unknown"
-	reqWriteNotSent       = "memory_write_not_sent"
-	reqContextUnavailable = "memory_context_artifact_unavailable"
-	reqReconciliation     = "memory_reconciliation_pending"
-	reqFreshness          = "memory_freshness_unavailable"
+	reqWriterProvision       = "memory_writer_provision"
+	reqWriteUnknown          = "memory_write_unknown"
+	reqWriteNotSent          = "memory_write_not_sent"
+	reqWriteFailed           = "memory_write_failed"
+	reqCapabilityUnsupported = "memory_capability_unsupported"
+	reqContextUnavailable    = "memory_context_artifact_unavailable"
+	reqReconciliation        = "memory_reconciliation_pending"
+	reqFreshness             = "memory_freshness_unavailable"
 )
 
 // Serenity adapter command statuses and evidence fields this owner acts on.
