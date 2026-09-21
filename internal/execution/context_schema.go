@@ -33,13 +33,23 @@ const contextArtifactBody = `{"$schema":"https://json-schema.org/draft/2020-12/s
 // worker turn's dispatched model-step effect must carry.
 const responsesModelStepBody = `{"$schema":"https://json-schema.org/draft/2020-12/schema","$ref":"#/$defs/ResponsesModelStepParameters"}`
 
-// composeContextSchemasOnce lazily composes the two operation-shaped
-// documents with the shared $defs catalog; composition happens once and the
-// documents are immutable thereafter.
+// modelOutputBody is the zatiti.model-output/v1 document schema
+// (ModelOutput): the exact normalized shape P16's interpretation stage
+// strictly validates a delivered model response against before trusting
+// anything in it. ModelOutput/ModelToolProposal are already present in the
+// contextSchemaDefs catalog above (P15 embedded them for the context
+// builder's own ContextToolCall reference); this body only wraps that
+// existing $def, it adds no new $defs text.
+const modelOutputBody = `{"$schema":"https://json-schema.org/draft/2020-12/schema","$ref":"#/$defs/ModelOutput"}`
+
+// composeContextSchemasOnce lazily composes the operation-shaped documents
+// with the shared $defs catalog; composition happens once and the documents
+// are immutable thereafter.
 var (
 	composeContextSchemasOnce  sync.Once
 	composedContextArtifact    json.RawMessage
 	composedResponsesModelStep json.RawMessage
+	composedModelOutput        json.RawMessage
 	composeContextSchemaErr    error
 )
 
@@ -61,6 +71,7 @@ func composeContextSchemas() error {
 		}{
 			{contextArtifactBody, &composedContextArtifact},
 			{responsesModelStepBody, &composedResponsesModelStep},
+			{modelOutputBody, &composedModelOutput},
 		}
 		for _, t := range targets {
 			composed, err := withAdapterDefs(t.body, defs)
@@ -109,4 +120,14 @@ func responsesModelStepSchema() (json.RawMessage, error) {
 		return nil, err
 	}
 	return composedResponsesModelStep, nil
+}
+
+// modelOutputSchema returns the composed zatiti.model-output/v1 schema:
+// P16 strictly validates every delivered model response against this exact
+// frozen shape before decoding or trusting any of its fields.
+func modelOutputSchema() (json.RawMessage, error) {
+	if err := composeContextSchemas(); err != nil {
+		return nil, err
+	}
+	return composedModelOutput, nil
 }
