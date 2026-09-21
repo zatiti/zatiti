@@ -362,3 +362,26 @@ type wireProfileCore struct {
 	MaxBytes   int64           `json:"max_bytes"`
 	Timeout    int64           `json:"timeout_seconds"`
 }
+
+// wireRepositoryProfile mirrors RepositoryVerifierProfile (schema kind
+// "repository_patch"): the repository_patch_applies/repository_command
+// flavor's fields beyond the shared identity core wireProfileCore already
+// reads. command_id/runner_profile/environment_profile are opaque
+// identifiers that resolve only against the prequalified local runner
+// registry (repository_runner.go); nothing here is executable argv/env by
+// itself, matching "no request supplies executable paths or argv"
+// (internal/execution/AGENTS.md).
+type wireRepositoryProfile struct {
+	Schema             string          `json:"schema"`
+	Kind               string          `json:"kind"`
+	ID                 string          `json:"id"`
+	Version            string          `json:"version"`
+	CodeDigest         contract.Digest `json:"code_digest"`
+	RunnerProfile      string          `json:"runner_profile"`
+	CommandID          string          `json:"command_id"`
+	CommandDigest      contract.Digest `json:"command_digest"`
+	EnvironmentProfile string          `json:"environment_profile"`
+	Network            string          `json:"network"`
+	MaxOutputBytes     int64           `json:"max_output_bytes"`
+	TimeoutSeconds     int64           `json:"timeout_seconds"`
+}
