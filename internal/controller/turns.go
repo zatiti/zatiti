@@ -18,43 +18,42 @@ import (
 // generic effect pipeline (tick.go/deliver.go, extended below), and
 // independent verification through the real contract.Verifier.
 //
-// Two confirmed, out-of-authority contract gaps bound what this phase can
-// actually complete today; both are reported as controller obligations
-// (never silently dropped, never worked around by inventing a seam this
-// package has no authority to add) and are named in full in the landing
-// report:
+// One of the two out-of-authority contract gaps this phase originally
+// found is now closed; the other remains and is reported as a controller
+// obligation (never silently dropped, never worked around by inventing a
+// seam this package has no authority to add):
 //
-//  1. _effects.prepare's caller allowlist (internal/effects/service.go,
-//     opMetas[opPrepare].callers) is {execution, memory, connections,
-//     skills, installation} -- "controller" is not present, and
-//     Application.Internal enforces this allowlist by simple membership
-//     (internal/application/dispatch.go, callerAllowed). Nothing this
-//     package calls can therefore itself dispatch a model_step (or
-//     prepare_session) effect for a committed, model_pending turn, even
-//     though context_build.go's own doc comment
-//     (buildResponsesModelStepAction) calls that dispatch "the
-//     controller's own tick responsibility". The gap is closed either by
-//     adding "controller" to that allowlist, or -- more consistent with
-//     every other case in this same package (prepareModelEffect,
-//     interpretExternalTool) -- by execution's own
-//     _execution.context.commit handler chaining internally to
-//     _effects.prepare the moment it commits a turn to model_pending, the
-//     same way those two existing call sites already do for their own
-//     cases. stalledModelDispatch below reports every turn stuck at
-//     model_pending as an obligation instead of guessing at either fix.
+//  1. CLOSED (execution-dispatch-model-step, the same-day P22 gap fix):
+//     _effects.prepare's caller allowlist (internal/effects/service.go,
+//     opMetas[opPrepare].callers) never included "controller", so nothing
+//     this package called could itself dispatch a model_step (or
+//     prepare_session) effect for a committed, model_pending turn. Closed
+//     the way this file's own original comment named as more consistent
+//     with prepareModelEffect/interpretExternalTool: execution's own
+//     _execution.context.commit handler now chains internally to
+//     _effects.prepare the moment it commits a turn to model_pending, no
+//     allowlist change needed. A model_pending turn therefore now always
+//     has an outstanding dispatched effect (visible via
+//     outstandingTurnEffects) unless its plan carries no resolved
+//     responses-adapter tool component (a worker with no hosted model
+//     connection configured) -- stalledModelDispatch below only reports
+//     that narrower remaining case, never a turn whose dispatch is
+//     legitimately in flight.
 //  2. A message/responsibility-triggered turn carries no attempt_id (only
 //     a task-triggered turn gets one, via _execution.enqueue's automatic
 //     turn admission); _execution.observation's frozen input schema
-//     requires attempt_id. Until gap 1 is closed this is moot for every
-//     turn, but once it is, a bare chat turn will still have no schema-
-//     valid path to receive its own model response -- already flagged as
-//     an out-of-scope contract gap at P16's landing (docs/roadmap.md,
-//     2026-09-21).
+//     requires attempt_id. Now that gap 1 is closed, this is live: a bare
+//     chat turn still has no schema-valid path to receive its own model
+//     response, so execution's own dispatch deliberately never fires for
+//     it (gated on AttemptID != "") rather than dispatching into a dead
+//     end -- already flagged as an out-of-scope contract gap at P16's
+//     landing (docs/roadmap.md, 2026-09-21).
 
 // Controller obligation kinds this phase reports.
 const (
-	// obligationModelDispatch names a turn whose committed context has no
-	// caller-allowed path to dispatch its model_step effect (gap 1 above).
+	// obligationModelDispatch names a model_pending turn whose plan names no
+	// resolved responses-adapter tool component, so nothing dispatched its
+	// model_step effect (see stalledModelDispatch).
 	obligationModelDispatch = "model_dispatch"
 	// obligationProposal names a prepared local_operation proposal the
 	// controller could not drive to completion.
@@ -207,6 +206,15 @@ func (c *Controller) driveWorkItems(ctx, workCtx context.Context, sess *session)
 			}
 			c.advanceContext(ctx, workCtx, sess, item)
 		case workKindProposal:
+			if outstanding[item.Turn.ID] {
+				// execution's own context.commit already dispatched this
+				// turn's prepare_session/model_step effect (gap 1, now
+				// closed); it is simply awaiting that effect's observation,
+				// not stalled. Withdraw any obligation a prior tick raised
+				// before that dispatch existed.
+				c.resolve(obligationModelDispatch, item.Turn.ID)
+				continue
+			}
 			c.stalledModelDispatch(sess, item.Turn)
 		}
 	}
@@ -439,15 +447,19 @@ func (c *Controller) commitStagedContext(ctx context.Context, sess *session, e e
 	c.journal(sess, e)
 }
 
-// stalledModelDispatch reports the confirmed, out-of-authority contract gap
-// (see this file's header) blocking every model_pending turn: there is no
-// caller-allowed path from this package to dispatch its model_step effect.
+// stalledModelDispatch reports a model_pending turn the caller (turnWork,
+// above) already confirmed has no outstanding dispatched effect: since gap
+// 1 closed (see this file's header), execution's own context.commit
+// dispatches prepare_session/model_step for every task-bound turn whose
+// plan names a resolved responses-adapter tool, so reaching here means the
+// plan names none -- a worker with no hosted model connection configured,
+// which can never have a model_step dispatched for it until that binding
+// exists.
 func (c *Controller) stalledModelDispatch(sess *session, turn wireWorkerTurn) {
 	f := prerequisiteMissing(
-		"turn %s committed context and is model_pending, but the controller has no caller-allowed path to "+
-			"dispatch its model_step effect: _effects.prepare's caller allowlist does not include \"controller\" "+
-			"(internal/effects/service.go), and no execution operation chains through to it on the controller's "+
-			"behalf for the turn pipeline -- a confirmed P00-level contract gap, not invented around here", turn.ID)
+		"turn %s committed context and is model_pending with no outstanding dispatched effect: its plan names no "+
+			"resolved responses-adapter tool component, so execution's own context.commit dispatch "+
+			"(dispatchModelEffect) had nothing to dispatch -- bind a hosted model connection for this worker", turn.ID)
 	c.note(f)
 	c.oblige(obligationModelDispatch, turn.ID, f)
 }
