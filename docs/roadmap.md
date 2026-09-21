@@ -1965,6 +1965,51 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   internal/scheduling not among the PR's failures.
   WAVE 5 STATUS: P39, P40, P17 landed (3 of 4). Only P15 remains
   (internal/execution) -- reported ready, in review now.
+- 2026-09-21 00:41 PT -- P15 LANDED (PR #29, 22cb0e78). Independently
+  reviewed: contextSchemaDefs (33 defs) diffed against internal/execution/
+  AGENTS.md's master $defs block via transitive-closure computation from
+  ContextArtifact/ResponsesModelStepParameters -- zero missing, zero
+  differing (confirmed the extra unreferenced defs are harmless: JSON
+  Schema validators ignore unused $defs entries). Read the real
+  handleContextPrepare/handleContextCommit in full: commit re-validates
+  the plan's pinned configuration revision and referenced artifacts are
+  still current before treating a context as accepted (discard-and-
+  rebuild on drift, matching the card's immutability requirement), and
+  records turn-scoped context lineage distinct from the existing
+  attempt-scoped lineage table (a WorkerTurn need not carry an attempt).
+  The three new peer calls (_messaging.pending, _memory.select,
+  _connections.resolve) confirmed legitimately declared outgoing calls
+  for this package with execution confirmed as an authorized caller on
+  the target side too -- not invented seams. All three required tests
+  read in full and independently re-run to confirm PASS: real JSON-
+  schema validation against the frozen adapter schema, precise message-
+  ordering assertions (instructions -> inbox -> tool result, each
+  exactly once), and a direct blob-store re-read proving byte-for-byte
+  immutability of a previously staged context. FOUND AND FIXED: one
+  genuinely unused test helper (setMemoryBinding, no test exercised the
+  "memory binding successfully authorized" path) -- removed rather than
+  force-wired in, matching the P14 precedent.
+  Two named, fail-closed design decisions evaluated as reasonable and
+  properly scoped, not founder decisions: a defaultResolveVersion=1
+  placeholder for tool/connection version pinning (fails closed with
+  stale_version on a wrong guess, since no peer surface lets execution
+  discover the current version -- out of this card's scope to fix for
+  real); and leaving the pre-existing legacy pre-turn hosted loop
+  (controller_ops.go's prepareModelEffect/handleTick/handleObservation,
+  audit finding G05's cited evidence) untouched, since CallbackRoute's
+  frozen enum has no "attempt" variant and retiring that path needs a
+  bigger, coordinated change -- flagged as a residual gap for a future
+  card (likely P22, the controller).
+  go test ./internal/execution: full suite passes including all three
+  required tests and TestDescriptorsMatchFrozenCatalog. CI confirmed
+  internal/execution not among the PR's failures.
+  WAVE 5 COMPLETE -- all 4 cards (P15, P17, P39, P40) landed. Combined
+  with wave 4 (P04, P14, P27, P35, P38, P41, complete as of earlier
+  today) and the foundation (P00-P02) plus wave 3's 15 cards: 28 of 50
+  cards landed (56%). Next: wave 6 is a single card, P16 (interpret
+  model responses into bounded governed work) -- the last piece before
+  P22 (the controller) can drive a turn from admission through a model
+  call through independent verification as one real running loop.
 
 ## Planned
 
