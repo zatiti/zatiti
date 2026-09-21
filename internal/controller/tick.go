@@ -31,6 +31,7 @@ func (c *Controller) tick(ctx, workCtx context.Context, sess *session) error {
 	c.wakes(ctx, sess)
 	c.readyScan(ctx, sess)
 	c.executionTick(ctx, sess)
+	c.turnWork(ctx, workCtx, sess)
 	waiting := c.jobs(ctx, workCtx, sess)
 	c.dispatch(ctx, workCtx, sess, waiting)
 
@@ -201,7 +202,7 @@ func (c *Controller) admit(ctx, workCtx context.Context, sess *session, op wireO
 	e.AttemptID = result.AttemptIDs[len(result.AttemptIDs)-1]
 	e.Scope = &scope
 	e.Bound = &bound
-	e.Route = routeFor(op.ID, action, waiting)
+	e.Route = c.routeFor(op.ID, result, action, waiting)
 	if !c.journal(sess, e) {
 		return false
 	}

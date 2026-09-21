@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"io"
 	"strings"
 	"time"
 
@@ -47,9 +48,16 @@ func (f *fx) action(parameters map[string]any, connection contract.ID) json.RawM
 // prepare commits one prepared operation, as a domain owner would through
 // _effects.prepare.
 func (f *fx) prepare(adapter string, parameters map[string]any) contract.ID {
+	return f.prepareRouted(adapter, parameters, "")
+}
+
+// prepareRouted commits one prepared operation carrying an explicit
+// callback_route, exactly as _effects.prepare persists one alongside the
+// action when a caller supplies it (P00-006).
+func (f *fx) prepareRouted(adapter string, parameters map[string]any, callbackRoute string) contract.ID {
 	id := contract.NewID()
-	f.exec(`INSERT INTO effects_operations (id, version, state, action, adapter) VALUES (?, 1, 'prepared', ?, ?)`,
-		string(id), string(f.action(parameters, "")), adapter)
+	f.exec(`INSERT INTO effects_operations (id, version, state, action, adapter, callback_route) VALUES (?, 1, 'prepared', ?, ?, ?)`,
+		string(id), string(f.action(parameters, "")), adapter, callbackRoute)
 	return id
 }
 
@@ -87,14 +95,14 @@ func (f *fx) observations(id contract.ID) []string {
 }
 
 type fxOperation struct {
-	id, state, action, adapter, admitMode string
-	version                               int64
+	id, state, action, adapter, admitMode, callbackRoute string
+	version                                              int64
 }
 
 func loadFxOperation(ctx context.Context, u contract.Unit, id contract.ID) (*fxOperation, error) {
 	o := &fxOperation{id: string(id)}
-	err := u.QueryRowContext(ctx, `SELECT version, state, action, adapter, admit_mode FROM effects_operations WHERE id = ?`, string(id)).
-		Scan(&o.version, &o.state, &o.action, &o.adapter, &o.admitMode)
+	err := u.QueryRowContext(ctx, `SELECT version, state, action, adapter, admit_mode, callback_route FROM effects_operations WHERE id = ?`, string(id)).
+		Scan(&o.version, &o.state, &o.action, &o.adapter, &o.admitMode, &o.callbackRoute)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, fxFault(contract.CodeNotFound, "operation not found")
 	}
@@ -122,10 +130,14 @@ func (o *fxOperation) wire(ctx context.Context, u contract.Unit) (map[string]any
 		}
 		ids = append(ids, id)
 	}
-	return map[string]any{
+	w := map[string]any{
 		"id": o.id, "version": o.version, "action": json.RawMessage(o.action),
 		"action_digest": fxDigest, "state": o.state, "attempt_ids": ids,
-	}, rows.Err()
+	}
+	if o.callbackRoute != "" {
+		w["callback_route"] = json.RawMessage(o.callbackRoute)
+	}
+	return w, rows.Err()
 }
 
 func (f *fx) effectsPending(ctx context.Context, u contract.Unit, input json.RawMessage) (any, error) {
@@ -241,11 +253,15 @@ func (f *fx) effectsClaim(ctx context.Context, u contract.Unit, input json.RawMe
 	if err := o.transition(ctx, u, "executing"); err != nil {
 		return nil, err
 	}
-	return map[string]any{"resource": map[string]any{
+	resource := map[string]any{
 		"operation_id": o.id, "attempt_id": a.id, "generation": a.generation, "adapter": o.adapter,
 		"action": json.RawMessage(o.action), "credential_ref": "secret-ref-synthetic",
 		"deadline": f.clock.Now().Add(time.Hour).Format(time.RFC3339Nano),
-	}}, nil
+	}
+	if o.callbackRoute != "" {
+		resource["callback_route"] = json.RawMessage(o.callbackRoute)
+	}
+	return map[string]any{"resource": resource}, nil
 }
 
 func (f *fx) effectsRecord(ctx context.Context, u contract.Unit, input json.RawMessage) (any, error) {
@@ -315,13 +331,27 @@ func (f *fx) effectsRecord(ctx context.Context, u contract.Unit, input json.RawM
 
 // ---- execution ----
 
+// executionFence mirrors the real _execution.fence's own turn-fencing
+// behavior (controller_ops.go, handleFence): a restart also fences every
+// WorkerTurn claimed under a generation below the given one back to
+// waiting/recovery with an immediate next_wake, so it becomes reachable
+// again through the ordinary resume -> claimed -> context/proposal pipeline
+// instead of being silently abandoned mid-flight.
 func (f *fx) executionFence(ctx context.Context, u contract.Unit, input json.RawMessage) (any, error) {
 	var in fenceInput
 	if err := decode(input, &in); err != nil {
 		return nil, err
 	}
-	_, err := u.ExecContext(ctx, `INSERT INTO execution_fences (generation, reason) VALUES (?, ?)`, in.Generation, in.Reason)
-	return map[string]any{"attempt_ids": []string{}}, err
+	if _, err := u.ExecContext(ctx, `INSERT INTO execution_fences (generation, reason) VALUES (?, ?)`, in.Generation, in.Reason); err != nil {
+		return nil, err
+	}
+	now := f.clock.Now().Format(time.RFC3339Nano)
+	if _, err := u.ExecContext(ctx, `UPDATE execution_turns SET state = 'waiting', next_wake = ?
+		WHERE generation < ? AND state IN ('claimed', 'context_pending', 'model_pending', 'proposal_pending')`,
+		now, in.Generation); err != nil {
+		return nil, err
+	}
+	return map[string]any{"attempt_ids": []string{}}, nil
 }
 
 func (f *fx) executionTick(ctx context.Context, u contract.Unit, input json.RawMessage) (any, error) {
@@ -350,6 +380,14 @@ func (f *fx) executionObservation(ctx context.Context, u contract.Unit, input js
 	if err := decode(input, &in); err != nil {
 		return nil, err
 	}
+	var turnID string
+	err := u.QueryRowContext(ctx, `SELECT id FROM execution_turns WHERE attempt_id = ?`, string(in.AttemptID)).Scan(&turnID)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, err
+	}
+	if turnID != "" {
+		return f.interpretTurnObservation(ctx, u, contract.ID(turnID), in)
+	}
 	var n int
 	if err := u.QueryRowContext(ctx, `SELECT COUNT(*) FROM execution_observations WHERE operation_id = ?`, string(in.OperationID)).Scan(&n); err != nil {
 		return nil, err
@@ -357,9 +395,113 @@ func (f *fx) executionObservation(ctx context.Context, u contract.Unit, input js
 	if n > 0 {
 		return nil, fxFault(contract.CodeConflict, "operation has no pending observation")
 	}
-	_, err := u.ExecContext(ctx, `INSERT INTO execution_observations (operation_id, attempt_id, disposition, evidence) VALUES (?, ?, ?, ?)`,
+	_, err = u.ExecContext(ctx, `INSERT INTO execution_observations (operation_id, attempt_id, disposition, evidence) VALUES (?, ?, ?, ?)`,
 		string(in.OperationID), string(in.AttemptID), in.Observation.Disposition, string(in.Observation.Evidence))
 	return map[string]any{"resource": f.attemptResource(in.AttemptID)}, err
+}
+
+// fxToolProposal is the fake's own convenience shape for a controlled
+// model response's tool_proposals[] entries. The real ModelToolProposal
+// carries tool.id/operation_id and defers "what kind of decision is this"
+// to matching against sealed local-decision-tool ids or the committed
+// context plan's own resolved tool list (interpret.go); this fake, testing
+// only the controller's own delivery/routing code and never execution's
+// interpretation logic, names the kind directly.
+type fxToolProposal struct {
+	ID     string `json:"id"`
+	Kind   string `json:"kind"`
+	Text   string `json:"text,omitempty"`
+	Digest string `json:"result_digest,omitempty"`
+}
+
+// interpretTurnObservation is the fake's turn-aware branch of
+// _execution.observation: given a controlled ModelOutput-shaped evidence
+// (fxToolProposal entries under "tool_proposals"), it records each proposal
+// and advances the turn/attempt exactly as P16's real interpretation stage
+// would for the two dispositions this package's required tests exercise --
+// reply (terminal, no outside-unit action) and report_outputs (reports the
+// turn's attempt and admits a durable verification request).
+func (f *fx) interpretTurnObservation(ctx context.Context, u contract.Unit, turnID contract.ID, in executionObservationInput) (any, error) {
+	if in.Observation.Disposition != contract.DispositionSucceeded && in.Observation.Disposition != contract.DispositionAccepted {
+		// Mirrors the real interpretTurnObservation's own first check
+		// (internal/execution/interpret.go): an unconfirmed delivery
+		// carries no model output to interpret, refused rather than
+		// silently accepted or guessed at.
+		return nil, fxFault(contract.CodeConflict, "observation disposition carries no model output to interpret")
+	}
+	t, err := loadFxTurnByID(ctx, u, turnID)
+	if err != nil {
+		return nil, err
+	}
+	var body struct {
+		ToolProposals []fxToolProposal `json:"tool_proposals"`
+	}
+	if err := json.Unmarshal(in.Observation.Evidence, &body); err != nil {
+		return nil, fxFault(contract.CodeInvalidInput, "malformed model output evidence")
+	}
+	stepIndex := t.stepsUsed
+	for _, tp := range body.ToolProposals {
+		normalized, _ := json.Marshal(map[string]any{"kind": tp.Kind, "text": tp.Text})
+		state := "recorded"
+		if tp.Kind == "local_operation" || tp.Kind == "external_tool" {
+			state = "prepared"
+		}
+		if _, err := u.ExecContext(ctx, `INSERT INTO execution_proposals (turn_id, step_index, proposal_id, normalized_proposal, state, created_at)
+			VALUES (?, ?, ?, ?, ?, ?)`, string(turnID), stepIndex, tp.ID, string(normalized), state, f.clock.Now().Format(time.RFC3339Nano)); err != nil {
+			return nil, err
+		}
+		switch tp.Kind {
+		case "reply":
+			t.state = "completed"
+		case "report_outputs":
+			t.state = "reporting"
+			if in.AttemptID != "" {
+				if _, err := u.ExecContext(ctx, `UPDATE execution_turn_attempts SET state = 'reported' WHERE id = ?`, string(in.AttemptID)); err != nil {
+					return nil, err
+				}
+				jobID := contract.NewID()
+				req := verificationRequestDoc(jobID, in.AttemptID, tp.Digest)
+				if _, err := u.ExecContext(ctx, `INSERT INTO execution_verification_requests (job_id, attempt_id, task_id, state, request)
+					VALUES (?, ?, ?, 'pending', ?)`, string(jobID), string(in.AttemptID), string(contract.NewID()), string(req)); err != nil {
+					return nil, err
+				}
+			}
+		}
+		t.stepsUsed++
+	}
+	if err := t.save(ctx, u); err != nil {
+		return nil, err
+	}
+	return map[string]any{"resource": f.attemptResource(in.AttemptID)}, nil
+}
+
+// verificationRequestDoc builds a schema-valid Adapter_VerificationRequest
+// document naming one expected check against the given digest.
+func verificationRequestDoc(jobID, attemptID contract.ID, digest string) json.RawMessage {
+	if digest == "" {
+		digest = fxDigest
+	}
+	raw, _ := json.Marshal(map[string]any{
+		"schema": "zatiti.verification-request/v1", "job_id": jobID, "task_id": contract.NewID(),
+		"attempt_id": attemptID, "scope": map[string]any{"installation_id": contract.NewID()},
+		"acceptance_digest": fxDigest,
+		"profile": map[string]any{
+			"schema": "zatiti.verifier-profile/v1", "kind": "artifact_contract", "id": "synthetic-verifier",
+			"version": "1", "code_digest": fxDigest, "supported_checks": []string{"digest"},
+			"max_bytes": 1048576, "timeout_seconds": 30,
+			"capability_evidence": map[string]any{
+				"artifact":        map[string]any{"id": contract.NewID(), "digest": fxDigest},
+				"adapter_version": "1", "source_revision": "1", "protocol_revision": "1", "profile_digest": fxDigest,
+				"qualified_at": "2026-03-01T12:00:00Z", "capabilities": []string{}, "limitations": []string{},
+			},
+		},
+		"sealed_inputs": []any{}, "outputs": []any{},
+		"expected_observations": []any{
+			map[string]any{"check_id": "output-digest", "kind": "artifact_digest", "expected": "pass", "expected_digest": digest},
+		},
+		"deadline": "2027-01-01T00:00:00Z",
+	})
+	return raw
 }
 
 // job commits one durable job as an owner would through _execution.job.create.
@@ -727,6 +869,18 @@ type fakeBlobs struct {
 }
 
 func newFakeBlobs() *fakeBlobs { return &fakeBlobs{mu: make(chan struct{}, 1)} }
+
+// Stage computes the real digest of the given bytes and returns a unique
+// staging reference; Publish (below) is what records it published.
+func (b *fakeBlobs) Stage(_ context.Context, r io.Reader, size int64) (string, contract.Digest, int64, error) {
+	data, err := io.ReadAll(r)
+	if err != nil {
+		return "", "", 0, err
+	}
+	digest := contract.Hash(data)
+	ref := "staged-" + string(contract.NewID())
+	return ref, digest, int64(len(data)), nil
+}
 
 func (b *fakeBlobs) Publish(_ context.Context, ref string, _ contract.Digest) error {
 	b.mu <- struct{}{}

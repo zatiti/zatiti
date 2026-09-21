@@ -48,11 +48,30 @@ const (
 	// phaseStranded retains an admission whose commit is unknowable through
 	// the controller's allowed calls.
 	phaseStranded phase = "stranded"
+
+	// Turn-work phases (kindTurn). Every owner call these phases bracket
+	// (work.claim, context.prepare, context.commit) is a pure database
+	// transaction with its own version/generation fence and is safe to
+	// retry unconditionally after a crash -- unlike an effect's adapter
+	// call, nothing here is a physical, possibly-already-sent invocation.
+	// The one physical action in this phase set is staging and publishing
+	// the context artifact's bytes outside any transaction, which is why it
+	// gets its own write-ahead phase: phaseContextStaging is durable before
+	// the stage/publish calls run, and phaseContextStaged (carrying the
+	// resulting artifact) is durable before context.commit is attempted, so
+	// a crash between them resumes by committing the already-published
+	// artifact instead of staging a second one.
+	phaseTurnClaiming   phase = "turn_claiming"
+	phaseContextStaging phase = "context_staging"
+	phaseContextStaged  phase = "context_staged"
 )
 
 const (
 	kindEffect = "effect"
 	kindJob    = "job"
+	// kindTurn is one durable worker-turn work-item step: a claim of
+	// pending/waiting work, or the stage-then-commit of one context plan.
+	kindTurn = "turn"
 )
 
 const (
@@ -69,7 +88,8 @@ const (
 
 // route names the owner callback an effect outcome is delivered to.
 type route struct {
-	// Owner is "", "execution", "memory" or "connections".
+	// Owner is "", "execution", "execution_proposal", "memory" or
+	// "connections".
 	Owner string `json:"owner,omitempty"`
 	// AttemptID is the execution attempt a model effect belongs to.
 	AttemptID contract.ID `json:"attempt_id,omitempty"`
@@ -77,6 +97,25 @@ type route struct {
 	JobID contract.ID `json:"job_id,omitempty"`
 	// Connection is the connection a probe validated.
 	Connection wireRef `json:"connection,omitempty"`
+	// ProposalID names the WorkerTurn proposal (owner execution_proposal)
+	// this effect's outcome completes.
+	ProposalID string `json:"proposal_id,omitempty"`
+}
+
+// turnProposalRef is what the controller remembers about one prepared
+// external_tool proposal between discovering it (_execution.proposal.
+// prepare, immediately after delivering the model step that produced it)
+// and its own effect's eventual delivery.
+type turnProposalRef struct {
+	TurnID     contract.ID
+	StepIndex  int64
+	ProposalID string
+	// ExpectedVersion is the turn's version captured at discovery time. The
+	// turn stays proposal_pending -- unchanged -- for exactly as long as
+	// this one prepared proposal is outstanding, so the version observed
+	// when the proposal was first discovered "prepared" is still current
+	// when its effect later completes and this proposal is recorded.
+	ExpectedVersion int64
 }
 
 // publishedOutput is one staged output whose bytes and metadata are
@@ -114,6 +153,11 @@ type entry struct {
 	JobOwner   string      `json:"job_owner,omitempty"`
 	JobOp      string      `json:"job_operation,omitempty"`
 	Outcome    *JobOutcome `json:"outcome,omitempty"`
+
+	// Turn-work fields (kindTurn).
+	TurnID         contract.ID      `json:"turn_id,omitempty"`
+	Plan           *wireContextPlan `json:"plan,omitempty"`
+	StagedArtifact *wireArtifact    `json:"staged_artifact,omitempty"`
 
 	// Fault is the owner's refusal or the prerequisite that blocks progress.
 	Fault     *contract.Fault `json:"fault,omitempty"`
@@ -240,6 +284,15 @@ func (j *journal) merge(e entry) {
 		e.Unacked = e.Unacked || prev.Unacked
 		if e.Outcome == nil {
 			e.Outcome = prev.Outcome
+		}
+		if e.TurnID == "" {
+			e.TurnID = prev.TurnID
+		}
+		if e.Plan == nil {
+			e.Plan = prev.Plan
+		}
+		if e.StagedArtifact == nil {
+			e.StagedArtifact = prev.StagedArtifact
 		}
 	}
 	if e.finished() {

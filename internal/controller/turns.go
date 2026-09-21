@@ -1,0 +1,635 @@
+package controller
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+
+	"github.com/zatiti/zatiti/internal/contract"
+)
+
+// Turn-driving phase (P22, "the controller drives turns, contexts and
+// model/tool work"): discovers worker-recipient messages, admits durable
+// WorkerTurns, fairly claims turn/context/proposal work, stages and
+// publishes context, and drives whatever P16's interpretation stage left
+// "prepared" for an outside-unit caller -- a local_operation through the
+// real contract.WorkerOperator, an external_tool through the existing
+// generic effect pipeline (tick.go/deliver.go, extended below), and
+// independent verification through the real contract.Verifier.
+//
+// Two confirmed, out-of-authority contract gaps bound what this phase can
+// actually complete today; both are reported as controller obligations
+// (never silently dropped, never worked around by inventing a seam this
+// package has no authority to add) and are named in full in the landing
+// report:
+//
+//  1. _effects.prepare's caller allowlist (internal/effects/service.go,
+//     opMetas[opPrepare].callers) is {execution, memory, connections,
+//     skills, installation} -- "controller" is not present, and
+//     Application.Internal enforces this allowlist by simple membership
+//     (internal/application/dispatch.go, callerAllowed). Nothing this
+//     package calls can therefore itself dispatch a model_step (or
+//     prepare_session) effect for a committed, model_pending turn, even
+//     though context_build.go's own doc comment
+//     (buildResponsesModelStepAction) calls that dispatch "the
+//     controller's own tick responsibility". The gap is closed either by
+//     adding "controller" to that allowlist, or -- more consistent with
+//     every other case in this same package (prepareModelEffect,
+//     interpretExternalTool) -- by execution's own
+//     _execution.context.commit handler chaining internally to
+//     _effects.prepare the moment it commits a turn to model_pending, the
+//     same way those two existing call sites already do for their own
+//     cases. stalledModelDispatch below reports every turn stuck at
+//     model_pending as an obligation instead of guessing at either fix.
+//  2. A message/responsibility-triggered turn carries no attempt_id (only
+//     a task-triggered turn gets one, via _execution.enqueue's automatic
+//     turn admission); _execution.observation's frozen input schema
+//     requires attempt_id. Until gap 1 is closed this is moot for every
+//     turn, but once it is, a bare chat turn will still have no schema-
+//     valid path to receive its own model response -- already flagged as
+//     an out-of-scope contract gap at P16's landing (docs/roadmap.md,
+//     2026-09-21).
+
+// Controller obligation kinds this phase reports.
+const (
+	// obligationModelDispatch names a turn whose committed context has no
+	// caller-allowed path to dispatch its model_step effect (gap 1 above).
+	obligationModelDispatch = "model_dispatch"
+	// obligationProposal names a prepared local_operation proposal the
+	// controller could not drive to completion.
+	obligationProposal = "proposal"
+	// obligationVerification names a claimed VerificationRequest the
+	// controller could not execute.
+	obligationVerification = "verification"
+)
+
+// contextDocumentSchema names the minimal, honest document the controller
+// itself assembles and publishes as a turn's committed context artifact.
+// _execution.context.commit's own handler (turn_ops.go, handleContextCommit)
+// never reads or validates the staged bytes' content -- it only checks that
+// the plan's pinned refs and configuration revision are still current and
+// that the caller supplied a published (not merely staged) artifact -- so
+// this is a legitimate, schema-honest choice given what the wire ContextPlan
+// actually exposes (refs, byte/token bounds, configuration revision), not a
+// reproduction of execution's own private zatiti.context/v1 transcript
+// (context_build.go's contextRecipe/contextComponent, and the stageContext/
+// buildResponsesModelStepAction functions that fold it into one, are
+// unexported, keyed to execution's own unexported row types, and never
+// wired to any operation or exported constructor a sibling package could
+// call -- see the report for why reproducing that exact private format here
+// would itself be inventing a seam, not implementing one).
+const contextDocumentSchema = "zatiti.controller.context-plan/v1"
+
+type contextDocument struct {
+	Schema                string         `json:"schema"`
+	TurnID                contract.ID    `json:"turn_id"`
+	ConfigurationRevision int64          `json:"configuration_revision"`
+	Refs                  []wireArtifact `json:"refs"`
+}
+
+// turnRouteInfo is what the controller remembers, between discovering a
+// model_pending turn's own attempt and later delivering that model step's
+// observation, to interpret the returned evidence and drive whatever it
+// leaves "prepared". Rebuilt every tick from the owner's own live state
+// (driveWorkItems) before it is ever consulted, so a fresh process never
+// consults a stale entry.
+type turnRouteInfo struct {
+	TurnID    contract.ID
+	StepIndex int64
+	Version   int64
+	WorkerID  contract.ID
+	Scope     contract.Scope
+}
+
+// turnWork is the bounded, fair turn-driving tick phase. Every sub-phase
+// processes its whole bounded batch, continuing past one item's refusal or
+// failure, so a blocked item never starves a later, eligible one in the
+// same batch.
+func (c *Controller) turnWork(ctx, workCtx context.Context, sess *session) {
+	if !c.admitting() {
+		return
+	}
+	c.discoverMessages(ctx, sess)
+	c.resumeContextStages(ctx, workCtx, sess)
+	c.driveWorkItems(ctx, workCtx, sess)
+	c.driveVerification(ctx, workCtx, sess)
+}
+
+// discoverMessages bounded-scans messages admitted and awaiting a durable
+// worker turn (_messaging.ready) and admits -- or safely injects into an
+// already-active turn for -- each recipient. This is a fallback discovery
+// mechanism alongside _execution.work.pending's own "claim" scan, never the
+// sole stranded-work response: a message's turn is also reachable the
+// ordinary way once admitted, exactly like every other pending turn.
+func (c *Controller) discoverMessages(ctx context.Context, sess *session) {
+	var out messagesOutput
+	if err := c.call(ctx, sess, "_messaging.ready", limitInput{Limit: c.batch()}, &out); err != nil {
+		c.note(err)
+		return
+	}
+	for _, m := range out.Items {
+		for _, recipient := range m.RecipientIDs {
+			if !c.admitting() {
+				return
+			}
+			scope := m.Scope
+			scope.WorkerID = recipient
+			var admitted turnOutput
+			err := c.write(func() error {
+				return c.call(ctx, sess, "_execution.turn.admit", turnAdmitInput{
+					Source: wireTurnSource{
+						Kind: "message", SourceID: m.ID, SourceVersion: m.Version, RecipientWorkerID: recipient,
+					},
+					WorkerID: recipient, Scope: scope, RequesterID: m.SenderID,
+				}, &admitted)
+			})
+			if err != nil {
+				c.note(err)
+			}
+		}
+	}
+}
+
+// driveWorkItems bounded-scans typed claim/context/proposal/resume work
+// (_execution.work.pending) and advances each item as far as an allowed
+// call and the confirmed contract gaps above permit.
+func (c *Controller) driveWorkItems(ctx, workCtx context.Context, sess *session) {
+	var out workItemsOutput
+	if err := c.call(ctx, sess, "_execution.work.pending", limitInput{Limit: c.batch()}, &out); err != nil {
+		c.note(err)
+		return
+	}
+	// Refresh the turn-routing indexes from this tick's live scan before
+	// dispatch() (called later this same tick, from tick.go) tries to route
+	// any worker_turn-callback-routed effect delivery.
+	c.turnsMu.Lock()
+	for _, item := range out.Items {
+		if item.Turn.AttemptID == "" {
+			continue
+		}
+		c.turnAttempts[item.Turn.ID] = item.Turn.AttemptID
+		c.attemptTurns[item.Turn.AttemptID] = turnRouteInfo{
+			TurnID: item.Turn.ID, StepIndex: item.Turn.StepsUsed, Version: item.Turn.Version,
+			WorkerID: item.Turn.WorkerID, Scope: item.Turn.Scope,
+		}
+	}
+	c.turnsMu.Unlock()
+
+	// A turn fenced out of model_pending (generation advanced while its
+	// model_step was in flight, controller_ops.go's real handleFence) comes
+	// back through work.claim's "waiting" branch as an ordinary "claimed"
+	// turn -- context_pending, model_pending and proposal_pending are all
+	// fenced the same way. Nothing in the frozen contract's own state
+	// machine stops a resumed "claimed" turn from rebuilding a second
+	// context and dispatching a second model_step while the first one's
+	// outcome is still unresolved (outcome_unknown, awaiting a
+	// reconciliation P23 has not landed yet). This package's own required
+	// no-double-dispatch guarantee (P22.md) is stricter than that, so a
+	// turn with an outstanding worker_turn-routed effect is never rebuilt
+	// here -- it waits for that effect to resolve (or be reconciled, once
+	// P23 exists) instead of piling a second physical call on top.
+	outstanding := c.outstandingTurnEffects(ctx, sess)
+
+	for _, item := range out.Items {
+		if !c.admitting() {
+			return
+		}
+		switch item.Kind {
+		case workKindClaim, workKindResume:
+			c.claimTurnWork(ctx, sess, item)
+		case workKindContext:
+			if outstanding[item.Turn.ID] {
+				c.oblige(obligationModelDispatch, item.Turn.ID, prerequisiteMissing(
+					"turn %s has an unresolved model_step effect outstanding; refusing to dispatch a second one until it resolves or is reconciled",
+					item.Turn.ID))
+				continue
+			}
+			c.advanceContext(ctx, workCtx, sess, item)
+		case workKindProposal:
+			c.stalledModelDispatch(sess, item.Turn)
+		}
+	}
+}
+
+// outstandingTurnEffects reads the bounded pending-effects scan and returns
+// the set of turn ids naming a worker_turn callback route among them -- an
+// admitted, claimed-or-awaiting-confirmation, or outcome_unknown physical
+// call this package must never pile a duplicate on top of.
+func (c *Controller) outstandingTurnEffects(ctx context.Context, sess *session) map[contract.ID]bool {
+	var pending operationsOutput
+	if err := c.call(ctx, sess, "_effects.pending", limitInput{Limit: c.batch()}, &pending); err != nil {
+		c.note(err)
+		return nil
+	}
+	out := make(map[contract.ID]bool, len(pending.Operations))
+	for _, op := range pending.Operations {
+		if len(op.CallbackRoute) == 0 {
+			continue
+		}
+		var cb wireCallbackRoute
+		if json.Unmarshal(op.CallbackRoute, &cb) == nil && cb.Kind == "worker_turn" && cb.TurnID != "" {
+			out[cb.TurnID] = true
+		}
+	}
+	return out
+}
+
+// claimTurnWork claims one pending or due-to-resume turn. _execution.work.
+// claim is a pure database transaction with its own version/generation
+// fence and no physical side effect, and a retry against the same key
+// inspects and returns the same claim rather than creating a second one
+// (turn_ops.go, handleWorkClaim) -- so a crash before this call ever
+// commits leaves nothing to recover: the turn is simply reclaimed, once,
+// the next time work.pending lists it.
+func (c *Controller) claimTurnWork(ctx context.Context, sess *session, item wireWorkItem) {
+	var claimed workClaimOutput
+	err := c.write(func() error {
+		return c.call(ctx, sess, "_execution.work.claim", workClaimInput{
+			WorkID: item.Turn.ID, ExpectedVersion: item.Turn.Version, Generation: sess.generation,
+		}, &claimed)
+	})
+	if err != nil {
+		c.note(err)
+		return
+	}
+	if claimed.Item.Turn.AttemptID != "" {
+		c.turnsMu.Lock()
+		c.turnAttempts[claimed.Item.Turn.ID] = claimed.Item.Turn.AttemptID
+		c.turnsMu.Unlock()
+	}
+}
+
+// advanceContext builds a fresh context plan for a freshly-claimed turn and
+// stages/commits it. _execution.context.prepare transitions the turn to
+// context_pending (turn_ops.go/context_build.go), a state _execution.work.
+// pending's own scan does not list -- so unlike every other phase here, a
+// turn stuck mid-way through this one is never rediscovered by re-scanning
+// pending work; only this package's own journal remembers it, which is
+// exactly what resumeContextStages (called every tick, before this scan) is
+// for.
+func (c *Controller) advanceContext(ctx, workCtx context.Context, sess *session, item wireWorkItem) {
+	var prepared contextPlanOutput
+	err := c.write(func() error {
+		return c.call(ctx, sess, "_execution.context.prepare", contextPrepareInput{
+			TurnID: item.Turn.ID, ExpectedVersion: item.Turn.Version, Generation: sess.generation,
+		}, &prepared)
+	})
+	if err != nil {
+		c.note(err)
+		return
+	}
+	p := prepared.Resource
+	scope := item.Turn.Scope
+	e := entry{
+		ID: string(contract.NewID()), Kind: kindTurn, Phase: phaseContextStaging,
+		Generation: sess.generation, TurnID: item.Turn.ID, Plan: &p, Scope: &scope,
+	}
+	if !c.journal(sess, e) {
+		return
+	}
+	c.stageAndCommit(ctx, workCtx, sess, e)
+}
+
+// resumeContextStages resumes every open kindTurn context entry this
+// generation from its last durable phase, before this tick's ordinary work-
+// item scan runs. A staged-but-uncommitted context (the process died after
+// publishing the bytes and before the commit call was durable) resumes at
+// the commit, reusing the already-published artifact rather than staging a
+// second one for the same plan.
+func (c *Controller) resumeContextStages(ctx, workCtx context.Context, sess *session) {
+	for _, e := range sess.journal.snapshot() {
+		if e.Kind != kindTurn || !e.open() || e.Generation != sess.generation {
+			continue
+		}
+		if !c.admitting() {
+			return
+		}
+		switch e.Phase {
+		case phaseContextStaging:
+			c.stageAndCommit(ctx, workCtx, sess, e)
+		case phaseContextStaged:
+			c.commitStagedContext(ctx, sess, e)
+		}
+	}
+}
+
+// stageAndCommit performs the one physical action in the turn-work phase --
+// building, staging and publishing the context artifact's bytes outside any
+// transaction -- durably journaling the resulting artifact before ever
+// attempting the commit call, then commits.
+func (c *Controller) stageAndCommit(ctx, workCtx context.Context, sess *session, e entry) {
+	ref, ok := c.stageContextArtifact(workCtx, sess, e)
+	if !ok {
+		return
+	}
+	e.Phase = phaseContextStaged
+	e.StagedArtifact = &ref
+	if !c.journal(sess, e) {
+		return
+	}
+	c.commitStagedContext(ctx, sess, e)
+}
+
+// stageContextArtifact builds, stages and publishes the context document
+// outside any transaction, journaling nothing itself -- the caller journals
+// the result once staging is durable.
+func (c *Controller) stageContextArtifact(ctx context.Context, sess *session, e entry) (wireArtifact, bool) {
+	c.mu.Lock()
+	blobs := c.deps.Blobs
+	c.mu.Unlock()
+	if blobs == nil {
+		f := prerequisiteMissing(
+			"no blob store is attached; turn %s's context cannot be staged and published", e.TurnID)
+		c.note(f)
+		c.oblige(obligationPublication, e.TurnID, f)
+		return wireArtifact{}, false
+	}
+	if e.Plan == nil {
+		c.note(internalFault("journal entry for turn %s reached context staging without a plan", e.TurnID))
+		return wireArtifact{}, false
+	}
+	doc, err := json.Marshal(contextDocument{
+		Schema: contextDocumentSchema, TurnID: e.TurnID,
+		ConfigurationRevision: e.Plan.ConfigurationRevision, Refs: nonNilArtifacts(e.Plan.Refs),
+	})
+	if err != nil {
+		c.note(internalFault("turn %s's context document could not be encoded", e.TurnID))
+		return wireArtifact{}, false
+	}
+	if int64(len(doc)) > e.Plan.ByteBound && e.Plan.ByteBound > 0 {
+		f := capabilityUnsupported("turn %s's context document is %d bytes, exceeding the plan's %d byte bound",
+			e.TurnID, len(doc), e.Plan.ByteBound)
+		c.oblige(obligationPublication, e.TurnID, f)
+		return wireArtifact{}, false
+	}
+	stagingRef, digest, size, err := blobs.Stage(ctx, bytes.NewReader(doc), int64(len(doc)))
+	if err != nil {
+		f := unavailable("turn %s's context could not be staged: %v", e.TurnID, err)
+		c.note(f)
+		c.oblige(obligationPublication, e.TurnID, f)
+		return wireArtifact{}, false
+	}
+	_ = size
+	if err := blobs.Publish(ctx, stagingRef, digest); err != nil {
+		f := unavailable("turn %s's context could not be published: %v", e.TurnID, err)
+		c.note(f)
+		c.oblige(obligationPublication, e.TurnID, f)
+		return wireArtifact{}, false
+	}
+	scope := sess.scope
+	if e.Scope != nil {
+		scope = *e.Scope
+	}
+	var published artifactOutput
+	err = c.write(func() error {
+		return c.call(ctx, sess, "_artifacts.publish", artifactsPublishInput{
+			Scope: scope, Digest: digest, Size: int64(len(doc)), MediaType: "application/json",
+			Classification: "internal", Encrypted: true,
+		}, &published)
+	})
+	if err != nil {
+		c.note(err)
+		c.oblige(obligationPublication, e.TurnID, faultOf(err))
+		return wireArtifact{}, false
+	}
+	c.resolve(obligationPublication, e.TurnID)
+	return wireArtifact{ID: published.Resource.ID, Digest: published.Resource.Digest}, true
+}
+
+// commitStagedContext commits an already-published context artifact.
+func (c *Controller) commitStagedContext(ctx context.Context, sess *session, e entry) {
+	if e.Plan == nil || e.StagedArtifact == nil {
+		c.note(internalFault("journal entry for turn %s reached context commit without a staged plan", e.TurnID))
+		return
+	}
+	ref := *e.StagedArtifact
+	err := c.write(func() error {
+		return c.call(ctx, sess, "_execution.context.commit", contextCommitInput{
+			PlanID: e.Plan.ID, ExpectedVersion: e.Plan.ExpectedVersion, Generation: e.Plan.Generation,
+			StagedContext: wireArtifactLocator{Kind: "artifact", Artifact: &ref},
+		}, nil)
+	})
+	if err != nil {
+		c.note(err)
+		if transient(err) {
+			// The call may not have reached the owner at all (this
+			// package's own crash, a lost acknowledgement): the entry
+			// stays exactly as it was, staged artifact and all, so the
+			// next tick's resumeContextStages retries this same commit
+			// rather than re-staging a second artifact for the same plan.
+			return
+		}
+		// A durable refusal (turn_ops.go, handleContextCommit: a stale
+		// plan is discarded by the owner without spending or sending).
+		// _execution.work.pending's own scan does not re-list a
+		// context_pending turn, so this package has no rediscovery path
+		// back to it without a query this card's frozen contract does not
+		// expose (no "get turn by id") -- reported as an obligation rather
+		// than guessed at, matching this card's "stalled turns" reporting
+		// requirement.
+		f := faultOf(err)
+		e.Phase = phaseDone
+		c.journal(sess, e)
+		c.oblige(obligationPublication, e.TurnID, f)
+		return
+	}
+	c.resolve(obligationPublication, e.TurnID)
+	e.Phase = phaseDone
+	c.journal(sess, e)
+}
+
+// stalledModelDispatch reports the confirmed, out-of-authority contract gap
+// (see this file's header) blocking every model_pending turn: there is no
+// caller-allowed path from this package to dispatch its model_step effect.
+func (c *Controller) stalledModelDispatch(sess *session, turn wireWorkerTurn) {
+	f := prerequisiteMissing(
+		"turn %s committed context and is model_pending, but the controller has no caller-allowed path to "+
+			"dispatch its model_step effect: _effects.prepare's caller allowlist does not include \"controller\" "+
+			"(internal/effects/service.go), and no execution operation chains through to it on the controller's "+
+			"behalf for the turn pipeline -- a confirmed P00-level contract gap, not invented around here", turn.ID)
+	c.note(f)
+	c.oblige(obligationModelDispatch, turn.ID, f)
+}
+
+// observeTurnDelivery runs after a turn-linked model_step's observation is
+// durably recorded (deliver.go, the ownerExecution case): it reads the same
+// raw ModelOutput evidence the controller already holds -- never trusted
+// for authorization, only to learn which proposal ids execution's own
+// interpretation stage decided on -- and, for each one left "prepared" (a
+// local_operation or external_tool the caller must finish outside any
+// transaction), drives it.
+func (c *Controller) observeTurnDelivery(ctx context.Context, sess *session, e *entry, normalized contract.Observation) {
+	c.turnsMu.Lock()
+	info, ok := c.attemptTurns[e.Route.AttemptID]
+	c.turnsMu.Unlock()
+	if !ok {
+		return
+	}
+	var probe struct {
+		ToolProposals []struct {
+			ID string `json:"id"`
+		} `json:"tool_proposals"`
+	}
+	if len(normalized.Evidence) == 0 || json.Unmarshal(normalized.Evidence, &probe) != nil {
+		return
+	}
+	for _, tp := range probe.ToolProposals {
+		if tp.ID == "" {
+			continue
+		}
+		c.driveOneProposal(ctx, sess, info, tp.ID)
+	}
+}
+
+// driveOneProposal fetches the authoritative, already-decided ProposalRecord
+// for one proposal id (_execution.proposal.prepare is an idempotent lookup
+// once execution has interpreted it) and, if it was left "prepared" for an
+// outside-unit caller, drives it.
+func (c *Controller) driveOneProposal(ctx context.Context, sess *session, info turnRouteInfo, proposalID string) {
+	var prep proposalOutput
+	err := c.write(func() error {
+		return c.call(ctx, sess, "_execution.proposal.prepare", proposalPrepareInput{
+			TurnID: info.TurnID, StepIndex: info.StepIndex, ProposalID: proposalID, ExpectedVersion: info.Version,
+		}, &prep)
+	})
+	if err != nil {
+		c.note(err)
+		return
+	}
+	p := prep.Resource
+	if p.State != "prepared" {
+		// Recorded inline (reply/clarify/report_outputs/cycle_decision/
+		// refused) by execution's own interpretation stage: nothing further
+		// for this package to drive.
+		return
+	}
+	var probe normalizedProposalProbe
+	if json.Unmarshal(p.NormalizedProposal, &probe) != nil {
+		return
+	}
+	switch probe.Kind {
+	case proposalKindLocalOperation:
+		c.driveLocalOperation(ctx, sess, info, p, probe)
+	case proposalKindExternalTool:
+		if p.EffectOperationID != "" {
+			c.turnsMu.Lock()
+			c.turnProposals[p.EffectOperationID] = turnProposalRef{
+				TurnID: info.TurnID, StepIndex: info.StepIndex, ProposalID: proposalID, ExpectedVersion: info.Version,
+			}
+			c.turnsMu.Unlock()
+		}
+	}
+}
+
+// driveLocalOperation invokes a worker-authored local_operation proposal
+// through the real contract.WorkerOperator, under the worker's own
+// authenticated actor -- never a controller-privileged shortcut -- and
+// reports the outcome back through _execution.proposal.record. The
+// submission key is deterministic in the proposal id, so a retried call
+// (this package restarting mid-way, or a duplicate delivery) replays the
+// same authorized command instead of invoking the operation twice.
+func (c *Controller) driveLocalOperation(ctx context.Context, sess *session, info turnRouteInfo, p wireProposalRecord, probe normalizedProposalProbe) {
+	c.mu.Lock()
+	operator := c.deps.Operator
+	c.mu.Unlock()
+	if operator == nil {
+		f := prerequisiteMissing(
+			"no worker operator is attached; turn %s's local_operation proposal %s cannot be driven", info.TurnID, p.ProposalID)
+		c.oblige(obligationProposal, info.TurnID, f)
+		return
+	}
+	result, err := operator.ExecuteWorker(ctx, contract.WorkerRequest{
+		TurnID: info.TurnID, ProposalID: p.ProposalID, WorkerID: info.WorkerID, Scope: info.Scope,
+		Operation: probe.Operation, Version: contract.Version(probe.OperationVersion), Input: probe.Input,
+		SubmissionKey: fmt.Sprintf("worker-turn/%s/%s", info.TurnID, p.ProposalID),
+	})
+	if err != nil {
+		f := faultOf(err)
+		c.note(f)
+		c.oblige(obligationProposal, info.TurnID, f)
+		return
+	}
+	err = c.write(func() error {
+		return c.call(ctx, sess, "_execution.proposal.record", proposalRecordInput{
+			ProposalID: p.ProposalID, ExpectedVersion: info.Version, CommandID: result.CommandID,
+		}, nil)
+	})
+	if err != nil {
+		c.note(err)
+		c.oblige(obligationProposal, info.TurnID, faultOf(err))
+		return
+	}
+	c.resolve(obligationProposal, info.TurnID)
+}
+
+// driveVerification bounded-scans sealed VerificationRequest work
+// (_execution.verification.pending), claims and executes each through the
+// real contract.Verifier, and records the independently established result.
+func (c *Controller) driveVerification(ctx, workCtx context.Context, sess *session) {
+	var out verificationItemsOutput
+	if err := c.call(ctx, sess, "_execution.verification.pending", limitInput{Limit: c.batch()}, &out); err != nil {
+		c.note(err)
+		return
+	}
+	for _, raw := range out.Items {
+		if !c.admitting() {
+			return
+		}
+		var probe verificationRequestProbe
+		if json.Unmarshal(raw, &probe) != nil {
+			continue
+		}
+		c.claimAndVerify(ctx, workCtx, sess, probe)
+	}
+}
+
+// claimAndVerify claims one sealed request, then executes it outside any
+// transaction (the trusted verifier runner never runs inside a Unit) and
+// records the independently established result.
+func (c *Controller) claimAndVerify(ctx, workCtx context.Context, sess *session, probe verificationRequestProbe) {
+	attemptID := probe.AttemptID
+	var claimed verificationClaimOutput
+	err := c.write(func() error {
+		return c.call(ctx, sess, "_execution.verification.claim", verificationClaimInput{
+			RequestID: probe.JobID, ExpectedVersion: 1, Generation: sess.generation,
+		}, &claimed)
+	})
+	if err != nil {
+		c.note(err)
+		return
+	}
+	c.mu.Lock()
+	verifier := c.deps.Verifier
+	c.mu.Unlock()
+	if verifier == nil {
+		f := prerequisiteMissing("no verifier is attached; attempt %s's verification request cannot be executed", attemptID)
+		c.oblige(obligationVerification, attemptID, f)
+		return
+	}
+	result, err := verifier.Verify(workCtx, contract.Verification{Request: claimed.Request})
+	if err != nil {
+		f := unavailable("the verifier returned an error instead of a result: %v", err)
+		c.note(f)
+		c.oblige(obligationVerification, attemptID, f)
+		return
+	}
+	err = c.write(func() error {
+		return c.call(ctx, sess, "_execution.verification.record", verificationRecordInput{
+			AttemptID: attemptID, ExpectedVersion: 1, Result: result.Document,
+		}, nil)
+	})
+	if err != nil {
+		c.note(err)
+		c.oblige(obligationVerification, attemptID, faultOf(err))
+		return
+	}
+	c.resolve(obligationVerification, attemptID)
+}
+
+func nonNilArtifacts(in []wireArtifact) []wireArtifact {
+	if in == nil {
+		return []wireArtifact{}
+	}
+	return in
+}

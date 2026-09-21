@@ -49,11 +49,12 @@ type wireAction struct {
 }
 
 type wireOperation struct {
-	ID         contract.ID     `json:"id"`
-	Version    int64           `json:"version"`
-	Action     json.RawMessage `json:"action"`
-	State      string          `json:"state"`
-	AttemptIDs []contract.ID   `json:"attempt_ids"`
+	ID            contract.ID     `json:"id"`
+	Version       int64           `json:"version"`
+	Action        json.RawMessage `json:"action"`
+	State         string          `json:"state"`
+	AttemptIDs    []contract.ID   `json:"attempt_ids"`
+	CallbackRoute json.RawMessage `json:"callback_route,omitempty"`
 }
 
 type wireUsage struct {

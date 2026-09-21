@@ -51,6 +51,15 @@ type Collaborators struct {
 	// Jobs maps "owner/operation" to the runner of that durable job kind. A
 	// pending job without a runner is never claimed.
 	Jobs map[string]JobRunner
+	// Operator drives a worker-authored local_operation proposal through the
+	// real public-operation authorization boundary, under the worker's own
+	// actor. Without it a "prepared" local_operation proposal is never
+	// driven and stays an open obligation.
+	Operator contract.WorkerOperator
+	// Verifier independently establishes task acceptance against pinned
+	// verifier code. Without it a claimed VerificationRequest is never
+	// executed and stays an open obligation.
+	Verifier contract.Verifier
 }
 
 // Controller owns one controller lifetime: the scheduler loop, adapter
@@ -87,6 +96,20 @@ type Controller struct {
 	busy     map[string]struct{}
 	backoff  map[contract.ID]backoffState
 	reported map[string]struct{}
+
+	// turnsMu guards the turn-routing indexes the turn-work phase refreshes
+	// every tick from live state before dispatch runs: turnAttempts resolves
+	// a worker_turn callback route's turn_id to the attempt _execution.
+	// observation requires, and turnProposals resolves a prepared
+	// external_tool effect's operation id to the proposal_id
+	// _execution.proposal.record requires. Neither is durable across a
+	// restart by design (see turns.go) -- the next tick's discovery phase
+	// rebuilds both from the owner's own live state before any routed
+	// delivery is attempted.
+	turnsMu       sync.Mutex
+	turnAttempts  map[contract.ID]contract.ID
+	attemptTurns  map[contract.ID]turnRouteInfo
+	turnProposals map[contract.ID]turnProposalRef
 
 	// afterTick lets tests observe loop progress without sleeping.
 	afterTick func(n int64)
@@ -195,20 +218,23 @@ func New(
 		concurrency = cfg.MaxDispatch
 	}
 	return &Controller{
-		cfg:      cfg,
-		app:      app,
-		db:       db,
-		own:      own,
-		adapters: registered,
-		clock:    clock,
-		log:      slog.Default().With("component", "controller"),
-		stopCh:   make(chan struct{}),
-		done:     make(chan struct{}),
-		force:    make(chan struct{}),
-		slots:    make(chan struct{}, concurrency),
-		busy:     map[string]struct{}{},
-		backoff:  map[contract.ID]backoffState{},
-		reported: map[string]struct{}{},
+		cfg:           cfg,
+		app:           app,
+		db:            db,
+		own:           own,
+		adapters:      registered,
+		clock:         clock,
+		log:           slog.Default().With("component", "controller"),
+		stopCh:        make(chan struct{}),
+		done:          make(chan struct{}),
+		force:         make(chan struct{}),
+		slots:         make(chan struct{}, concurrency),
+		busy:          map[string]struct{}{},
+		backoff:       map[contract.ID]backoffState{},
+		reported:      map[string]struct{}{},
+		turnAttempts:  map[contract.ID]contract.ID{},
+		attemptTurns:  map[contract.ID]turnRouteInfo{},
+		turnProposals: map[contract.ID]turnProposalRef{},
 	}, nil
 }
 
