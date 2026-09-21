@@ -1934,6 +1934,37 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   WAVE 5 STATUS: P39 and P40 landed. P17 (internal/scheduling) reported
   ready and is in review/landing now. P15 (internal/execution, the
   direct continuation of P14's turn pipeline) still coding.
+- 2026-09-21 00:22 PT -- P17 LANDED (PR #28, 83b0083). Independently
+  reviewed: wireDefs and all 19 _scheduling.* operation schemas diffed
+  byte-for-byte against the frozen catalog, including the fixed
+  _scheduling.cycle.record cycle_id/turn_id fields. Read the new
+  admitEventWake function in full: confirmed it's reachable only through
+  _scheduling.wake.admit's unchanged controller-only caller allowlist
+  (service.go untouched by this diff), and its authentication step
+  (_messaging.pending) is a legitimately declared outgoing call for this
+  package in the frozen contract -- verified the exact input/output
+  shape matches docs/implementation/operations.json. All 8 new tests
+  read in full, including two real race conditions (pause-vs-due-wake,
+  reply-vs-timer-wake) with an explicit no-test-backdoor discipline.
+  FOUND AND FIXED before landing: the new cycle_id idempotency key
+  lacked the DB-level UNIQUE backing index this package's own wakes/
+  occurrences tables already use for their idempotency keys (P14's
+  execution_proposals table follows the same convention) -- added a
+  partial unique index (WHERE cycle_id != '' to exclude pre-migration
+  rows). The three design-decision judgment calls the agent flagged
+  (structural useful-work/no-work classification since the wire schema
+  has no decision field; event/reply/dependency wake admission as an
+  extension of wake.admit rather than a new operation; dependency
+  triggers not specially distinguished from reply triggers) were
+  evaluated as reasonable, well-reasoned interpretations of an
+  underspecified card -- internal implementation choices with no
+  external contract impact, not founder decisions. P14 not yet calling
+  _scheduling.cycle.record is expected (P16's job, not yet landed).
+  go test ./internal/scheduling: 41 tests, zero failures, including
+  TestDescriptorsMatchFrozenCatalog now green. CI confirmed
+  internal/scheduling not among the PR's failures.
+  WAVE 5 STATUS: P39, P40, P17 landed (3 of 4). Only P15 remains
+  (internal/execution) -- reported ready, in review now.
 
 ## Planned
 
