@@ -365,6 +365,36 @@ CREATE INDEX execution_turns_attempt_idx
 	ON execution_turns (attempt_id) WHERE attempt_id != '';
 `
 
+// schemaV5 (execution-dispatch-model-step, the same-day P22 gap fix) adds
+// the missing chain from a committed context to an actual dispatched
+// Responses effect. session_handle persists the confirmed OpenAI Responses
+// provider session (AGENTS.md's "OpenAI Responses session preparation"
+// prepare_session/model_step split) on the turn that owns it -- never
+// reused across turns, never guessed. execution_turn_dispatches is a new,
+// dedicated bookkeeping table (kept separate from the pre-turn hosted
+// loop's own execution_operations table, whose kind CHECK constraint this
+// migration does not touch) so a redelivered prepare_session observation
+// always resolves its own recorded kind by exact operation_ref, even after
+// the turn has moved on to dispatching model_step -- never misrouted into
+// interpretTurnObservation's strict ModelOutput validation.
+const schemaV5 = `
+ALTER TABLE execution_turns ADD COLUMN session_handle TEXT NOT NULL DEFAULT '';
+
+CREATE TABLE execution_turn_dispatches (
+	id              TEXT PRIMARY KEY,
+	turn_id         TEXT NOT NULL,
+	installation_id TEXT NOT NULL,
+	kind            TEXT NOT NULL CHECK (kind IN ('prepare_session','model_step')),
+	state           TEXT NOT NULL CHECK (state IN ('prepared','recorded','failed')) DEFAULT 'prepared',
+	operation_ref   TEXT NOT NULL,
+	created_at      TEXT NOT NULL
+);
+CREATE UNIQUE INDEX execution_turn_dispatches_ref_idx
+	ON execution_turn_dispatches (turn_id, operation_ref);
+CREATE INDEX execution_turn_dispatches_turn_idx
+	ON execution_turn_dispatches (turn_id, created_at);
+`
+
 // migrations returns the execution-owned migration set. Bodies are pinned
 // by SHA-256 so storage can detect any drift from the reviewed schema.
 func migrations() []contract.Migration {
@@ -388,5 +418,10 @@ func migrations() []contract.Migration {
 		Version: 4,
 		SQL:     schemaV4,
 		SHA256:  contract.Hash([]byte(schemaV4)),
+	}, {
+		Owner:   owner,
+		Version: 5,
+		SQL:     schemaV5,
+		SHA256:  contract.Hash([]byte(schemaV5)),
 	}}
 }

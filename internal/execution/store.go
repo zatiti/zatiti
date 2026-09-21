@@ -1192,6 +1192,14 @@ type turnRow struct {
 	LeaseExpiresAt        time.Time
 	ContextArtifact       *wireArtifactRef
 	LastObservationID     contract.ID
+	// SessionHandle is the confirmed OpenAI Responses provider-issued
+	// session handle (ResponsesEvidence.session_handle) a prior prepare_session
+	// effect resolved for this turn -- never guessed, never fabricated, never
+	// reused across turns (AGENTS.md, "OpenAI Responses session preparation").
+	// It is purely internal dispatch state: no frozen WorkerTurn wire field
+	// carries it, so turnOut never renders it and no caller of the public
+	// pipeline observes it directly.
+	SessionHandle string
 }
 
 const turnColumns = `id, version, worker_id, principal_id, installation_id,
@@ -1200,7 +1208,7 @@ source_version, recipient_worker_id, requester_id, configuration_revision,
 state, generation, limits_json, root_id, steps_used, created_at, updated_at,
 conversation_id, task_id, run_id, attempt_id, waiting_reason,
 waiting_resource_id, next_wake, lease_id, lease_expires_at,
-context_artifact_json, last_observation_id`
+context_artifact_json, last_observation_id, session_handle`
 
 func scanTurn(scan func(dest ...any) error) (*turnRow, error) {
 	var t turnRow
@@ -1215,7 +1223,7 @@ func scanTurn(scan func(dest ...any) error) (*turnRow, error) {
 		&t.State, &t.Generation, &limitsJSON, &t.RootID, &t.StepsUsed, &created, &updated,
 		&t.ConversationID, &t.TaskID, &t.RunID, &t.AttemptID, &t.WaitingReason,
 		&t.WaitingResourceID, &nextWake, &t.LeaseID, &leaseExpires,
-		&contextJSON, &t.LastObservationID)
+		&contextJSON, &t.LastObservationID, &t.SessionHandle)
 	if err != nil {
 		return nil, err
 	}
@@ -1335,15 +1343,15 @@ func insertTurn(ctx context.Context, unit contract.Unit, t *turnRow) error {
 		 state, generation, limits_json, root_id, steps_used, created_at, updated_at,
 		 conversation_id, task_id, run_id, attempt_id, waiting_reason,
 		 waiting_resource_id, next_wake, lease_id, lease_expires_at,
-		 context_artifact_json, last_observation_id)
-		VALUES (?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		 context_artifact_json, last_observation_id, session_handle)
+		VALUES (?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		t.ID, t.WorkerID, t.PrincipalID, t.InstallationID, t.OrganizationID,
 		t.ProjectID, t.TaskScopeID, scopeJSON, t.Source.Kind, t.Source.SourceID,
 		t.Source.SourceVersion, t.Source.RecipientWorkerID, t.RequesterID, t.ConfigurationRevision,
 		t.State, t.Generation, limitsJSON, t.RootID, t.StepsUsed, formatStamp(t.CreatedAt), formatStamp(t.UpdatedAt),
 		t.ConversationID, t.TaskID, t.RunID, t.AttemptID, t.WaitingReason,
 		t.WaitingResourceID, formatStamp(t.NextWake), t.LeaseID, formatStamp(t.LeaseExpiresAt),
-		contextJSON, t.LastObservationID)
+		contextJSON, t.LastObservationID, t.SessionHandle)
 	return err
 }
 
@@ -1357,12 +1365,12 @@ func updateTurn(ctx context.Context, unit contract.Unit, t *turnRow) error {
 		version = ?, state = ?, generation = ?, root_id = ?, steps_used = ?, updated_at = ?,
 		task_id = ?, run_id = ?, attempt_id = ?, waiting_reason = ?, waiting_resource_id = ?,
 		next_wake = ?, lease_id = ?, lease_expires_at = ?, context_artifact_json = ?,
-		last_observation_id = ?
+		last_observation_id = ?, session_handle = ?
 		WHERE id = ? AND version = ?`,
 		t.Version+1, t.State, t.Generation, t.RootID, t.StepsUsed, formatStamp(t.UpdatedAt),
 		t.TaskID, t.RunID, t.AttemptID, t.WaitingReason, t.WaitingResourceID,
 		formatStamp(t.NextWake), t.LeaseID, formatStamp(t.LeaseExpiresAt), contextJSON,
-		t.LastObservationID, t.ID, t.Version)
+		t.LastObservationID, t.SessionHandle, t.ID, t.Version)
 	if err != nil {
 		return err
 	}
@@ -1396,6 +1404,77 @@ func listTurns(ctx context.Context, unit contract.Unit, conds []string, args []a
 		out = append(out, t)
 	}
 	return out, rows.Err()
+}
+
+// turnDispatchRow is the storage representation of one turn-pipeline
+// Responses effect dispatch (prepare_session or model_step) handleContextCommit
+// or interpretPrepareSessionObservation prepared through _effects.prepare.
+// It is keyed by (turn_id, operation_ref) -- never overwritten, never
+// reused -- so a redelivered observation for an operation_ref this turn has
+// already superseded still resolves its own original kind instead of being
+// misrouted into the next dispatch's interpretation path. This is
+// execution's own private bookkeeping, distinct from the pre-turn hosted
+// loop's attempt-keyed execution_operations table (whose kind CHECK
+// constraint this migration deliberately leaves untouched).
+type turnDispatchRow struct {
+	ID             contract.ID
+	TurnID         contract.ID
+	InstallationID contract.ID
+	Kind           string // prepare_session | model_step
+	State          string // prepared | recorded | failed
+	OperationRef   string
+	CreatedAt      time.Time
+}
+
+const turnDispatchColumns = `id, turn_id, installation_id, kind, state, operation_ref, created_at`
+
+func scanTurnDispatch(scan func(dest ...any) error) (*turnDispatchRow, error) {
+	var d turnDispatchRow
+	var created string
+	err := scan(&d.ID, &d.TurnID, &d.InstallationID, &d.Kind, &d.State, &d.OperationRef, &created)
+	if err != nil {
+		return nil, err
+	}
+	if d.CreatedAt, err = parseStamp(created); err != nil {
+		return nil, err
+	}
+	return &d, nil
+}
+
+// insertTurnDispatch records one newly prepared turn-pipeline Responses
+// dispatch.
+func insertTurnDispatch(ctx context.Context, unit contract.Unit, id, turnID, installationID contract.ID, kind, operationRef string, at time.Time) error {
+	_, err := unit.ExecContext(ctx, `INSERT INTO execution_turn_dispatches
+		(id, turn_id, installation_id, kind, state, operation_ref, created_at)
+		VALUES (?, ?, ?, ?, 'prepared', ?, ?)`,
+		id, turnID, installationID, kind, operationRef, formatStamp(at))
+	return err
+}
+
+// loadTurnDispatchByRef reads the turn-pipeline dispatch row naming the
+// exact effects operation ref, or nil if this turn never dispatched one
+// under that exact ref (an ordinary, expected condition -- not a fault --
+// for every turn/operation pair outside this narrow bookkeeping, including
+// every turn admitted before this migration).
+func loadTurnDispatchByRef(ctx context.Context, unit contract.Unit, turnID contract.ID, operationRef string) (*turnDispatchRow, error) {
+	row := unit.QueryRowContext(ctx, `SELECT `+turnDispatchColumns+` FROM execution_turn_dispatches
+		WHERE turn_id = ? AND operation_ref = ?`, turnID, operationRef)
+	d, err := scanTurnDispatch(row.Scan)
+	if isNoRows(err) {
+		return nil, nil
+	}
+	return d, err
+}
+
+// updateTurnDispatchState moves one turn dispatch to its terminal state
+// once its observation has been interpreted.
+func updateTurnDispatchState(ctx context.Context, unit contract.Unit, id contract.ID, state string) error {
+	res, err := unit.ExecContext(ctx, `UPDATE execution_turn_dispatches
+		SET state = ? WHERE id = ?`, state, id)
+	if err != nil {
+		return err
+	}
+	return expectOneRow(res)
 }
 
 // proposalRow is the storage representation of one durable ProposalRecord.

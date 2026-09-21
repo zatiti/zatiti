@@ -162,6 +162,14 @@ type wireResponsesModelStep struct {
 	ContinuationReference string          `json:"continuation_reference,omitempty"`
 }
 
+// wireResponsesPrepareSession mirrors ResponsesPrepareSessionParameters
+// exactly: no model-visible content beyond what an empty provider
+// conversation creation requires, and no context_artifact.
+type wireResponsesPrepareSession struct {
+	Schema string `json:"schema"`
+	Kind   string `json:"kind"`
+}
+
 // handleContextPrepare is the _execution.context.prepare boundary: build a
 // versioned immutable context plan naming exact authorized refs and
 // byte/token bounds inside the transaction. No IO, no provider call and no
@@ -651,6 +659,64 @@ func buildResponsesModelStepAction(plan *contextPlanRow, contextArtifact wireArt
 	var parameters map[string]any
 	if err := json.Unmarshal(raw, &parameters); err != nil {
 		return wireResponsesModelStep{}, nil, wireRef{}, wireRef{}, "", err
+	}
+	toolRef := wireRef{ID: modelTool.ToolID, Version: modelTool.ToolVersion}
+	connectionRef := wireRef{ID: modelTool.ConnectionID, Version: modelTool.ConnectionVersion}
+	return action, parameters, toolRef, connectionRef, modelTool.AccountIdentity, nil
+}
+
+// resolveModelToolComponent locates the plan's one resolved model-dispatch
+// tool component (the bound tool whose resolved adapter is "responses"), the
+// same lookup buildResponsesModelStepAction performs inline. It is factored
+// out here (execution-dispatch-model-step, the same-day P22 gap fix) so
+// buildResponsesPrepareSessionAction and handleContextCommit's own dispatch
+// helper resolve the identical real Tool/Connection identity -- never a
+// second, independent lookup that could disagree, and never the worker's own
+// execution profile identity (profile-as-tool). buildResponsesModelStepAction
+// itself is left with its own original inline loop unchanged, since P15's
+// existing test asserts its exact return shape.
+func resolveModelToolComponent(plan *contextPlanRow) *contextComponent {
+	for i, c := range plan.Recipe.Components {
+		if c.Kind == "tool" && c.IsModelTool {
+			return &plan.Recipe.Components[i]
+		}
+	}
+	return nil
+}
+
+// buildResponsesPrepareSessionAction constructs the exact
+// zatiti.responses.action/v1 prepare_session fields (schema, kind) -- no
+// model-visible content, no context_artifact, no session_handle, since this
+// action's own purpose is to obtain one (AGENTS.md's "OpenAI Responses
+// session preparation": "the action carries no model-visible content beyond
+// what an empty conversation creation requires"). It resolves the same real
+// Tool/Connection identity buildResponsesModelStepAction resolves, so both
+// dispatches for the same turn always name the identical account/connection.
+func buildResponsesPrepareSessionAction(plan *contextPlanRow) (wireResponsesPrepareSession, map[string]any, wireRef, wireRef, string, error) {
+	modelTool := resolveModelToolComponent(plan)
+	if modelTool == nil {
+		return wireResponsesPrepareSession{}, nil, wireRef{}, wireRef{}, "",
+			prerequisiteMissing("no responses-adapter tool is bound for this worker; cannot dispatch prepare_session")
+	}
+	action := wireResponsesPrepareSession{
+		Schema: "zatiti.responses.action/v1",
+		Kind:   "prepare_session",
+	}
+	raw, err := json.Marshal(action)
+	if err != nil {
+		return wireResponsesPrepareSession{}, nil, wireRef{}, wireRef{}, "", err
+	}
+	schema, err := responsesPrepareSessionSchema()
+	if err != nil {
+		return wireResponsesPrepareSession{}, nil, wireRef{}, wireRef{}, "", fmt.Errorf("execution: load responses prepare_session schema: %w", err)
+	}
+	if err := contract.ValidateSchema(schema, raw); err != nil {
+		return wireResponsesPrepareSession{}, nil, wireRef{}, wireRef{}, "", fmt.Errorf(
+			"execution: assembled prepare_session action does not satisfy zatiti.responses.action/v1: %w", err)
+	}
+	var parameters map[string]any
+	if err := json.Unmarshal(raw, &parameters); err != nil {
+		return wireResponsesPrepareSession{}, nil, wireRef{}, wireRef{}, "", err
 	}
 	toolRef := wireRef{ID: modelTool.ToolID, Version: modelTool.ToolVersion}
 	connectionRef := wireRef{ID: modelTool.ConnectionID, Version: modelTool.ConnectionVersion}
