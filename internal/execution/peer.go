@@ -186,6 +186,27 @@ func (s *Service) callConnectionsResolve(ctx context.Context, unit contract.Unit
 	return body.Connection, body.Tool, nil
 }
 
+// recordSchedulingCycle records one responsibility-triggered turn's bounded
+// cycle_decision outcome through scheduling's own owner-backed ledger.
+// cycle_id is the unique replay/conflict fence: an identical result for the
+// same cycle_id replays, a differing one is submission_conflict -- scheduling
+// enforces that, not execution.
+func (s *Service) recordSchedulingCycle(ctx context.Context, unit contract.Unit, responsibilityID contract.ID, expectedVersion contract.Version, nextWake string, outputs []wireArtifactRef, taskIDs []contract.ID, cycleID, turnID contract.ID) error {
+	input := map[string]any{
+		"responsibility_id": responsibilityID,
+		"expected_version":  expectedVersion,
+		"next_wake":         nextWake,
+		"outputs":           outputs,
+		"task_ids":          taskIDs,
+		"cycle_id":          cycleID,
+	}
+	if turnID != "" {
+		input["turn_id"] = turnID
+	}
+	_, err := s.callPeer(ctx, unit, peerSchedulingCycleRecord, input)
+	return err
+}
+
 // transitionTask moves one task to a new state with evidence.
 func (s *Service) transitionTask(ctx context.Context, unit contract.Unit, taskID contract.ID, expectedVersion contract.Version, state string, evidenceIDs []contract.ID, waitingReason string, manual bool) (wireTask, error) {
 	input := map[string]any{

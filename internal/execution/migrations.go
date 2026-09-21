@@ -353,6 +353,18 @@ CREATE INDEX execution_turn_context_lineage_turn_idx
 	ON execution_turn_context_lineage (turn_id, created_at);
 `
 
+// schemaV4 (P16) backs findTurnByAttemptID's lookup: _execution.observation
+// now resolves the WorkerTurn bound to a hosted attempt by attempt_id on
+// every delivery, a hot path with no existing index to serve it -- every
+// other attempt_id column in this file (execution_checkpoints,
+// execution_context_lineage, execution_verification_jobs,
+// execution_obligations, execution_operations, all above) already carries
+// its own dedicated index; execution_turns was the one exception.
+const schemaV4 = `
+CREATE INDEX execution_turns_attempt_idx
+	ON execution_turns (attempt_id) WHERE attempt_id != '';
+`
+
 // migrations returns the execution-owned migration set. Bodies are pinned
 // by SHA-256 so storage can detect any drift from the reviewed schema.
 func migrations() []contract.Migration {
@@ -371,5 +383,10 @@ func migrations() []contract.Migration {
 		Version: 3,
 		SQL:     schemaV3,
 		SHA256:  contract.Hash([]byte(schemaV3)),
+	}, {
+		Owner:   owner,
+		Version: 4,
+		SQL:     schemaV4,
+		SHA256:  contract.Hash([]byte(schemaV4)),
 	}}
 }

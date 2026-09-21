@@ -143,10 +143,18 @@ func (s *Service) waitRun(ctx context.Context, unit contract.Unit, runID contrac
 	return updateRun(ctx, unit, r)
 }
 
-// handleObservation is the _execution.observation boundary: continue the
-// bounded model loop from a recorded effect. The observation closes the
-// operation record, preserves unknown effects as obligations and advances
-// the model step counter against the task's bound.
+// handleObservation is the _execution.observation boundary. For a hosted
+// attempt bound to a durable WorkerTurn (revision 3's turn/proposal
+// pipeline, auto-claimed only through work.claim -- never a plain
+// cooperative run.claim), P16's interpretation stage owns this call: it
+// strictly validates the delivered ModelOutput and interprets it into
+// bounded governed work instead of blindly preparing another model step.
+// For every other attempt (the pre-turn hosted loop -- controller_ops.go's
+// own prepareModelEffect/handleTick, audit finding G05, still driven only
+// through plain run.claim -- see docs/roadmap.md 2026-09-21 P15 landing
+// note), this operation's original, unconditional continue-the-loop
+// behavior is unchanged below: retiring that separate path is a bigger,
+// coordinated change this card does not own.
 func (s *Service) handleObservation(ctx context.Context, unit contract.Unit, in observationInput) (contract.Outcome[attemptBody], error) {
 	a, err := loadAttempt(ctx, unit, in.AttemptID)
 	if err != nil {
@@ -158,6 +166,11 @@ func (s *Service) handleObservation(ctx context.Context, unit contract.Unit, in 
 	}
 	if a.State != "claimed" && a.State != "running" && a.State != "waiting" {
 		return contract.Outcome[attemptBody]{}, conflict("attempt is %s and cannot continue its loop", a.State)
+	}
+	if turn, terr := findTurnByAttemptID(ctx, unit, a.ID); terr != nil {
+		return contract.Outcome[attemptBody]{}, terr
+	} else if turn != nil {
+		return s.interpretTurnObservation(ctx, unit, turn, a, in)
 	}
 	// The delivery names the effects operation the controller dispatched;
 	// the owned record is resolved by attempt and that reference.

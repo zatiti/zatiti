@@ -1298,6 +1298,22 @@ func findActiveTurnForWorker(ctx context.Context, unit contract.Unit, installati
 	return t, err
 }
 
+// findTurnByAttemptID locates the WorkerTurn bound to a real hosted attempt,
+// if any; no match reads as nil. A hosted attempt claimed through the public
+// run.claim path (never through work.claim's automatic hosted bind) has no
+// linked turn and legitimately falls through to the pre-turn attempt loop.
+func findTurnByAttemptID(ctx context.Context, unit contract.Unit, attemptID contract.ID) (*turnRow, error) {
+	if attemptID == "" {
+		return nil, nil
+	}
+	row := unit.QueryRowContext(ctx, `SELECT `+turnColumns+` FROM execution_turns WHERE attempt_id = ?`, attemptID)
+	t, err := scanTurn(row.Scan)
+	if isNoRows(err) {
+		return nil, nil
+	}
+	return t, err
+}
+
 // insertTurn persists a new worker turn at version 1.
 func insertTurn(ctx context.Context, unit contract.Unit, t *turnRow) error {
 	scopeJSON, err := encodeScope(t.Scope)
@@ -1545,6 +1561,41 @@ func loadContextPlan(ctx context.Context, unit contract.Unit, id contract.ID) (*
 		&refsJSON, &p.ConfigurationRevision, &p.ByteBound, &p.TokenBound, &committed, &created, &componentsJSON)
 	if isNoRows(err) {
 		return nil, notFound("context plan %s does not exist", id)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if err := decodeJSON(refsJSON, &p.Refs); err != nil {
+		return nil, err
+	}
+	if err := decodeJSON(componentsJSON, &p.Recipe); err != nil {
+		return nil, err
+	}
+	p.Committed = committed == 1
+	if p.CreatedAt, err = parseStamp(created); err != nil {
+		return nil, err
+	}
+	return &p, nil
+}
+
+// latestCommittedContextPlan reads the newest committed context plan for a
+// turn -- the recipe P16's interpretation stage cross-checks a model
+// proposal's claimed tool/connection against, since a bound tool/connection
+// selection must resolve from execution's own already-authorized offer for
+// this exact step, never from model-supplied text.
+func latestCommittedContextPlan(ctx context.Context, unit contract.Unit, turnID contract.ID) (*contextPlanRow, error) {
+	row := unit.QueryRowContext(ctx, `SELECT id, installation_id, turn_id, expected_version,
+		generation, refs_json, configuration_revision, byte_bound, token_bound, committed, created_at, components_json
+		FROM execution_context_plans WHERE turn_id = ? AND committed = 1
+		ORDER BY created_at DESC, id DESC LIMIT 1`, turnID)
+	var p contextPlanRow
+	var refsJSON, componentsJSON string
+	var committed int64
+	var created string
+	err := row.Scan(&p.ID, &p.InstallationID, &p.TurnID, &p.ExpectedVersion, &p.Generation,
+		&refsJSON, &p.ConfigurationRevision, &p.ByteBound, &p.TokenBound, &committed, &created, &componentsJSON)
+	if isNoRows(err) {
+		return nil, nil
 	}
 	if err != nil {
 		return nil, err

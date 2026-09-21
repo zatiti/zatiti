@@ -79,6 +79,11 @@ const (
 	peerMessagingPending   = "_messaging.pending"
 	peerMemorySelect       = "_memory.select"
 	peerConnectionsResolve = "_connections.resolve"
+
+	// P16: interpreting a cycle_decision proposal for a responsibility-
+	// triggered turn records the reasoning cycle's bounded outcome through
+	// scheduling's own owner-backed ledger.
+	peerSchedulingCycleRecord = "_scheduling.cycle.record"
 )
 
 // opMeta is the static registration record for one operation.

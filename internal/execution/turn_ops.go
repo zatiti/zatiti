@@ -645,7 +645,21 @@ func (s *Service) handleProposalRecord(ctx context.Context, unit contract.Unit, 
 	if p.EffectOperationID != "" {
 		t.LastObservationID = p.EffectOperationID
 	}
+	// P16: a local_operation or external_tool proposal is the only kind
+	// _execution.observation's interpretation stage ever leaves "prepared"
+	// for a caller to finish outside any Unit (WorkerOperator.ExecuteWorker,
+	// or an awaited effect) and then report back here. Recording it means
+	// that outside-unit action already concluded, so the turn returns to
+	// claimed, ready for another context.prepare/dispatch loop -- never left
+	// unconditionally "proposal_pending" with nothing left to advance it.
+	// Every other kind (reply/clarify/report_outputs/cycle_decision/refused)
+	// is recorded inline by that same interpretation stage and never reaches
+	// this handler in production; a direct test call (as P14's own fixtures
+	// do) keeps the original unconditional transition unchanged.
 	t.State = "proposal_pending"
+	if kind := normalizedProposalKind(p.NormalizedProposal); kind == "local_operation" || kind == "external_tool" {
+		t.State = "claimed"
+	}
 	t.UpdatedAt = now
 	if t.Limits.ModelSteps > 0 && t.StepsUsed >= t.Limits.ModelSteps {
 		t.State = "waiting"
