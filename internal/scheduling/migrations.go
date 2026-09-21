@@ -137,15 +137,39 @@ CREATE INDEX scheduling_cycles_responsibility_idx
 	ON scheduling_cycles (responsibility_id, recorded_at);
 `
 
+// schemaV2 adds the revision-3 columns this card's cycle idempotency and
+// source-linkage requirements need. last_cycle_id (AGENTS.md: "Responsibility
+// gains optional last_cycle_id") makes the responsibility->cycle source
+// linkage visible on the wire; event_cursor persists the last durable
+// message identity an authenticated event/reply trigger consumed, so a
+// duplicate or replayed delivery never re-admits the same signal; cycle_id
+// and turn_id on scheduling_cycles carry the frozen _scheduling.cycle.record
+// replay/conflict fence and its optional WorkerTurn linkage. All four are
+// additive and default to the empty string, so existing rows validate
+// unchanged with the new fields simply absent. The partial unique index on
+// cycle_id backs the idempotency check at the storage layer -- the same
+// UNIQUE(source_id, occurrence_key) pattern scheduling_wakes/
+// scheduling_occurrences already use for their own idempotency keys above
+// -- rather than relying solely on the app-level check-then-insert in
+// cycleRecord; the WHERE clause excludes the empty-string default so
+// existing pre-migration rows (which all share the empty-string default)
+// never collide.
+const schemaV2 = `
+ALTER TABLE scheduling_responsibilities ADD COLUMN last_cycle_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE scheduling_responsibilities ADD COLUMN event_cursor TEXT NOT NULL DEFAULT '';
+ALTER TABLE scheduling_cycles ADD COLUMN cycle_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE scheduling_cycles ADD COLUMN turn_id TEXT NOT NULL DEFAULT '';
+CREATE UNIQUE INDEX scheduling_cycles_cycle_id_idx
+	ON scheduling_cycles (responsibility_id, cycle_id) WHERE cycle_id != '';
+`
+
 // migrations returns the scheduling-owned migration set. Bodies are pinned
 // by SHA-256 so storage can detect any drift from the reviewed schema.
 func migrations() []contract.Migration {
-	return []contract.Migration{{
-		Owner:   owner,
-		Version: 1,
-		SQL:     schemaV1,
-		SHA256:  contract.Hash([]byte(schemaV1)),
-	}}
+	return []contract.Migration{
+		{Owner: owner, Version: 1, SQL: schemaV1, SHA256: contract.Hash([]byte(schemaV1))},
+		{Owner: owner, Version: 2, SQL: schemaV2, SHA256: contract.Hash([]byte(schemaV2))},
+	}
 }
 
 // encodeScope marshals a scope for the scope_json column.

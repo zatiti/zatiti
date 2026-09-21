@@ -69,16 +69,18 @@ type fakePorts struct {
 	bindings []peerBinding
 	workers  map[contract.ID]peerWorker
 	tasks    map[contract.ID]wireTask
+	messages map[contract.ID][]peerMessage
 
 	fail map[string]*contract.Fault
 }
 
 func newFakePorts(ids *seqIDs) *fakePorts {
 	return &fakePorts{
-		ids:     ids,
-		workers: map[contract.ID]peerWorker{},
-		tasks:   map[contract.ID]wireTask{},
-		fail:    map[string]*contract.Fault{},
+		ids:      ids,
+		workers:  map[contract.ID]peerWorker{},
+		tasks:    map[contract.ID]wireTask{},
+		messages: map[contract.ID][]peerMessage{},
+		fail:     map[string]*contract.Fault{},
 	}
 }
 
@@ -94,6 +96,10 @@ func (p *fakePorts) Call(ctx context.Context, unit contract.Unit, inv contract.I
 	tasks := make(map[contract.ID]wireTask, len(p.tasks))
 	for id, t := range p.tasks {
 		tasks[id] = t
+	}
+	messages := make(map[contract.ID][]peerMessage, len(p.messages))
+	for id, m := range p.messages {
+		messages[id] = append([]peerMessage(nil), m...)
 	}
 	p.mu.Unlock()
 	if injected != nil {
@@ -147,6 +153,12 @@ func (p *fakePorts) Call(ctx context.Context, unit contract.Unit, inv contract.I
 		body = peerTaskBody{Resource: task}
 	case "_execution.enqueue":
 		body = json.RawMessage(`{}`)
+	case "_messaging.pending":
+		var in messagingPendingCallInput
+		if err := json.Unmarshal(inv.Input, &in); err != nil {
+			return contract.Payload{}, err
+		}
+		body = messagingPendingBody{Items: messages[in.WorkerID]}
 	default:
 		return contract.Payload{}, &contract.Fault{
 			Code: contract.CodeInternalError, Message: "fake ports: unexpected peer call " + inv.Operation,
@@ -184,6 +196,19 @@ func (p *fakePorts) setBindings(bs []peerBinding) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.bindings = bs
+}
+
+// setPendingMessages seeds the fake worker mailbox _messaging.pending
+// serves, the authentication boundary an event-sourced wake is checked
+// against.
+func (p *fakePorts) setPendingMessages(workerID contract.ID, ids ...contract.ID) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	msgs := make([]peerMessage, 0, len(ids))
+	for _, id := range ids {
+		msgs = append(msgs, peerMessage{ID: id})
+	}
+	p.messages[workerID] = msgs
 }
 
 // testEnv is one installation wired to a real storage database.
@@ -780,28 +805,53 @@ func (e *testEnv) wakeDueOp(now time.Time, limit int64) []wireWake {
 // admitWakeOp runs wake.admit and returns the decision body.
 func (e *testEnv) admitWakeOp(w wakeRow) wakeAdmitBody {
 	e.t.Helper()
-	payload := e.mustOK(opWakeAdmit, wakeAdmitInput{Wake: wakeWire(w)})
+	return e.admitWakeWireOp(wakeWire(w))
+}
+
+// admitWakeWireOp runs wake.admit with a caller-supplied Wake and returns
+// the decision body. Unlike admitWakeOp, the Wake need not already be a
+// persisted row: this is how an authenticated event/reply/dependency
+// trigger is driven, mirroring the fresh Wake object the controller mints
+// from a durable event (see admitEventWake).
+func (e *testEnv) admitWakeWireOp(w wireWake) wakeAdmitBody {
+	e.t.Helper()
+	payload := e.mustOK(opWakeAdmit, wakeAdmitInput{Wake: w})
 	var out wakeAdmitBody
 	e.decode(payload.Data, &out)
 	return out
 }
 
-// recordCycleOp runs cycle.record and returns the wire resource.
+// recordCycleOp runs cycle.record with a fresh cycle_id and returns the wire
+// resource. Most tests care only that one cycle is recorded, not about
+// replaying a specific cycle_id, so a fresh id keeps every call an
+// independent cycle unless the caller uses recordCycleOpWithID directly.
 func (e *testEnv) recordCycleOp(id contract.ID, expected contract.Version, next time.Time, outputs []wireArtifactRef, taskIDs []contract.ID) wireResponsibility {
 	e.t.Helper()
+	return e.recordCycleOpWithID(id, e.ids.New(), expected, next, outputs, taskIDs)
+}
+
+// recordCycleOpWithID runs cycle.record under an explicit cycle_id, so a
+// test can drive a genuine replay or conflict of that exact identity.
+func (e *testEnv) recordCycleOpWithID(id, cycleID contract.ID, expected contract.Version, next time.Time, outputs []wireArtifactRef, taskIDs []contract.ID) wireResponsibility {
+	e.t.Helper()
+	payload := e.mustOK(opCycleRecord, e.cycleRecordInput(id, cycleID, expected, next, outputs, taskIDs))
+	var out responsibilityBody
+	e.decode(payload.Data, &out)
+	return out.Resource
+}
+
+// cycleRecordInput builds a schema-valid _scheduling.cycle.record input.
+func (e *testEnv) cycleRecordInput(id, cycleID contract.ID, expected contract.Version, next time.Time, outputs []wireArtifactRef, taskIDs []contract.ID) cycleRecordInput {
 	if outputs == nil {
 		outputs = []wireArtifactRef{} // the wire schema rejects a null array
 	}
 	if taskIDs == nil {
 		taskIDs = []contract.ID{}
 	}
-	payload := e.mustOK(opCycleRecord, cycleRecordInput{
+	return cycleRecordInput{
 		ResponsibilityID: id, ExpectedVersion: expected, NextWake: next,
-		Outputs: outputs, TaskIDs: taskIDs,
-	})
-	var out responsibilityBody
-	e.decode(payload.Data, &out)
-	return out.Resource
+		Outputs: outputs, TaskIDs: taskIDs, CycleID: cycleID,
+	}
 }
 
 // wakeWire renders a stored wake row as its wire shape for admit inputs.

@@ -80,27 +80,19 @@ func TestCycleRecordFaults(t *testing.T) {
 	outputs := []wireArtifactRef{}
 	taskIDs := []contract.ID{}
 
-	_ = e.expectFault(opCycleRecord, cycleRecordInput{
-		ResponsibilityID: e.ids.New(), ExpectedVersion: 1,
-		NextWake: e.clock.Now().Add(time.Minute), Outputs: outputs, TaskIDs: taskIDs,
-	}, contract.CodeNotFound)
+	_ = e.expectFault(opCycleRecord, e.cycleRecordInput(e.ids.New(), e.ids.New(), 1,
+		e.clock.Now().Add(time.Minute), outputs, taskIDs), contract.CodeNotFound)
 
 	// The minimum reconsideration interval fences consecutive cycle starts.
-	_ = e.expectFault(opCycleRecord, cycleRecordInput{
-		ResponsibilityID: row.ID, ExpectedVersion: 1,
-		NextWake: e.clock.Now().Add(-30 * time.Second), Outputs: outputs, TaskIDs: taskIDs,
-	}, contract.CodeInvalidInput)
+	_ = e.expectFault(opCycleRecord, e.cycleRecordInput(row.ID, e.ids.New(), 1,
+		e.clock.Now().Add(-30*time.Second), outputs, taskIDs), contract.CodeInvalidInput)
 
-	_ = e.expectFault(opCycleRecord, cycleRecordInput{
-		ResponsibilityID: row.ID, ExpectedVersion: 99,
-		NextWake: e.clock.Now().Add(time.Minute), Outputs: outputs, TaskIDs: taskIDs,
-	}, contract.CodeStaleVersion)
+	_ = e.expectFault(opCycleRecord, e.cycleRecordInput(row.ID, e.ids.New(), 99,
+		e.clock.Now().Add(time.Minute), outputs, taskIDs), contract.CodeStaleVersion)
 
 	e.archiveResponsibility(row.ID, 1)
-	_ = e.expectFault(opCycleRecord, cycleRecordInput{
-		ResponsibilityID: row.ID, ExpectedVersion: 2,
-		NextWake: e.clock.Now().Add(time.Minute), Outputs: outputs, TaskIDs: taskIDs,
-	}, contract.CodeConflict)
+	_ = e.expectFault(opCycleRecord, e.cycleRecordInput(row.ID, e.ids.New(), 2,
+		e.clock.Now().Add(time.Minute), outputs, taskIDs), contract.CodeConflict)
 }
 
 func TestCycleRecordAggregateFenceRejectsExhaustedBudget(t *testing.T) {
@@ -113,11 +105,8 @@ func TestCycleRecordAggregateFenceRejectsExhaustedBudget(t *testing.T) {
 	admitted := e.admitWakeOp(e.mustFindWake(e.pendingWakesFor(row.ID)[0].ID))
 	e.recordCycleOp(row.ID, 1, e.clock.Now().Add(30*time.Second), nil, []contract.ID{admitted.Task.ID})
 
-	_ = e.expectFault(opCycleRecord, cycleRecordInput{
-		ResponsibilityID: row.ID, ExpectedVersion: 2,
-		NextWake: e.clock.Now().Add(90 * time.Second),
-		Outputs:  []wireArtifactRef{}, TaskIDs: []contract.ID{},
-	}, contract.CodeBudgetUnavailable)
+	_ = e.expectFault(opCycleRecord, e.cycleRecordInput(row.ID, e.ids.New(), 2,
+		e.clock.Now().Add(90*time.Second), nil, nil), contract.CodeBudgetUnavailable)
 	if got := len(e.cyclesOf(row.ID)); got != 1 {
 		t.Fatalf("exhausted aggregate must not record, got %d cycles", got)
 	}
@@ -141,11 +130,8 @@ func TestCycleRecordOverflowFailsClosed(t *testing.T) {
 	}
 	e.recordCycleOp(row.ID, 1, e.clock.Now().Add(30*time.Second), nil, []contract.ID{admitted.Task.ID})
 
-	_ = e.expectFault(opCycleRecord, cycleRecordInput{
-		ResponsibilityID: row.ID, ExpectedVersion: 2,
-		NextWake: e.clock.Now().Add(90 * time.Second),
-		Outputs:  []wireArtifactRef{}, TaskIDs: []contract.ID{},
-	}, contract.CodeBudgetUnavailable)
+	_ = e.expectFault(opCycleRecord, e.cycleRecordInput(row.ID, e.ids.New(), 2,
+		e.clock.Now().Add(90*time.Second), nil, nil), contract.CodeBudgetUnavailable)
 	if got := len(e.cyclesOf(row.ID)); got != 1 {
 		t.Fatalf("overflow must not record, got %d cycles", got)
 	}

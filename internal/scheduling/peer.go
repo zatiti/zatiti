@@ -71,6 +71,29 @@ func (s *Service) callSnapshot(ctx context.Context, unit contract.Unit, scope co
 	return body.Resource, nil
 }
 
+// messagingPendingLimit bounds the authenticated inbox read an event/reply
+// trigger check performs at wake admission: a fixed, small page, never an
+// unbounded scan of a worker's mailbox.
+const messagingPendingLimit = 50
+
+// messagingPending reads a worker's authorized pending inbox, the
+// authentication boundary an event-sourced wake's occurrence key is checked
+// against: a caller-supplied occurrence key names a genuine admitted
+// message only when it appears here, never by trusting the string alone.
+func (s *Service) messagingPending(ctx context.Context, unit contract.Unit, workerID contract.ID) ([]peerMessage, error) {
+	data, err := s.callPeer(ctx, unit, "_messaging.pending", messagingPendingCallInput{
+		WorkerID: workerID, Limit: messagingPendingLimit,
+	})
+	if err != nil {
+		return nil, err
+	}
+	var body messagingPendingBody
+	if err := json.Unmarshal(data, &body); err != nil {
+		return nil, fmt.Errorf("scheduling: decode messaging pending: %w", err)
+	}
+	return body.Items, nil
+}
+
 // requireMatchingInstallation rejects definitions homed in another
 // installation; cross-installation scheduling is never visible here.
 func requireMatchingInstallation(unit contract.Unit, scope contract.Scope) error {
