@@ -2286,6 +2286,112 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   interpretTurnObservation's strict ModelOutput-only validation path.
   Briefed the same way P22 was: stop and report rather than invent a
   workaround if the real scope turns out even bigger once in the code.
+- 2026-09-21 17:26 PT -- GAP-FIX LANDED (PR #34, 4a57eb1, branch
+  execution-dispatch-model-step; not a plan P-number). The piece that
+  makes the worker loop dispatch an actual request to the AI model for
+  the first time in this whole remediation effort. internal/execution's
+  handleContextCommit now chains through to _effects.prepare for every
+  task-bound turn (t.AttemptID != ""), mirroring interpretExternalTool's
+  existing precedent -- no caller-allowlist change needed, exactly as
+  P22's own landing comment (and the founder decision) named. Dispatches
+  prepare_session first for a turn with no confirmed session, then
+  model_step once a ResponsesEvidence.session_handle is persisted
+  (AGENTS.md's "OpenAI Responses session preparation" split). New
+  execution_turn_dispatches table (schemaV5, additive) tracks each
+  dispatch by exact operation_ref so a redelivered prepare_session
+  observation always resolves its own recorded kind, never misrouted
+  into interpretTurnObservation's strict ModelOutput-only validation --
+  proved directly by a negative-control test confirming the
+  ResponsesEvidence document genuinely fails ModelOutput's schema before
+  proving the observation still completes.
+  Lead's own independent verification, not trusted from the report:
+  read every changed line in turn_ops.go/interpret.go/context_build.go/
+  store.go/migrations.go/context_schema.go directly. Wrote a standalone
+  Python script re-verifying ResponsesEvidence byte-for-byte against
+  AGENTS.md's own embedded $defs (0 mismatches across all 34 defs, not
+  just the new one) -- independent of the agent's own claimed technique.
+  Ran go build/vet/gofmt/test myself on internal/execution (full
+  package green, cached and fresh). Red->green verified the core
+  dispatch behavior myself: temporarily neutralized handleContextCommit's
+  new dispatch call, confirmed TestContextCommitDispatchesPrepareSession...
+  fails with the exact expected message, restored, confirmed green again.
+  FOUND AND FIXED A SECOND BUG, independently, not flagged by the
+  dispatching agent (out of its execution-only write scope): internal/
+  controller/turns.go's workKindProposal branch unconditionally called
+  stalledModelDispatch for every model_pending turn, reporting a
+  model_dispatch obligation ("the controller has no caller-allowed path
+  to dispatch") on every tick a turn's effect remained outstanding --
+  which after this fix is now EVERY task-bound turn between dispatch and
+  observation, since gap 1 is closed. Diagnosed by tracing turnWork's
+  switch statement directly against the already-landed P22 controller
+  code (git show main:internal/controller/turns.go), not by guessing.
+  Verified the false positive empirically: wrote a probing test driving
+  a real turn through claim -> context.commit -> dispatch with the fake
+  adapter answering "not yet" (retryable, no crash/abandonment, which
+  would exercise a different already-covered fenced-turn path), observed
+  model_dispatch firing alongside a legitimate delivery obligation on
+  every subsequent tick. Fixed by reusing the same outstandingTurnEffects
+  check the context branch already relies on: an outstanding dispatch
+  resolves/skips the obligation, only a turn whose plan names no
+  responses-adapter tool (nothing to ever dispatch) still reports
+  stalled. Updated turns.go's own header comment and stalledModelDispatch's
+  doc/message to reflect gap 1 now closed rather than leaving stale
+  claims about "no caller-allowed path" in the code. Red->green verified
+  with the permanent test (TestOutstandingModelDispatchIsNeverReportedAsStalled):
+  reverted the fix, confirmed the exact false-positive fault fires,
+  restored, confirmed clean.
+  Whole-repo go build/go vet clean (run directly, load ~9.6-9.7,
+  R-build-lease contended by an unrelated mini session so skipped rather
+  than waited on since this wasn't a concurrent build). Pre-commit's own
+  full go test ./... on both commits: failures only in packages already
+  tracked in docs/implementation-remediation/expected-red.txt (the
+  standing internal/skills _skills.activate schema-drift baseline,
+  unchanged all session). CI on PR #34: both "build and test" jobs
+  failed with the identical pre-existing signature (compared directly
+  against PR #33/P22's and PR #32/P18's own CI runs, both merged with
+  the same failure pattern) -- confirmed not a new regression before
+  merging, not just assumed from the local pre-commit result.
+  Rebase-merged via gh pr merge --rebase (matching the repo's rebase-
+  merge convention). Worktree and branch cleaned up, R-p22-gap-fix
+  claim released.
+  62% (31 of 50 cards) unchanged by this fix -- it closes an
+  architectural gap inside already-counted P22/P16 work, not a new
+  plan card. The real milestone: the worker loop can now dispatch a real
+  request to the AI model and receive a real response for the first
+  time in this entire remediation effort.
+- 2026-09-21 ~17:30 PT -- WAVE 8 DISPATCHED (P19, P20, P36), all three in
+  parallel: disjoint write roots (internal/skills, internal/execution,
+  internal/policy respectively), no same-owner conflicts, matching the
+  wave 7 pattern. Dependency readiness verified directly on current main
+  before dispatch, not trusted from plan.json's own stale "planned"
+  status field for every one of these: P02 (python3 tools/specgen/
+  render.py --check -- clean), P07/internal/policy (go test -- clean),
+  P18/internal/execution (go test -- clean, 127s), P34/internal/
+  evidence (go test -- clean) -- confirmed each actually landed by
+  reading docs/roadmap.md's own Shipped entries (P02 PR #5, P07 PR #12,
+  P34 PR #16, P18 PR #32), not by inference. P19 (internal/skills, the
+  local skill.evaluate job executor) briefed with the pre-existing
+  known context it needs: internal/skills is currently the ONLY package
+  still in docs/implementation-remediation/expected-red.txt for a real,
+  tracked reason (_skills.activate/TestDescriptorsMatchFrozenCatalog
+  schema drift against the revision-3 frozen catalog), and this is the
+  only card that owns that package -- landing it is expected to fix the
+  drift, and since cmd/zatiti/internal/application/internal/installation/
+  tests/integration/tests/qualification all fail downstream of this
+  same root cause, P19 landing clean could clear the ENTIRE remaining
+  expected-red baseline that has persisted unchanged all session.
+  Briefed the agent to check and report this explicitly rather than
+  just fixing internal/skills in isolation. P20 (internal/execution,
+  controlled repository_patch_applies/repository_command verification)
+  briefed to read what P18 and the same-day gap fix just landed in the
+  same package first, so it plugs into the existing contract.Verifier
+  path rather than inventing a parallel one. P36 (internal/policy,
+  earned-autonomy evidence updates) briefed to read P18's actual
+  verified-result/incident event shape and P34's actual receipt/event-
+  tail shape from the landed code rather than guessing, and to match
+  the existing Z19 acceptance cases exactly rather than inventing new
+  ones. All three claimed (P19/P20/P36), isolated worktrees created off
+  current main (4a57eb1, includes the gap fix), model sonnet.
 
 ## Planned
 
