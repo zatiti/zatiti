@@ -31,7 +31,6 @@
 cmd/zatiti
 internal/application
 internal/installation
-internal/mcp
 internal/scheduling
 internal/skills
 tests/integration
