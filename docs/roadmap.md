@@ -2467,6 +2467,60 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   operation must be run in a work tree". Working-tree files were
   confirmed fully intact; this was config corruption, not data loss.
   Fixed directly (git config core.bare false), verified restored.
+- 2026-09-21 18:38 PT -- P36 LANDED (PR #36, abad6824). Connects earned-
+  autonomy evaluation to real evidence identity, given policy's outgoing-
+  call list is frozen (no event-log/execution call) -- so this makes
+  evaluation genuinely consult the real independently-verified state
+  already reachable via _tasks.snapshot, reading its acceptance
+  mode/verifier identity and dependencies fields the existing code had
+  been ignoring, rather than inventing a new event-tail consumer outside
+  the frozen call list. Rejects any credited evidence task whose
+  acceptance wasn't mode:"independent" (a manually-accepted task is not
+  qualification, Z19.unsupported_evidence). Checks standing policy for
+  an explicit human-required rule on the target capability and refuses
+  to promote if one governs it (Z19.human_review_preserved) -- driven
+  off real standing-policy rules (humanRequiredBlocks, mirroring
+  evaluate()'s own narrowest-scope/deny-wins matching), not the
+  previously-dead HumanRequiredPreserved field. Re-verifies the
+  promotion rule's ceiling grant against the worker's CURRENT authority
+  at evaluation time, not just at rule-authoring time, before calling
+  _identity.promote (Z19.capability_promotion). Tracks each credited
+  evidence task's own dependency closure on the qualification, so a
+  later change to any of those refs invalidates it exactly as a change
+  to the evidence itself would. Additive migration (schemaV2):
+  policy_qualifications.dependencies_json, policy_evidence.
+  {acceptance_mode,verifier_id,verifier_version} -- internal bookkeeping
+  only, never on the public wire schema.
+  Lead's own independent verification: read autonomy.go and
+  authority.go's humanRequiredBlocks in full, confirmed the narrowest-
+  scope/deny-wins matching genuinely mirrors evaluate()'s own existing
+  pattern (not just claimed to) by tracing the shared helpers
+  (scopeDims/policyCovers/decisionDeny/capWildcard) both use. Ran go
+  build/vet/gofmt/test myself (38 tests, clean). Red->green verified
+  the human-required-class guard myself: temporarily short-circuited
+  humanRequiredBlocks to always return unblocked, confirmed
+  TestAutonomyEvaluatePreservesHumanRequiredClass fails with the
+  qualification incorrectly auto-qualifying a capability standing
+  policy marks mandatory human review, restored, confirmed green.
+  Rebased onto post-P19 main; CI's build-and-test failures confirmed
+  zero "skill" mentions (grepped the actual failure log), matching the
+  expected internal/policy(_policy.activate)/internal/installation
+  pattern. Rebase-merged. Worktree/branch cleaned up, P36 claim
+  released.
+  WAVE 8: 2 of 3 landed (P19, P36). P20 (internal/execution, controlled
+  repository verification) independently reviewed and opened as PR #37
+  -- real containment (owned process group, negative-PID kill on
+  timeout/output-bound breach, argv[0] resolved via the trusted
+  runner's own PATH never the accepted command's env), a real command-
+  digest tamper check, 10 tests against a real local git repo and the
+  real git binary including a genuine timeout/process-group-death
+  proof. Found and fixed along the way: a GIT_DIR/GIT_INDEX_FILE env
+  leak from the outer pre-commit hook into the test fixture's own
+  nested git commit, silently redirecting it at this worktree's real
+  index -- fixed with a gitEnv() helper stripping GIT_* from every git
+  subprocess the runner starts, a real production robustness fix, not
+  just a test workaround. Red->green verified the command_digest
+  tamper check myself. Landing pending CI.
 
 ## Planned
 
