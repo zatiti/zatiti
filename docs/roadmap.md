@@ -2536,6 +2536,19 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   receive a real response, and independently verify real engineering-
   task outcomes against a real repository" -- the concrete product
   capability this whole remediation effort exists to deliver.
+- 2026-09-21 ~18:50 PT -- WAVE 9 DISPATCHED (P21, internal/execution,
+  "complete cooperative recovery and run export jobs"). depends_on
+  P18/P02/P20, all landed -- confirmed by direct go test ./internal/
+  execution on real post-merge main (161.8s, ok), not plan.json's own
+  stale status field. Checked P23 (wave 10, internal/controller) at the
+  same time: it additionally depends on P21 itself, so it is NOT yet
+  ready and was not dispatched -- will check again once P21 lands.
+  Dispatched with isolation:"worktree" only this time (no manual
+  worktree pre-creation), correcting the process mistake that confused
+  all three wave-8 agents. Briefed to read P18's reportAttempt and
+  P20's repository_runner.go evidence-staging pattern first for
+  consistency, and reminded that only whole-repo checks need the
+  shared build lease.
 
 ## Planned
 
