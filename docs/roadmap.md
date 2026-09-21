@@ -2027,6 +2027,87 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   of the four attack shapes -- not just that a test asserts it. Three
   wave-7 cards (P18 verification, P22 the controller, P28 memory
   lifecycle) all depend on this card landing.
+- 2026-09-21 03:21 PT -- P16 LANDED (PR #30, 4d73a37). The most
+  security-critical card in the plan; got the deepest review of the
+  session. interpret.go read line by line and traced through all four
+  required attack-shape defenses:
+    - Duplicate proposal (replay): the existing (turn_id, step_index,
+      proposal_id) idempotency key, backed by a DB-level UNIQUE
+      constraint -- an identical redelivery is read back and returned,
+      never re-interpreted or re-dispatched.
+    - Prompt injection in fetched content: interpretation never parses
+      free text for instructions -- it only ever reads structured
+      tool_proposals[] and matches tool.id/version against either the
+      sealed local decision tools (deterministically minted, never
+      model-supplied) or the turn's own committed context plan's
+      resolved tool list. Injected text influencing the model into
+      proposing an unbound tool still gets refused (unauthorized_tool)
+      regardless of what the text claims.
+    - Fabricated human approval: confirmed by direct code reading that
+      ModelToolProposal.Explanation is decoded but never referenced by
+      any conditional/branching logic anywhere in interpret.go -- a
+      proposal claiming prior human review routes exactly as an ordinary
+      unapproved call.
+    - Unauthorized connection: refused via the same tool-closure check
+      as injection; a legitimately-matched tool is ALSO re-resolved
+      fresh via _connections.resolve at actual dispatch time (not just
+      trusted from when the context was built), so a since-revoked
+      binding is caught too.
+  All new peer calls (_scheduling.cycle.record) confirmed legitimately
+  declared/authorized in the frozen contract (execution is the sole
+  listed caller). modelOutputSchema confirmed to reuse the
+  already-byte-verified contextSchemaDefs with zero new $defs text.
+  TWO REAL BUGS FOUND AND FIXED BEFORE LANDING:
+  (1) A ModelOutput may carry more than one tool_proposal, and the
+  original implementation let whichever proposal was processed LAST
+  decide the turn's next state. A batch mixing a still-pending
+  external_tool proposal with a terminal reply/report_outputs/
+  cycle_decision-done proposal could move the turn to "completed" while
+  the pending proposal's already-dispatched effect sat orphaned --
+  nothing in work.pending/.claim scans a completed turn again, so the
+  effect's real outcome would never get reconciled. Fixed by aggregating
+  completion/pending status across the WHOLE batch, order-independent:
+  if anything in a delivery is left pending, the turn stays
+  proposal_pending regardless of what else the same delivery decided.
+  VERIFIED RED-OVER-GREEN, not just written and trusted: temporarily
+  reverted the fix, confirmed the new regression test
+  (TestModelResponseMixedBatchKeepsPendingProposalReachable/
+  pending_first) genuinely failed with the exact predicted symptom
+  (turn state "completed" instead of "proposal_pending"), then restored
+  the fix and confirmed it passes both proposal orderings.
+  (2) execution_turns.attempt_id had no index despite now being queried
+  directly on every _execution.observation delivery
+  (findTurnByAttemptID) -- every other attempt_id column in this
+  package's own schema already carries a dedicated index (checkpoints,
+  context_lineage, verification_jobs, obligations, operations);
+  execution_turns was the one exception. Added as a partial index
+  (schemaV4).
+  Two flagged scope gaps independently confirmed legitimate rather than
+  silently worked around: a bare chat/responsibility turn (no task/
+  attempt) has no schema-valid path to receive a ModelOutput today,
+  since _execution.observation's frozen schema requires attempt_id --
+  verified directly against docs/implementation/operations.json, a real
+  contract gap outside this card's write scope. Actual dispatch of the
+  outgoing model_step/prepare_session effect remains unimplemented,
+  reaffirming P15's own documented deferral (residual audit finding G05,
+  left for a future controller card -- see P22 below).
+  go test ./internal/execution: 128 subtests, zero failures, zero
+  skips, including all three required tests, all four attack-shape
+  sub-cases, the new mixed-batch regression test, and
+  TestDescriptorsMatchFrozenCatalog. tests/integration: same 36
+  pre-existing failures as main, zero new. CI confirmed internal/
+  execution not among the PR's failures.
+  WAVE 6 COMPLETE (its only card). Overall: 29 of 50 cards landed
+  (58%). Wave 7's three cards are now dependency-ready: P18
+  (verification/output evidence, internal/execution) needs P16/P09/
+  P11/P02 -- all landed. P22 (drive turns/contexts/model-tool work in
+  the controller, internal/controller -- first card ever touching this
+  package) needs P16/P17/P02 -- all landed. P28 (memory lifecycle,
+  internal/memory) needs P27/P16/P02/P26 -- all landed. Not dispatching
+  wave 7 yet; P22 in particular (the piece that finally ties
+  context-building, model interpretation and verification into one real
+  running loop, on a brand-new package) will get the same
+  before-dispatch check-in P16 got.
 
 ## Planned
 
