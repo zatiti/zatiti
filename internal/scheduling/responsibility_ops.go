@@ -88,6 +88,7 @@ func (r responsibilityRow) wire() (wireResponsibility, error) {
 		Acceptance:           acceptance,
 		Paused:               r.Paused,
 		NextWake:             r.NextWake,
+		LastCycleID:          r.LastCycleID,
 	}, nil
 }
 

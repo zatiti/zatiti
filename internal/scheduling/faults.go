@@ -32,6 +32,13 @@ func conflict(format string, args ...any) error {
 	return fault(contract.CodeConflict, false, format, args...)
 }
 
+// submissionConflict reports that a replayed identity (a cycle_id or wake
+// id already recorded/admitted) was resubmitted with different content: the
+// wire convention's exact conflict-versus-replay rule.
+func submissionConflict(format string, args ...any) error {
+	return fault(contract.CodeSubmissionConflict, false, format, args...)
+}
+
 // budgetUnavailable reports that the responsibility's aggregate spend limit
 // is already exhausted, so admitting another cycle would create unaccounted
 // spend. Retryable: free budget or a pause may change the answer later.

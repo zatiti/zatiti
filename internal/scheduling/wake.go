@@ -111,14 +111,19 @@ func (s *Service) wakeDue(ctx context.Context, unit contract.Unit, in wakeDueInp
 	return completed(wakeDueBody{Wakes: wakes})
 }
 
-// wakeAdmit admits one due wake exactly once. Unknown, already-admitted and
+// wakeAdmit admits one due wake exactly once. Already-admitted and
 // occurrence-duplicated deliveries report skipped so controller retries stay
-// idempotent; a not-yet-due wake is a caller error.
+// idempotent; a not-yet-due wake is a caller error. A wake ID scheduling has
+// never persisted is not necessarily unknown: it is the shape an
+// authenticated event/reply/dependency trigger takes (see admitEventWake) —
+// the controller mints the Wake object itself from a durable event rather
+// than scheduling arming it ahead of time the way a cron or responsibility
+// timer wake is armed.
 func (s *Service) wakeAdmit(ctx context.Context, unit contract.Unit, in wakeAdmitInput) (contract.Payload, error) {
 	now := s.deps.Clock.Now()
 	row, err := loadWake(ctx, unit, in.Wake.ID)
 	if errors.Is(err, sql.ErrNoRows) {
-		return completed(wakeAdmitBody{Skipped: true})
+		return s.admitEventWake(ctx, unit, in.Wake, now)
 	}
 	if err != nil {
 		return contract.Payload{}, err
@@ -300,6 +305,46 @@ func (s *Service) admitScheduleWake(ctx context.Context, unit contract.Unit, wak
 	return completed(wakeAdmitBody{Task: &task, Skipped: false})
 }
 
+// aggregateFenceExceeded reports whether admitting one more cycle for resp
+// would exceed its aggregate spend limit: every recorded cycle spends at
+// most the per-cycle limit, so admitting one more exceeds the aggregate
+// exactly when the checked product does. A zero per-cycle spend never
+// exceeds. Shared by the timer, event-triggered and cycle.record admission
+// paths so the three fences cannot drift apart.
+func aggregateFenceExceeded(ctx context.Context, unit contract.Unit, resp responsibilityRow) (bool, int64, error) {
+	count, err := countCycles(ctx, unit, resp.ID)
+	if err != nil {
+		return false, 0, err
+	}
+	total, ok := checkedMul(count+1, resp.CycleLimits.SpendMicroUnits)
+	return !ok || total > resp.AggregateLimits.SpendMicroUnits, count, nil
+}
+
+// buildCycleTask assembles the bounded, draft cycle task a responsibility's
+// admitted wake produces: the responsibility's own outcome, acceptance and
+// per-cycle limits, freshly deadlined from the admission instant. Shared by
+// the timer and event-triggered admission paths.
+func (s *Service) buildCycleTask(resp responsibilityRow, now time.Time) (wireTask, error) {
+	acceptance := wireAcceptance{}
+	if err := decodeJSON(string(resp.Acceptance), &acceptance); err != nil {
+		return wireTask{}, err
+	}
+	return wireTask{
+		ID:              s.deps.IDs.New(),
+		Version:         1,
+		Scope:           resp.Scope,
+		OwnerID:         resp.WorkerID,
+		WorkerID:        resp.WorkerID,
+		Outcome:         resp.Outcome,
+		Inputs:          []wireArtifactRef{},
+		RequiredOutputs: []string{},
+		Acceptance:      acceptance,
+		Limits:          freshDeadline(resp.CycleLimits, now),
+		Dependencies:    []contract.ID{},
+		State:           "draft",
+	}, nil
+}
+
 // admitResponsibilityWake admits one responsibility wake: the aggregate
 // spend fence, the bounded cycle task through tasks, and the occurrence row.
 // The next wake is the cycle outcome's durable decision, recorded by
@@ -336,43 +381,138 @@ func (s *Service) admitResponsibilityWake(ctx context.Context, unit contract.Uni
 		return completed(wakeAdmitBody{Skipped: true})
 	}
 
-	// Aggregate fence: every recorded cycle spends at most the per-cycle
-	// limit, so admitting one more cycle exceeds the aggregate when the
-	// checked product does. A zero per-cycle spend always admits.
-	count, err := countCycles(ctx, unit, resp.ID)
+	exceeded, count, err := aggregateFenceExceeded(ctx, unit, resp)
 	if err != nil {
 		return contract.Payload{}, err
 	}
-	total, ok := checkedMul(count+1, resp.CycleLimits.SpendMicroUnits)
-	if !ok || total > resp.AggregateLimits.SpendMicroUnits {
+	if exceeded {
 		return contract.Payload{}, budgetUnavailable(
 			"responsibility %s aggregate spend limit %d %s would be exceeded by cycle %d at %d micro-units per cycle",
 			resp.ID, resp.AggregateLimits.SpendMicroUnits, resp.CycleLimits.Currency, count+1, resp.CycleLimits.SpendMicroUnits)
 	}
 
-	acceptance := wireAcceptance{}
-	if err := decodeJSON(string(resp.Acceptance), &acceptance); err != nil {
+	cycle, err := s.buildCycleTask(resp, now)
+	if err != nil {
 		return contract.Payload{}, err
-	}
-	cycle := wireTask{
-		ID:              s.deps.IDs.New(),
-		Version:         1,
-		Scope:           resp.Scope,
-		OwnerID:         resp.WorkerID,
-		WorkerID:        resp.WorkerID,
-		Outcome:         resp.Outcome,
-		Inputs:          []wireArtifactRef{},
-		RequiredOutputs: []string{},
-		Acceptance:      acceptance,
-		Limits:          freshDeadline(resp.CycleLimits, now),
-		Dependencies:    []contract.ID{},
-		State:           "draft",
 	}
 	task, err := s.landTask(ctx, unit, cycle, wake.SourceID, wake.OccurrenceKey)
 	if err != nil {
 		return contract.Payload{}, err
 	}
 	if err := s.recordOccurrence(ctx, unit, wake, wake.OccurrenceKey, occurrenceAdmitted, "", task.ID, now); err != nil {
+		return contract.Payload{}, err
+	}
+	return completed(wakeAdmitBody{Task: &task, Skipped: false})
+}
+
+// admitEventWake admits an authenticated event/reply/dependency trigger: a
+// caller-supplied Wake naming a responsibility that scheduling has never
+// persisted a wake row for (see wakeAdmit — a fresh occurrence carries no
+// prior wake identity, unlike the timer path, which always admits a wake
+// scheduling itself armed). The controller mints these from durable events
+// R9-009 requires be explicit and authenticated; scheduling never trusts
+// the occurrence key's content alone — it is authenticated here against a
+// genuine authorized message in the worker's mailbox via _messaging.pending
+// before anything is admitted, and every negative outcome (unauthenticated,
+// paused, archived, unknown source, too-soon-to-reconsider) persists
+// nothing, so a legitimate later delivery of the same event can still
+// succeed once the condition that refused it clears.
+//
+// Design decision (not fully specified by the card): the frozen
+// _scheduling.wake.admit schema carries a caller-supplied Wake with no
+// source_kind, and this package's own pre-existing comment on occurrence
+// keys already documents that "the controller mints" event-driven
+// responsibility wakes, but no operation existed for it to do so before
+// this change — wake.admit's prior implementation replied skipped for any
+// wake ID it had not itself armed. This is the minimal extension of that
+// existing contract that makes the documented mechanism real: an unknown
+// wake ID whose source_id resolves to a responsibility is treated as a
+// fresh, authenticated admission request rather than an already-consumed
+// retry. It does not change behavior for any wake ID whose source does not
+// resolve to a responsibility (still skipped, exactly as before).
+func (s *Service) admitEventWake(ctx context.Context, unit contract.Unit, in wireWake, now time.Time) (contract.Payload, error) {
+	resp, found, err := loadResponsibility(ctx, unit, in.SourceID)
+	if err != nil {
+		return contract.Payload{}, err
+	}
+	if !found || resp.Paused || resp.Archived {
+		// Nothing persists: an unknown source, a paused responsibility and
+		// an archived one all leave the event unconsumed so a later,
+		// legitimate delivery (after resume, or once the caller resolves
+		// which responsibility genuinely owns it) is not silently lost.
+		return completed(wakeAdmitBody{Skipped: true})
+	}
+	exists, err := occurrenceExists(ctx, unit, resp.ID, in.OccurrenceKey)
+	if err != nil {
+		return contract.Payload{}, err
+	}
+	if exists {
+		return completed(wakeAdmitBody{Skipped: true})
+	}
+
+	pending, err := s.messagingPending(ctx, unit, resp.WorkerID)
+	if err != nil {
+		return contract.Payload{}, err
+	}
+	authenticated := false
+	for _, m := range pending {
+		if string(m.ID) == in.OccurrenceKey {
+			authenticated = true
+			break
+		}
+	}
+	if !authenticated {
+		return contract.Payload{}, invalidInput(
+			"event wake %s does not name an authorized pending message for responsibility %s", in.OccurrenceKey, resp.ID)
+	}
+
+	// Minimum reconsideration interval, rechecked here because an
+	// event-triggered admission — unlike the timer path, whose due_at is
+	// always armed at least one interval after the prior cycle start —
+	// bypasses the timer entirely and could otherwise reconsider on every
+	// reply regardless of pace. A too-soon event is left unconsumed so the
+	// same delivery can be retried once the interval elapses.
+	if resp.LastCycleAt != nil && now.Sub(*resp.LastCycleAt) < time.Duration(resp.MinIntervalSeconds)*time.Second {
+		return completed(wakeAdmitBody{Skipped: true})
+	}
+
+	exceeded, count, err := aggregateFenceExceeded(ctx, unit, resp)
+	if err != nil {
+		return contract.Payload{}, err
+	}
+	if exceeded {
+		return contract.Payload{}, budgetUnavailable(
+			"responsibility %s aggregate spend limit %d %s would be exceeded by cycle %d at %d micro-units per cycle",
+			resp.ID, resp.AggregateLimits.SpendMicroUnits, resp.CycleLimits.Currency, count+1, resp.CycleLimits.SpendMicroUnits)
+	}
+
+	cycle, err := s.buildCycleTask(resp, now)
+	if err != nil {
+		return contract.Payload{}, err
+	}
+	task, err := s.landTask(ctx, unit, cycle, resp.ID, in.OccurrenceKey)
+	if err != nil {
+		return contract.Payload{}, err
+	}
+	// The fresh wake identity is persisted already admitted: it was minted
+	// and consumed in the same transaction, so a redelivery under the same
+	// wake ID replays through the ordinary loadWake/admitted_at path above
+	// exactly like a timer wake's duplicate delivery.
+	installation, organization, project, worker, taskDim := scopeDims(resp.Scope)
+	if err := insertWake(ctx, unit, wakeRow{
+		ID: in.ID, InstallationID: installation, OrganizationID: organization,
+		ProjectID: project, WorkerID: worker, TaskID: taskDim, Scope: resp.Scope,
+		SourceKind: sourceResponsibility, SourceID: resp.ID, OccurrenceKey: in.OccurrenceKey,
+		DueAt: in.DueAt, ConditionVersion: in.ConditionVersion, AdmittedAt: &now, CreatedAt: now,
+	}); err != nil {
+		return contract.Payload{}, err
+	}
+	if err := s.recordOccurrence(ctx, unit, wakeRow{Scope: resp.Scope, SourceID: resp.ID}, in.OccurrenceKey, occurrenceAdmitted, "", task.ID, now); err != nil {
+		return contract.Payload{}, err
+	}
+	resp.EventCursor = in.OccurrenceKey
+	resp.UpdatedAt = now
+	if err := updateResponsibilityEventCursor(ctx, unit, resp); err != nil {
 		return contract.Payload{}, err
 	}
 	return completed(wakeAdmitBody{Task: &task, Skipped: false})

@@ -197,7 +197,10 @@ type wireSchedule struct {
 }
 
 // wireResponsibility is the shared Responsibility definition: one ongoing
-// reasoning cycle owned by a worker.
+// reasoning cycle owned by a worker. LastCycleID is the revision-3 addition
+// (AGENTS.md: "Responsibility gains optional last_cycle_id") that surfaces
+// the source linkage of the most recently recorded cycle so desktop can show
+// the real relationship between a responsibility and the work it produced.
 type wireResponsibility struct {
 	ID                   contract.ID      `json:"id"`
 	Version              contract.Version `json:"version"`
@@ -215,6 +218,7 @@ type wireResponsibility struct {
 	Acceptance           wireAcceptance   `json:"acceptance"`
 	Paused               bool             `json:"paused"`
 	NextWake             *time.Time       `json:"next_wake,omitempty"`
+	LastCycleID          contract.ID      `json:"last_cycle_id,omitempty"`
 }
 
 // wireWake is the shared Wake definition: one durable wake condition.
@@ -353,12 +357,19 @@ type wakeAdmitInput struct {
 	Wake wireWake `json:"wake"`
 }
 
+// cycleRecordInput is the revision-3 _scheduling.cycle.record input:
+// cycle_id is the unique replay/conflict fence execution pins per completed
+// cycle (an identical repeat for the same cycle_id replays; a differing
+// repeat is submission_conflict), and the optional turn_id links the cycle
+// to the WorkerTurn that produced it.
 type cycleRecordInput struct {
 	ResponsibilityID contract.ID       `json:"responsibility_id"`
 	ExpectedVersion  contract.Version  `json:"expected_version"`
 	NextWake         time.Time         `json:"next_wake"`
 	Outputs          []wireArtifactRef `json:"outputs"`
 	TaskIDs          []contract.ID     `json:"task_ids"`
+	CycleID          contract.ID       `json:"cycle_id"`
+	TurnID           contract.ID       `json:"turn_id,omitempty"`
 }
 
 // Output bodies for owned operations. Resource and items keys are literal.
@@ -436,6 +447,15 @@ type executionEnqueueCallInput struct {
 	Task wireTask `json:"task"`
 }
 
+// messagingPendingCallInput is the exact _messaging.pending input: the
+// authorized inbox read scheduling uses to authenticate an event-sourced
+// wake against a genuine admitted message, never against the caller's
+// unverified occurrence key alone.
+type messagingPendingCallInput struct {
+	WorkerID contract.ID `json:"worker_id"`
+	Limit    int64       `json:"limit"`
+}
+
 // Peer response shapes. Decoded tolerantly; peers validate their own output
 // against the shared schemas before sending.
 
@@ -476,4 +496,16 @@ type snapshotResource struct {
 
 type snapshotBody struct {
 	Resource snapshotResource `json:"resource"`
+}
+
+// peerMessage is the slice of the shared Message definition scheduling
+// consumes when authenticating an event-sourced wake: only the stable
+// message identity is needed to confirm the caller's occurrence key names a
+// genuine admitted message, never its body or attachments.
+type peerMessage struct {
+	ID contract.ID `json:"id"`
+}
+
+type messagingPendingBody struct {
+	Items []peerMessage `json:"items"`
 }

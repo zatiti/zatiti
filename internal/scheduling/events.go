@@ -29,6 +29,7 @@ const (
 	eventResponsibilityPaused    = "scheduling.responsibility.paused"
 	eventResponsibilityResumed   = "scheduling.responsibility.resumed"
 	eventCycleRecorded           = "scheduling.cycle.recorded"
+	eventCycleIdle               = "scheduling.cycle.idle"
 )
 
 // emitTransition appends one state-correlated event to the transaction

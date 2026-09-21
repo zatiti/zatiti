@@ -338,12 +338,14 @@ type responsibilityRow struct {
 	Paused               bool
 	NextWake             *time.Time
 	LastCycleAt          *time.Time
+	LastCycleID          contract.ID
+	EventCursor          string
 	Archived             bool
 	CreatedAt            time.Time
 	UpdatedAt            time.Time
 }
 
-const responsibilityCols = `id, version, installation_id, organization_id, project_id, worker_id, task_id, scope_json, outcome, signals_json, triggers_json, reasoning_policy, min_interval_seconds, cycle_limits_json, aggregate_limits_json, pause_conditions_json, escalation_conditions_json, acceptance_json, paused, next_wake, last_cycle_at, archived, created_at, updated_at`
+const responsibilityCols = `id, version, installation_id, organization_id, project_id, worker_id, task_id, scope_json, outcome, signals_json, triggers_json, reasoning_policy, min_interval_seconds, cycle_limits_json, aggregate_limits_json, pause_conditions_json, escalation_conditions_json, acceptance_json, paused, next_wake, last_cycle_at, last_cycle_id, event_cursor, archived, created_at, updated_at`
 
 func scanResponsibility(scan func(...any) error) (responsibilityRow, error) {
 	r := responsibilityRow{}
@@ -355,6 +357,7 @@ func scanResponsibility(scan func(...any) error) (responsibilityRow, error) {
 		&r.WorkerID, &taskID, &scopeJSON, &r.Outcome, &signalsJSON, &triggersJSON,
 		&r.ReasoningPolicy, &r.MinIntervalSeconds, &cycleJSON, &aggregateJSON,
 		&pauseJSON, &escalationJSON, &acceptanceJSON, &paused, &nextWake, &lastCycle,
+		&r.LastCycleID, &r.EventCursor,
 		&archived, &created, &updated)
 	if err != nil {
 		return responsibilityRow{}, err
@@ -434,12 +437,13 @@ func insertResponsibility(ctx context.Context, unit contract.Unit, r responsibil
 		 scope_json, outcome, signals_json, triggers_json, reasoning_policy,
 		 min_interval_seconds, cycle_limits_json, aggregate_limits_json,
 		 pause_conditions_json, escalation_conditions_json, acceptance_json,
-		 paused, next_wake, last_cycle_at, archived, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		 paused, next_wake, last_cycle_at, last_cycle_id, event_cursor, archived, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		r.ID, r.Version, r.InstallationID, r.OrganizationID, r.ProjectID, r.WorkerID, r.TaskID,
 		scopeJSON, r.Outcome, signalsJSON, triggersJSON, r.ReasoningPolicy,
 		r.MinIntervalSeconds, cycleJSON, aggregateJSON, pauseJSON, escalationJSON,
 		acceptanceJSON, boolInt(r.Paused), stampArg(r.NextWake), stampArg(r.LastCycleAt),
+		r.LastCycleID, r.EventCursor,
 		boolInt(r.Archived), formatStamp(r.CreatedAt), formatStamp(r.UpdatedAt))
 	if err != nil {
 		return fmt.Errorf("scheduling: insert responsibility: %w", err)
@@ -571,15 +575,32 @@ func archiveResponsibilityRow(ctx context.Context, unit contract.Unit, r respons
 }
 
 // recordResponsibilityCycle persists a recorded cycle: next wake, last cycle
-// stamp and the post-bump version, behind the fence.
+// stamp, the last cycle's source identity and the post-bump version, behind
+// the fence.
 func recordResponsibilityCycle(ctx context.Context, unit contract.Unit, r responsibilityRow) error {
 	res, err := unit.ExecContext(ctx, `UPDATE scheduling_responsibilities SET
-		next_wake = ?, last_cycle_at = ?, version = ?, updated_at = ?
+		next_wake = ?, last_cycle_at = ?, last_cycle_id = ?, version = ?, updated_at = ?
 		WHERE id = ? AND installation_id = ? AND version = ?`,
-		stampArg(r.NextWake), stampArg(r.LastCycleAt), r.Version, formatStamp(r.UpdatedAt),
+		stampArg(r.NextWake), stampArg(r.LastCycleAt), r.LastCycleID, r.Version, formatStamp(r.UpdatedAt),
 		r.ID, r.InstallationID, r.Version-1)
 	if err != nil {
 		return fmt.Errorf("scheduling: record cycle: %w", err)
+	}
+	return expectOneRow(res)
+}
+
+// updateResponsibilityEventCursor advances the persisted source-event cursor
+// an authenticated event/reply/dependency trigger consumed, behind the
+// current version fence. Advancing the cursor is operational bookkeeping,
+// not a definition change, so it does not bump the version — mirroring
+// updateScheduleNextWake's rationale.
+func updateResponsibilityEventCursor(ctx context.Context, unit contract.Unit, r responsibilityRow) error {
+	res, err := unit.ExecContext(ctx, `UPDATE scheduling_responsibilities SET
+		event_cursor = ?, updated_at = ?
+		WHERE id = ? AND installation_id = ? AND version = ?`,
+		r.EventCursor, formatStamp(r.UpdatedAt), r.ID, r.InstallationID, r.Version)
+	if err != nil {
+		return fmt.Errorf("scheduling: update responsibility event cursor: %w", err)
 	}
 	return expectOneRow(res)
 }
@@ -801,6 +822,8 @@ type cycleRow struct {
 	Outputs               []wireArtifactRef
 	TaskIDs               []contract.ID
 	RecordedAt            time.Time
+	CycleID               contract.ID
+	TurnID                contract.ID
 }
 
 // insertCycle records one completed reasoning cycle.
@@ -821,11 +844,11 @@ func insertCycle(ctx context.Context, unit contract.Unit, c cycleRow) error {
 	_, err = unit.ExecContext(ctx, `INSERT INTO scheduling_cycles
 		(id, responsibility_id, responsibility_version, installation_id, organization_id,
 		 project_id, worker_id, task_id, scope_json, next_wake, outputs_json, task_ids_json,
-		 recorded_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		 recorded_at, cycle_id, turn_id)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		c.ID, c.ResponsibilityID, c.ResponsibilityVersion, installation, organization,
 		project, worker, task, scopeJSON, formatStamp(c.NextWake), outputsJSON,
-		taskIDsJSON, formatStamp(c.RecordedAt))
+		taskIDsJSON, formatStamp(c.RecordedAt), c.CycleID, c.TurnID)
 	if err != nil {
 		return fmt.Errorf("scheduling: insert cycle: %w", err)
 	}
@@ -842,4 +865,43 @@ func countCycles(ctx context.Context, unit contract.Unit, responsibilityID contr
 		return 0, fmt.Errorf("scheduling: count cycles: %w", err)
 	}
 	return n, nil
+}
+
+// findCycleByCycleID reads the cycle already recorded under cycle_id for one
+// responsibility, the idempotency fence _scheduling.cycle.record enforces:
+// cycle_id is the unique replay/conflict identity execution pins per
+// completed cycle. A missing row is not an error; the found flag
+// distinguishes a fresh cycle_id from a replay or conflict.
+func findCycleByCycleID(ctx context.Context, unit contract.Unit, responsibilityID, cycleID contract.ID) (cycleRow, bool, error) {
+	row := unit.QueryRowContext(ctx, `SELECT
+		id, responsibility_id, responsibility_version, scope_json, next_wake,
+		outputs_json, task_ids_json, recorded_at, cycle_id, turn_id
+		FROM scheduling_cycles WHERE responsibility_id = ? AND cycle_id = ?`,
+		responsibilityID, cycleID)
+	c := cycleRow{}
+	var scopeJSON, outputsJSON, taskIDsJSON, nextWake, recorded string
+	err := row.Scan(&c.ID, &c.ResponsibilityID, &c.ResponsibilityVersion, &scopeJSON,
+		&nextWake, &outputsJSON, &taskIDsJSON, &recorded, &c.CycleID, &c.TurnID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return cycleRow{}, false, nil
+	}
+	if err != nil {
+		return cycleRow{}, false, fmt.Errorf("scheduling: find cycle by cycle_id: %w", err)
+	}
+	if c.Scope, err = decodeScope(scopeJSON); err != nil {
+		return cycleRow{}, false, err
+	}
+	if c.NextWake, err = parseStamp(nextWake); err != nil {
+		return cycleRow{}, false, err
+	}
+	if c.RecordedAt, err = parseStamp(recorded); err != nil {
+		return cycleRow{}, false, err
+	}
+	if err := json.Unmarshal([]byte(outputsJSON), &c.Outputs); err != nil {
+		return cycleRow{}, false, fmt.Errorf("scheduling: decode cycle outputs: %w", err)
+	}
+	if err := json.Unmarshal([]byte(taskIDsJSON), &c.TaskIDs); err != nil {
+		return cycleRow{}, false, fmt.Errorf("scheduling: decode cycle task ids: %w", err)
+	}
+	return c, true, nil
 }
