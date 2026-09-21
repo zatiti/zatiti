@@ -26,6 +26,11 @@ const (
 	schemaEvaluateIn     = `{"type":"object","additionalProperties":false,"properties":{"scope":{"$ref":"#/$defs/Scope"},"skill":{"$ref":"#/$defs/Ref"},"acceptance":{"$ref":"#/$defs/Acceptance"},"profile":{"$ref":"#/$defs/ExecutionProfile"},"limits":{"$ref":"#/$defs/Limits"}},"required":["scope","skill","acceptance","profile","limits"]}`
 	schemaJobResourceOut = `{"type":"object","additionalProperties":false,"properties":{"resource":{"$ref":"#/$defs/Job"}},"required":["resource"]}`
 
+	// schemaEvaluationRecordIn is _skills.evaluation.record's frozen input:
+	// no scope field — the caller's transaction scope names the
+	// installation, matching _effects.admit's own internal boundary shape.
+	schemaEvaluationRecordIn = `{"type":"object","additionalProperties":false,"properties":{"evaluation_id":{"type":"string","format":"uuid"},"job_id":{"type":"string","format":"uuid"},"expected_version":{"type":"integer","minimum":1,"maximum":9223372036854775807},"verifier_id":{"type":"string","maxLength":8192},"verifier_version":{"type":"string","maxLength":8192},"evidence_ids":{"type":"array","items":{"type":"string","format":"uuid"},"maxItems":4096},"passed":{"type":"boolean"}},"required":["evaluation_id","job_id","expected_version","verifier_id","verifier_version","evidence_ids","passed"]}`
+
 	schemaImportIn  = `{"type":"object","additionalProperties":false,"properties":{"scope":{"$ref":"#/$defs/Scope"},"artifact":{"$ref":"#/$defs/ArtifactRef"},"source":{"type":"string","maxLength":8192},"license":{"type":"string","maxLength":8192},"draft_id":{"type":"string","format":"uuid"}},"required":["scope","artifact","source","license"]}`
 	schemaImportOut = `{"oneOf":[{"type":"object","additionalProperties":false,"properties":{"resource":{"$ref":"#/$defs/Skill"}},"required":["resource"]},{"type":"object","additionalProperties":false,"properties":{"job":{"$ref":"#/$defs/Job"}},"required":["job"]}]}`
 )
@@ -52,8 +57,9 @@ type opSchemas struct {
 // assignment embeds it. Internal operations precede public ones.
 var operationSchemaBodies = map[string]opSchemas{
 	// Internal operations.
-	"_skills.activate": {schemaCandidateIn, schemaVersionsOut},
-	"_skills.validate": {schemaCandidateIn, schemaValidateOut},
+	"_skills.activate":          {schemaCandidateIn, schemaVersionsOut},
+	"_skills.validate":          {schemaCandidateIn, schemaValidateOut},
+	"_skills.evaluation.record": {schemaEvaluationRecordIn, schemaJobResourceOut},
 
 	"skill.archive":           {schemaArchiveIn, schemaArchiveOut},
 	"skill.evaluate":          {schemaEvaluateIn, schemaJobResourceOut},

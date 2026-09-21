@@ -66,3 +66,25 @@ func (s *Service) emitEvaluationCreated(ctx context.Context, unit contract.Unit,
 		Data:            json.RawMessage(data),
 	})
 }
+
+// emitEvaluationRecorded appends the evaluation.recorded event for a
+// terminal disposition _skills.evaluation.record durably wrote — the
+// independently established verdict, never a self-declared one.
+func (s *Service) emitEvaluationRecorded(ctx context.Context, unit contract.Unit, id contract.ID, version int64, skillID contract.ID, skillVersion int64, state string, passed bool) error {
+	data, err := marshalJSON(map[string]any{
+		"type":          "skills.evaluation.recorded",
+		"skill_id":      skillID,
+		"skill_version": skillVersion,
+		"state":         state,
+		"passed":        passed,
+	})
+	if err != nil {
+		return err
+	}
+	return unit.Emit(ctx, contract.Event{
+		Kind:            "skills.evaluation.recorded",
+		ResourceID:      id,
+		ResourceVersion: contract.Version(version),
+		Data:            json.RawMessage(data),
+	})
+}

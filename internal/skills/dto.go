@@ -235,6 +235,29 @@ type candidateInput struct {
 	Candidate wireCandidate `json:"candidate"`
 }
 
+// evaluationRecordInput is _skills.evaluation.record's frozen input: no
+// scope field, since the caller's transaction scope names the installation.
+type evaluationRecordInput struct {
+	EvaluationID    contract.ID   `json:"evaluation_id"`
+	JobID           contract.ID   `json:"job_id"`
+	ExpectedVersion int64         `json:"expected_version"`
+	VerifierID      string        `json:"verifier_id"`
+	VerifierVersion string        `json:"verifier_version"`
+	EvidenceIDs     []contract.ID `json:"evidence_ids"`
+	Passed          bool          `json:"passed"`
+}
+
+// evaluationJobInput is the exact inert JSON handleEvaluate seals into
+// _execution.job.create's input for one skill.evaluate job. RunJob decodes
+// it back unchanged; it carries no authority of its own.
+type evaluationJobInput struct {
+	EvaluationID contract.ID          `json:"evaluation_id"`
+	Skill        wireRef              `json:"skill"`
+	Acceptance   wireAcceptance       `json:"acceptance"`
+	Profile      wireExecutionProfile `json:"profile"`
+	Limits       wireLimits           `json:"limits"`
+}
+
 // ---------- operation output bodies ----------
 
 type skillOutput struct {

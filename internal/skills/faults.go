@@ -34,6 +34,10 @@ func conflictFault(format string, args ...any) *contract.Fault {
 	return fault(contract.CodeConflict, format, args...)
 }
 
+func staleVersion(format string, args ...any) *contract.Fault {
+	return fault(contract.CodeStaleVersion, format, args...)
+}
+
 func cursorExpired(format string, args ...any) *contract.Fault {
 	return fault(contract.CodeCursorExpired, format, args...)
 }
