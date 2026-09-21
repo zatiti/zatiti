@@ -2010,6 +2010,23 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   model responses into bounded governed work) -- the last piece before
   P22 (the controller) can drive a turn from admission through a model
   call through independent verification as one real running loop.
+- 2026-09-21 00:51 PT -- WAVE 6 DISPATCHED. P16 (interpret model
+  responses into bounded governed work, owner internal/execution)
+  confirmed ready: depends_on P15/P04/P12/P02, all landed. Solo card
+  (wave 6 has only one card, no parallelism opportunity) and
+  security-critical -- the card requires proving that a duplicate
+  proposal, prompt injection in fetched content, a fabricated
+  human-approval claim, and an unauthorized connection each produce zero
+  effects. Confirmed with David (AskUserQuestion) before dispatching
+  given the stakes. Claimed (claim.sh) and dispatched as an isolated-
+  worktree agent (zatiti_p16), briefed in detail on what P14/P15 already
+  built that it extends (the WorkerTurn pipeline, contract.WorkerOperator
+  from P04, the sealed local decision tools from P15's context builder,
+  _effects.prepare's callback routing) and told to be explicit in its
+  final report about exactly which check in which function prevents each
+  of the four attack shapes -- not just that a test asserts it. Three
+  wave-7 cards (P18 verification, P22 the controller, P28 memory
+  lifecycle) all depend on this card landing.
 
 ## Planned
 
