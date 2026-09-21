@@ -31,6 +31,5 @@
 cmd/zatiti
 internal/application
 internal/installation
-internal/skills
 tests/integration
 tests/qualification

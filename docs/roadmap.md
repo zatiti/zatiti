@@ -2391,7 +2391,82 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   tail shape from the landed code rather than guessing, and to match
   the existing Z19 acceptance cases exactly rather than inventing new
   ones. All three claimed (P19/P20/P36), isolated worktrees created off
-  current main (4a57eb1, includes the gap fix), model sonnet.
+  current main (4a57eb1, includes the gap fix), model sonnet. Process
+  note: dispatched with both a manually pre-created worktree per card
+  AND isolation:"worktree" on the Agent call -- redundant and
+  conflicting, since the tool's own isolation already auto-creates a
+  separate sandboxed worktree per agent, which is the one its Bash
+  tooling actually enforces. All three agents correctly refused to
+  force operations into the manually-named path once their sandbox
+  guard rejected it; cleared by telling each to just work in and report
+  its own actual assigned worktree/branch instead of the one originally
+  named in its brief -- no work lost, both worktrees shared the same
+  base commit. Also: all three agents initially blocked on claiming the
+  shared cross-machine R-build-lease for what should have been a
+  single-package check (their own assignment docs only require the
+  lease for MULTI-package/whole-repo commands) -- unblocked by telling
+  each to run its own package-scoped build/vet/test directly and leave
+  the whole-repo verification to the lead at landing time, matching
+  this repo's own established division of labor.
+- 2026-09-21 18:27 PT -- P19 LANDED (PR #35, a732750b). The local job
+  executor for skill.evaluate: RunJob independently verifies each
+  expected observation against real published fixture artifacts
+  (artifact_presence/artifact_digest/json_schema read and compare
+  actual bytes; any repository_patch profile check, or any check kind
+  the pinned profile doesn't declare supported, reports "unavailable" --
+  skills has no controlled runner, so that containment is never
+  advertised as available). An unavailable/interrupted check makes the
+  whole outcome outcome_unknown (no evidence minted), never a
+  fabricated verdict. _skills.evaluation.record fences on job_id
+  linkage/expected_version/"passed requires evidence"; an exact replay
+  of an already-terminal disposition is idempotent, anything else
+  against a terminal row is refused stale_version; a verifier identity
+  mismatch since admission invalidates to failed instead of recording
+  the mismatched submission. New activation gate (rejectFailedEvaluation):
+  _skills.activate refuses a version with a recorded failed evaluation
+  for its exact (skill_id, skill_version) -- scoped so a sibling/prior
+  version's failure never bleeds forward.
+  ALSO ROOT-CAUSED AND FIXED THE STANDING TestDescriptorsMatchFrozenCatalog
+  FAILURE THAT HAD PERSISTED ALL SESSION: schema_defs.go's embedded
+  $defs catalog was stale (revision-2 shape, missing Artifact.
+  source_operation_id/purpose, Operation.attempts/callback_route, and
+  the CallbackRoute/OperationAttempt defs entirely). Replaced verbatim
+  with AGENTS.md's revision-3 copy.
+  Lead's own independent verification: read every changed line
+  directly. Re-verified the schema replacement byte-for-byte against
+  AGENTS.md's own embedded $defs myself (44/44 defs structurally
+  identical, 0 mismatches) via a standalone script, independent of the
+  agent's own claimed technique -- also diffed old-vs-new to confirm
+  exactly what changed (added CallbackRoute/OperationAttempt, updated
+  Artifact/Operation/Responsibility to revision 3, nothing removed).
+  Read all 4 new test functions in jobs_test.go in full -- real digest
+  mismatches, real fixture seeding, exact fault-code and state
+  assertions, a genuine negative control (an unobservable fixture
+  distinct from a definite mismatch). Ran go build/vet/gofmt/test
+  myself on internal/skills (41 subtests, clean). Red->green verified
+  the activation gate myself: temporarily removed the
+  rejectFailedEvaluation call from validateTransition, confirmed
+  TestFailingFixtureBlocksActivation fails exactly as expected,
+  restored, confirmed green. Rebased onto current main, whole-repo
+  go build/go vet clean (load 7.02 at check time). CI: both "build and
+  test" jobs failed with the SAME pre-existing failure class as PR
+  #32-34 (confirmed by grepping the actual failure log) -- but with
+  zero "skill" mentions anywhere in the failure output, confirming the
+  fix is real: the only remaining causes are internal/policy's own
+  _policy.activate schema drift (not yet fixed by any landed card) and
+  internal/installation's separately missing installation.verifier.list
+  descriptor. Rebase-merged. internal/skills removed from
+  docs/implementation-remediation/expected-red.txt after confirming
+  go test ./internal/skills passes on the real post-merge main (not
+  just the PR branch) -- per the established lore.md lesson. Worktree/
+  branch cleaned up, P19 claim released.
+  Also found and fixed, mid-session: the main checkout's own .git/config
+  had core.bare flipped to true (likely a side effect of an earlier
+  git worktree remove/gh pr merge --delete-branch interaction),
+  breaking every git command in the main checkout with "fatal: this
+  operation must be run in a work tree". Working-tree files were
+  confirmed fully intact; this was config corruption, not data loss.
+  Fixed directly (git config core.bare false), verified restored.
 
 ## Planned
 
