@@ -249,6 +249,8 @@ func (s *Service) autonomyEvaluate(ctx context.Context, unit contract.Unit, in a
 		successes  int64
 		unobserved []contract.ID
 		aliens     []contract.ID
+		unverified []contract.ID
+		depRefs    []contract.ID
 	)
 	for _, id := range q.EvidenceIDs {
 		task, err := s.callTaskSnapshot(ctx, unit, in.Scope, id)
@@ -266,16 +268,32 @@ func (s *Service) autonomyEvaluate(ctx context.Context, unit contract.Unit, in a
 			FirstState:      task.State,
 			FirstVersion:    int64(task.Version),
 			FirstAt:         now,
+			AcceptanceMode:  task.Acceptance.Mode,
+			VerifierID:      task.Acceptance.VerifierID,
+			VerifierVersion: task.Acceptance.VerifierVersion,
 		}
 		if task.State == "succeeded" {
 			if task.WorkerID != q.WorkerID {
 				aliens = append(aliens, id)
 				continue
 			}
+			// A task whose own acceptance contract did not require
+			// independent verification may have succeeded on nothing more
+			// than an eligible human's manual label, or -- short of that --
+			// on the worker's own report. Neither independently establishes
+			// competence: only a task pinned to an independent verifier
+			// counts toward earned autonomy (Z19.unsupported_evidence, "no
+			// grant activates solely from competence narration or a
+			// remembered judgment").
+			if task.Acceptance.Mode != acceptanceModeIndependent {
+				unverified = append(unverified, id)
+				continue
+			}
 			successes++
 			link.SucceededAt = &now
 			v := int64(task.Version)
 			link.SucceededVersion = &v
+			depRefs = append(depRefs, task.Dependencies...)
 		}
 		observed = append(observed, link)
 		// A disqualifying observed state rejects the qualification
@@ -288,6 +306,12 @@ func (s *Service) autonomyEvaluate(ctx context.Context, unit contract.Unit, in a
 			}
 		}
 	}
+	// The credited evidence's own dependency closure becomes part of what
+	// this qualification stands on: a later change to any of these refs
+	// invalidates it exactly as a change to the evidence itself would
+	// (Z19.version_requalification). An unrelated ref -- one that is no
+	// evidence task's own dependency -- is never part of this closure.
+	q.Dependencies = dedupeIDs(depRefs)
 
 	// Evidence kinds this package cannot independently establish reject
 	// with an inspectable explanation: competence narration and remembered
@@ -303,9 +327,21 @@ func (s *Service) autonomyEvaluate(ctx context.Context, unit contract.Unit, in a
 	// Insufficient successes reject with the full observation record.
 	if successes < rule.MinimumSuccesses {
 		return s.rejectQualification(ctx, unit, q, fmt.Sprintf(
-			"insufficient evidence for rule %s v%d: %d of %d required successes observed (unobserved evidence: %s; evidence of other workers: %s)",
+			"insufficient evidence for rule %s v%d: %d of %d required successes observed (unobserved evidence: %s; evidence of other workers: %s; evidence not independently verified: %s)",
 			rule.ID, rule.Version, successes, rule.MinimumSuccesses,
-			joinIDs(unobserved), joinIDs(aliens)), now, observed)
+			joinIDs(unobserved), joinIDs(aliens), joinIDs(unverified)), now, observed)
+	}
+
+	// Preserve every human-required class: sufficient, independently
+	// verified evidence still never auto-qualifies a capability standing
+	// policy currently governs as mandatory human review. Only an owner's
+	// own narrower policy change lifts it (Z19.human_review_preserved).
+	if blocked, reason, err := s.humanRequiredBlocks(ctx, unit, in.Scope, rule.Capability); err != nil {
+		return contract.Payload{}, err
+	} else if blocked {
+		return s.rejectQualification(ctx, unit, q, fmt.Sprintf(
+			"promotion rule %s v%d has sufficient independently established evidence, but %s",
+			rule.ID, rule.Version, reason), now, observed)
 	}
 
 	// Bind the worker's current model and skill versions: the earned grant
@@ -321,6 +357,29 @@ func (s *Service) autonomyEvaluate(ctx context.Context, unit contract.Unit, in a
 			q.Model = snap.Worker.Profile.Model
 		}
 		q.SkillVersions = snap.Worker.SkillVersions
+	}
+
+	// Keep qualification below the configured ceiling, re-verified now, at
+	// evaluation time, against the worker's own current authority -- not
+	// merely trusted from whatever the ceiling grant covered when the rule
+	// was authored, since that grant can itself be narrowed, denied or
+	// expire in between (Z19.capability_promotion: "only the exact
+	// permitted capability/scope activates within the prior ceiling").
+	workerAuthority, err := s.callAuthority(ctx, unit, q.WorkerID, workerScope)
+	if err != nil {
+		if !isNotFound(err) {
+			return contract.Payload{}, err
+		}
+		workerAuthority = authorityResource{}
+	}
+	if !ceilingWithinEnvelope(workerAuthority.Grants, ruleDefinitionInput{
+		Capability:     rule.Capability,
+		Destinations:   rule.Destinations,
+		CeilingGrantID: rule.CeilingGrantID,
+	}, now) {
+		return s.rejectQualification(ctx, unit, q, fmt.Sprintf(
+			"promotion rule %s v%d has sufficient independently established evidence, but ceiling grant %s no longer covers capability %s and its destinations in the worker's current authority",
+			rule.ID, rule.Version, rule.CeilingGrantID, rule.Capability), now, observed)
 	}
 
 	// Commit the qualified state in memory and ask identity to activate

@@ -106,6 +106,19 @@ CREATE TABLE policy_evidence (
 CREATE INDEX policy_evidence_evidence_idx ON policy_evidence (evidence_id);
 `
 
+// schemaV2 adds the columns that connect autonomy evaluation to the cited
+// evidence tasks' own pinned acceptance identity and dependency closure
+// (P36): which verifier independently established each credited result, and
+// which upstream tasks that result itself depended on, so _policy.invalidate
+// can restrict a qualification whose evidence no longer stands on an
+// unchanged foundation, not merely whose own row was cited directly.
+const schemaV2 = `
+ALTER TABLE policy_qualifications ADD COLUMN dependencies_json TEXT NOT NULL DEFAULT '[]';
+ALTER TABLE policy_evidence ADD COLUMN acceptance_mode TEXT NOT NULL DEFAULT '';
+ALTER TABLE policy_evidence ADD COLUMN verifier_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE policy_evidence ADD COLUMN verifier_version TEXT NOT NULL DEFAULT '';
+`
+
 // migrations returns the policy-owned migration set. Bodies are pinned by
 // SHA-256 so storage can detect any drift from the reviewed schema.
 func migrations() []contract.Migration {
@@ -114,6 +127,11 @@ func migrations() []contract.Migration {
 		Version: 1,
 		SQL:     schemaV1,
 		SHA256:  contract.Hash([]byte(schemaV1)),
+	}, {
+		Owner:   owner,
+		Version: 2,
+		SQL:     schemaV2,
+		SHA256:  contract.Hash([]byte(schemaV2)),
 	}}
 }
 

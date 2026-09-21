@@ -364,6 +364,80 @@ func defaultReviewRequired(capability string) bool {
 	return false
 }
 
+// humanRequiredBlocks reports whether an explicit standing policy currently
+// marks capability as a mandatory human-required class that earned autonomy
+// can never silently bypass (Z19.human_review_preserved): an explicit deny,
+// or a HumanRequired rule, from the narrowest policy that covers scope and
+// capability. This mirrors evaluate's own standing-policy rule matching
+// (denies win, the narrowest covering policy's rules shadow broader ones)
+// but, deliberately, never consults any principal's grants: the question is
+// only whether an owner's own governing policy currently marks this exact
+// capability human-required, independent of who might hold it.
+//
+// Deliberately excluded: evaluate's platform-default review classes
+// (publication, deploy, merge, ...) that apply only absent any narrower
+// standing policy. A promotion rule is itself only ever authored by a human
+// or service principal holding a covering ceiling grant (requireCeiling,
+// Z04.old_authority) -- an owner's own act of establishing exactly this
+// automation. Re-litigating the platform default on top of that would make
+// no promotion rule for any of those capability families ever usable, which
+// is not what "the governing policy still requires a human for a specific
+// action class" (Z19.human_review_preserved's own wording: *the* governing
+// policy, not the platform default) describes. An explicit standing-policy
+// rule -- the owner's deliberate, inspectable act -- is what this checks;
+// only a narrower explicit ALLOW rule for the exact capability lifts a
+// HumanRequired one, exactly as "only an explicitly authorized owner policy
+// change under existing authority can change the mandatory class" requires.
+func (s *Service) humanRequiredBlocks(ctx context.Context, unit contract.Unit, scope contract.Scope, capability string) (blocked bool, reason string, err error) {
+	policies, err := s.loadActivePolicies(ctx, unit, scope.InstallationID)
+	if err != nil {
+		return false, "", err
+	}
+	type matchedRule struct {
+		policy *policyRow
+		rule   wireRule
+	}
+	var denies []matchedRule
+	var narrow []matchedRule
+	maxSpec := -1
+	for i := range policies {
+		p := &policies[i]
+		if !policyCovers(p, scope) {
+			continue
+		}
+		for _, r := range p.Rules {
+			if r.Capability != capability && r.Capability != capWildcard {
+				continue
+			}
+			if r.Decision == decisionDeny {
+				denies = append(denies, matchedRule{policy: p, rule: r})
+				continue
+			}
+			spec := scopeDims(p.Scope)
+			if spec > maxSpec {
+				maxSpec = spec
+				narrow = nil
+			}
+			if spec == maxSpec {
+				narrow = append(narrow, matchedRule{policy: p, rule: r})
+			}
+		}
+	}
+	if len(denies) > 0 {
+		return true, fmt.Sprintf(
+			"standing policy %s denies capability %s; earned autonomy cannot grant a capability standing policy denies",
+			denies[0].policy.ID, capability), nil
+	}
+	for _, m := range narrow {
+		if m.rule.HumanRequired {
+			return true, fmt.Sprintf(
+				"standing policy %s marks capability %s human required; only an owner policy change can lift it",
+				m.policy.ID, capability), nil
+		}
+	}
+	return false, "", nil
+}
+
 // noObjectRef is the nil UUID at version 1: the frozen Action shape requires
 // tool and connection references, and a capability check names no tool and
 // no connection. The nil UUID is the well-known "no object" value, never a
