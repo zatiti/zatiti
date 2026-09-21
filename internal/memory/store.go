@@ -404,6 +404,33 @@ func loadIntentByOperation(ctx context.Context, unit contract.Unit, operationID 
 	return scanIntent(row.Scan)
 }
 
+// loadIntentByJob resolves a writer intent by this owner's own durable job
+// id (memory_jobs.id), the stable command identity `_memory.record`'s job_id
+// names alongside the ephemeral effects operation_id. Unlike operation_id --
+// which a bounded reconciliation read admits fresh, under its own distinct
+// Operation, separate from the original write (R15-009) -- the job this
+// owner opened at dispatch never changes across any number of redeliveries
+// or reconciliation attempts, so it is the correct fallback correlation key
+// when a callback names an operation_id this package no longer recognizes.
+func loadIntentByJob(ctx context.Context, unit contract.Unit, jobID contract.ID) (*intentRow, error) {
+	row := unit.QueryRowContext(ctx, `SELECT `+intentColumns+` FROM memory_intents WHERE job_id = ?`, string(jobID))
+	return scanIntent(row.Scan)
+}
+
+// loadIntentByExecutionJob resolves a writer intent by the linked
+// `_execution.job.create` id (memory_jobs.execution_job_id), the second
+// durable identity `_memory.record`'s job_id may legitimately name --
+// handleRecord's own cross-check already accepts either this owner's job id
+// or its linked execution job id, so the stable-identity fallback must
+// recognize both.
+func loadIntentByExecutionJob(ctx context.Context, unit contract.Unit, executionJobID contract.ID) (*intentRow, error) {
+	row := unit.QueryRowContext(ctx, `SELECT mi.id, mi.kind, mi.installation_id, mi.brain_id, mi.adapter_command_id,
+		mi.operation_id, mi.job_id, mi.payload_digest, mi.state, mi.detail_json, mi.created_at, mi.updated_at
+		FROM memory_intents mi JOIN memory_jobs mj ON mj.id = mi.job_id
+		WHERE mj.execution_job_id = ?`, string(executionJobID))
+	return scanIntent(row.Scan)
+}
+
 // listPendingIntents returns every writer intent not yet in a terminal
 // state, for the backup manifest's key-recovery prerequisites (R15-009).
 func listPendingIntents(ctx context.Context, unit contract.Unit, install contract.ID) ([]*intentRow, error) {
