@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/zatiti/zatiti/internal/contract"
 )
@@ -57,11 +58,15 @@ func decodeResource[T any](domain string, data json.RawMessage) (T, error) {
 }
 
 // peerScopeSnapshot is the part of configuration's scope snapshot execution
-// consumes: the scope-level worker, if any, and the configuration revision.
+// consumes: the scope-level worker, if any, the configuration revision, and
+// the current bindings a worker's own Bindings IDs select into -- the
+// authorized tool/connection/memory capability list P15's context builder
+// resolves against.
 type peerScopeSnapshot struct {
 	Scope    contract.Scope   `json:"scope"`
 	Revision contract.Version `json:"revision"`
 	Worker   *wireWorker      `json:"worker"`
+	Bindings []wireBinding    `json:"bindings"`
 }
 
 // callScopeSnapshot reads configuration's scope snapshot.
@@ -117,6 +122,68 @@ func (s *Service) callTaskSnapshot(ctx context.Context, unit contract.Unit, scop
 		return wireTask{}, err
 	}
 	return decodeResource[wireTask]("tasks snapshot", data)
+}
+
+// callMessagingPending reads the worker's authorized inbox for
+// safe-boundary injection or context assembly, without trusting message
+// bodies as grants: the caller renders each returned message as
+// user-originated, untrusted transcript content.
+func (s *Service) callMessagingPending(ctx context.Context, unit contract.Unit, workerID contract.ID, limit int64) ([]wireMessage, error) {
+	data, err := s.callPeer(ctx, unit, peerMessagingPending, map[string]any{
+		"worker_id": workerID, "limit": limit,
+	})
+	if err != nil {
+		return nil, err
+	}
+	var body struct {
+		Items []wireMessage `json:"items"`
+	}
+	if err := json.Unmarshal(data, &body); err != nil {
+		return nil, fmt.Errorf("execution: decode messaging pending response: %w", err)
+	}
+	return body.Items, nil
+}
+
+// callMemorySelect filters the current authorized bindings before any
+// retrieval: a binding outside the caller's permission or freshness bound
+// refuses here, before any context bytes are built or staged.
+func (s *Service) callMemorySelect(ctx context.Context, unit contract.Unit, scope contract.Scope, bindingIDs []contract.ID, permission string, minimumFreshness time.Time) ([]wireMemoryBinding, error) {
+	data, err := s.callPeer(ctx, unit, peerMemorySelect, map[string]any{
+		"scope": scope, "binding_ids": bindingIDs, "permission": permission,
+		"minimum_freshness": formatStamp(minimumFreshness),
+	})
+	if err != nil {
+		return nil, err
+	}
+	var body struct {
+		Bindings []wireMemoryBinding `json:"bindings"`
+	}
+	if err := json.Unmarshal(data, &body); err != nil {
+		return nil, fmt.Errorf("execution: decode memory select response: %w", err)
+	}
+	return body.Bindings, nil
+}
+
+// callConnectionsResolve validates one exact connection/tool/destination
+// triple: lifecycle, freshness, revocation and destination bindings on
+// both sides. It never discovers an unknown tool -- the caller must already
+// name the exact version it pins; a mismatch refuses with stale_version
+// rather than silently dispatching against a guessed identity.
+func (s *Service) callConnectionsResolve(ctx context.Context, unit contract.Unit, scope contract.Scope, connection, tool wireRef, destination string) (wireConnection, wireTool, error) {
+	data, err := s.callPeer(ctx, unit, peerConnectionsResolve, map[string]any{
+		"scope": scope, "connection": connection, "tool": tool, "destination": destination,
+	})
+	if err != nil {
+		return wireConnection{}, wireTool{}, err
+	}
+	var body struct {
+		Connection wireConnection `json:"connection"`
+		Tool       wireTool       `json:"tool"`
+	}
+	if err := json.Unmarshal(data, &body); err != nil {
+		return wireConnection{}, wireTool{}, fmt.Errorf("execution: decode connections resolve response: %w", err)
+	}
+	return body.Connection, body.Tool, nil
 }
 
 // transitionTask moves one task to a new state with evidence.

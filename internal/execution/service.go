@@ -72,6 +72,13 @@ const (
 	peerTasksSnapshot      = "_tasks.snapshot"
 	peerTasksTransit       = "_tasks.transition"
 	peerMessagingProcessed = "_messaging.processed"
+
+	// P15: real context assembly reaches messaging's authorized inbox,
+	// memory's authorized bindings and connections' validated tool/
+	// connection resolution.
+	peerMessagingPending   = "_messaging.pending"
+	peerMemorySelect       = "_memory.select"
+	peerConnectionsResolve = "_connections.resolve"
 )
 
 // opMeta is the static registration record for one operation.
