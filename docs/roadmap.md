@@ -2178,6 +2178,38 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   go test ./internal/memory: 25 tests, zero failures, including
   TestDescriptorsMatchFrozenCatalog. CI confirmed internal/memory not
   among the PR's failures.
+- 2026-09-21 15:51 PT -- P18 LANDED (PR #32, 2594997). The second half
+  of P16's security boundary: P16 made sure a worker/model can't
+  fabricate task completion by claiming success in text; P18 makes
+  independent verification actually run and actually gate the real
+  success transition. Independently reviewed:
+  resolveOutputArtifacts/publishArtifact/recordTaskEvidence traced
+  through fully, confirming _tasks.evidence.record/_artifacts.publish
+  are legitimately authorized for execution in the frozen catalog with
+  exact matching field shapes (both were declared outgoing calls but
+  never actually called before this card). Traced the subtle
+  "verification job keeps its honest 'passed' verdict while the task
+  still fails on an unmet required child" logic line by line: confirmed
+  updateVerificationJob commits the real verdict BEFORE the
+  required-child gate can mutate the local `effective` variable used
+  only for the task's own transition -- exactly matching the required
+  test's own assertion that the job stays "passed" while the task
+  transitions to "failed". All 6 new tests read in full and confirmed
+  non-vacuous, using the real NewVerifier end to end (never a shortcut
+  that inserts SQL rows or calls an internal record function directly),
+  including a genuine crash-at-claim/crash-at-record test proving
+  exactly one verdict survives either fault. Also fixed: "interrupted"
+  no longer collapses into "prerequisite_missing", and neither forces a
+  permanent attempt/run failure -- both leave the task retryable, since
+  an unavailable verifier or incomplete run is not evidence of
+  anything (only a definitive "failed" or "tampered" does). No schema/
+  migration changes. go test ./internal/execution: 134 subtests, zero
+  failures, including TestDescriptorsMatchFrozenCatalog. go build/vet
+  clean across the whole module (run directly). CI confirmed
+  internal/execution not among the PR's failures.
+  WAVE 7 STATUS: P28 and P18 landed (2 of 3). Only P22 (the controller)
+  remains -- reported ready, in review now, given the deepest review of
+  the session given its centrality.
 
 ## Planned
 
