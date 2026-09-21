@@ -198,7 +198,7 @@ func TestAttemptReportEntersVerification(t *testing.T) {
 	payload := e.mustOK(opAttemptReport, reportInput{
 		Scope: e.scope, AttemptID: claim.Attempt.ID, LeaseID: a.LeaseID,
 		Generation: a.Generation, ExpectedVersion: a.Version,
-		Outputs:      []wireArtifactRef{{ID: e.ids.New(), Digest: fixtureDigest}},
+		Outputs:      []wireArtifactRef{e.fixtureOutputRef()},
 		Observations: []byte(`{"steps":3}`),
 		Usage:        wireUsage{Currency: "USD", Spent: 250},
 	})
@@ -248,7 +248,7 @@ func TestAttemptReportUnknownCostHoldsReservation(t *testing.T) {
 	e.mustOK(opAttemptReport, reportInput{
 		Scope: e.scope, AttemptID: claim.Attempt.ID, LeaseID: a.LeaseID,
 		Generation: a.Generation, ExpectedVersion: a.Version,
-		Outputs:      []wireArtifactRef{{ID: e.ids.New(), Digest: fixtureDigest}},
+		Outputs:      []wireArtifactRef{e.fixtureOutputRef()},
 		Observations: []byte(`{}`),
 		Usage:        wireUsage{Currency: "USD", Unknown: 40},
 	})
@@ -271,7 +271,7 @@ func TestAttemptReportTwiceRejected(t *testing.T) {
 	e.mustOK(opAttemptReport, reportInput{
 		Scope: e.scope, AttemptID: claim.Attempt.ID, LeaseID: a.LeaseID,
 		Generation: a.Generation, ExpectedVersion: a.Version,
-		Outputs:      []wireArtifactRef{{ID: e.ids.New(), Digest: fixtureDigest}},
+		Outputs:      []wireArtifactRef{e.fixtureOutputRef()},
 		Observations: []byte(`{}`),
 		Usage:        wireUsage{Currency: "USD", Spent: 1},
 	})
@@ -403,7 +403,7 @@ func TestAttemptRecoverySurfacesObligations(t *testing.T) {
 	e.mustOK(opAttemptReport, reportInput{
 		Scope: e.scope, AttemptID: claim.Attempt.ID, LeaseID: a.LeaseID,
 		Generation: a.Generation, ExpectedVersion: a.Version,
-		Outputs:      []wireArtifactRef{{ID: e.ids.New(), Digest: fixtureDigest}},
+		Outputs:      []wireArtifactRef{e.fixtureOutputRef()},
 		Observations: []byte(`{}`),
 		Usage:        wireUsage{Currency: "USD", Unknown: 5},
 	})

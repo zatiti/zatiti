@@ -75,6 +75,28 @@ type recordedProcessed struct {
 	TurnID      contract.ID
 }
 
+// recordedEvidence is one _tasks.evidence.record call: P18's real,
+// non-fabricated binding of a trusted verdict to a task.
+type recordedEvidence struct {
+	TaskID               contract.ID
+	AttemptID            contract.ID
+	ExpectedVersion      contract.Version
+	AcceptanceDigest     contract.Digest
+	VerificationArtifact wireArtifactRef
+	OutputBindings       []reportBindingProposal
+	Verdict              string
+}
+
+// recordedPublish is one _artifacts.publish call.
+type recordedPublish struct {
+	Scope          contract.Scope
+	Digest         contract.Digest
+	Size           int64
+	MediaType      string
+	Classification string
+	Encrypted      bool
+}
+
 // fakePorts serves the peer fixtures per installation and task, records the
 // calls handlers make, and carries injectable faults and raw errors.
 type fakePorts struct {
@@ -92,6 +114,8 @@ type fakePorts struct {
 	settles        []recordedSettle
 	prepared       []contract.ID
 	processed      []recordedProcessed
+	evidence       []recordedEvidence
+	published      []recordedPublish
 	seq            int
 }
 
@@ -192,6 +216,20 @@ func (p *fakePorts) Transitions() []recordedTransition {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return append([]recordedTransition(nil), p.transitions...)
+}
+
+// EvidenceRecords returns every _tasks.evidence.record call observed.
+func (p *fakePorts) EvidenceRecords() []recordedEvidence {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return append([]recordedEvidence(nil), p.evidence...)
+}
+
+// Published returns every _artifacts.publish call observed.
+func (p *fakePorts) Published() []recordedPublish {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return append([]recordedPublish(nil), p.published...)
 }
 
 func (p *fakePorts) Call(ctx context.Context, unit contract.Unit, inv contract.Invocation) (contract.Payload, error) {
@@ -417,6 +455,64 @@ func (p *fakePorts) Call(ctx context.Context, unit contract.Unit, inv contract.I
 		}{struct {
 			ID contract.ID `json:"id"`
 		}{id}}
+	case peerArtifactsPublish:
+		var in struct {
+			Scope          contract.Scope  `json:"scope"`
+			Digest         contract.Digest `json:"digest"`
+			Size           int64           `json:"size"`
+			MediaType      string          `json:"media_type"`
+			Classification string          `json:"classification"`
+			Encrypted      bool            `json:"encrypted"`
+		}
+		if err := contract.DecodeStrict(inv.Input, &in); err != nil {
+			p.mu.Unlock()
+			return contract.Payload{}, err
+		}
+		p.published = append(p.published, recordedPublish{
+			Scope: in.Scope, Digest: in.Digest, Size: in.Size,
+			MediaType: in.MediaType, Classification: in.Classification, Encrypted: in.Encrypted,
+		})
+		id := p.nextID()
+		art := wireArtifact{
+			ID: id, Version: 1, Scope: in.Scope, Digest: in.Digest, Size: in.Size,
+			MediaType: in.MediaType, Classification: in.Classification, Encrypted: in.Encrypted,
+			State: "available", CreatedAt: "2026-09-10T12:00:00.000000000Z",
+		}
+		body = struct {
+			Resource wireArtifact `json:"resource"`
+		}{art}
+	case peerTasksEvidenceRecord:
+		var in struct {
+			TaskID               contract.ID             `json:"task_id"`
+			AttemptID            contract.ID             `json:"attempt_id"`
+			ExpectedVersion      contract.Version        `json:"expected_version"`
+			AcceptanceDigest     contract.Digest         `json:"acceptance_digest"`
+			VerificationArtifact wireArtifactRef         `json:"verification_artifact"`
+			OutputBindings       []reportBindingProposal `json:"output_bindings"`
+			Verdict              string                  `json:"verdict"`
+		}
+		if err := contract.DecodeStrict(inv.Input, &in); err != nil {
+			p.mu.Unlock()
+			return contract.Payload{}, err
+		}
+		task, ok := p.tasks[in.TaskID]
+		if !ok {
+			p.mu.Unlock()
+			return contract.Payload{}, notFound("task %s does not exist", in.TaskID)
+		}
+		if task.Version != in.ExpectedVersion {
+			p.mu.Unlock()
+			return contract.Payload{}, staleVersion("task %s is at a different version", in.TaskID)
+		}
+		p.evidence = append(p.evidence, recordedEvidence{
+			TaskID: in.TaskID, AttemptID: in.AttemptID, ExpectedVersion: in.ExpectedVersion,
+			AcceptanceDigest: in.AcceptanceDigest, VerificationArtifact: in.VerificationArtifact,
+			OutputBindings: in.OutputBindings, Verdict: in.Verdict,
+		})
+		task.Version++
+		body = struct {
+			Resource wireTask `json:"resource"`
+		}{*task}
 	default:
 		p.mu.Unlock()
 		return contract.Payload{}, &contract.Fault{
@@ -666,6 +762,19 @@ func fixtureAcceptance(mode string) wireAcceptance {
 }
 
 // fixtureTask builds a schema-valid ready task for one worker.
+// fixtureOutputRef mints a fresh ArtifactRef for the fixture acceptance's
+// single named output slot ("result") and registers it as a published
+// artifact _artifacts.metadata resolves -- reportAttempt's output-slot
+// resolution (P18) requires exactly this, the same registration
+// interpret_test.go's report_outputs fixtures already use for the model-
+// driven path.
+func (e *testEnv) fixtureOutputRef() wireArtifactRef {
+	e.t.Helper()
+	ref := wireArtifactRef{ID: e.ids.New(), Digest: fixtureDigest}
+	e.registerArtifact(ref)
+	return ref
+}
+
 func (e *testEnv) fixtureTask(workerID contract.ID, modelSteps int64) wireTask {
 	return wireTask{
 		ID:              e.ids.New(),

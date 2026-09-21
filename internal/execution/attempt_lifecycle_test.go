@@ -47,7 +47,7 @@ func (e *testEnv) reportAccepted(claim claimBody, usage wireUsage) {
 		LeaseID:         a.LeaseID,
 		Generation:      a.Generation,
 		ExpectedVersion: a.Version,
-		Outputs:         []wireArtifactRef{{ID: e.ids.New(), Digest: fixtureDigest}},
+		Outputs:         []wireArtifactRef{e.fixtureOutputRef()},
 		Observations:    json.RawMessage("{}"),
 		Usage:           usage,
 	})

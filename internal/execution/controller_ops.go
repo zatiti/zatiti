@@ -586,7 +586,15 @@ func (s *Service) handleVerificationRecord(ctx context.Context, unit contract.Un
 			"verifier status passed contradicts observed checks: %s", explanation)
 	}
 	effective := result.Status
-	if recomputed != "passed" && recomputed != "failed" {
+	switch {
+	case effective == "interrupted":
+		// The verifier's own signal that it did not finish is preserved
+		// distinctly: recomputing a verdict from whatever partial
+		// observations an interrupted run happened to collect cannot
+		// manufacture a more complete outcome than "it did not finish" --
+		// collapsing it into prerequisite_missing would lose exactly the
+		// distinction the interruption itself carries.
+	case recomputed != "passed" && recomputed != "failed":
 		// Tampering or missing evidence overrides a mere failure report.
 		effective = recomputed
 	}
@@ -625,7 +633,29 @@ func (s *Service) handleVerificationRecord(ctx context.Context, unit contract.Un
 		}
 	}
 
+	// A designated required child that has not itself independently
+	// succeeded blocks the parent's acceptance. The V1 verifier runner only
+	// observes artifact/repository checks -- it cannot see a sibling task's
+	// state -- so this task-config gate runs here, after the verifier's own
+	// genuine finding is already durably recorded above: the verification
+	// job keeps the honest "passed" the artifact checks actually earned,
+	// while the task itself is still refused a success transition.
 	if effective == "passed" {
+		for _, childID := range task.Acceptance.RequiredChildIDs {
+			child, err := s.callTaskSnapshot(ctx, unit, r.Scope, childID)
+			if err != nil {
+				return contract.Outcome[attemptBody]{}, err
+			}
+			if child.State != "succeeded" {
+				effective = "failed"
+				explanation = fmt.Sprintf("required child %s has not independently succeeded (state %q)", childID, child.State)
+				break
+			}
+		}
+	}
+
+	switch effective {
+	case "passed":
 		if usage.Unknown == 0 && !usage.Advisory {
 			// The cost question the obligations raised is conclusively
 			// settled; close exactly those. Unknown-effect obligations stay
@@ -634,14 +664,22 @@ func (s *Service) handleVerificationRecord(ctx context.Context, unit contract.Un
 				return contract.Outcome[attemptBody]{}, err
 			}
 		}
+		// Publish the sealed request as a real artifact and hand the
+		// trusted verdict to tasks as evidence before the success
+		// transition: only this recorded lineage, or eligible explicit
+		// manual acceptance, may ever establish succeeded.
+		updatedTask, err := s.recordVerificationEvidence(ctx, unit, r.Scope, task.ID, task.Version, a.ID, v.Request, request, "passed")
+		if err != nil {
+			return contract.Outcome[attemptBody]{}, err
+		}
 		if task.Acceptance.Mode == "manual" {
-			if _, err := s.transitionTask(ctx, unit, task.ID, task.Version, "waiting",
+			if _, err := s.transitionTask(ctx, unit, updatedTask.ID, updatedTask.Version, "waiting",
 				[]contract.ID{v.ID}, "manual_acceptance", true); err != nil {
 				return contract.Outcome[attemptBody]{}, err
 			}
 			r.State = "waiting"
 		} else {
-			if _, err := s.transitionTask(ctx, unit, task.ID, task.Version, "succeeded",
+			if _, err := s.transitionTask(ctx, unit, updatedTask.ID, updatedTask.Version, "succeeded",
 				[]contract.ID{v.ID}, "", false); err != nil {
 				return contract.Outcome[attemptBody]{}, err
 			}
@@ -650,7 +688,33 @@ func (s *Service) handleVerificationRecord(ctx context.Context, unit contract.Un
 				return contract.Outcome[attemptBody]{}, err
 			}
 		}
-	} else {
+	case "failed":
+		a.State = "failed"
+		a.RecoveryReason = "verification " + effective + ": " + explanation
+		a.UpdatedAt = now
+		if err := updateAttempt(ctx, unit, a); err != nil {
+			return contract.Outcome[attemptBody]{}, err
+		}
+		// A definitive check failure is real evidence too: record it before
+		// the task's failed transition, the same as a pass.
+		updatedTask, err := s.recordVerificationEvidence(ctx, unit, r.Scope, task.ID, task.Version, a.ID, v.Request, request, "failed")
+		if err != nil {
+			return contract.Outcome[attemptBody]{}, err
+		}
+		if _, err := s.transitionTask(ctx, unit, updatedTask.ID, updatedTask.Version, "failed",
+			[]contract.ID{v.ID}, "", false); err != nil {
+			return contract.Outcome[attemptBody]{}, err
+		}
+		r.State = "failed"
+		if err := emitTransition(ctx, unit, eventRunFailed, r.ID, r.Version); err != nil {
+			return contract.Outcome[attemptBody]{}, err
+		}
+	case "tampered":
+		// A tampered result is not trustworthy evidence -- never handed to
+		// tasks as if it were a genuine verdict. Unlike an unavailable
+		// verifier or an interrupted run (below), tampering is a
+		// definitive, adversarial outcome: the task is fenced directly to
+		// failed, not left open for a retry to reach a decisive verdict.
 		a.State = "failed"
 		a.RecoveryReason = "verification " + effective + ": " + explanation
 		a.UpdatedAt = now
@@ -665,10 +729,47 @@ func (s *Service) handleVerificationRecord(ctx context.Context, unit contract.Un
 		if err := emitTransition(ctx, unit, eventRunFailed, r.ID, r.Version); err != nil {
 			return contract.Outcome[attemptBody]{}, err
 		}
+	default:
+		// prerequisite_missing (the verifier itself, or an expected check,
+		// was unavailable) and interrupted are inconclusive, not a
+		// definitive failure: the task and run are left exactly as they
+		// were (verifying) so a future attempt can still reach a decisive
+		// verdict. Success is prevented either way -- neither state is
+		// "succeeded" -- but execution never spends a permanent task
+		// failure on "the verifier could not finish or was unavailable."
+		a.State = "failed"
+		a.RecoveryReason = "verification " + effective + ": " + explanation
+		a.UpdatedAt = now
+		if err := updateAttempt(ctx, unit, a); err != nil {
+			return contract.Outcome[attemptBody]{}, err
+		}
+		return completedOutcome(attemptBody{Resource: attemptOut(a)})
 	}
 	r.UpdatedAt = now
 	if err := updateRun(ctx, unit, r); err != nil {
 		return contract.Outcome[attemptBody]{}, err
 	}
 	return completedOutcome(attemptBody{Resource: attemptOut(a)})
+}
+
+// recordVerificationEvidence publishes the sealed verification request --
+// already blob-published outside any Unit by the verifier's own
+// stageRequest -- as a real, inspectable artifact, then hands it and the
+// resolved named output bindings to tasks as the trusted evidence lineage
+// for this verdict, before any task state depends on it. Publishing here
+// registers domain metadata for bytes that already exist; it performs no
+// blob IO itself, so it is safe inside this Unit-bound handler.
+func (s *Service) recordVerificationEvidence(ctx context.Context, unit contract.Unit, scope contract.Scope, taskID contract.ID, taskVersion contract.Version, attemptID contract.ID, requestBytes json.RawMessage, request wireVerificationRequest, verdict string) (wireTask, error) {
+	digest := sha256Hex(requestBytes)
+	published, err := s.publishArtifact(ctx, unit, scope, digest, int64(len(requestBytes)),
+		"application/json", "internal", true)
+	if err != nil {
+		return wireTask{}, err
+	}
+	bindings := make([]reportBindingProposal, 0, len(request.Outputs))
+	for _, o := range request.Outputs {
+		bindings = append(bindings, reportBindingProposal{Name: o.Name, Artifact: o.Artifact})
+	}
+	return s.recordTaskEvidence(ctx, unit, taskID, attemptID, taskVersion, request.AcceptanceDigest,
+		wireArtifactRef{ID: published.ID, Digest: published.Digest}, bindings, verdict)
 }

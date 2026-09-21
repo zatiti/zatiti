@@ -73,6 +73,13 @@ const (
 	peerTasksTransit       = "_tasks.transition"
 	peerMessagingProcessed = "_messaging.processed"
 
+	// P18: driving independent verification to a bound task success
+	// transition publishes the sealed verification request as a real
+	// artifact and hands the trusted verdict to tasks as evidence before
+	// any success transition depends on it.
+	peerArtifactsPublish    = "_artifacts.publish"
+	peerTasksEvidenceRecord = "_tasks.evidence.record"
+
 	// P15: real context assembly reaches messaging's authorized inbox,
 	// memory's authorized bindings and connections' validated tool/
 	// connection resolution.

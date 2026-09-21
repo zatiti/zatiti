@@ -697,7 +697,9 @@ func (s *Service) handleExecutionReport(ctx context.Context, unit contract.Unit,
 	if err := narrowAttemptScope(in.Scope, a); err != nil {
 		return contract.Outcome[attemptBody]{}, err
 	}
-	return s.reportAttempt(ctx, unit, a, in.LeaseID, in.Generation, in.Outputs, in.Observations, in.Usage)
+	// Same frozen unnamed-ArtifactRef wire schema as the public path: bind
+	// positionally against the task's own RequiredOutputs.
+	return s.reportAttempt(ctx, unit, a, in.LeaseID, in.Generation, in.Outputs, nil, in.Observations, in.Usage)
 }
 
 // handleVerificationPending is the _execution.verification.pending
