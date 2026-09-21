@@ -90,8 +90,18 @@ func leaseExpiryAt(now time.Time, rootDeadline string) time.Time {
 // lease, own generation and executing worker identity, the expected version
 // must match, and the lease window must still be open. An expired lease is
 // stale: heartbeat, checkpoint and report cannot revive it, and the tick
-// scan fences it independently. Returns nil when the call may proceed.
-func checkWorkerCall(a *attemptRow, inScope contract.Scope, leaseID contract.ID, generation int64, now time.Time) error {
+// scan fences it independently. It also verifies the call's actual
+// authenticated actor against the attempt's bound worker (P21 item 5): a
+// worker-kind principal whose own identity does not match a.WorkerID is
+// refused outright, regardless of what lease_id/generation/scope the
+// request otherwise claims -- a report (or checkpoint/heartbeat) claiming
+// to be from a different worker than the one actually holding the claim is
+// never silently accepted merely because it happens to know the current
+// lease. A service-kind actor (the controller, driving _execution.report
+// etc. on behalf of the current worker subject under its own trusted
+// identity) is exempt: it never asserts to *be* the worker. Returns nil
+// when the call may proceed.
+func checkWorkerCall(unit contract.Unit, a *attemptRow, inScope contract.Scope, leaseID contract.ID, generation int64, now time.Time) error {
 	if a.LeaseID != leaseID {
 		return conflict("lease %s is not the attempt's current lease", leaseID)
 	}
@@ -106,6 +116,9 @@ func checkWorkerCall(a *attemptRow, inScope contract.Scope, leaseID contract.ID,
 	}
 	if inScope.WorkerID != "" && inScope.WorkerID != a.WorkerID {
 		return permissionDenied("worker %s is not the attempt's bound worker", inScope.WorkerID)
+	}
+	if actor := unit.Actor(); actor.Kind == contract.KindWorker && actor.PrincipalID != a.WorkerID {
+		return permissionDenied("calling worker %s is not the attempt's bound worker", actor.PrincipalID)
 	}
 	return nil
 }

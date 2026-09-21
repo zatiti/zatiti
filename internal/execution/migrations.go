@@ -395,6 +395,21 @@ CREATE INDEX execution_turn_dispatches_turn_idx
 	ON execution_turn_dispatches (turn_id, created_at);
 `
 
+// schemaV6 (P21) adds cumulative run-level model-step tracking: the
+// pre-turn hosted loop's own attemptRow.model_steps_used resets to zero on
+// every replacement attempt (a fresh attempt row), which would let a worker
+// accumulate unlimited total model steps against one task's bound just by
+// being replaced repeatedly -- unlike the WorkerTurn pipeline, whose
+// steps_used already lives on the turn row and survives fencing untouched
+// (see handleFence's own comment). model_steps_used on execution_runs is
+// the same fix for the pre-turn attempt lineage: incremented alongside the
+// attempt's own counter and never reset by a replacement claim, so
+// handleObservation and admitAttempt can enforce the task's model-step
+// bound against the run's real cumulative total.
+const schemaV6 = `
+ALTER TABLE execution_runs ADD COLUMN model_steps_used INTEGER NOT NULL DEFAULT 0;
+`
+
 // migrations returns the execution-owned migration set. Bodies are pinned
 // by SHA-256 so storage can detect any drift from the reviewed schema.
 func migrations() []contract.Migration {
@@ -423,5 +438,10 @@ func migrations() []contract.Migration {
 		Version: 5,
 		SQL:     schemaV5,
 		SHA256:  contract.Hash([]byte(schemaV5)),
+	}, {
+		Owner:   owner,
+		Version: 6,
+		SQL:     schemaV6,
+		SHA256:  contract.Hash([]byte(schemaV6)),
 	}}
 }

@@ -242,6 +242,60 @@ func (s *Service) admitAttempt(ctx context.Context, unit contract.Unit, r *runRo
 		return contract.Outcome[claimBody]{}, conflict("task cancellation has been requested")
 	}
 
+	// Resuming a waiting run (a replacement attempt after the prior one was
+	// fenced) is blocked until every unresolved-provider-effect obligation
+	// the run carries is resolved (Z10.conflicting_replacement: "an expired
+	// attempt may still control a repository resource or have an
+	// unresolved provider effect"): a stale lease alone never proves the
+	// prior external process stopped, so replacement cannot proceed on that
+	// inference. This gates specifically on unknown_effect -- a genuinely
+	// dispatched, unconfirmed effect a prior attempt left open -- and not
+	// on the much more common lease_conflict obligation routine lease-expiry
+	// or generation fencing always records (mere staleness of the claim
+	// itself, not evidence of an in-flight external effect); a bare
+	// lease_conflict alone never blocks a fresh replacement claim, matching
+	// the existing lease-expiry-then-replace recovery flow. Resolution
+	// comes only from the channel that actually resolves this kind (a later
+	// conclusive _execution.observation -- see handleObservation), never a
+	// claim-time shortcut; run.recovery/attempt.recovery expose the
+	// obligation itself for inspection either way.
+	if r.State == "waiting" {
+		obligations, err := unresolvedObligations(ctx, unit, "run_id", r.ID)
+		if err != nil {
+			return contract.Outcome[claimBody]{}, err
+		}
+		unresolvedEffects := 0
+		for _, o := range obligations {
+			if o.Code == "unknown_effect" {
+				unresolvedEffects++
+			}
+		}
+		if unresolvedEffects > 0 {
+			return contract.Outcome[claimBody]{}, prerequisiteMissing(
+				"run has %d unresolved provider effect obligation(s); resolve them before a replacement attempt can be admitted -- see run.recovery",
+				unresolvedEffects)
+		}
+	}
+
+	// Root deadline: a fixed absolute bound no replacement attempt can push
+	// out merely by being claimed again (Z12.root_limits_shared).
+	if task.Limits.RootDeadline != "" {
+		if deadline, derr := parseStamp(task.Limits.RootDeadline); derr == nil && !deadline.IsZero() && !now.Before(deadline) {
+			return contract.Outcome[claimBody]{}, conflict(
+				"task root deadline %s has passed; no further attempt may be claimed", task.Limits.RootDeadline)
+		}
+	}
+
+	// Cumulative model steps: gated on the run's own running total, not the
+	// fresh attempt's (which always starts at zero), so a worker cannot
+	// accumulate more total model steps than the task allows just by being
+	// replaced repeatedly.
+	if task.Limits.ModelSteps > 0 && r.ModelStepsUsed >= task.Limits.ModelSteps {
+		return contract.Outcome[claimBody]{}, conflict(
+			"task model step bound %d already reached across %d prior attempt(s); no further attempt may be claimed",
+			task.Limits.ModelSteps, len(r.AttemptIDs))
+	}
+
 	// Required executor guarantees: the declared capabilities must cover the
 	// pinned execution profile's capabilities.
 	snapshot, err := s.callScopeSnapshot(ctx, unit, r.Scope)
@@ -338,7 +392,7 @@ func (s *Service) admitAttempt(ctx context.Context, unit contract.Unit, r *runRo
 	if err := emitTransition(ctx, unit, eventAttemptClaimed, a.ID, a.Version); err != nil {
 		return contract.Outcome[claimBody]{}, err
 	}
-	envelope, err := s.claimContextRef(ctx, unit, r, a)
+	envelope, err := s.claimContextRef(ctx, unit, r, a, snapshot, now)
 	if err != nil {
 		return contract.Outcome[claimBody]{}, err
 	}
@@ -348,13 +402,21 @@ func (s *Service) admitAttempt(ctx context.Context, unit contract.Unit, r *runRo
 // claimReplay answers a repeated claim by the current worker with the
 // original disposition: the same attempt, lease and generation, and the
 // context lineage available at the time of the answer. No duplicate owner
-// is created merely because an acknowledgement was lost.
+// is created merely because an acknowledgement was lost. Recomputing the
+// same deterministic claim-context bytes (when no real checkpoint exists
+// yet) yields the identical digest/reference claimContextRef returned the
+// first time, so a lost-ack replay is idempotent by content, not merely by
+// a cached lookup.
 func (s *Service) claimReplay(ctx context.Context, unit contract.Unit, r *runRow, a *attemptRow) (contract.Outcome[claimBody], error) {
 	task, err := s.callTaskSnapshot(ctx, unit, r.Scope, r.TaskID)
 	if err != nil {
 		return contract.Outcome[claimBody]{}, err
 	}
-	envelope, err := s.claimContextRef(ctx, unit, r, a)
+	snapshot, err := s.callScopeSnapshot(ctx, unit, r.Scope)
+	if err != nil {
+		return contract.Outcome[claimBody]{}, err
+	}
+	envelope, err := s.claimContextRef(ctx, unit, r, a, snapshot, s.now())
 	if err != nil {
 		return contract.Outcome[claimBody]{}, err
 	}
@@ -363,10 +425,19 @@ func (s *Service) claimReplay(ctx context.Context, unit contract.Unit, r *runRow
 
 // claimContextRef resolves the claim's context envelope: the attempt's own
 // pinned context when one exists, else the newest checkpoint context of the
-// run's prior attempts, else the deterministic digest envelope of the
-// pinned inputs. The controller replaces the envelope with the persisted
-// request context before dispatch.
-func (s *Service) claimContextRef(ctx context.Context, unit contract.Unit, r *runRow, a *attemptRow) (wireArtifactRef, error) {
+// run's prior attempts, else a durably published advisory claim-context
+// document naming the worker's currently authorized bindings, the
+// executor's required capabilities and an explicit advisory disclaimer
+// (buildClaimContext) -- never a bare digest referencing bytes nothing ever
+// staged. Publishing brand-new bytes cannot happen synchronously inside
+// this Unit-bound call (AGENTS.md's transaction rules forbid filesystem/blob
+// IO inside a Unit; see job_runner.go), so this seals the exact content by
+// digest now and commits the durable document-publish job that completes
+// it (job_runner.go's stageDocumentArtifact/recordDocumentJob) -- the
+// reference returned here names precisely that content, not a fabrication.
+// The controller replaces the envelope with the persisted request context
+// before a hosted dispatch.
+func (s *Service) claimContextRef(ctx context.Context, unit contract.Unit, r *runRow, a *attemptRow, snapshot peerScopeSnapshot, now time.Time) (wireArtifactRef, error) {
 	if a.ContextArtifact != nil {
 		return *a.ContextArtifact, nil
 	}
@@ -377,17 +448,22 @@ func (s *Service) claimContextRef(ctx context.Context, unit contract.Unit, r *ru
 	if ref != nil {
 		return *ref, nil
 	}
-	bundle, err := canonicalJSON(struct {
-		TaskID        contract.ID      `json:"task_id"`
-		TaskVersion   contract.Version `json:"task_version"`
-		Revision      contract.Version `json:"configuration_revision"`
-		InputVersions []wireRef        `json:"input_versions"`
-	}{r.TaskID, r.TaskVersion, r.ConfigurationRevision, r.InputVersions})
+
+	var required []string
+	if snapshot.Worker != nil && snapshot.Worker.Profile != nil {
+		required = snapshot.Worker.Profile.Capabilities
+	}
+	raw, err := buildClaimContext(a, r, required, snapshot.Bindings)
 	if err != nil {
 		return wireArtifactRef{}, err
 	}
-	digest := sha256Hex(bundle)
-	return wireArtifactRef{ID: uuidFromDigest(digest), Digest: digest}, nil
+	digest := sha256Hex(raw)
+	envelope := wireArtifactRef{ID: uuidFromDigest(digest), Digest: digest}
+	if _, err := s.enqueueDocumentPublish(ctx, unit, r.Scope, "claim_context", envelope.ID, raw,
+		"application/json", "internal", now); err != nil {
+		return wireArtifactRef{}, err
+	}
+	return envelope, nil
 }
 
 // handleRunGet is the run.get boundary.
@@ -569,9 +645,15 @@ func (s *Service) handleRunCancel(ctx context.Context, unit contract.Unit, in ca
 	}})
 }
 
-// handleRunExport is the run.export boundary: commit the authorized bounded
-// export as a durable job. The eventual result is the run history artifact,
-// published through the job pipeline.
+// handleRunExport is the run.export boundary: assemble the run's full
+// canonical history (accepted task, every attempt with its effects,
+// outputs, observations and independently recorded verifier evidence, and
+// the run's checkpoint lineage -- buildRunExportHistory, never a partial
+// view of only the current attempt) and commit it as a durable bounded
+// document-publish job. The eventual result is the run history artifact,
+// published through the same job mechanism claim-context uses
+// (job_runner.go); a repeated export while the run's history is unchanged
+// replays the original job rather than growing a second one.
 func (s *Service) handleRunExport(ctx context.Context, unit contract.Unit, in getIDInput) (contract.Outcome[jobBody], error) {
 	if err := checkInstallation(unit, in.Scope.InstallationID); err != nil {
 		return contract.Outcome[jobBody]{}, err
@@ -583,44 +665,27 @@ func (s *Service) handleRunExport(ctx context.Context, unit contract.Unit, in ge
 	if err := narrowRunScope(in.Scope, r); err != nil {
 		return contract.Outcome[jobBody]{}, err
 	}
-	inputJSON, err := canonicalJSON(map[string]any{
-		"scope":  in.Scope,
-		"run_id": in.ID,
-	})
-	if err != nil {
-		return contract.Outcome[jobBody]{}, err
-	}
+	// One export job per run: a repeated call replays the original,
+	// already-committed durable job unconditionally, exactly like the
+	// prior digest-only implementation and like claimReplay's own
+	// lost-ack handling -- an export is a durable, immutable commitment to
+	// a history snapshot, not silently recomputed (and its exported_at
+	// stamp not silently drifted) on every repeated inspection.
 	prior, err := findJobBySourceID(ctx, unit, in.ID)
 	if err != nil {
 		return contract.Outcome[jobBody]{}, err
 	}
 	if prior != nil {
-		if prior.InputHash != string(sha256Hex(inputJSON)) {
-			return contract.Outcome[jobBody]{}, conflict("run already has an export job with different bounds")
-		}
 		return completedOutcome(jobBody{Resource: jobOut(prior)})
 	}
 	now := s.now()
-	j := &jobRow{
-		ID:               s.newID(),
-		Version:          1,
-		Kind:             "run_export",
-		State:            "pending",
-		InstallationID:   r.InstallationID,
-		OrganizationID:   r.OrganizationID,
-		ProjectID:        r.ProjectID,
-		Scope:            in.Scope,
-		Owner:            ownerName,
-		Operation:        opRunExport,
-		Input:            inputJSON,
-		InputHash:        string(sha256Hex(inputJSON)),
-		SourceID:         in.ID,
-		Requirements:     []wireRequirement{},
-		CompletionSchema: schemaExportResult,
-		CreatedAt:        now,
-		UpdatedAt:        now,
+	raw, err := s.buildRunExportHistory(ctx, unit, r, now)
+	if err != nil {
+		return contract.Outcome[jobBody]{}, err
 	}
-	if err := insertJob(ctx, unit, j); err != nil {
+	j, err := s.enqueueDocumentPublish(ctx, unit, in.Scope, "run_export", in.ID, raw,
+		"application/json", "internal", now)
+	if err != nil {
 		return contract.Outcome[jobBody]{}, err
 	}
 	return completedOutcome(jobBody{Resource: jobOut(j)})
