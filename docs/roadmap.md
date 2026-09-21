@@ -2108,6 +2108,39 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   context-building, model interpretation and verification into one real
   running loop, on a brand-new package) will get the same
   before-dispatch check-in P16 got.
+- 2026-09-21 03:22 PT -- WAVE 7 DISPATCHED. All three cards confirmed
+  dependency-ready via plan.json (verified earlier: P09/P11/P17/P26/P27/
+  P02 all already landed). Confirmed with David (AskUserQuestion) to
+  dispatch all three in parallel, same pattern as wave 5, rather than
+  handling P22 solo first. Claimed (claim.sh) and dispatched as isolated-
+  worktree agents:
+  - P18 (drive independent verification and bind real output evidence,
+    owner internal/execution): the second half of P16's security
+    boundary -- P16 made sure a worker/model can't fabricate task
+    completion by claiming success in text; P18 makes independent
+    verification actually run and actually gate the real success
+    transition. Same-owner discipline respected: no other internal/
+    execution card is in flight.
+  - P22 (drive turns, contexts and model/tool work in the controller,
+    owner internal/controller -- the FIRST card in this remediation
+    plan to touch this package): the piece that actually drives P14/
+    P15/P16/P18's separately-correct pieces as one running loop --
+    discover work, admit turns, claim, build/commit context, dispatch
+    the model_step effect, deliver the observation, and for whatever
+    P16 leaves "prepared," drive the real WorkerOperator call or await
+    the real effect outcome and report it back. Briefed at length on
+    the exact hand-off chain from P14 through P18 and told explicitly
+    not to invent P23's reconciliation logic if it hits that seam.
+    Given how central this card is, review will get the same depth
+    P16 got.
+  - P28 (complete memory lifecycle against the qualified adapter,
+    owner internal/memory): briefed in advance on the P27 upstream-
+    limitation finding (Serenity's pinned protocol needs a 3-step
+    handshake, incompatible with the one-physical-call-per-action rule,
+    so all 6 real memory actions may correctly and permanently refuse
+    capability_unsupported) so it doesn't try to work around a
+    structural blocker -- told to be explicit about what genuinely
+    works end-to-end versus what correctly refuses.
 
 ## Planned
 
