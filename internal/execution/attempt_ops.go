@@ -204,7 +204,11 @@ func (s *Service) handleAttemptReport(ctx context.Context, unit contract.Unit, i
 	if err := narrowAttemptScope(in.Scope, a); err != nil {
 		return contract.Outcome[attemptBody]{}, err
 	}
-	return s.reportAttempt(ctx, unit, a, in.LeaseID, in.Generation, in.Outputs, in.Observations, in.Usage)
+	// The public cooperative path carries no named bindings (the frozen
+	// attempt.report/_execution.report wire schema is a bare ArtifactRef
+	// list): reportAttempt binds each reported output positionally against
+	// the task's own named required-output slots.
+	return s.reportAttempt(ctx, unit, a, in.LeaseID, in.Generation, in.Outputs, nil, in.Observations, in.Usage)
 }
 
 // reportAttempt is the report/verification transition shared by the public
@@ -212,8 +216,11 @@ func (s *Service) handleAttemptReport(ctx context.Context, unit contract.Unit, i
 // _execution.report: persist observations, seal the independent
 // verification request and enter verifying. Neither path directly succeeds
 // the task; only the trusted verifier path (_execution.verification.record)
-// does.
-func (s *Service) reportAttempt(ctx context.Context, unit contract.Unit, a *attemptRow, leaseID contract.ID, generation int64, outputs []wireArtifactRef, observations json.RawMessage, usage wireUsage) (contract.Outcome[attemptBody], error) {
+// does. named carries the report_outputs proposal's own name->artifact
+// bindings when the caller already has them (P16's interpretReportOutputs);
+// nil for the public path, which has no names on the wire and binds each
+// reported output positionally against the task's own RequiredOutputs.
+func (s *Service) reportAttempt(ctx context.Context, unit contract.Unit, a *attemptRow, leaseID contract.ID, generation int64, outputs []wireArtifactRef, named []reportBindingProposal, observations json.RawMessage, usage wireUsage) (contract.Outcome[attemptBody], error) {
 	now := s.now()
 	if err := checkWorkerCall(a, contract.Scope{WorkerID: a.WorkerID}, leaseID, generation, now); err != nil {
 		return contract.Outcome[attemptBody]{}, err
@@ -223,6 +230,30 @@ func (s *Service) reportAttempt(ctx context.Context, unit contract.Unit, a *atte
 		return contract.Outcome[attemptBody]{}, err
 	}
 	task, err := s.callTaskSnapshot(ctx, unit, r.Scope, r.TaskID)
+	if err != nil {
+		return contract.Outcome[attemptBody]{}, err
+	}
+
+	// Resolve named output slots to published attempt artifacts before the
+	// request is sealed: report_outputs already carries real names (P16's
+	// interpretReportOutputs), and the public path binds each reported
+	// output positionally against the task's own RequiredOutputs. A name
+	// with nothing reported for it is a legitimate omission the trusted
+	// verifier independently gates on; a reported binding that does not
+	// resolve to a real published artifact refuses the whole report -- it
+	// can never seal a fabricated claim into the request.
+	bindings := named
+	if bindings == nil {
+		bindings = make([]reportBindingProposal, 0, len(outputs))
+		for i, ref := range outputs {
+			name := ""
+			if i < len(task.RequiredOutputs) {
+				name = task.RequiredOutputs[i]
+			}
+			bindings = append(bindings, reportBindingProposal{Name: name, Artifact: ref})
+		}
+	}
+	resolvedOutputs, err := s.resolveOutputArtifacts(ctx, unit, r.Scope, bindings)
 	if err != nil {
 		return contract.Outcome[attemptBody]{}, err
 	}
@@ -255,7 +286,7 @@ func (s *Service) reportAttempt(ctx context.Context, unit contract.Unit, a *atte
 		AcceptanceDigest:     sha256Hex(acceptanceJSON),
 		Profile:              task.Acceptance.Profile,
 		SealedInputs:         task.Acceptance.SealedInputs,
-		Outputs:              []wireVerifierOutputRequirement{},
+		Outputs:              resolvedOutputs,
 		ExpectedObservations: task.Acceptance.ExpectedObservations,
 		Deadline:             formatStamp(now.Add(verificationDeadline)),
 	}

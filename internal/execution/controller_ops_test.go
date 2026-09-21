@@ -26,7 +26,7 @@ func reportedPipeline(e *testEnv, mutate func(*wireTask), usage wireUsage) (clai
 	e.mustOK(opAttemptReport, reportInput{
 		Scope: e.scope, AttemptID: claim.Attempt.ID, LeaseID: a.LeaseID,
 		Generation: a.Generation, ExpectedVersion: a.Version,
-		Outputs:      []wireArtifactRef{{ID: e.ids.New(), Digest: fixtureDigest}},
+		Outputs:      []wireArtifactRef{e.fixtureOutputRef()},
 		Observations: []byte(`{}`),
 		Usage:        usage,
 	})
@@ -135,7 +135,7 @@ func TestContextOnReportedAttemptConflicts(t *testing.T) {
 	e.mustOK(opAttemptReport, reportInput{
 		Scope: e.scope, AttemptID: claim.Attempt.ID, LeaseID: a.LeaseID,
 		Generation: a.Generation, ExpectedVersion: a.Version,
-		Outputs:      []wireArtifactRef{{ID: e.ids.New(), Digest: fixtureDigest}},
+		Outputs:      []wireArtifactRef{e.fixtureOutputRef()},
 		Observations: []byte(`{}`),
 		Usage:        wireUsage{Currency: "USD", Spent: 1},
 	})

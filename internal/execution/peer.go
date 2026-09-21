@@ -207,6 +207,99 @@ func (s *Service) recordSchedulingCycle(ctx context.Context, unit contract.Unit,
 	return err
 }
 
+// resolveOutputArtifacts resolves named output-slot bindings to published
+// attempt artifacts through the artifacts metadata boundary, exactly as
+// pinInputVersions resolves task inputs: a binding naming an artifact that
+// is not registered, digest-mismatched or not yet available refuses the
+// whole call rather than sealing a verification request around a claim
+// nothing backs. Bindings with an empty name (outputs beyond the task's
+// named required-output slots) are not part of the pinned acceptance
+// contract and are skipped -- they stay in the attempt's own output record
+// but never become a named VerifierOutputRequirement.
+func (s *Service) resolveOutputArtifacts(ctx context.Context, unit contract.Unit, scope contract.Scope, bindings []reportBindingProposal) ([]wireVerifierOutputRequirement, error) {
+	named := make([]reportBindingProposal, 0, len(bindings))
+	for _, b := range bindings {
+		if b.Name != "" {
+			named = append(named, b)
+		}
+	}
+	if len(named) == 0 {
+		return []wireVerifierOutputRequirement{}, nil
+	}
+	refs := make([]wireArtifactRef, len(named))
+	for i, b := range named {
+		refs[i] = b.Artifact
+	}
+	data, err := s.callPeer(ctx, unit, peerArtifactsMeta, map[string]any{
+		"scope":     scope,
+		"artifacts": refs,
+	})
+	if err != nil {
+		return nil, err
+	}
+	var body struct {
+		Artifacts []wireArtifact `json:"artifacts"`
+	}
+	if err := json.Unmarshal(data, &body); err != nil {
+		return nil, prerequisitesDecode(err)
+	}
+	byDigest := make(map[contract.Digest]wireArtifact, len(body.Artifacts))
+	for _, a := range body.Artifacts {
+		byDigest[a.Digest] = a
+	}
+	out := make([]wireVerifierOutputRequirement, 0, len(named))
+	for _, b := range named {
+		artifact, ok := byDigest[b.Artifact.Digest]
+		if !ok || artifact.ID != b.Artifact.ID || artifact.State != "available" {
+			return nil, prerequisiteMissing("required output %q names an artifact that is not a published attempt output", b.Name)
+		}
+		out = append(out, wireVerifierOutputRequirement{
+			Name:      b.Name,
+			Artifact:  wireArtifactRef{ID: artifact.ID, Digest: artifact.Digest},
+			MediaType: artifact.MediaType,
+		})
+	}
+	return out, nil
+}
+
+// publishArtifact registers domain metadata for bytes a trusted IO phase
+// already staged and blob-published (never new bytes: publishing inside a
+// Unit performs no blob IO). Used to promote the verifier's already
+// blob-published sealed request into a real, inspectable Artifact before it
+// is handed to tasks as evidence.
+func (s *Service) publishArtifact(ctx context.Context, unit contract.Unit, scope contract.Scope, digest contract.Digest, size int64, mediaType, classification string, encrypted bool) (wireArtifact, error) {
+	data, err := s.callPeer(ctx, unit, peerArtifactsPublish, map[string]any{
+		"scope": scope, "digest": digest, "size": size,
+		"media_type": mediaType, "classification": classification, "encrypted": encrypted,
+	})
+	if err != nil {
+		return wireArtifact{}, err
+	}
+	return decodeResource[wireArtifact]("artifacts publish", data)
+}
+
+// recordTaskEvidence binds the trusted verifier's own evidence -- the
+// published request artifact, the resolved named output bindings and the
+// verdict -- to the task before any success transition depends on it. Only
+// this recorded lineage, or eligible explicit manual acceptance, can ever
+// establish succeeded (_tasks.evidence.record's own contract); this is
+// never called with a worker-supplied verdict, only the one this package's
+// own trusted verification.record boundary just independently established.
+func (s *Service) recordTaskEvidence(ctx context.Context, unit contract.Unit, taskID, attemptID contract.ID, expectedVersion contract.Version, acceptanceDigest contract.Digest, verificationArtifact wireArtifactRef, outputBindings []reportBindingProposal, verdict string) (wireTask, error) {
+	if outputBindings == nil {
+		outputBindings = []reportBindingProposal{}
+	}
+	data, err := s.callPeer(ctx, unit, peerTasksEvidenceRecord, map[string]any{
+		"task_id": taskID, "attempt_id": attemptID, "expected_version": expectedVersion,
+		"acceptance_digest": acceptanceDigest, "verification_artifact": verificationArtifact,
+		"output_bindings": outputBindings, "verdict": verdict,
+	})
+	if err != nil {
+		return wireTask{}, err
+	}
+	return decodeResource[wireTask]("tasks evidence record", data)
+}
+
 // transitionTask moves one task to a new state with evidence.
 func (s *Service) transitionTask(ctx context.Context, unit contract.Unit, taskID contract.ID, expectedVersion contract.Version, state string, evidenceIDs []contract.ID, waitingReason string, manual bool) (wireTask, error) {
 	input := map[string]any{

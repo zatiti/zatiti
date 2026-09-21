@@ -518,7 +518,7 @@ func (s *Service) interpretReportOutputs(ctx context.Context, unit contract.Unit
 	if err != nil {
 		return stepDisposition{}, err
 	}
-	if _, err := s.reportAttempt(ctx, unit, a, a.LeaseID, a.Generation, outputs, observations, wireUsage{Currency: turn.Limits.Currency}); err != nil {
+	if _, err := s.reportAttempt(ctx, unit, a, a.LeaseID, a.Generation, outputs, bindings, observations, wireUsage{Currency: turn.Limits.Currency}); err != nil {
 		return stepDisposition{}, err
 	}
 
