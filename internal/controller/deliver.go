@@ -13,6 +13,12 @@ const (
 	ownerExecution   = "execution"
 	ownerMemory      = "memory"
 	ownerConnections = "connections"
+	// ownerExecutionProposal routes a worker_turn-callback-routed effect's
+	// outcome to _execution.proposal.record instead of _execution.
+	// observation: the effect is a proposal's own external_tool dispatch
+	// (P16 interpretExternalTool), not a fresh model step, and the owner's
+	// turn/proposal record -- not an attempt -- is what advances.
+	ownerExecutionProposal = "execution_proposal"
 )
 
 // stagedOutput mirrors the adapter StagedOutput handoff: bytes an adapter
@@ -26,18 +32,31 @@ type stagedOutput struct {
 	Purpose        string          `json:"purpose"`
 }
 
-// routeFor decides, from the immutable action, which owner is waiting on an
-// operation. The frozen contract carries no owner field on an operation, so
-// the controller relies on the only durable links that exist: a network job
-// that names the operation, and the hosted loop's attempt identity in the
-// action parameters. An operation nobody waits on has no callback.
-func routeFor(operation contract.ID, action wireAction, jobs map[contract.ID]wireJob) *route {
+// routeFor decides, from the admitted operation, which owner is waiting on
+// it. The frozen contract's explicit callback_route (P00-006, revision 3)
+// is authoritative and checked first; the legacy pre-turn hosted loop
+// (controller_ops.go's prepareModelEffect, audit finding G05) predates
+// callback_route and is never given one, so its attempt identity in the
+// action's own parameters is kept as a fallback -- never the reverse, so a
+// turn-linked effect is never misrouted by an attempt_id a strict provider
+// parameter set happens to also carry. A network job naming the operation,
+// and a probe's connection, are unrelated routing sources checked
+// independently. An operation nobody waits on has no callback.
+func (c *Controller) routeFor(operation contract.ID, op wireOperation, action wireAction, jobs map[contract.ID]wireJob) *route {
 	if job, ok := jobs[operation]; ok {
 		switch job.Owner {
 		case ownerMemory:
 			return &route{Owner: ownerMemory, JobID: job.ID}
 		case ownerConnections:
 			return &route{Owner: ownerConnections, JobID: job.ID, Connection: action.Connection}
+		}
+	}
+	if len(op.CallbackRoute) > 0 {
+		var cb wireCallbackRoute
+		if json.Unmarshal(op.CallbackRoute, &cb) == nil && cb.Kind == "worker_turn" && cb.TurnID != "" {
+			if r := c.routeWorkerTurn(operation, cb); r != nil {
+				return r
+			}
 		}
 	}
 	var params struct {
@@ -47,6 +66,31 @@ func routeFor(operation contract.ID, action wireAction, jobs map[contract.ID]wir
 		return &route{Owner: ownerExecution, AttemptID: params.AttemptID}
 	}
 	return &route{}
+}
+
+// routeWorkerTurn resolves a worker_turn callback route using the indexes
+// the turn-work phase refreshed this tick: a model-step effect (this turn's
+// own attempt is known) routes to _execution.observation, and a proposal's
+// own external_tool effect (this exact operation was seen "prepared" by an
+// earlier proposal.prepare discovery) routes to _execution.proposal.record.
+// Neither index is a database of record -- they are exactly what the
+// current tick's discovery already re-derived from live owner state, so a
+// route that cannot be resolved this tick is retried next tick rather than
+// guessed at.
+func (c *Controller) routeWorkerTurn(operation contract.ID, cb wireCallbackRoute) *route {
+	c.turnsMu.Lock()
+	defer c.turnsMu.Unlock()
+	// A proposal's own external_tool effect is keyed by this exact
+	// operation id -- checked first, since such an operation is also
+	// carried under its turn's attempt and must route to the proposal, not
+	// re-enter model-step observation.
+	if ref, ok := c.turnProposals[operation]; ok {
+		return &route{Owner: ownerExecutionProposal, ProposalID: ref.ProposalID}
+	}
+	if attemptID, ok := c.turnAttempts[cb.TurnID]; ok {
+		return &route{Owner: ownerExecution, AttemptID: attemptID}
+	}
+	return nil
 }
 
 // deliver finishes a recorded effect: publish the staged outputs — the
@@ -70,6 +114,20 @@ func (c *Controller) deliver(ctx context.Context, sess *session, e *entry) {
 		err = c.write(func() error {
 			return c.call(ctx, sess, "_execution.observation", executionObservationInput{
 				AttemptID: e.Route.AttemptID, OperationID: e.OperationID, Observation: normalized,
+			}, nil)
+		})
+		if err == nil {
+			c.observeTurnDelivery(ctx, sess, e, normalized)
+		}
+	case ownerExecutionProposal:
+		c.turnsMu.Lock()
+		expected := c.turnProposals[e.OperationID].ExpectedVersion
+		c.turnsMu.Unlock()
+		artifact := resultArtifactOf(normalized)
+		err = c.write(func() error {
+			return c.call(ctx, sess, "_execution.proposal.record", proposalRecordInput{
+				ProposalID: e.Route.ProposalID, ExpectedVersion: expected,
+				EffectOperationID: e.OperationID, ResultArtifact: artifact,
 			}, nil)
 		})
 	case ownerMemory:
@@ -213,6 +271,23 @@ func (c *Controller) publish(ctx context.Context, sess *session, e *entry) (cont
 	}
 	obs.Evidence = evidence
 	return obs, true
+}
+
+// resultArtifactOf reads the first published output_artifacts entry of a
+// normalized observation, the same field publish() populates from staged
+// outputs -- a reasonable, inspectable choice of "the artifact this proposal
+// produced" when the adapter published exactly one. An effect that
+// published nothing (or several outputs, disambiguated only by the tool's
+// own domain semantics execution -- not the controller -- owns) records no
+// result_artifact rather than guessing.
+func resultArtifactOf(obs contract.Observation) *wireArtifact {
+	var probe struct {
+		OutputArtifacts []wireArtifact `json:"output_artifacts"`
+	}
+	if len(obs.Evidence) == 0 || json.Unmarshal(obs.Evidence, &probe) != nil || len(probe.OutputArtifacts) != 1 {
+		return nil
+	}
+	return &probe.OutputArtifacts[0]
 }
 
 // stagedOutputs reads the top-level staged_outputs every adapter evidence

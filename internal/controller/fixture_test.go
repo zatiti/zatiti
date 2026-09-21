@@ -295,7 +295,10 @@ type fx struct {
 	adapters map[string]contract.Adapter
 	blobs    contract.BlobStore
 	jobs     map[string]JobRunner
+	verifier contract.Verifier
+	operator contract.WorkerOperator
 	ready    int
+	paused   map[contract.ID]bool
 }
 
 func newFx(t *testing.T) *fx {
@@ -315,6 +318,7 @@ func newFx(t *testing.T) *fx {
 		limits:   map[string]int64{},
 		inject:   map[string][]injection{},
 		adapters: map[string]contract.Adapter{},
+		paused:   map[contract.ID]bool{},
 	}
 	f.boot(true)
 	t.Cleanup(func() { _ = f.raw.Close() })
@@ -394,7 +398,7 @@ func (f *fx) controller(own contract.Ownership) *Controller {
 	if err != nil {
 		f.t.Fatalf("New: %v", err)
 	}
-	if err := c.Attach(Collaborators{Identity: f.actor, Blobs: f.blobs, Jobs: f.jobs}); err != nil {
+	if err := c.Attach(Collaborators{Identity: f.actor, Blobs: f.blobs, Jobs: f.jobs, Verifier: f.verifier, Operator: f.operator}); err != nil {
 		f.t.Fatalf("Attach: %v", err)
 	}
 	f.mu.Lock()
@@ -580,13 +584,25 @@ func (f *fx) catalog() *catalog {
 		"_connections.validation.record": f.validationRecord,
 		"_artifacts.publish":             f.artifactsPublish,
 		"_installation.restore.record":   f.restoreRecord,
+		"_execution.turn.admit":          f.executionTurnAdmit,
+		"_execution.work.claim":          f.executionWorkClaim,
+		"_execution.context.prepare":     f.executionContextPrepare,
+		"_execution.context.commit":      f.executionContextCommit,
+		"_execution.proposal.prepare":    f.executionProposalPrepare,
+		"_execution.proposal.record":     f.executionProposalRecord,
+		"_execution.report":              f.executionReport,
+		"_execution.verification.claim":  f.executionVerificationClaim,
+		"_execution.verification.record": f.executionVerificationRecord,
 	} {
 		add(id, strings.SplitN(strings.TrimPrefix(id, "_"), ".", 2)[0], contract.ModeMutation, ctl, f.handler(id, true, fn))
 	}
 	for id, fn := range map[string]ownerFunc{
-		"_effects.pending":       f.effectsPending,
-		"_execution.job.pending": f.jobPending,
-		"_scheduling.wake.due":   f.wakeDue,
+		"_effects.pending":                f.effectsPending,
+		"_execution.job.pending":          f.jobPending,
+		"_scheduling.wake.due":            f.wakeDue,
+		"_messaging.ready":                f.messagingReady,
+		"_execution.work.pending":         f.executionWorkPending,
+		"_execution.verification.pending": f.executionVerificationPending,
 	} {
 		add(id, strings.SplitN(strings.TrimPrefix(id, "_"), ".", 2)[0], contract.ModeQuery, ctl, f.handler(id, true, fn))
 	}
@@ -600,6 +616,9 @@ func fixtureMigrations() []contract.Migration {
 	mig := func(owner, sql string) contract.Migration {
 		return contract.Migration{Owner: owner, Version: 1, SQL: sql, SHA256: contract.Hash([]byte(sql))}
 	}
+	migV := func(owner string, version int64, sql string) contract.Migration {
+		return contract.Migration{Owner: owner, Version: version, SQL: sql, SHA256: contract.Hash([]byte(sql))}
+	}
 	return []contract.Migration{
 		mig("identity", `CREATE TABLE identity_principals (id TEXT PRIMARY KEY, kind TEXT NOT NULL, revoked INTEGER NOT NULL);`),
 		mig("effects", `
@@ -609,6 +628,7 @@ CREATE TABLE effects_attempts (seq INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NO
 	generation INTEGER NOT NULL, state TEXT NOT NULL, consumed INTEGER NOT NULL);
 CREATE TABLE effects_observations (seq INTEGER PRIMARY KEY AUTOINCREMENT, operation_id TEXT NOT NULL, attempt_id TEXT NOT NULL,
 	kind TEXT NOT NULL, disposition TEXT NOT NULL, evidence TEXT NOT NULL, usage TEXT NOT NULL);`),
+		migV("effects", 2, `ALTER TABLE effects_operations ADD COLUMN callback_route TEXT NOT NULL DEFAULT '';`),
 		mig("execution", `
 CREATE TABLE execution_fences (seq INTEGER PRIMARY KEY AUTOINCREMENT, generation INTEGER NOT NULL, reason TEXT NOT NULL);
 CREATE TABLE execution_ticks (seq INTEGER PRIMARY KEY AUTOINCREMENT, now TEXT NOT NULL);
@@ -616,6 +636,12 @@ CREATE TABLE execution_observations (operation_id TEXT PRIMARY KEY, attempt_id T
 CREATE TABLE execution_jobs (seq INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL UNIQUE, version INTEGER NOT NULL, state TEXT NOT NULL,
 	owner TEXT NOT NULL, operation TEXT NOT NULL, operation_id TEXT NOT NULL DEFAULT '', input TEXT NOT NULL,
 	claimed_generation INTEGER NOT NULL DEFAULT 0, result TEXT NOT NULL DEFAULT '');`),
+		migV("execution", 2, turnsFixtureSchema),
+		migV("execution", 3, `ALTER TABLE execution_turns ADD COLUMN next_wake TEXT NOT NULL DEFAULT '';`),
+		mig("messaging", `
+CREATE TABLE messaging_messages (seq INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL UNIQUE, version INTEGER NOT NULL,
+	sender_id TEXT NOT NULL, recipient_ids TEXT NOT NULL, scope TEXT NOT NULL, body TEXT NOT NULL,
+	state TEXT NOT NULL, turn_id TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL);`),
 		mig("scheduling", `
 CREATE TABLE scheduling_wakes (seq INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL UNIQUE, source_id TEXT NOT NULL,
 	occurrence_key TEXT NOT NULL, due_at TEXT NOT NULL, admitted INTEGER NOT NULL DEFAULT 0);
