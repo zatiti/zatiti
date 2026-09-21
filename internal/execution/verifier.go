@@ -12,11 +12,13 @@ import (
 
 // The trusted verifier: establishes task acceptance independently of the
 // worker and outside any unit transaction. It observes each expected check
-// against the blob store under the pinned accepted profile, never trusts
-// worker-provided evidence, and stages the exact request document for later
-// audit. The repository profile flavors require the controlled runner, which
-// is unavailable in this runtime; their checks observe unavailable rather
-// than pretending success.
+// against the blob store (artifact_contract profiles) or the controlled
+// repository runner (repository_patch profiles, repository_runner.go) under
+// the pinned accepted profile, never trusts worker-provided evidence, and
+// stages the exact request document for later audit. A repository check
+// whose containment prerequisites are not met locally (no runner root
+// configured, no local git binary, an unsupported network capability, ...)
+// observes unavailable rather than pretending success.
 
 // defaultVerifierMaxBytes bounds artifact reads when the pinned profile
 // declares no read bound.
@@ -72,7 +74,7 @@ func (v *verifier) Verify(ctx context.Context, verification contract.Verificatio
 	started := v.clock.Now()
 	observed := make([]wireObservedCheck, 0, len(request.ExpectedObservations))
 	for _, want := range request.ExpectedObservations {
-		obs, err := v.observe(ctx, want, profile.MaxBytes)
+		obs, err := v.observe(ctx, want, profile.MaxBytes, request)
 		if err != nil {
 			if ctx.Err() != nil {
 				break
@@ -118,10 +120,11 @@ func (v *verifier) Verify(ctx context.Context, verification contract.Verificatio
 	return contract.VerificationResult{Document: doc}, nil
 }
 
-// observe establishes one expected check against the blob store. A
-// transport-level blob failure returns an error; any check-level outcome is
-// reported as a status, never invented.
-func (v *verifier) observe(ctx context.Context, want wireExpectedObservation, profileMaxBytes int64) (wireObservedCheck, error) {
+// observe establishes one expected check against the blob store, or, for
+// the repository kinds, the controlled repository runner. A transport-level
+// blob failure returns an error; any check-level outcome is reported as a
+// status, never invented.
+func (v *verifier) observe(ctx context.Context, want wireExpectedObservation, profileMaxBytes int64, request wireVerificationRequest) (wireObservedCheck, error) {
 	obs := wireObservedCheck{
 		CheckID:     want.CheckID,
 		Kind:        want.Kind,
@@ -184,12 +187,12 @@ func (v *verifier) observe(ctx context.Context, want wireExpectedObservation, pr
 		}
 		return obs, nil
 
+	case "repository_patch_applies", "repository_command":
+		return v.observeRepository(ctx, want, request), nil
+
 	default:
-		// repository_patch_applies and repository_command require the
-		// controlled runner. This runtime does not host it; the honest
-		// observation is unavailability, never a fabricated pass.
 		obs.Status = "unavailable"
-		obs.Explanation = "repository verifier profile requires the controlled runner, which is unavailable in this runtime"
+		obs.Explanation = fmt.Sprintf("verification check kind %q is not implemented", want.Kind)
 		return obs, nil
 	}
 }
