@@ -97,26 +97,48 @@ type recordedPublish struct {
 	Encrypted      bool
 }
 
+// recordedEffectsPrepare is one full _effects.prepare call: the real
+// dispatched action shape and callback route, not just the minted operation
+// id PreparedOps() already exposes. Used to assert exactly which Responses
+// action kind (prepare_session vs model_step) a real dispatch sent.
+type recordedEffectsPrepare struct {
+	ID            contract.ID
+	Scope         contract.Scope
+	SourceID      contract.ID
+	Action        map[string]any
+	CallbackRoute map[string]any
+}
+
+// ActionKind reads the "kind" discriminator of the dispatched action's own
+// "parameters" field -- the ResponsesParameters oneOf discriminator
+// (prepare_session vs model_step).
+func (r recordedEffectsPrepare) ActionKind() string {
+	params, _ := r.Action["parameters"].(map[string]any)
+	kind, _ := params["kind"].(string)
+	return kind
+}
+
 // fakePorts serves the peer fixtures per installation and task, records the
 // calls handlers make, and carries injectable faults and raw errors.
 type fakePorts struct {
-	mu             sync.Mutex
-	snapshots      map[contract.ID]*peerScopeSnapshot
-	tasks          map[contract.ID]*wireTask
-	artifacts      map[contract.Digest]wireArtifact
-	messages       map[contract.ID][]wireMessage
-	memoryBindings map[contract.ID]wireMemoryBinding
-	connections    map[contract.ID]wireConnection
-	tools          map[contract.ID]wireTool
-	fail           map[string]*contract.Fault
-	rawFail        map[string]error
-	transitions    []recordedTransition
-	settles        []recordedSettle
-	prepared       []contract.ID
-	processed      []recordedProcessed
-	evidence       []recordedEvidence
-	published      []recordedPublish
-	seq            int
+	mu              sync.Mutex
+	snapshots       map[contract.ID]*peerScopeSnapshot
+	tasks           map[contract.ID]*wireTask
+	artifacts       map[contract.Digest]wireArtifact
+	messages        map[contract.ID][]wireMessage
+	memoryBindings  map[contract.ID]wireMemoryBinding
+	connections     map[contract.ID]wireConnection
+	tools           map[contract.ID]wireTool
+	fail            map[string]*contract.Fault
+	rawFail         map[string]error
+	transitions     []recordedTransition
+	settles         []recordedSettle
+	prepared        []contract.ID
+	effectsPrepared []recordedEffectsPrepare
+	processed       []recordedProcessed
+	evidence        []recordedEvidence
+	published       []recordedPublish
+	seq             int
 }
 
 func newFakePorts() *fakePorts {
@@ -204,6 +226,14 @@ func (p *fakePorts) PreparedOps() []contract.ID {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return append([]contract.ID(nil), p.prepared...)
+}
+
+// EffectsPrepared returns every full _effects.prepare call observed, in
+// order.
+func (p *fakePorts) EffectsPrepared() []recordedEffectsPrepare {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return append([]recordedEffectsPrepare(nil), p.effectsPrepared...)
 }
 
 func (p *fakePorts) Processed() []recordedProcessed {
@@ -448,6 +478,23 @@ func (p *fakePorts) Call(ctx context.Context, unit contract.Unit, inv contract.I
 		}
 		id := p.nextID()
 		p.prepared = append(p.prepared, id)
+		rec := recordedEffectsPrepare{ID: id}
+		if action, ok := in["action"].(map[string]any); ok {
+			rec.Action = action
+		}
+		if sourceID, ok := in["source_id"].(string); ok {
+			rec.SourceID = contract.ID(sourceID)
+		}
+		if route, ok := in["callback_route"].(map[string]any); ok {
+			rec.CallbackRoute = route
+		}
+		if scopeRaw, ok := in["scope"]; ok {
+			raw, err := json.Marshal(scopeRaw)
+			if err == nil {
+				_ = json.Unmarshal(raw, &rec.Scope)
+			}
+		}
+		p.effectsPrepared = append(p.effectsPrepared, rec)
 		body = struct {
 			Resource struct {
 				ID contract.ID `json:"id"`

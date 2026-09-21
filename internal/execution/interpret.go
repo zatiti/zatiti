@@ -266,6 +266,125 @@ func (s *Service) interpretTurnObservation(ctx context.Context, unit contract.Un
 	return completedOutcome(attemptBody{Resource: attemptOut(a)})
 }
 
+// wireResponsesEvidence mirrors the frozen $defs/ResponsesEvidence exactly:
+// the adapter observation shape for BOTH physical Responses calls
+// (prepare_session and model_step). It is a structurally different document
+// from ModelOutput (no finish_reason/text_outputs/tool_proposals/usage;
+// session_handle instead) -- interpretPrepareSessionObservation decodes
+// exactly this shape for a prepare_session confirmation, never
+// wireModelOutput, so the two observation kinds can never be confused with
+// each other.
+type wireResponsesEvidence struct {
+	Schema          string          `json:"schema"`
+	PhysicalCall    json.RawMessage `json:"physical_call"`
+	SessionHandle   string          `json:"session_handle"`
+	ResponseID      string          `json:"response_id,omitempty"`
+	Output          json.RawMessage `json:"output,omitempty"`
+	StagedOutputs   json.RawMessage `json:"staged_outputs"`
+	OutputArtifacts json.RawMessage `json:"output_artifacts,omitempty"`
+}
+
+// interpretPrepareSessionObservation is the turn pipeline's distinct
+// handling for a prepare_session effect's own observation (execution-
+// dispatch-model-step, the same-day P22 gap fix). handleObservation
+// (controller_ops.go) routes here -- BEFORE interpretTurnObservation's
+// ModelOutput-specific validation -- whenever the delivered operation_id
+// matches this turn's own recorded prepare_session dispatch row; a
+// model_step's ModelOutput observation is structurally different and is
+// never decoded here, exactly as a prepare_session's ResponsesEvidence is
+// never decoded by interpretTurnObservation.
+//
+// A confirmed session_handle is persisted onto the turn and immediately
+// chained through to the actual model_step dispatch via the same
+// dispatchModelEffect helper handleContextCommit uses -- for the first turn
+// interaction this is the second of the two round-trip effects the AGENTS.md
+// split describes (prepare_session, then model_step) before the model is
+// ever actually reached. A failed/not_sent/unknown outcome never fabricates
+// a session and never retries a fresh prepare_session on an unconfirmed
+// result (AGENTS.md: "a fresh prepare_session could create a second,
+// unlinked provider conversation"); it parks the turn waiting on the typed
+// effect reason for explicit recovery instead.
+func (s *Service) interpretPrepareSessionObservation(ctx context.Context, unit contract.Unit, turn *turnRow, a *attemptRow, dispatch *turnDispatchRow, in observationInput) (contract.Outcome[attemptBody], error) {
+	if dispatch.State != "prepared" {
+		// Already interpreted once (a redelivered/duplicate observation for
+		// the identical operation_ref): refused outright rather than
+		// re-persisting a session or re-dispatching a second model_step,
+		// mirroring the legacy pre-turn path's own already-recorded refusal.
+		return contract.Outcome[attemptBody]{}, conflict(
+			"prepare_session dispatch %s for turn %s is already %s; observation replay is refused",
+			dispatch.ID, turn.ID, dispatch.State)
+	}
+	now := s.now()
+	if in.Observation.Disposition != "succeeded" && in.Observation.Disposition != "accepted" {
+		if in.Observation.Disposition == "unknown" {
+			if err := insertObligation(ctx, unit, s.newID(), "unknown_effect",
+				turn.InstallationID, a.RunID, a.ID, dispatch.ID,
+				"prepare_session outcome reported unknown; inspect the provider reference before recovery -- "+
+					"a fresh prepare_session is never dispatched against an unconfirmed result", now); err != nil {
+				return contract.Outcome[attemptBody]{}, err
+			}
+		} else if err := updateTurnDispatchState(ctx, unit, dispatch.ID, "failed"); err != nil {
+			return contract.Outcome[attemptBody]{}, err
+		}
+		turn.State = "waiting"
+		turn.WaitingReason = waitingEffect
+		turn.NextWake = time.Time{}
+		turn.UpdatedAt = now
+		if err := updateTurn(ctx, unit, turn); err != nil {
+			return contract.Outcome[attemptBody]{}, err
+		}
+		if err := emitTransition(ctx, unit, eventTurnWaiting, turn.ID, turn.Version); err != nil {
+			return contract.Outcome[attemptBody]{}, err
+		}
+		return completedOutcome(attemptBody{Resource: attemptOut(a)})
+	}
+
+	schema, err := responsesEvidenceSchema()
+	if err != nil {
+		return contract.Outcome[attemptBody]{}, fmt.Errorf("execution: load responses evidence schema: %w", err)
+	}
+	if err := contract.ValidateSchema(schema, in.Observation.Evidence); err != nil {
+		return contract.Outcome[attemptBody]{}, invalidInput("malformed prepare_session evidence: %v", err)
+	}
+	var evidence wireResponsesEvidence
+	if err := contract.DecodeStrict(in.Observation.Evidence, &evidence); err != nil {
+		return contract.Outcome[attemptBody]{}, invalidInput("malformed prepare_session evidence: %v", err)
+	}
+	if evidence.Schema != "zatiti.responses.evidence/v1" {
+		return contract.Outcome[attemptBody]{}, invalidInput(
+			"prepare_session evidence schema %q is not the accepted zatiti.responses.evidence/v1", evidence.Schema)
+	}
+	if evidence.SessionHandle == "" {
+		return contract.Outcome[attemptBody]{}, invalidInput("prepare_session evidence carries no session_handle")
+	}
+
+	if err := updateTurnDispatchState(ctx, unit, dispatch.ID, "recorded"); err != nil {
+		return contract.Outcome[attemptBody]{}, err
+	}
+	turn.SessionHandle = evidence.SessionHandle
+
+	plan, err := latestCommittedContextPlan(ctx, unit, turn.ID)
+	if err != nil {
+		return contract.Outcome[attemptBody]{}, err
+	}
+	if turn.ContextArtifact == nil {
+		return contract.Outcome[attemptBody]{}, conflict(
+			"turn %s confirmed a session but has no committed context to dispatch model_step against", turn.ID)
+	}
+	if err := s.dispatchModelEffect(ctx, unit, turn, plan, *turn.ContextArtifact, now); err != nil {
+		return contract.Outcome[attemptBody]{}, err
+	}
+
+	turn.UpdatedAt = now
+	if err := updateTurn(ctx, unit, turn); err != nil {
+		return contract.Outcome[attemptBody]{}, err
+	}
+	if err := emitTransition(ctx, unit, eventTurnSessionPrepared, turn.ID, turn.Version); err != nil {
+		return contract.Outcome[attemptBody]{}, err
+	}
+	return completedOutcome(attemptBody{Resource: attemptOut(a)})
+}
+
 // stepDisposition is the outcome of interpreting one proposal, enough to
 // decide the turn's next state without re-decoding normalizedProposal at
 // the call site.

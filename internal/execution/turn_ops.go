@@ -558,7 +558,98 @@ func (s *Service) handleContextCommit(ctx context.Context, unit contract.Unit, i
 			return contract.Outcome[turnBody]{}, err
 		}
 	}
+
+	// Chain through to the actual Responses dispatch (execution-dispatch-
+	// model-step, the same-day P22 gap fix): a committed context previously
+	// stopped here, leaving nothing to ever dispatch the model_step effect.
+	// Only a task-bound turn (a real attempt) is dispatched -- _execution.
+	// observation's delivery is attempt_id-keyed, so a pure chat/
+	// responsibility turn with no attempt has no route back for the
+	// confirmation under the current frozen contract; extending that is a
+	// controller/contract-level change outside this card's scope, and this
+	// call is a documented no-op for it (dispatchModelEffect's own guard).
+	if t.AttemptID != "" {
+		if err := s.dispatchModelEffect(ctx, unit, t, plan, ref, now); err != nil {
+			return contract.Outcome[turnBody]{}, err
+		}
+	}
 	return completedOutcome(turnBody{Resource: turnOut(t)})
+}
+
+// dispatchModelEffect chains a committed context straight through to
+// _effects.prepare, exactly the pattern interpretExternalTool already uses
+// for its own analogous case: prepare_session first when the turn carries
+// no confirmed session_handle yet (AGENTS.md's "OpenAI Responses session
+// preparation" split), model_step once it does. It is a documented no-op --
+// never a fabricated dispatch -- when the plan carries no resolved
+// responses-adapter tool component: a worker with no hosted model
+// connection configured (or, in this package's own test fixtures, a turn
+// exercising only local/external tool interpretation) legitimately has
+// nothing to dispatch here.
+func (s *Service) dispatchModelEffect(ctx context.Context, unit contract.Unit, t *turnRow, plan *contextPlanRow, contextArtifact wireArtifactRef, now time.Time) error {
+	modelTool := resolveModelToolComponent(plan)
+	if modelTool == nil {
+		return nil
+	}
+	var (
+		kind            string
+		parameters      map[string]any
+		toolRef         wireRef
+		connectionRef   wireRef
+		accountIdentity string
+		err             error
+	)
+	if t.SessionHandle == "" {
+		kind = "prepare_session"
+		_, parameters, toolRef, connectionRef, accountIdentity, err = buildResponsesPrepareSessionAction(plan)
+	} else {
+		kind = "model_step"
+		_, parameters, toolRef, connectionRef, accountIdentity, err = buildResponsesModelStepAction(plan, contextArtifact, t.SessionHandle, "")
+	}
+	if err != nil {
+		return err
+	}
+
+	expiresAt := t.LeaseExpiresAt
+	if expiresAt.IsZero() {
+		expiresAt = now.Add(leaseDuration)
+	}
+	action := map[string]any{
+		"scope":                  t.Scope,
+		"tool":                   map[string]any{"id": toolRef.ID, "version": toolRef.Version},
+		"connection":             map[string]any{"id": connectionRef.ID, "version": connectionRef.Version},
+		"account_identity":       accountIdentity,
+		"destination":            firstOrEmpty(modelTool.Destinations),
+		"content":                []any{},
+		"not_before":             formatStamp(now),
+		"expires_at":             formatStamp(expiresAt),
+		"preconditions":          map[string]any{},
+		"configuration_revision": t.ConfigurationRevision,
+		"parameters":             parameters,
+		// Session creation is not billed by the pinned protocol; a real
+		// model_step's cost bound is a follow-up (the same zero-bound
+		// simplification interpretExternalTool already uses for its own
+		// effect dispatch in this package).
+		"cost_bound": map[string]any{"currency": t.Limits.Currency, "micro_units": 0},
+	}
+	data, err := s.callPeer(ctx, unit, peerEffectsPrepare, map[string]any{
+		"scope":     t.Scope,
+		"action":    action,
+		"source_id": t.AttemptID,
+		"callback_route": map[string]any{
+			"kind": "worker_turn", "turn_id": t.ID, "step_index": t.StepsUsed,
+		},
+	})
+	if err != nil {
+		return err
+	}
+	op, err := decodeResource[struct {
+		ID contract.ID `json:"id"`
+	}]("effects operation", data)
+	if err != nil {
+		return err
+	}
+	return insertTurnDispatch(ctx, unit, s.newID(), t.ID, t.InstallationID, kind, string(op.ID), now)
 }
 
 // handleProposalPrepare is the _execution.proposal.prepare boundary: return

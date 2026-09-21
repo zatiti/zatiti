@@ -50,6 +50,11 @@ const (
 	eventProposalPrepared    = "execution.proposal.prepared"
 	eventProposalRecorded    = "execution.proposal.recorded"
 	eventVerificationClaimed = "execution.verification.claimed"
+
+	// eventTurnSessionPrepared marks a confirmed prepare_session observation
+	// persisting its session_handle onto the turn (execution-dispatch-
+	// model-step, the same-day P22 gap fix).
+	eventTurnSessionPrepared = "execution.turn.session_prepared"
 )
 
 // emitTransition appends one state-correlated event to the transaction

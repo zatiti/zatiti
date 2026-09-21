@@ -170,6 +170,21 @@ func (s *Service) handleObservation(ctx context.Context, unit contract.Unit, in 
 	if turn, terr := findTurnByAttemptID(ctx, unit, a.ID); terr != nil {
 		return contract.Outcome[attemptBody]{}, terr
 	} else if turn != nil {
+		// A third branch, checked before interpretTurnObservation's own
+		// ModelOutput-specific validation (execution-dispatch-model-step, the
+		// same-day P22 gap fix): this turn's own recorded dispatch bookkeeping
+		// (execution_turn_dispatches, keyed by exact operation_ref) says
+		// whether the delivered observation answers a prepare_session effect
+		// -- a structurally different ResponsesEvidence document, never a
+		// ModelOutput -- rather than inferring it from turn state, which a
+		// redelivered/superseded observation could get wrong.
+		dispatch, derr := loadTurnDispatchByRef(ctx, unit, turn.ID, string(in.OperationID))
+		if derr != nil {
+			return contract.Outcome[attemptBody]{}, derr
+		}
+		if dispatch != nil && dispatch.Kind == "prepare_session" {
+			return s.interpretPrepareSessionObservation(ctx, unit, turn, a, dispatch, in)
+		}
 		return s.interpretTurnObservation(ctx, unit, turn, a, in)
 	}
 	// The delivery names the effects operation the controller dispatched;
