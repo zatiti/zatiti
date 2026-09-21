@@ -55,6 +55,14 @@ const (
 	// persisting its session_handle onto the turn (execution-dispatch-
 	// model-step, the same-day P22 gap fix).
 	eventTurnSessionPrepared = "execution.turn.session_prepared"
+
+	// eventRunExportSucceeded and eventClaimContextPublished are terminal
+	// job callbacks (P21 item 4): a kind-specific completion event a caller
+	// watching run-level events observes in addition to the generic
+	// execution.job.recorded, once a document-publish job's record phase
+	// registers real artifact metadata and marks it succeeded.
+	eventRunExportSucceeded    = "execution.run.export_succeeded"
+	eventClaimContextPublished = "execution.claim_context.published"
 )
 
 // emitTransition appends one state-correlated event to the transaction

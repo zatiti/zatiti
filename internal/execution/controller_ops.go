@@ -209,6 +209,20 @@ func (s *Service) handleObservation(ctx context.Context, unit contract.Unit, in 
 			return contract.Outcome[attemptBody]{}, err
 		}
 	default: // "unknown"
+		// P21 item 2 note: this obligation, once recorded, currently has no
+		// reachable resolution path from inside this package. The pre-turn
+		// loop's own disposition switch below fences the attempt in this
+		// same call for every non-"succeeded"/"accepted" disposition
+		// (including "unknown"), and handleObservation's own top-of-function
+		// guard then refuses all further delivery to that now-fenced
+		// attempt -- so a later "conclusive redelivery to the same
+		// attempt" can never actually arrive here to resolve it. A real
+		// resolution path (relaxing that guard for a narrow resolve-only,
+		// never-revive case, or a callback from effects' own separately
+		// owned _effects.reconciliation.record) is a genuine design
+		// decision this card does not resolve; see admitAttempt's
+		// replacement gate below, which blocks on this obligation existing
+		// at all regardless of how (or whether) it is ever resolved.
 		if err := insertObligation(ctx, unit, s.newID(), "unknown_effect",
 			a.InstallationID, a.RunID, a.ID, op.ID,
 			"effect outcome reported unknown; inspect the provider reference before replacement", now); err != nil {
@@ -219,8 +233,21 @@ func (s *Service) handleObservation(ctx context.Context, unit contract.Unit, in 
 		}
 	}
 
+	r, err := loadRun(ctx, unit, a.RunID)
+	if err != nil {
+		return contract.Outcome[attemptBody]{}, err
+	}
 	if op.Kind == "model_step" {
 		a.ModelStepsUsed++
+		// Cumulative across the run's whole attempt lineage, not just this
+		// attempt: a replacement attempt starts its own counter at zero, so
+		// the task's model-step bound must be enforced against the run's
+		// running total or a worker could accumulate unlimited steps just
+		// by being replaced repeatedly (P21 item 2).
+		r.ModelStepsUsed++
+		if err := updateRun(ctx, unit, r); err != nil {
+			return contract.Outcome[attemptBody]{}, err
+		}
 	}
 	obs := in.Observation
 	obs.ConfirmedAt = formatStamp(now)
@@ -239,15 +266,11 @@ func (s *Service) handleObservation(ctx context.Context, unit contract.Unit, in 
 	}
 	switch in.Observation.Disposition {
 	case "succeeded", "accepted":
-		r, err := loadRun(ctx, unit, a.RunID)
-		if err != nil {
-			return contract.Outcome[attemptBody]{}, err
-		}
 		task, err := s.callTaskSnapshot(ctx, unit, r.Scope, r.TaskID)
 		if err != nil {
 			return contract.Outcome[attemptBody]{}, err
 		}
-		if task.Limits.ModelSteps > 0 && a.ModelStepsUsed >= task.Limits.ModelSteps {
+		if task.Limits.ModelSteps > 0 && r.ModelStepsUsed >= task.Limits.ModelSteps {
 			if err := s.fenceAttempt(ctx, unit, a, "", "",
 				fmt.Sprintf("model step bound %d reached", task.Limits.ModelSteps), now); err != nil {
 				return contract.Outcome[attemptBody]{}, err

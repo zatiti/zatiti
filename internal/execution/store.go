@@ -35,8 +35,14 @@ type runRow struct {
 	InputVersions         []wireRef
 	State                 string
 	AttemptIDs            []contract.ID
-	CreatedAt             time.Time
-	UpdatedAt             time.Time
+	// ModelStepsUsed is the run's cumulative model-step count across every
+	// attempt it has ever admitted, including replaced/fenced ones. Unlike
+	// attemptRow.ModelStepsUsed (which starts fresh on every new attempt),
+	// this never resets on replacement, so the task's model-step bound is
+	// enforced against the real cumulative total (P21).
+	ModelStepsUsed int64
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
 }
 
 // attemptRow is the storage representation of one attempt.
@@ -225,7 +231,7 @@ func joinConds(conds []string) string {
 const runColumns = `id, version, task_id, task_version, installation_id,
 organization_id, project_id, worker_id, task_scope_id, scope_json,
 configuration_revision, input_versions_json, state, attempt_ids_json,
-created_at, updated_at`
+model_steps_used, created_at, updated_at`
 
 func scanRun(scan func(dest ...any) error) (*runRow, error) {
 	var r runRow
@@ -234,7 +240,7 @@ func scanRun(scan func(dest ...any) error) (*runRow, error) {
 	err := scan(&r.ID, &r.Version, &r.TaskID, &r.TaskVersion,
 		&r.InstallationID, &r.OrganizationID, &r.ProjectID, &r.WorkerID, &r.TaskScopeID,
 		&scopeJSON, &r.ConfigurationRevision, &inputsJSON, &r.State, &attemptsJSON,
-		&created, &updated)
+		&r.ModelStepsUsed, &created, &updated)
 	if err != nil {
 		return nil, err
 	}
@@ -301,11 +307,12 @@ func insertRun(ctx context.Context, unit contract.Unit, r *runRow) error {
 	_, err = unit.ExecContext(ctx, `INSERT INTO execution_runs
 		(id, version, task_id, task_version, installation_id, organization_id,
 		 project_id, worker_id, task_scope_id, scope_json, configuration_revision,
-		 input_versions_json, state, attempt_ids_json, created_at, updated_at)
-		VALUES (?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		 input_versions_json, state, attempt_ids_json, model_steps_used,
+		 created_at, updated_at)
+		VALUES (?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		r.ID, r.TaskID, r.TaskVersion, r.InstallationID, r.OrganizationID,
 		r.ProjectID, r.WorkerID, r.TaskScopeID, scopeJSON, r.ConfigurationRevision,
-		inputsJSON, r.State, attemptsJSON, formatStamp(r.CreatedAt), formatStamp(r.UpdatedAt))
+		inputsJSON, r.State, attemptsJSON, r.ModelStepsUsed, formatStamp(r.CreatedAt), formatStamp(r.UpdatedAt))
 	return err
 }
 
@@ -327,10 +334,10 @@ func updateRun(ctx context.Context, unit contract.Unit, r *runRow) error {
 	res, err := unit.ExecContext(ctx, `UPDATE execution_runs SET
 		version = ?, worker_id = ?, task_scope_id = ?, scope_json = ?,
 		configuration_revision = ?, input_versions_json = ?, state = ?,
-		attempt_ids_json = ?, updated_at = ?
+		attempt_ids_json = ?, model_steps_used = ?, updated_at = ?
 		WHERE id = ? AND version = ?`,
 		r.Version+1, r.WorkerID, r.TaskScopeID, scopeJSON, r.ConfigurationRevision,
-		inputsJSON, r.State, attemptsJSON, formatStamp(r.UpdatedAt), r.ID, r.Version)
+		inputsJSON, r.State, attemptsJSON, r.ModelStepsUsed, formatStamp(r.UpdatedAt), r.ID, r.Version)
 	if err != nil {
 		return err
 	}
@@ -1111,6 +1118,74 @@ func openOperationOf(ctx context.Context, unit contract.Unit, attemptID contract
 		return nil, err
 	}
 	return &o, nil
+}
+
+// listOperationRecords reads every owned operation record of one attempt,
+// oldest first -- the full effect lineage run.export's canonical history
+// needs, not just the single newest-open record openOperationOf serves.
+func listOperationRecords(ctx context.Context, unit contract.Unit, attemptID contract.ID) ([]*operationRow, error) {
+	rows, err := unit.QueryContext(ctx, `SELECT id, attempt_id, run_id, installation_id,
+		kind, state, operation_ref, created_at FROM execution_operations
+		WHERE attempt_id = ? ORDER BY created_at, id`, attemptID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []*operationRow
+	for rows.Next() {
+		var o operationRow
+		var created string
+		if err := rows.Scan(&o.ID, &o.AttemptID, &o.RunID, &o.InstallationID,
+			&o.Kind, &o.State, &o.OperationRef, &created); err != nil {
+			return nil, err
+		}
+		if o.CreatedAt, err = parseStamp(created); err != nil {
+			return nil, err
+		}
+		out = append(out, &o)
+	}
+	return out, rows.Err()
+}
+
+// runCheckpointRow is one persisted checkpoint of a run's attempt lineage.
+type runCheckpointRow struct {
+	ID        contract.ID
+	AttemptID contract.ID
+	Context   wireArtifactRef
+	Outputs   []wireArtifactRef
+	CreatedAt time.Time
+}
+
+// listRunCheckpoints reads every checkpoint across a run's attempts, oldest
+// first -- the full context lineage run.export's canonical history needs,
+// not just the newest checkpoint latestRunCheckpoint serves for claim/resume.
+func listRunCheckpoints(ctx context.Context, unit contract.Unit, runID contract.ID) ([]*runCheckpointRow, error) {
+	rows, err := unit.QueryContext(ctx, `SELECT id, attempt_id, context_json,
+		outputs_json, created_at FROM execution_checkpoints
+		WHERE run_id = ? ORDER BY created_at, id`, runID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []*runCheckpointRow
+	for rows.Next() {
+		var c runCheckpointRow
+		var contextJSON, outputsJSON, created string
+		if err := rows.Scan(&c.ID, &c.AttemptID, &contextJSON, &outputsJSON, &created); err != nil {
+			return nil, err
+		}
+		if err := decodeJSON(contextJSON, &c.Context); err != nil {
+			return nil, err
+		}
+		if err := decodeJSON(outputsJSON, &c.Outputs); err != nil {
+			return nil, err
+		}
+		if c.CreatedAt, err = parseStamp(created); err != nil {
+			return nil, err
+		}
+		out = append(out, &c)
+	}
+	return out, rows.Err()
 }
 
 // findRunByTask locates the run pinned to one task/version; no match reads

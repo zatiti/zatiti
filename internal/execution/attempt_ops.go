@@ -140,7 +140,7 @@ func (s *Service) handleAttemptHeartbeat(ctx context.Context, unit contract.Unit
 		return contract.Outcome[attemptBody]{}, err
 	}
 	now := s.now()
-	if err := checkWorkerCall(a, in.Scope, in.LeaseID, in.Generation, now); err != nil {
+	if err := checkWorkerCall(unit, a, in.Scope, in.LeaseID, in.Generation, now); err != nil {
 		return contract.Outcome[attemptBody]{}, err
 	}
 	a.LeaseExpiresAt = now.Add(leaseDuration)
@@ -170,7 +170,7 @@ func (s *Service) handleAttemptCheckpoint(ctx context.Context, unit contract.Uni
 		return contract.Outcome[attemptBody]{}, err
 	}
 	now := s.now()
-	if err := checkWorkerCall(a, in.Scope, in.LeaseID, in.Generation, now); err != nil {
+	if err := checkWorkerCall(unit, a, in.Scope, in.LeaseID, in.Generation, now); err != nil {
 		return contract.Outcome[attemptBody]{}, err
 	}
 	outputs := in.Outputs
@@ -222,7 +222,7 @@ func (s *Service) handleAttemptReport(ctx context.Context, unit contract.Unit, i
 // reported output positionally against the task's own RequiredOutputs.
 func (s *Service) reportAttempt(ctx context.Context, unit contract.Unit, a *attemptRow, leaseID contract.ID, generation int64, outputs []wireArtifactRef, named []reportBindingProposal, observations json.RawMessage, usage wireUsage) (contract.Outcome[attemptBody], error) {
 	now := s.now()
-	if err := checkWorkerCall(a, contract.Scope{WorkerID: a.WorkerID}, leaseID, generation, now); err != nil {
+	if err := checkWorkerCall(unit, a, contract.Scope{WorkerID: a.WorkerID}, leaseID, generation, now); err != nil {
 		return contract.Outcome[attemptBody]{}, err
 	}
 	r, err := loadRun(ctx, unit, a.RunID)
