@@ -1916,6 +1916,24 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   to be exactly the pre-existing expected-red set (internal/application,
   internal/installation, internal/mcp, internal/scheduling, cmd/zatiti,
   etc.) -- internal/cli itself was not among them.
+- 2026-09-21 00:07 PT -- P40 LANDED (PR #27, b4f6c810). Independently
+  reviewed: internal/mcp/defs.json diffed byte-for-byte against
+  AGENTS.md's embedded $defs -- all 68 definitions matched after the fix
+  (was missing CallbackRoute/OperationAttempt/VerifierDescriptor and had
+  5 stale copies). mcp.Serve's tool registration confirmed genuinely
+  descriptor-generic (same finding pattern as P39's cli.go). All three
+  required tests read in full: one calls all 190+ catalog operations
+  through a real go-sdk client end to end (not just tools/list), one
+  proves a reconnecting client never re-triggers the original mutation,
+  one proves MCP forwards input verbatim with no authorization logic of
+  its own. go test ./internal/mcp: 25 tests, zero failures, including
+  TestEmbeddedDefsMatchContract (previously red) now green. Confirmed
+  green on real post-merge main before removing internal/mcp from
+  expected-red.txt (8c22b75) -- learned from the P14 timing mistake,
+  did the removal only after the merge this time, not before.
+  WAVE 5 STATUS: P39 and P40 landed. P17 (internal/scheduling) reported
+  ready and is in review/landing now. P15 (internal/execution, the
+  direct continuation of P14's turn pipeline) still coding.
 
 ## Planned
 
