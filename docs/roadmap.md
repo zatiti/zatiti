@@ -2141,6 +2141,43 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
     capability_unsupported) so it doesn't try to work around a
     structural blocker -- told to be explicit about what genuinely
     works end-to-end versus what correctly refuses.
+- 2026-09-21 09:19 PT -- P28 LANDED (PR #31, b162f0b). Independently
+  reviewed under heavy machine load (uptime 90-100 for much of the
+  review window, from P18/P22 both actively compiling/testing
+  concurrently plus an unrelated process; package-scoped verification
+  completed directly, whole-module build/vet deferred to CI given the
+  load and this diff's zero exported-API/schema footprint -- CI
+  confirmed clean). Traced handleRecord's fallback resolution chain
+  (operation_id -> job_id -> execution_job_id) end to end, confirming
+  scanIntent genuinely returns nil on a no-rows miss so the fallback
+  logic is reachable; confirmed _memory.record's job_id field is
+  required in the frozen catalog, not invented. All 4 new tests read in
+  full and confirmed non-vacuous, including a genuine close-and-reopen-
+  the-database restart test (not simulated). No schema/migration
+  changes, zero exported API changes. Four real fixes: honest refusal
+  detail (peekRefusalDetail replaces an empty requirements array / a
+  misleading "pending reconciliation" message with the actual adapter
+  refusal reason, including correctly distinguishing the PERMANENT
+  capability_unsupported refusal from a genuinely transient unknown);
+  stable-command-identity reconciliation fallback (a bounded
+  reconciliation read admits its own separate effects Operation per
+  R15-009, so handleRecord now falls back to the owner's own stable
+  job_id rather than refusing a redelivered/reconciled observation
+  outright); retraction propagation (a retracted source claim now
+  actually flips every downstream promoted copy inactive at a new,
+  provenance-preserving version, instead of leaving an inert obligation
+  while the copy keeps reading as current); hard-bound mode
+  (remember/promote/retract refuse an explicit lookup_authoritative=
+  false rather than silently downgrading to advisory-as-guaranteed;
+  recall is exempt; an absent signal is never itself a refusal). One
+  gap confirmed but not fixable from this package: no operation
+  anywhere in the frozen contract ever populates a brain's
+  ConnectionRefID/ToolRefID, so a brain stays in provisioning state
+  forever in production -- pre-existing (P26's own comments already
+  flagged it), needs a P00 contract revision.
+  go test ./internal/memory: 25 tests, zero failures, including
+  TestDescriptorsMatchFrozenCatalog. CI confirmed internal/memory not
+  among the PR's failures.
 
 ## Planned
 
