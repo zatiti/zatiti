@@ -2597,6 +2597,19 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   the real post-merge main (272s, ok). Worktree/branch cleaned up, P21
   claim released.
   WAVE 9 COMPLETE. 35 of 50 cards landed (70%, up from 68%).
+- 2026-09-21 ~17:58 PT -- WAVE 10 DISPATCHED (P23, internal/controller,
+  "attach verifier, local jobs and reconciliation driver"). depends_on
+  P22/P18/P19/P21/P12/P02, all landed -- P12 confirmed via its own
+  Shipped entry (PR #20), the rest already confirmed this session.
+  Briefed on P22's own outstandingTurnEffects no-double-dispatch
+  pattern (this card's job-driving/reconciliation work should follow
+  the same discipline) and P21's job_runner.go admit/perform/record
+  shape (this card is the controller-side driver of exactly that
+  pattern). Machine load was marginal at dispatch time (~16, just
+  above the strict 15 threshold but stable across several checks, not
+  climbing, with memory healthy at ~506MB) -- proceeded, since
+  dispatching one agent is lightweight on this session's own end
+  regardless of where the agent's later heavy work lands.
 
 ## Planned
 
