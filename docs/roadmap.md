@@ -3498,3 +3498,47 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   agent attempted a fix; treating it like the restore gap, to verify and
   prove the real ceiling rather than route around. Will independently
   verify when P46 reports its full handoff.
+- 2026-09-22 ~08:00-08:20 PT -- P45 LANDED (PR #54). Real content: a
+  documented executable packaging/install driver (zatiti-pack) on top of
+  the pre-existing ~6,100-line manifest/signature/install/service/audit
+  library that had no executable at all. Independently verified: no
+  network calls anywhere in the new code, cli_sign.go is pure local
+  Ed25519 signing against caller-supplied keys, every test uses a
+  recording shell-script stand-in for launchctl/systemctl, never the real
+  host service manager -- confirms the card's own "no publishing or
+  deployment" constraint was genuinely honored, not just claimed. Red->
+  green verified the tamper-detection guard directly: bypassing
+  VerifySignature reproduces the expected failure for the two tamper
+  cases that depend on it (manifest/helper), while the other two (binary/
+  profile) stay correctly caught by the independent tree/digest
+  verification layer -- confirms real defense-in-depth.
+
+  MOST SIGNIFICANT FINDING THIS SESSION: P46's new real end-to-end fixture
+  (the first test in this tree to exercise run.claim through genuine
+  schema-validated dispatch, rather than internal/execution's own test
+  fake which never decoded operation_id at all) found that
+  internal/execution's handleClaim has ALWAYS called _accounting.reserve
+  with a hardcoded empty-string operation_id -- and _accounting.reserve's
+  own frozen schema requires operation_id as a non-empty uuid. This means
+  run.claim, the single entry point every hosted AND cooperative worker
+  attempt goes through, has never actually been able to succeed on this
+  tree. Independently verified end to end before fixing: confirmed the
+  exact schema requirement (docs/implementation/operations.json), traced
+  the empty string from handleClaim through reserveBudget's unconditional
+  map-literal input, and found internal/tasks/admission.go already solves
+  the identical "no real operation exists yet" case by minting a fresh ID
+  via its own generator -- the same fix applied here via internal/
+  execution's existing s.newID() helper. New regression test
+  (TestClaimReservesBudgetWithAValidOperationID) captures the real request
+  sent (a new ReserveCalls() recorder on the test fake, which previously
+  discarded operation_id silently) and validates it against the actual
+  uuid-format schema; red->green confirmed. Landed as PR #55, its own
+  same-day fix.
+
+  Coordinating with P46's agent (still in flight, not yet landed) to
+  rebase onto this fix once merged and extend its own coverage into what
+  it explicitly called out as blocked pending this exact bug -- likely
+  unlocking substantially more of the card's original required scope
+  (real task completion/verification/reply through a real cooperative
+  claim) rather than just patching its now-incorrect "expect failure"
+  assertions to match the old broken behavior.
