@@ -374,6 +374,64 @@ func (c *controller) rawFrame(ctx context.Context, frame string) (string, error)
 	return strings.TrimSpace(line), nil
 }
 
+// TestZ01DuplicateControllerRefusesExclusiveOwnership is
+// Z01.duplicate_controller: a second real `zatiti serve` process started
+// against the shared controller's own state directory (a different socket,
+// so the collision under test is the state directory's exclusive install
+// lock, never an unrelated socket bind conflict) must refuse to serve
+// anything, and the original controller must keep working throughout.
+func TestZ01DuplicateControllerRefusesExclusiveOwnership(t *testing.T) {
+	c := beginCase(t, "Z01.duplicate_controller", "Z01",
+		"Second controller refuses exclusive ownership and serves no requests.",
+		"Only the original controller admits work; no extra scheduler or writer appears.")
+	ctrl := needController(t, c)
+
+	before, err := ctrl.cli(context.Background(), "installation", "status", "--json",
+		"--input", `{"scope":{"installation_id":"`+string(ctrl.installationID)+`"}}`)
+	if err != nil {
+		c.fail("original controller query before the duplicate attempt: %v", err)
+	}
+	if _, err := before.envelope(); err != nil {
+		c.fail("original controller was not healthy before the duplicate attempt: %v", err)
+	}
+
+	secondSocket := filepath.Join(ctrl.root, "second.sock")
+	masterKey := "file:" + filepath.Join(ctrl.root, "master.key")
+	// A real exclusive-lock refusal is near-instant (opening an already-
+	// locked SQLite state file fails immediately, not after minutes); this
+	// budget is generous headroom on a loaded machine, not an expectation
+	// that a duplicate controller legitimately takes this long to refuse.
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	dup := exec.CommandContext(ctx, ctrl.bin, "serve", "--credential-backend", "headless", "--master-key", masterKey, "--tick-interval", "100ms")
+	dup.Env = []string{
+		"PATH=" + os.Getenv("PATH"), "HOME=" + os.Getenv("HOME"),
+		"ZATITI_STATE_DIR=" + ctrl.stateDir, "ZATITI_SOCKET=" + secondSocket,
+	}
+	var dupLog lockedBuffer
+	dup.Stdout, dup.Stderr = &dupLog, &dupLog
+	runErr := dup.Run()
+	if runErr == nil {
+		c.fail("a second `zatiti serve` against the same state directory exited 0; it must refuse exclusive ownership\nlog:\n%s", dupLog.String())
+	}
+	c.observe("a second `zatiti serve` against the shared controller's own state directory exited non-zero (%v), refusing exclusive ownership", runErr)
+	c.attach("duplicate_controller_log", dupLog.String())
+	if _, err := os.Stat(secondSocket); err == nil {
+		c.fail("the duplicate controller created a second socket at %s; it must serve no requests", secondSocket)
+	}
+	c.observe("the duplicate controller never created a socket at %s: no extra scheduler or writer appeared", secondSocket)
+
+	after, err := ctrl.cli(context.Background(), "installation", "status", "--json",
+		"--input", `{"scope":{"installation_id":"`+string(ctrl.installationID)+`"}}`)
+	if err != nil {
+		c.fail("original controller query after the duplicate attempt: %v", err)
+	}
+	if _, err := after.envelope(); err != nil {
+		c.fail("the original controller stopped admitting work after the duplicate attempt: %v", err)
+	}
+	c.observe("the original controller kept serving completed queries throughout and after the duplicate attempt")
+}
+
 // lockedBuffer is a concurrency-safe log sink.
 type lockedBuffer struct {
 	mu sync.Mutex

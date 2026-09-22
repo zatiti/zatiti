@@ -182,6 +182,25 @@ func TestQualificationBaselineMCP(t *testing.T) {
 	}
 	c.observe("changed input under the same key: isError=true, error.code=%s", conflictEnv.Error.Code)
 
+	// The flow just proven above (steps 3-4: keyed create, session death,
+	// lookup-by-key and keyed replay from a fresh session, changed input
+	// under the same key refused) is also the exact behavior Z04.
+	// submission_replay and Z16.disconnect_command_lookup name; it is
+	// recorded again here under each case's own identity rather than only
+	// under QUALIFICATION.baseline_mcp, so a release audit finds it. This
+	// harness does not additionally prove restart-survival or the >=30-day
+	// retention window Z04.submission_replay's own text also names; that
+	// narrower scope is recorded honestly rather than claimed.
+	z04 := beginCase(t, "Z04.submission_replay", "Z04",
+		"Identical retry returns the original durable command disposition without another revision or event.",
+		"Changed input is refused; command identity survives restart and remains retained through unresolved obligations and at least 30 days.")
+	z04.observe("identical replay from a fresh session (after the original session ended) returned the original command %s unchanged; changed input under the same key was refused %s", createdEnv.CommandID, conflictEnv.Error.Code)
+	z04.observe("restart-survival and the >=30-day retention window are not exercised by this harness; only same-run replay/lookup and changed-input refusal are proven here")
+	z16 := beginCase(t, "Z16.disconnect_command_lookup", "Z16",
+		"The original disposition is recovered without another business mutation or event.",
+		"JSON-RPC request IDs are not treated as durable submission keys.")
+	z16.observe("after the MCP session that submitted command %s ended (a real transport disconnect), a fresh session recovered the identical disposition through command.get keyed by submission_key, and a same-key replay returned the same command rather than minting a second one", createdEnv.CommandID)
+
 	// 5. A malformed protocol message is a protocol error, not a tool
 	// result: an unknown method gets a JSON-RPC error object.
 	answer, err := ctrl.rawFrame(ctx, `{"jsonrpc":"2.0","id":7,"method":"zatiti/not-a-method"}`)

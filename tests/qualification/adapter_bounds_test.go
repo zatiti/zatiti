@@ -9,8 +9,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -19,6 +19,7 @@ import (
 
 	"github.com/zatiti/zatiti/internal/adapters/github"
 	"github.com/zatiti/zatiti/internal/adapters/httpread"
+	"github.com/zatiti/zatiti/internal/adapters/responses"
 	"github.com/zatiti/zatiti/internal/adapters/serenity"
 	"github.com/zatiti/zatiti/internal/contract"
 )
@@ -583,29 +584,287 @@ func (b countingBlobs) RemoveStaged(context.Context, string) error {
 
 // ---------- responses ----------
 
-// TestAdapterBoundsResponses: the hosted model adapter has no code on this
-// tree, so nothing can be constructed or bound; the case is not run and
-// every hosted-model claim stays blocked.
-func TestAdapterBoundsResponses(t *testing.T) {
+// openaiProtocolRevision duplicates internal/adapters/responses/openai.go's
+// unexported openaiProtocolRevision constant ("openai-openapi/2.3.0@ddface9b").
+// It is unexported there, so a profile naming the real qualified OpenAI wire
+// protocol (rather than a synthetic revision responses.New refuses to bind
+// dispatch to) has to spell it again here, the same duplication tests/
+// integration/hosted_turn_test.go already carries for the identical reason.
+const openaiProtocolRevision = "openai-openapi/2.3.0@ddface9b"
+
+// openaiSimulator is a controlled TLS server speaking just enough of the
+// real, pinned OpenAI Responses wire protocol
+// (internal/adapters/responses/openai.go) for the real qualified adapter to
+// drive a genuine physical round trip: POST .../conversations mints a
+// conversation id (prepare_session) and POST .../responses answers one
+// completed, text-only response (model_step). "sleep" delays the /responses
+// answer past the caller's deadline without ever closing the connection, so
+// a timeout is observed on real bytes, not simulated by never dialing.
+type openaiSimulator struct {
+	srv   *httptest.Server
+	mode  atomic.Value // string: "ok" or "sleep"
+	sleep time.Duration
+	mu    sync.Mutex
+	paths []string
+}
+
+func newOpenAISimulator() *openaiSimulator {
+	s := &openaiSimulator{}
+	s.mode.Store("ok")
+	s.srv = httptest.NewTLSServer(http.HandlerFunc(s.handle))
+	return s
+}
+
+func (s *openaiSimulator) endpoint() string { return s.srv.URL + "/v1/responses" }
+func (s *openaiSimulator) close()           { s.srv.Close() }
+
+func (s *openaiSimulator) hitPaths() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.paths...)
+}
+
+func (s *openaiSimulator) handle(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	s.paths = append(s.paths, r.URL.Path)
+	s.mu.Unlock()
+	if s.mode.Load().(string) == "sleep" && strings.HasSuffix(r.URL.Path, "/responses") {
+		time.Sleep(s.sleep)
+	}
+	w.Header().Set("Content-Type", "application/json")
+	var body string
+	switch {
+	case strings.HasSuffix(r.URL.Path, "/conversations"):
+		body = fmt.Sprintf(`{"id":"conv_%s","object":"conversation"}`, strings.ReplaceAll(string(contract.NewID()), "-", ""))
+	case strings.HasSuffix(r.URL.Path, "/responses"):
+		body = fmt.Sprintf(`{"id":"resp_%s","object":"response","status":"completed",`+
+			`"output":[{"type":"message","role":"assistant","status":"completed",`+
+			`"content":[{"type":"output_text","text":"acknowledged"}]}],`+
+			`"usage":{"input_tokens":12,"output_tokens":4,"total_tokens":16}}`,
+			strings.ReplaceAll(string(contract.NewID()), "-", ""))
+	default:
+		w.WriteHeader(http.StatusNotFound)
+		body = `{"error":{"type":"invalid_request_error","message":"qualification fixture: no route"}}`
+	}
+	_, _ = io.WriteString(w, body)
+}
+
+// responsesOrigin returns endpoint's scheme://host[:port] with no path, so
+// a profile can declare one origin-wide provider_destinations entry
+// (profile.go's destinationPermits treats an empty/"/" path as covering
+// every path on that origin) rather than separately naming the distinct
+// .../conversations and .../responses paths the adapter's own protocol
+// dispatches to.
+func responsesOrigin(t *testing.T, endpoint string) string {
+	t.Helper()
+	u, err := url.Parse(endpoint)
+	if err != nil {
+		t.Fatalf("parse responses endpoint %q: %v", endpoint, err)
+	}
+	u.Path, u.RawQuery, u.Fragment = "", "", ""
+	return u.String()
+}
+
+// responsesProfile builds a valid, self-binding zatiti.responses/v1 adapter
+// profile pointed at endpoint and naming the real qualified OpenAI wire
+// protocol revision, so Invoke really selects and speaks internal/adapters/
+// responses/openai.go's protocol against the controlled simulator, not a
+// synthetic one this build has no dispatchable protocol for.
+func responsesProfile(t *testing.T, endpoint, model string) json.RawMessage {
+	t.Helper()
+	return bindProfile(t, map[string]any{
+		"schema": "zatiti.responses/v1", "endpoint": endpoint, "model": model,
+		"connection_id": string(contract.NewID()), "max_input_tokens": 100000, "max_output_tokens": 4096,
+		"max_response_bytes": 1 << 20, "timeout_seconds": 30, "currency": "USD",
+		"input_rate":  map[string]any{"numerator_micro_units": 2, "denominator_units": 1, "unit": "input_token"},
+		"output_rate": map[string]any{"numerator_micro_units": 7, "denominator_units": 2, "unit": "output_token"},
+		"enforcement": map[string]any{
+			"cost": "advisory", "disclosure": "advisory",
+			"maximum_cost":          map[string]any{"currency": "USD", "micro_units": 1000000},
+			"provider_destinations": []string{responsesOrigin(t, endpoint)},
+			"classifications":       []string{"internal"},
+			"evidence":              capabilityEvidence("qualification-responses-enforcement", sourceRevision(), openaiProtocolRevision, []string{}, []string{"advisory cost/disclosure only; no claimed hard-cap input-token bound"}),
+		},
+		"capability_evidence": capabilityEvidence("qualification-responses", sourceRevision(), openaiProtocolRevision, []string{}, []string{}),
+	})
+}
+
+// responsesContextArtifact stages a minimal zatiti.context/v1 document (the
+// same shape tests/integration/hosted_turn_test.go uses) into blobs and
+// returns its ArtifactRef.
+func responsesContextArtifact(blobs *memoryBlobs) map[string]any {
+	body := map[string]any{
+		"schema": "zatiti.context/v1", "attempt_id": string(contract.NewID()),
+		"scope": map[string]any{"installation_id": string(contract.NewID())}, "configuration_revision": 1,
+		"worker":            map[string]any{"id": string(contract.NewID()), "version": 1},
+		"execution_profile": map[string]any{"id": string(contract.NewID()), "version": 1},
+		"skill_versions":    []any{}, "messages": []any{}, "tools": []any{}, "source_artifacts": []any{},
+		"capture": "complete", "created_at": "2026-01-01T00:00:00Z",
+	}
+	raw, _ := json.Marshal(body)
+	return map[string]any{"id": string(contract.NewID()), "digest": string(blobs.put(raw))}
+}
+
+// TestResponsesAdapterQualifiesControlledProtocolPrepareSessionAndModelStep
+// is P47 item 1's pinned controlled-protocol harness, replacing the
+// previous unconditional notRun: internal/adapters/responses now has real
+// Go source (landed under P02/P13), so this constructs the real adapter
+// through its exact public constructor (responses.New, no test seam)
+// against a controlled TLS simulator speaking the pinned OpenAI wire
+// protocol, and drives the real revision-3 prepare_session/model_step
+// split -- the same pattern tests/integration/hosted_turn_test.go's
+// TestResponsesAdapterDispatchesPrepareSessionAndModelStepAgainstControlledProvider
+// established for a real controller; here the adapter is qualified
+// directly, and its endpoint/model/price/limits evidence is recorded
+// against the simulator, never a live provider.
+func TestResponsesAdapterQualifiesControlledProtocolPrepareSessionAndModelStep(t *testing.T) {
 	c := beginCase(t, "QUALIFICATION.adapter_bounds/responses", "QUALIFICATION",
-		"Record exact adapter/source/protocol/profile versions and observed physical calls for the hosted Responses adapter.")
-	root, err := moduleRoot()
+		"Record exact adapter/source/protocol/profile versions and observed physical calls for the hosted Responses adapter.",
+		"Each Invoke performs exactly one physical call (prepare_session xor model_step); a timeout after bytes were sent is outcome_unknown with no automatic fresh call.")
+	c.version("adapter_source_revision", sourceRevision())
+	c.version("responses_protocol_revision", openaiProtocolRevision)
+	sim := newOpenAISimulator()
+	defer sim.close()
+	const model = "qualification-controlled-model"
+	profile := responsesProfile(t, sim.endpoint(), model)
+	c.attach("profile_endpoint", sim.endpoint())
+	c.attach("profile_model", model)
+	c.attach("profile_limits", map[string]any{"max_input_tokens": 100000, "max_output_tokens": 4096, "timeout_seconds": 30})
+	c.attach("profile_price", map[string]any{"currency": "USD", "input_rate_micro_units_per_token": 2, "output_rate_micro_units_per_2_tokens": 7})
+
+	blobs := newMemoryBlobs()
+	secrets := memorySecrets{refs: map[string][]byte{"cred-responses": []byte("fake-controlled-provider-key-" + string(contract.NewID())[:8])}}
+	a, err := responses.New(contract.AdapterDependencies{
+		HTTP: sim.srv.Client(), Secrets: secrets, Clock: &stepClock{now: time.Now().UTC()}, Blobs: blobs,
+	}, profile)
 	if err != nil {
-		c.fail("%v", err)
+		c.fail("responses.New: %v", err)
 	}
-	dir := filepath.Join(root, "internal", "adapters", "responses")
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		c.notRun("internal/adapters/responses is absent: %v", err)
+	c.attach("contract_bytes", len(a.Contract()))
+
+	// 1. prepare_session: exactly one physical call to .../conversations, a
+	// real session handle, no model-visible content.
+	prepareAction := map[string]any{"schema": "zatiti.responses.action/v1", "kind": "prepare_session"}
+	deadline := func() time.Time { return time.Now().Add(time.Minute) }
+	prepObs, err := a.Invoke(context.Background(), dispatch(t, "responses", prepareAction, "cred-responses", deadline()))
+	if err != nil || prepObs.Disposition != contract.DispositionSucceeded || prepObs.ProviderReference == "" {
+		c.fail("prepare_session: disposition=%s reference=%q err=%v", prepObs.Disposition, prepObs.ProviderReference, err)
 	}
-	goFiles := 0
-	for _, e := range entries {
-		if strings.HasSuffix(e.Name(), ".go") {
-			goFiles++
+	if got := sim.hitPaths(); len(got) != 1 || !strings.HasSuffix(got[0], "/conversations") {
+		c.fail("prepare_session physical calls: %v, want exactly one .../conversations", got)
+	}
+	c.observe("prepare_session: disposition %s, session_handle %q, exactly 1 physical call to .../conversations", prepObs.Disposition, prepObs.ProviderReference)
+
+	// 2. model_step naming that session handle: exactly one further physical
+	// call to .../responses, carrying only the pinned context_artifact.
+	modelStepAction := map[string]any{
+		"schema": "zatiti.responses.action/v1", "kind": "model_step",
+		"session_handle": prepObs.ProviderReference, "context_artifact": responsesContextArtifact(blobs),
+		"max_output_tokens": 128, "tool_contract_versions": []any{},
+	}
+	stepObs, err := a.Invoke(context.Background(), dispatch(t, "responses", modelStepAction, "cred-responses", deadline()))
+	if err != nil || stepObs.Disposition != contract.DispositionSucceeded {
+		c.fail("model_step: disposition=%s evidence=%s err=%v", stepObs.Disposition, stepObs.Evidence, err)
+	}
+	if got := sim.hitPaths(); len(got) != 2 || !strings.HasSuffix(got[1], "/responses") {
+		c.fail("physical calls after model_step: %v, want [.../conversations, .../responses]", got)
+	}
+	var evidence struct {
+		SessionHandle string `json:"session_handle"`
+	}
+	if err := json.Unmarshal(stepObs.Evidence, &evidence); err != nil || evidence.SessionHandle != prepObs.ProviderReference {
+		c.fail("model_step evidence session_handle %q, want the prepare_session handle %q (decode err %v)", evidence.SessionHandle, prepObs.ProviderReference, err)
+	}
+	c.observe("model_step: disposition %s naming session_handle %q, exactly 1 further physical call to .../responses", stepObs.Disposition, evidence.SessionHandle)
+
+	// 3. A model_step whose dispatch deadline passes after bytes were sent
+	// (the simulator answers after 4s, deadline in 1s): outcome_unknown,
+	// exactly one physical call, no automatic fresh call -- the exact
+	// revision-3 rule this harness must fail under if dispatch were doubled.
+	sim.mode.Store("sleep")
+	sim.sleep = 4 * time.Second
+	before := len(sim.hitPaths())
+	timeoutAction := map[string]any{
+		"schema": "zatiti.responses.action/v1", "kind": "model_step",
+		"session_handle": prepObs.ProviderReference, "context_artifact": responsesContextArtifact(blobs),
+		"max_output_tokens": 128, "tool_contract_versions": []any{},
+	}
+	unkObs, err := a.Invoke(context.Background(), dispatch(t, "responses", timeoutAction, "cred-responses", time.Now().Add(time.Second)))
+	if err != nil || unkObs.Disposition != contract.DispositionUnknown {
+		c.fail("model_step past deadline: disposition=%s evidence=%s err=%v, want outcome_unknown", unkObs.Disposition, unkObs.Evidence, err)
+	}
+	after := len(sim.hitPaths())
+	if after-before != 1 {
+		c.fail("model_step past deadline made %d physical call(s), want exactly 1 (no automatic fresh call)", after-before)
+	}
+	c.observe("model_step past its dispatch deadline with the simulator still answering: disposition %s, exactly %d physical call, no retry", unkObs.Disposition, after-before)
+}
+
+// responsesLiveOptIn is the environment variable that must be explicitly
+// set to "1" before this harness attempts any real network call to a real
+// hosted Responses provider. It is never set in this repository's own CI or
+// development environment; absent it, the real-provider case always
+// records not_run rather than dialing out, exactly as the httpread/github/
+// serenity cases above never reach a real host either.
+const responsesLiveOptIn = "ZATITI_QUALIFICATION_RESPONSES_LIVE"
+
+// TestResponsesAdapterRealProviderQualificationRequiresExplicitAuthorization
+// is P47 item 1's "separately authorized real-provider qualification": the
+// plumbing to bind the real qualified adapter to a real endpoint/model/
+// credential and record actual observed endpoint/model/price/limits
+// evidence, gated behind an explicit opt-in this environment never sets and
+// real connection details this environment never provides. Each missing
+// prerequisite is named individually and blocks the real-provider
+// compatibility claim; nothing here ever dials a real provider without all
+// three present.
+func TestResponsesAdapterRealProviderQualificationRequiresExplicitAuthorization(t *testing.T) {
+	c := beginCase(t, "QUALIFICATION.adapter_bounds/responses_real_provider", "QUALIFICATION",
+		"A real-provider compatibility claim needs an executed session against the actual endpoint, with actual observed endpoint/model/price/limits evidence retained.",
+		"Missing authorization, endpoint, model or credential is recorded as not_run and blocks the real-provider claim; no real network call is made without all three.")
+	optedIn := os.Getenv(responsesLiveOptIn) == "1"
+	endpoint := os.Getenv("ZATITI_QUALIFICATION_RESPONSES_ENDPOINT")
+	model := os.Getenv("ZATITI_QUALIFICATION_RESPONSES_MODEL")
+	hasCredential := os.Getenv("ZATITI_QUALIFICATION_RESPONSES_API_KEY") != ""
+	c.attach("opted_in", optedIn)
+	c.attach("endpoint_configured", endpoint != "")
+	c.attach("model_configured", model != "")
+	c.attach("credential_configured", hasCredential)
+	if !optedIn || endpoint == "" || model == "" || !hasCredential {
+		var missing []string
+		if !optedIn {
+			missing = append(missing, responsesLiveOptIn+"=1 (explicit authorization)")
 		}
+		if endpoint == "" {
+			missing = append(missing, "ZATITI_QUALIFICATION_RESPONSES_ENDPOINT")
+		}
+		if model == "" {
+			missing = append(missing, "ZATITI_QUALIFICATION_RESPONSES_MODEL")
+		}
+		if !hasCredential {
+			missing = append(missing, "ZATITI_QUALIFICATION_RESPONSES_API_KEY")
+		}
+		c.notRun("real-provider qualification requires all of %v; this session has none configured, so no real network call was attempted and no real-provider compatibility claim is qualified", missing)
 	}
-	if goFiles == 0 {
-		c.notRun("internal/adapters/responses holds no Go source (%d entries, only the brief); no adapter exists to qualify and no endpoint/model/price is pinned", len(entries))
+	// Reached only when every prerequisite above is genuinely present: build
+	// the real adapter against the real endpoint/model and record actual
+	// observed evidence from one real, explicitly authorized prepare_session
+	// call. This path is never exercised in this repository's environment.
+	blobs := newMemoryBlobs()
+	apiKey := os.Getenv("ZATITI_QUALIFICATION_RESPONSES_API_KEY")
+	secrets := memorySecrets{refs: map[string][]byte{"cred-responses-live": []byte(apiKey)}}
+	profile := responsesProfile(t, endpoint, model)
+	a, err := responses.New(contract.AdapterDependencies{
+		HTTP: &http.Client{}, Secrets: secrets, Clock: &stepClock{now: time.Now().UTC()}, Blobs: blobs,
+	}, profile)
+	if err != nil {
+		c.fail("responses.New against the real endpoint: %v", err)
 	}
-	c.notRun("internal/adapters/responses has %d Go files but this harness pins no qualified endpoint, model or price to bind them against", goFiles)
+	prepareAction := map[string]any{"schema": "zatiti.responses.action/v1", "kind": "prepare_session"}
+	obs, err := a.Invoke(context.Background(), dispatch(t, "responses", prepareAction, "cred-responses-live", time.Now().Add(time.Minute)))
+	if err != nil {
+		c.fail("real-provider prepare_session: %v", err)
+	}
+	c.attach("real_provider_disposition", obs.Disposition)
+	c.attach("real_provider_reference", obs.ProviderReference)
+	c.observe("real-provider prepare_session: disposition %s against endpoint %s, model %s", obs.Disposition, endpoint, model)
 }
