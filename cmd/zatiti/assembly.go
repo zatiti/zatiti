@@ -249,15 +249,37 @@ func openInstallation(ctx context.Context, cfg config) (_ *installationHandle, e
 	if h.own, err = plat.Acquire(ctx); err != nil {
 		return nil, fmt.Errorf("installation lock: %w", err)
 	}
-	if h.db, err = storage.Open(ctx, storage.Config{Path: cfg.databasePath()}); err != nil {
-		return nil, fmt.Errorf("storage: %w", err)
-	}
-
 	h.secrets = &custodySecrets{SecretStore: plat.Secrets()}
-	router := application.NewPorts()
-	mods, idn, jobRunners, err := modules(router, h.clock, randomIDs{}, h.secrets, plat.Blobs(), databaseBackup{db: h.db})
-	if err != nil {
+	if err = h.assemble(ctx); err != nil {
 		return nil, err
+	}
+	return h, nil
+}
+
+// assemble runs storage.Open -> modules -> Migrate -> StartGeneration ->
+// registry.New -> application.New -> Bind against h's already-open platform
+// and already-held installation lock, populating h.db/h.reg/h.identity/
+// h.jobRunners/h.generation/h.app. It is openInstallation's own startup
+// body, factored out so reassembleAfterRestoreHandoff (restore.go) can
+// reuse it verbatim: controller.ErrRestoreHandoff's own contract is that the
+// caller "reassembles Application/Controller exactly as at first startup"
+// over the freshly reopened database, never re-acquiring platform.Acquire
+// (P32's restore protocol retains exclusive installation ownership through
+// the whole swap) and never skipping StartGeneration (calling it again here
+// is exactly what fences out the swap-performing lifetime that just ended --
+// P32's own required test, "no old-generation controller/worker can commit
+// after reopen").
+func (h *installationHandle) assemble(ctx context.Context) error {
+	db, err := storage.Open(ctx, storage.Config{Path: h.cfg.databasePath()})
+	if err != nil {
+		return fmt.Errorf("storage: %w", err)
+	}
+	h.db = db
+
+	router := application.NewPorts()
+	mods, idn, jobRunners, err := modules(router, h.clock, randomIDs{}, h.secrets, h.plat.Blobs(), databaseBackup{db: h.db})
+	if err != nil {
+		return err
 	}
 	h.identity = idn
 	h.jobRunners = jobRunners
@@ -266,21 +288,48 @@ func openInstallation(ctx context.Context, cfg config) (_ *installationHandle, e
 		migrations = append(migrations, m.Migrations()...)
 	}
 	if err = h.db.Migrate(ctx, migrations); err != nil {
-		return nil, fmt.Errorf("migrate: %w", err)
+		return fmt.Errorf("migrate: %w", err)
 	}
 	if h.generation, err = h.db.StartGeneration(ctx); err != nil {
-		return nil, fmt.Errorf("generation: %w", err)
+		return fmt.Errorf("generation: %w", err)
 	}
 	if h.reg, err = registry.New(mods); err != nil {
-		return nil, fmt.Errorf("registry over the landed modules: %w", err)
+		return fmt.Errorf("registry over the landed modules: %w", err)
 	}
 	if h.app, err = application.New(h.db, h.reg, idn, h.clock, randomIDs{}); err != nil {
-		return nil, fmt.Errorf("application: %w", err)
+		return fmt.Errorf("application: %w", err)
 	}
 	if err = router.Bind(h.app); err != nil {
-		return nil, fmt.Errorf("bind: %w", err)
+		return fmt.Errorf("bind: %w", err)
 	}
-	return h, nil
+	return nil
+}
+
+// reassembleAfterRestoreHandoff closes the stale application and database
+// this lifetime's Controller reported controller.ErrRestoreHandoff over
+// (its Application was built over the database handle CommitRestore closed
+// as part of the atomic swap; see internal/controller/restore.go's package
+// doc) and reassembles them fresh: an ordinary storage.Open at the same
+// path already observes the swap CommitRestore made durable. It never
+// touches h.own/h.plat -- the installation lock and platform stay held for
+// this process's entire lifetime, exactly as the restore protocol's step 4
+// requires ("retaining exclusive installation ownership").
+func (h *installationHandle) reassembleAfterRestoreHandoff(ctx context.Context) error {
+	if h.app != nil {
+		h.app.Close()
+		h.app = nil
+	}
+	if h.db != nil {
+		// Idempotent: CommitRestore already closed the same underlying
+		// database this field points to as part of the swap
+		// (checkpointAndClose sets its own closed flag); calling Close
+		// again here is the literal "close old ... database" step this
+		// card's item 2 names, and every method on an already-closed
+		// database reports a harmless closed fault rather than panicking.
+		_ = h.db.Close()
+		h.db = nil
+	}
+	return h.assemble(ctx)
 }
 
 // initialized reports the installation identity when bootstrap has
