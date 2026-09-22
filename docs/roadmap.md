@@ -3836,3 +3836,29 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
 - 2026-09-22 ~20:53 PT -- PR #59 LANDED (contracts.md restore-protocol
   correction, commit e495a92). All 7 CI checks passed clean on first run.
   Confirmed on real post-merge main via merge-base --is-ancestor.
+- 2026-09-22 ~21:05 PT -- P48 LANDED (PR #60, commit 97f861c). 49/50
+  original cards landed (50/51 counting P50, not yet implemented). New
+  cigate qualevidence command enforces required-gate enumeration and
+  evidence freshness against tests/qualification's own release-report.json;
+  new -require-tests flag on cigate gotest protects the two hosted-only
+  internal/platform regressions audit.md flagged
+  (TestListenPrivateRefusesSymlinkedRunDirectory,
+  TestBlobTamperedObjectFailsPublishOverExisting) from ever being silently
+  dropped again; two new compiled-in cigate lint rules guard both
+  mechanisms against workflow-file regression. All claims independently
+  verified against real source before landing (qualificationReport struct
+  matches tests/qualification/evidence_test.go's real JSON shape
+  field-for-field; both named regression tests and their audit.md citation
+  confirmed real). All 7 CI checks passed clean on first run -- notably
+  this run itself is the first real hosted exercise of the new
+  -require-tests gate, and both platform regressions passed clean on
+  hosted Linux/macOS this time (consistent with audit.md's own note that
+  these are known-flaky, not permanently broken). Confirmed on real
+  post-merge main via merge-base --is-ancestor.
+
+  Worktree note for future dispatches: isolation:"worktree" agents are
+  hard-sandboxed to their own auto-created worktree regardless of what
+  path the dispatch prompt names -- a manually pre-created worktree
+  (as this card's dispatch mistakenly specified) is simply ignored/
+  write-blocked. Stop naming a specific worktree path in future dispatch
+  prompts; let the tool create its own.
