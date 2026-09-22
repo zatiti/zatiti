@@ -102,6 +102,18 @@ class ConversationOutcome {
   final int version;
 }
 
+/// What `memory.retract` returns: the `Job` identity and its status at
+/// acknowledgment. Retraction is asynchronous — "acknowledged" here means
+/// the controller accepted the retraction request, never that the claim is
+/// already gone; [jobStatus] is the job's own state in words (`Queued`,
+/// `In progress`, `Done`, …), read directly from the controller's `Job`,
+/// never a locally invented phase.
+class MemoryRetractOutcome {
+  const MemoryRetractOutcome({required this.jobId, required this.jobStatus});
+  final String jobId;
+  final String jobStatus;
+}
+
 /// Nothing was sent. The same [PendingSubmission] may be submitted again.
 class SourceUnavailable implements Exception {
   const SourceUnavailable(this.message);
@@ -204,6 +216,17 @@ abstract interface class WorkspaceSource {
 
   /// Freezes a pause bound to the routine's current version.
   PendingSubmission preparePause(RoutineEntry routine);
+
+  /// Freezes a retraction of [claim], bound to the exact claim version this
+  /// view saw. Only offered when [MemoryEntry.canRetract] is true.
+  ResourceSubmission<MemoryRetractOutcome> prepareMemoryRetract(
+    MemoryEntry claim,
+    String reason,
+  );
+
+  /// Looks up a retraction job's current status. Never a background poll:
+  /// called only when the person asks to check again.
+  Future<String> checkMemoryJob(String jobId);
 
   // ---- organization/worker/group/task/responsibility creation ------------
   //

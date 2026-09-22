@@ -442,6 +442,86 @@ void main() {
     });
   });
 
+  group('keyboard-only and assistive technology: review, pause, reconnect', () {
+    testWidgets(
+      'a review is read and approved end to end with the keyboard only',
+      (t) async {
+        final h = await _pump(t);
+        final opener = _key('open-review-${_review.value}');
+        _focusOf(t, opener).requestFocus();
+        await t.pump();
+        await t.sendKeyEvent(LogicalKeyboardKey.enter);
+        await t.pumpAndSettle();
+        expect(_key('review-approve'), findsOneWidget);
+
+        FocusNode? approveFocus;
+        for (var i = 0; i < 12 && approveFocus?.hasFocus != true; i++) {
+          await t.sendKeyEvent(LogicalKeyboardKey.tab);
+          await t.pump();
+          final f = _focusOf(t, _key('review-approve'));
+          if (f.hasFocus) approveFocus = f;
+        }
+        expect(approveFocus, isNotNull, reason: 'Tab reaches Approve');
+        await t.sendKeyEvent(LogicalKeyboardKey.enter);
+        await t.pumpAndSettle();
+        expect(h.source.committed, hasLength(1));
+        expect(find.text('Approved · delivery not confirmed'), findsWidgets);
+      },
+    );
+
+    testWidgets(
+      'a responsibility is paused end to end with the keyboard only, and '
+      'the acknowledged state is announced to assistive technology',
+      (t) async {
+        final h = await _pump(t);
+        final handle = t.ensureSemantics();
+        h.controller.openDetails(DetailsTab.routines);
+        await t.pumpAndSettle();
+        final pause = _key('pause-${DemoWorkspaceSource.reconciliation.value}');
+        expect(find.bySemanticsLabel('Active'), findsNothing);
+
+        _focusOf(t, pause).requestFocus();
+        await t.pump();
+        await t.sendKeyEvent(LogicalKeyboardKey.enter);
+        await t.pumpAndSettle();
+        expect(find.text('Paused'), findsOneWidget);
+        expect(pause, findsNothing, reason: 'a paused routine offers no pause');
+        expect(
+          h.controller
+              .routinesFor(DemoWorkspaceSource.ledger)
+              .single
+              .routine
+              .paused,
+          isTrue,
+        );
+        handle.dispose();
+      },
+    );
+
+    testWidgets(
+      'reconnecting after an outage is reachable and confirmed with the '
+      'keyboard only, and the recovered state is a live region for '
+      'assistive technology',
+      (t) async {
+        final h = await _pump(t);
+        final handle = t.ensureSemantics();
+        await t.tap(_key('demo-offline-toggle'));
+        await t.pumpAndSettle();
+        expect(_text(t, 'connection-status'), 'Saved view');
+        expect(_key('offline-banner'), findsOneWidget);
+
+        h.source.offline = false;
+        _focusOf(t, _key('reconnect')).requestFocus();
+        await t.pump();
+        await t.sendKeyEvent(LogicalKeyboardKey.enter);
+        await t.pumpAndSettle();
+        expect(_text(t, 'connection-status'), 'Available');
+        expect(_key('offline-banner'), findsNothing);
+        handle.dispose();
+      },
+    );
+  });
+
   group('appearance and scaling', () {
     testWidgets('follows the operating system preference', (t) async {
       await _pump(t, platform: Brightness.dark);

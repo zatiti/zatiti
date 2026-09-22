@@ -111,10 +111,32 @@ abstract final class Operations {
   static const operationList = OperationDescriptor.query('operation.list');
   static const toolGet = OperationDescriptor.query('tool.get');
   static const usageGet = OperationDescriptor.query('usage.get');
+  static const budgetGet = OperationDescriptor.query('budget.get');
   static const connectionList = OperationDescriptor.query('connection.list');
   static const installationVerifierList = OperationDescriptor.query(
     'installation.verifier.list',
   );
+
+  // ---- memory: authorized claims, source/freshness and retraction --------
+
+  static const memoryBindingList = OperationDescriptor.query(
+    'memory.binding.list',
+  );
+  static const memoryList = OperationDescriptor.query('memory.list');
+  static const memoryRetract = OperationDescriptor.mutation('memory.retract');
+  static const memoryJobGet = OperationDescriptor.query('memory.job.get');
+
+  // ---- responsibility-to-schedule links -----------------------------------
+
+  static const scheduleList = OperationDescriptor.query('schedule.list');
+
+  // ---- autonomy evidence and recovery obligations -------------------------
+
+  static const autonomyQualificationList = OperationDescriptor.query(
+    'autonomy.qualification.list',
+  );
+  static const runList = OperationDescriptor.query('run.list');
+  static const runRecovery = OperationDescriptor.query('run.recovery');
 
   /// Every operation the client may call.
   static const List<OperationDescriptor> all = [
@@ -151,7 +173,16 @@ abstract final class Operations {
     operationList,
     toolGet,
     usageGet,
+    budgetGet,
     connectionList,
     installationVerifierList,
+    memoryBindingList,
+    memoryList,
+    memoryRetract,
+    memoryJobGet,
+    scheduleList,
+    autonomyQualificationList,
+    runList,
+    runRecovery,
   ];
 }

@@ -202,6 +202,30 @@ class LiveWorkspaceSource implements WorkspaceSource {
     ),
   );
 
+  @override
+  ResourceSubmission<MemoryRetractOutcome> prepareMemoryRetract(
+    MemoryEntry claim,
+    String reason,
+  ) => _LiveResourceSubmission(
+    api.prepareMemoryRetract(
+      brainId: claim.brainId,
+      claimId: claim.id.value,
+      claimVersion: claim.claimVersion,
+      reason: reason,
+    ),
+    (data) {
+      final o = StrictObject(data, 'memory.retract');
+      final job = wire.Job.fromJson(o.object('resource'));
+      o.finish();
+      return MemoryRetractOutcome(jobId: job.id, jobStatus: job.label);
+    },
+    'retract claim ${claim.id.value}',
+  );
+
+  @override
+  Future<String> checkMemoryJob(String jobId) =>
+      _guard(() async => (await api.memoryJobGet(jobId)).label);
+
   // ---- organization/worker/group/task/responsibility creation -----------
 
   DraftedResource _draftedResource(
@@ -762,6 +786,23 @@ class LiveWorkspaceSource implements WorkspaceSource {
       wire.Principal.fromJson,
     );
     final connections = await api.connections();
+    final schedules = await api.schedules();
+    final qualifications = await api.autonomyQualifications();
+    var memoryBindings = <wire.MemoryBinding>[];
+    var claims = <wire.Claim>[];
+    String? memoryFailure;
+    try {
+      memoryBindings = await api.memoryBindings();
+      claims = await api.memoryClaims([for (final b in memoryBindings) b.id]);
+    } on OperationFailedException catch (e) {
+      memoryFailure = e.fault.message;
+    }
+    var runs = <wire.Run>[];
+    try {
+      runs = await api.runs();
+    } on OperationFailedException {
+      // No runs visible; recovery obligations simply stay empty below.
+    }
     await _baselineEvents();
 
     final workerEntries = _tree(organizations, workers, conversations);
@@ -786,25 +827,189 @@ class LiveWorkspaceSource implements WorkspaceSource {
       reviewEntries.add(await _reviewEntry(r, operations, workerIds));
     }
 
+    // ---- cost liabilities and context-capture/advisory posture -----------
     final spending = <SpendingEntry>[];
     for (final w in workers.take(25)) {
+      wire.Usage? usage;
       try {
-        final u = await api.usage(workerId: w.id);
-        String money(int micro) =>
-            wire.Money(currency: u.currency, microUnits: micro).format();
-        spending.add(
-          SpendingEntry(
-            workerId: WorkerId(w.id),
-            headline: '${money(u.spent)} spent · ${money(u.reserved)} reserved',
-            detail: u.unknown > 0
-                ? '${money(u.unknown)} of cost is unknown and still reserved'
-                : u.advisory
-                ? 'Prices are advisory; a missing price is not zero.'
-                : 'No unknown costs.',
+        usage = await api.usage(workerId: w.id);
+      } on OperationFailedException {
+        // No spend visible for this worker; still show ceiling/posture.
+      }
+      wire.Limits? budget;
+      try {
+        budget = await api.budget(workerId: w.id);
+      } on OperationFailedException {
+        // No effective ceiling visible for this worker.
+      }
+      final contextCapture = w.profile?.contextCapture;
+      if (usage == null &&
+          (budget == null || budget.isUnconfigured) &&
+          contextCapture == null) {
+        continue;
+      }
+      String money(String currency, int micro) =>
+          wire.Money(currency: currency, microUnits: micro).format();
+      final headline = usage == null
+          ? 'Spend not visible for this worker'
+          : '${money(usage.currency, usage.spent)} spent · '
+                '${money(usage.currency, usage.reserved)} reserved';
+      final detail = usage == null
+          ? 'usage.get returned nothing for this scope.'
+          : usage.unknown > 0
+          ? '${money(usage.currency, usage.unknown)} of cost is unknown and '
+                'still reserved'
+          : usage.advisory
+          ? 'Prices are advisory; a missing price is not zero.'
+          : 'No unknown costs.';
+      final ceiling = budget == null || budget.isUnconfigured
+          ? null
+          : '${money(budget.currency, budget.spendMicroUnits)} ceiling · '
+                '${budget.concurrency} concurrent · '
+                '${budget.modelSteps} model steps';
+      spending.add(
+        SpendingEntry(
+          workerId: WorkerId(w.id),
+          headline: headline,
+          detail: detail,
+          fraction:
+              usage != null &&
+                  budget != null &&
+                  !budget.isUnconfigured &&
+                  budget.spendMicroUnits > 0
+              ? usage.spent / budget.spendMicroUnits
+              : null,
+          ceiling: ceiling,
+          contextCapture: contextCapture,
+        ),
+      );
+    }
+
+    // ---- responsibility-to-schedule links ---------------------------------
+    final schedulesByWorker = <String, wire.Schedule>{};
+    for (final s in schedules) {
+      schedulesByWorker.putIfAbsent(s.workerId, () => s);
+    }
+    ScheduleLink? scheduleFor(String workerId) {
+      final s = schedulesByWorker[workerId];
+      if (s == null) return null;
+      return ScheduleLink(
+        id: s.id,
+        timezone: s.timezone,
+        expression: s.expression,
+        misfire: s.misfire,
+        catchUpSeconds: s.catchUpSeconds,
+        paused: s.paused,
+        nextWake: s.nextWake,
+      );
+    }
+
+    // ---- artifact output names, task provenance and sealed checks --------
+    final tasksById = {for (final t in tasks) t.id: t};
+    String checkLabel(wire.ExpectedCheck c) {
+      final target = c.artifactName ?? c.checkId;
+      return '${c.kind} on $target: expected to ${c.expected}';
+    }
+
+    // ---- authorized memory claims: source, freshness, retract ------------
+    final orgById = {for (final o in organizations) o.id: o};
+    String? chiefOf(String organizationId) {
+      var org = orgById[organizationId];
+      final seen = <String>{};
+      while (org != null && seen.add(org.id)) {
+        if (workerIds.contains(org.chiefId)) return org.chiefId;
+        org = org.parentId == null ? null : orgById[org.parentId];
+      }
+      return null;
+    }
+
+    String? attributeScope(wire.Scope scope) {
+      if (scope.workerId != null && workerIds.contains(scope.workerId)) {
+        return scope.workerId;
+      }
+      if (scope.organizationId != null) {
+        final chief = chiefOf(scope.organizationId!);
+        if (chief != null) return chief;
+      }
+      // Installation-wide memory (no organization or worker named) is the
+      // personal chief's to curate (R15-005): the root of the tree.
+      for (final w in workerEntries) {
+        if (w.parentId == null) return w.id.value;
+      }
+      return null;
+    }
+
+    final bindingsByBrain = <String, List<wire.MemoryBinding>>{};
+    for (final b in memoryBindings) {
+      bindingsByBrain.putIfAbsent(b.brainId, () => []).add(b);
+    }
+    final memory = <MemoryEntry>[];
+    for (final c in claims) {
+      final bindings = bindingsByBrain[c.brainId] ?? const [];
+      // No authorized binding names this brain: this client cannot attribute
+      // or show it, and never guesses which worker it belongs to.
+      final binding = bindings.isEmpty ? null : bindings.first;
+      if (binding == null) continue;
+      final owner = attributeScope(binding.scope);
+      if (owner == null) continue;
+      memory.add(
+        MemoryEntry(
+          id: ClaimId(c.id),
+          workerId: WorkerId(owner),
+          bindingId: binding.id,
+          brainId: c.brainId,
+          claimVersion: c.version,
+          title: c.text.length > 64 ? '${c.text.substring(0, 61)}…' : c.text,
+          text: c.text,
+          provenance: [
+            'Source: ${c.sources.isEmpty ? 'none recorded' : c.sources.map((s) => _short(s.digest)).join(', ')}',
+            'Freshness: ${c.freshness.toIso8601String()}',
+            if (c.curatorId != null)
+              'Curated by ${principalNames[c.curatorId] ?? 'an identity that is not listed'}',
+            if (c.redaction != null && c.redaction!.isNotEmpty)
+              'Redacted: ${c.redaction}',
+          ],
+          freshness: c.freshness,
+          active: c.active,
+          confidence: c.confidence,
+          canRetract: bindings.any((b) => b.canRetract),
+        ),
+      );
+    }
+
+    // ---- autonomy evidence -------------------------------------------------
+    final autonomy = [
+      for (final q in qualifications)
+        if (workerIds.contains(q.workerId))
+          AutonomyEntry(
+            id: q.id,
+            workerId: WorkerId(q.workerId),
+            capability: q.capability,
+            destinations: q.destinations,
+            state: q.state,
+            explanation: q.explanation,
+          ),
+    ];
+
+    // ---- recovery obligations -----------------------------------------------
+    final recovery = <RecoveryEntry>[];
+    for (final r in runs.take(20)) {
+      if (!r.isRecoverable) continue;
+      final task = tasksById[r.taskId];
+      if (task == null || !workerIds.contains(task.workerId)) continue;
+      try {
+        final obligations = await api.runRecovery(r.id);
+        if (obligations.isEmpty) continue;
+        recovery.add(
+          RecoveryEntry(
+            id: r.id,
+            workerId: WorkerId(task.workerId),
+            label: 'Run ${_short(r.id)} for ${task.outcome}',
+            obligations: [for (final req in obligations) req.message],
           ),
         );
       } on OperationFailedException {
-        // No usage visible for this worker; the Access tab says so.
+        // No recovery detail visible for this run.
       }
     }
 
@@ -828,11 +1033,13 @@ class LiveWorkspaceSource implements WorkspaceSource {
               version: r.version,
               workerId: WorkerId(r.workerId),
               title: r.outcome,
-              schedule: r.triggers.isEmpty
-                  ? 'Runs when its signals change'
-                  : r.triggers.join(' · '),
+              triggers: r.triggers,
+              signals: r.signals,
+              minIntervalSeconds: r.minIntervalSeconds,
               paused: r.paused,
+              lastCycleId: r.lastCycleId,
               nextRun: r.nextWake,
+              schedule: scheduleFor(r.workerId),
             ),
       ],
       files: [
@@ -841,11 +1048,29 @@ class LiveWorkspaceSource implements WorkspaceSource {
             FileEntry(
               id: a.id,
               workerId: WorkerId(a.scope.workerId!),
-              title: '${a.mediaType} · ${_short(a.digest)}',
-              detail:
-                  '${a.size} bytes · ${a.classification} · '
-                  '${a.createdAt.toIso8601String()}',
+              title: a.purpose ?? '${a.mediaType} · ${_short(a.digest)}',
+              detail: a.available
+                  ? '${a.size} bytes · ${a.classification} · '
+                        '${a.createdAt.toIso8601String()}'
+                  : 'Integrity failure: bytes are missing or do not match '
+                        'the recorded digest.',
               verified: a.available,
+              digest: a.digest,
+              classification: a.classification,
+              taskId: a.scope.taskId,
+              taskTitle: a.scope.taskId == null
+                  ? null
+                  : tasksById[a.scope.taskId]?.outcome,
+              checks: a.scope.taskId == null
+                  ? const []
+                  : [
+                      for (final c
+                          in tasksById[a.scope.taskId]
+                                  ?.acceptance
+                                  .expectedObservations ??
+                              const [])
+                        checkLabel(c),
+                    ],
             ),
       ],
       access: [
@@ -860,6 +1085,9 @@ class LiveWorkspaceSource implements WorkspaceSource {
             ),
       ],
       spending: spending,
+      memory: memory,
+      autonomy: autonomy,
+      recovery: recovery,
       principals: [
         for (final p in principals)
           PrincipalEntry(
@@ -890,14 +1118,16 @@ class LiveWorkspaceSource implements WorkspaceSource {
           ),
         for (final r in status.requirements)
           PrerequisiteNotice(title: r.code, message: r.message),
-        const PrerequisiteNotice(
-          tab: DetailsTab.memory,
-          title: 'Memory cannot be listed yet',
-          message:
-              'The controller can inspect one memory claim by identity, but '
-              'offers no operation that lists a worker’s claims, so there '
-              'is nothing to show or remove here.',
-        ),
+        // memory.recall/.remember/.promote/.inspect (authoring and paid
+        // retrieval) are out of this client's scope; only claims/source/
+        // freshness/retract are read here. A real read failure — never a
+        // permanently assumed gap — surfaces as its own notice.
+        if (memoryFailure != null)
+          PrerequisiteNotice(
+            tab: DetailsTab.memory,
+            title: 'Memory could not be read',
+            message: memoryFailure,
+          ),
         ..._workerSetupPrerequisites(workers, connections),
       ],
       unresolvedOperations: _unresolvedOperations(

@@ -76,6 +76,7 @@ class DemoWorkspaceSource implements WorkspaceSource {
   ReviewRecordState _reviewState = ReviewRecordState.pending;
   int _reviewVersion = 1;
   bool _routinePaused = false;
+  bool _memoryRetracted = false;
   bool _dirty = false;
   final Map<ConversationId, List<ChatMessage>> _sent = {};
   int _messageIds = 0;
@@ -221,6 +222,21 @@ class DemoWorkspaceSource implements WorkspaceSource {
   PendingSubmission preparePause(RoutineEntry routine) =>
       _DemoSubmission('pause ${routine.id.value}', () => _routinePaused = true);
 
+  @override
+  ResourceSubmission<MemoryRetractOutcome> prepareMemoryRetract(
+    MemoryEntry claim,
+    String reason,
+  ) => _DemoResourceSubmission('retract ${claim.id.value}', () {
+    _memoryRetracted = true;
+    return const MemoryRetractOutcome(
+      jobId: 'demo-job-retract',
+      jobStatus: 'Done',
+    );
+  });
+
+  @override
+  Future<String> checkMemoryJob(String jobId) async => 'Done';
+
   // ---- organization/worker/group/task/responsibility creation -----------
   //
   // The demo has no compiler: creation happens on the "create" step's own
@@ -307,9 +323,9 @@ class DemoWorkspaceSource implements WorkspaceSource {
         version: 1,
         workerId: WorkerId(workerId),
         title: outcome,
-        schedule: triggers.isEmpty
-            ? 'Runs when its signals change'
-            : triggers.join(' · '),
+        triggers: triggers,
+        signals: const [],
+        minIntervalSeconds: minIntervalSeconds,
         paused: false,
       ),
     );
@@ -922,41 +938,74 @@ class DemoWorkspaceSource implements WorkspaceSource {
           version: 1,
           workerId: ledger,
           title: 'Weekly reconciliation',
-          schedule: 'Every Friday · 9:00 AM · America/Los_Angeles',
-          boundary: 'Reads receipts and prepares a report. Cannot move money.',
+          triggers: const ['receipts.imported', 'week.closed'],
+          signals: const ['unmatched receipt count'],
+          minIntervalSeconds: 3600,
           paused: _routinePaused,
+          lastCycleId: 'demo-cycle-41',
+          schedule: const ScheduleLink(
+            id: 'demo-schedule-reconciliation',
+            timezone: 'America/Los_Angeles',
+            expression: '0 9 * * FRI',
+            misfire: 'coalesce',
+            catchUpSeconds: 3600,
+            paused: false,
+          ),
         ),
         ..._extraRoutines,
       ],
-      files: const [
+      files: [
         FileEntry(
           id: 'demo-file-shortlist',
           workerId: research,
           title: 'Partnership shortlist',
           detail: 'Research brief · shared with Marketing and Wren',
           verified: true,
+          digest: 'a' * 64,
+          classification: 'internal',
+          taskId: 'demo-task-shortlist',
+          taskTitle: 'Partnership shortlist',
+          checks: const ['presence on shortlist.md: expected to pass'],
         ),
-        FileEntry(
+        const FileEntry(
           id: 'demo-file-intro',
           workerId: outreach,
           title: 'Introduction draft',
           detail: 'Draft text · not sent anywhere',
           verified: false,
+          digest: '',
+          classification: 'internal',
         ),
       ],
-      memory: const [
+      memory: [
         MemoryEntry(
-          id: 'demo-memory-tone',
+          id: const ClaimId('demo-memory-tone'),
           workerId: marketing,
+          bindingId: 'demo-memory-binding-marketing',
+          brainId: 'demo-brain-marketing',
+          claimVersion: 1,
           title: 'Keep introductions short',
           text:
               '“Use a friendly, direct tone. Keep the first note under '
               '100 words.”',
-          provenance: [
+          provenance: const [
             'Scope · Personal › Marketing',
             'Source · your message, September 14',
-            'Updated · September 16 · current',
           ],
+          freshness: DateTime.utc(2026, 9, 16),
+          active: !_memoryRetracted,
+          confidence: 900000,
+          canRetract: true,
+        ),
+      ],
+      autonomy: const [
+        AutonomyEntry(
+          id: 'demo-autonomy-pr',
+          workerId: quality,
+          capability: 'Open a pull request',
+          destinations: ['github.com/example/website'],
+          state: 'restricted',
+          explanation: 'A human decides every pull request for now.',
         ),
       ],
       access: [
@@ -999,9 +1048,19 @@ class DemoWorkspaceSource implements WorkspaceSource {
       spending: const [
         SpendingEntry(
           workerId: quality,
-          headline: '4.82 USD spent of 20.00 USD daily limit',
-          detail: '0.04 USD reserved · no unknown costs in this sample',
+          headline: '4.82 USD spent · 0.04 USD reserved',
+          detail: 'No unknown costs in this sample.',
           fraction: 0.241,
+          ceiling: '20.00 USD ceiling · 2 concurrent · 40 model steps',
+          contextCapture: 'complete',
+        ),
+      ],
+      recovery: const [
+        RecoveryEntry(
+          id: 'demo-run-recovery',
+          workerId: quality,
+          label: 'Run demo-run for Review the first-time website experience',
+          obligations: ['Confirm the pull-request draft was never sent.'],
         ),
       ],
     );

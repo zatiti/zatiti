@@ -283,6 +283,8 @@ class ExecutionProfile {
     required this.model,
     required this.connectionId,
     required this.providerDestination,
+    required this.costBound,
+    required this.contextCapture,
   });
 
   factory ExecutionProfile.fromJson(Object? json) {
@@ -294,11 +296,11 @@ class ExecutionProfile {
       model: o.string('model'),
       connectionId: o.string('connection_id'),
       providerDestination: o.string('provider_destination'),
+      costBound: Money.fromJson(o.object('cost_bound')),
+      contextCapture: o.string('context_capture'),
     );
     o.list('capabilities');
-    o.object('cost_bound');
     o.string('classification');
-    o.string('context_capture');
     o.finish();
     return p;
   }
@@ -309,6 +311,15 @@ class ExecutionProfile {
   final String model;
   final String connectionId;
   final String providerDestination;
+
+  /// The per-action spend ceiling this profile's adapter enforces.
+  final Money costBound;
+
+  /// `complete`, `partial` or `advisory` — how much of a model step's real
+  /// context this profile's adapter actually captures. `advisory` means an
+  /// output is a suggestion, never confirmed state; this client renders the
+  /// exact word the controller sent, never a softened paraphrase.
+  final String contextCapture;
 }
 
 class Worker {
@@ -547,6 +558,83 @@ class DecisionRequirement {
   final bool separateProposer;
 }
 
+/// One check a task or responsibility's verifier is sealed to run —
+/// `Adapter_ExpectedVerificationObservation` in the frozen contract. This is
+/// the *configured* check, read before any run exists; whether it actually
+/// passed is a separate fact this client only ever learns from the task's
+/// own state (`succeeded`/`failed`) and `waiting_reason`, never invented.
+class ExpectedCheck {
+  const ExpectedCheck({
+    required this.checkId,
+    required this.kind,
+    required this.expected,
+    this.artifactName,
+    this.expectedDigest,
+  });
+
+  factory ExpectedCheck.fromJson(Object? json) {
+    final o = StrictObject(json, 'expected verification observation');
+    final c = ExpectedCheck(
+      checkId: o.string('check_id'),
+      kind: o.string('kind'),
+      expected: o.string('expected'),
+      artifactName: o.optionalString('artifact_name'),
+      expectedDigest: o.optionalString('expected_digest'),
+    );
+    o.optionalObject('schema');
+    o.optionalString('command_id');
+    o.optionalInteger('expected_exit_code');
+    o.finish();
+    return c;
+  }
+
+  final String checkId;
+  final String kind;
+
+  /// `pass` or `expected`; the observation this check must produce for the
+  /// verifier to accept the task.
+  final String expected;
+  final String? artifactName;
+  final String? expectedDigest;
+}
+
+/// A task or responsibility's sealed acceptance contract: who verifies it,
+/// and (for `mode: "independent"`) exactly which checks were sealed in. See
+/// `api/acceptance.dart` for why this client only ever authors `"manual"`.
+class Acceptance {
+  const Acceptance({
+    required this.verifierId,
+    required this.verifierVersion,
+    required this.mode,
+    required this.expectedObservations,
+  });
+
+  factory Acceptance.fromJson(Object? json) {
+    final o = StrictObject(json, 'acceptance');
+    final a = Acceptance(
+      verifierId: o.string('verifier_id'),
+      verifierVersion: o.string('verifier_version'),
+      mode: o.string('mode'),
+      expectedObservations: [
+        for (final e in o.list('expected_observations'))
+          ExpectedCheck.fromJson(e),
+      ],
+    );
+    o.list('sealed_inputs');
+    o.list('required_child_ids');
+    o.object('profile');
+    o.finish();
+    return a;
+  }
+
+  final String verifierId;
+  final String verifierVersion;
+
+  /// `manual` or `independent`.
+  final String mode;
+  final List<ExpectedCheck> expectedObservations;
+}
+
 enum ReviewState { pending, approved, rejected, expired, invalidated }
 
 class Review {
@@ -674,6 +762,7 @@ class Task {
     required this.outcome,
     required this.requiredOutputs,
     required this.state,
+    required this.acceptance,
     this.waitingReason,
     this.manualAcceptance = false,
   });
@@ -695,11 +784,11 @@ class Task {
           'task state "$stateWire" is not in the contract',
         ),
       ),
+      acceptance: Acceptance.fromJson(o.object('acceptance')),
       waitingReason: o.optionalString('waiting_reason'),
       manualAcceptance: o.optionalBoolean('manual_acceptance') ?? false,
     );
     o.list('inputs');
-    o.object('acceptance');
     o.object('limits');
     o.list('dependencies');
     o.optionalString('parent_id');
@@ -718,6 +807,7 @@ class Task {
   final List<String> requiredOutputs;
   final TaskState state;
   final String? waitingReason;
+  final Acceptance acceptance;
 
   /// True when this task's success can only be established by an eligible
   /// human calling `task.accept` — never by an automated verifier. See
@@ -725,22 +815,43 @@ class Task {
   final bool manualAcceptance;
 }
 
-/// One execution of a task's definition. This client only needs to know
-/// that `task.start` produced one; the run's own progress is read back
-/// through the task's own state.
+enum RunState {
+  ready,
+  running,
+  waiting,
+  verifying,
+  succeeded,
+  failed,
+  cancelled,
+}
+
+/// One execution of a task's definition. Most surfaces only need to know
+/// that `task.start` produced one, reading progress back through the task's
+/// own state; [state] itself is read for recovery: only a run still `ready`,
+/// `running`, `waiting` or `verifying` can carry live recovery obligations.
 class Run {
-  const Run({required this.id, required this.version, required this.taskId});
+  const Run({
+    required this.id,
+    required this.version,
+    required this.taskId,
+    required this.state,
+  });
 
   factory Run.fromJson(Object? json) {
     final o = StrictObject(json, 'run');
+    final stateWire = o.string('state');
     final r = Run(
       id: o.string('id'),
       version: o.integer('version'),
       taskId: o.string('task_id'),
+      state: RunState.values.firstWhere(
+        (s) => s.name == stateWire,
+        orElse: () =>
+            throw StrictJsonException('run state "$stateWire" is unknown'),
+      ),
     );
     o.integer('configuration_revision');
     o.list('input_versions');
-    o.string('state');
     o.list('attempt_ids');
     o.finish();
     return r;
@@ -749,6 +860,15 @@ class Run {
   final String id;
   final int version;
   final String taskId;
+  final RunState state;
+
+  bool get isRecoverable => switch (state) {
+    RunState.ready ||
+    RunState.running ||
+    RunState.waiting ||
+    RunState.verifying => true,
+    RunState.succeeded || RunState.failed || RunState.cancelled => false,
+  };
 }
 
 class Responsibility {
@@ -759,8 +879,12 @@ class Responsibility {
     required this.workerId,
     required this.outcome,
     required this.triggers,
+    required this.signals,
+    required this.reasoningPolicy,
+    required this.minIntervalSeconds,
     required this.paused,
     this.nextWake,
+    this.lastCycleId,
   });
 
   factory Responsibility.fromJson(Object? json) {
@@ -772,12 +896,15 @@ class Responsibility {
       workerId: o.string('worker_id'),
       outcome: o.string('outcome'),
       triggers: o.stringList('triggers'),
+      signals: o.stringList('signals'),
+      reasoningPolicy: o.string('reasoning_policy'),
+      minIntervalSeconds: o.integer('min_interval_seconds'),
       paused: o.boolean('paused'),
       nextWake: o.optionalDateTime('next_wake'),
+      // Revision 3 addition. Optional on the wire: an older controller may
+      // omit it; this responsibility just has no recorded cycle yet.
+      lastCycleId: o.optionalString('last_cycle_id'),
     );
-    o.list('signals');
-    o.string('reasoning_policy');
-    o.integer('min_interval_seconds');
     o.object('cycle_limits');
     o.object('aggregate_limits');
     o.list('pause_conditions');
@@ -792,9 +919,23 @@ class Responsibility {
   final Scope scope;
   final String workerId;
   final String outcome;
+
+  /// Event strings that admit a new cycle. Never a schedule description on
+  /// their own — see `snapshot.dart`'s `RoutineEntry` on why this client
+  /// keeps them separate from any real `Schedule` record.
   final List<String> triggers;
+
+  /// Signals this responsibility watches, distinct from what triggers a
+  /// cycle.
+  final List<String> signals;
+  final String reasoningPolicy;
+  final int minIntervalSeconds;
   final bool paused;
   final DateTime? nextWake;
+
+  /// The most recent cycle this responsibility actually ran, when the
+  /// controller has recorded one.
+  final String? lastCycleId;
 }
 
 class Artifact {
@@ -808,6 +949,8 @@ class Artifact {
     required this.classification,
     required this.available,
     required this.createdAt,
+    this.sourceOperationId,
+    this.purpose,
   });
 
   factory Artifact.fromJson(Object? json) {
@@ -826,6 +969,11 @@ class Artifact {
       classification: o.string('classification'),
       available: stateWire == 'available',
       createdAt: o.dateTime('created_at'),
+      // Revision 3 additions (provenance). Optional on the wire: an older
+      // controller, or an artifact published outside a task run, may omit
+      // either.
+      sourceOperationId: o.optionalString('source_operation_id'),
+      purpose: o.optionalString('purpose'),
     );
     o.boolean('encrypted');
     o.finish();
@@ -839,8 +987,19 @@ class Artifact {
   final int size;
   final String mediaType;
   final String classification;
+
+  /// `true` only for wire state `available`. `false` covers `fault`: bytes
+  /// missing or an integrity check failed, never merely "not verified yet".
   final bool available;
   final DateTime createdAt;
+
+  /// The operation that produced this artifact, when the controller recorded
+  /// one — real provenance, never inferred from the artifact's own content.
+  final String? sourceOperationId;
+
+  /// The human-facing output name this artifact was published under, when
+  /// the controller named one (for example a task's required output name).
+  final String? purpose;
 }
 
 class Grant {
@@ -1294,4 +1453,259 @@ class Connection {
   final String provider;
   final String accountIdentity;
   final ConnectionValidationState validationState;
+}
+
+/// A bounded async unit of work: `memory.retract`, `memory.recall`,
+/// `memory.remember`, `memory.promote` and the artifact upload/export family
+/// all commit as a `Job`, resolved later through `*.job.get`. `state` is the
+/// only fact this client trusts about progress; a caller never infers
+/// completion from having merely submitted the request (the acknowledgment
+/// rule applies to jobs exactly as it does to reviews and pauses).
+enum JobState { pending, running, succeeded, failed, outcomeUnknown, cancelled }
+
+class Job {
+  const Job({
+    required this.id,
+    required this.version,
+    required this.kind,
+    required this.state,
+    required this.owner,
+    required this.operation,
+  });
+
+  factory Job.fromJson(Object? json) {
+    final o = StrictObject(json, 'job');
+    final stateWire = o.string('state');
+    final j = Job(
+      id: o.string('id'),
+      version: o.integer('version'),
+      kind: o.string('kind'),
+      state: switch (stateWire) {
+        'pending' => JobState.pending,
+        'running' => JobState.running,
+        'succeeded' => JobState.succeeded,
+        'failed' => JobState.failed,
+        'outcome_unknown' => JobState.outcomeUnknown,
+        'cancelled' => JobState.cancelled,
+        _ => throw StrictJsonException('job state "$stateWire" is unknown'),
+      },
+      owner: o.string('owner'),
+      operation: o.string('operation'),
+    );
+    o.list('requirements');
+    o.optional('result_artifact');
+    o.optionalString('operation_id');
+    o.optional('result');
+    o.finish();
+    return j;
+  }
+
+  final String id;
+  final int version;
+  final String kind;
+  final JobState state;
+  final String owner;
+  final String operation;
+
+  String get label => switch (state) {
+    JobState.pending => 'Queued',
+    JobState.running => 'In progress',
+    JobState.succeeded => 'Done',
+    JobState.failed => 'Failed',
+    JobState.outcomeUnknown => 'Outcome unknown · being reconciled',
+    JobState.cancelled => 'Cancelled',
+  };
+}
+
+/// A worker/organization/installation's authorized access to one memory
+/// brain — what `memory.binding.list` reports. `permissions` says exactly
+/// what this scope may do with that brain: read, write, curate, promote or
+/// retract.
+class MemoryBinding {
+  const MemoryBinding({
+    required this.id,
+    required this.version,
+    required this.scope,
+    required this.brainId,
+    required this.permissions,
+    required this.classification,
+  });
+
+  factory MemoryBinding.fromJson(Object? json) {
+    final o = StrictObject(json, 'memory binding');
+    final b = MemoryBinding(
+      id: o.string('id'),
+      version: o.integer('version'),
+      scope: Scope.fromJson(o.object('scope')),
+      brainId: o.string('brain_id'),
+      permissions: o.stringList('permissions'),
+      classification: o.string('classification'),
+    );
+    o.finish();
+    return b;
+  }
+
+  final String id;
+  final int version;
+  final Scope scope;
+  final String brainId;
+  final List<String> permissions;
+  final String classification;
+
+  bool get canRetract => permissions.contains('retract');
+}
+
+/// One authorized scoped memory claim — a `memory.list`/`memory.inspect`
+/// result. Never the product of a local guess: source, freshness and
+/// confidence all come from the controller, and `active: false` means a
+/// retraction has already excluded it from recall, even though the claim
+/// itself (and the fact it once existed) is never hidden from this view.
+class Claim {
+  const Claim({
+    required this.id,
+    required this.version,
+    required this.brainId,
+    required this.text,
+    required this.sources,
+    required this.confidence,
+    required this.freshness,
+    required this.active,
+    this.curatorId,
+    this.redaction,
+  });
+
+  factory Claim.fromJson(Object? json) {
+    final o = StrictObject(json, 'claim');
+    final c = Claim(
+      id: o.string('id'),
+      version: o.integer('version'),
+      brainId: o.string('brain_id'),
+      text: o.string('text'),
+      sources: [for (final s in o.list('sources')) ArtifactRef.fromJson(s)],
+      confidence: o.integer('confidence'),
+      freshness: o.dateTime('freshness'),
+      active: o.boolean('active'),
+      curatorId: o.optionalString('curator_id'),
+      redaction: o.optionalString('redaction'),
+    );
+    o.optionalString('source_brain_id');
+    o.optional('source_claim');
+    o.finish();
+    return c;
+  }
+
+  final String id;
+  final int version;
+  final String brainId;
+  final String text;
+  final List<ArtifactRef> sources;
+
+  /// 0..1000000 (parts-per-million), never rendered as a bare probability
+  /// this client invented meaning for.
+  final int confidence;
+  final DateTime freshness;
+  final bool active;
+  final String? curatorId;
+  final String? redaction;
+}
+
+/// One capability-specific autonomy record — `autonomy.qualification.list`.
+/// Never a global trust score: each entry names the exact capability and
+/// destinations a rule evaluated, and whether it is qualified, restricted,
+/// rejected, proposed or expired.
+class Qualification {
+  const Qualification({
+    required this.id,
+    required this.version,
+    required this.workerId,
+    required this.capability,
+    required this.destinations,
+    required this.state,
+    required this.explanation,
+  });
+
+  factory Qualification.fromJson(Object? json) {
+    final o = StrictObject(json, 'qualification');
+    final q = Qualification(
+      id: o.string('id'),
+      version: o.integer('version'),
+      workerId: o.string('worker_id'),
+      capability: o.string('capability'),
+      destinations: o.stringList('destinations'),
+      state: o.string('state'),
+      explanation: o.string('explanation'),
+    );
+    o.object('rule');
+    o.string('model');
+    o.list('tool_versions');
+    o.list('skill_versions');
+    o.list('evidence_ids');
+    o.dateTime('window_start');
+    o.dateTime('window_end');
+    o.finish();
+    return q;
+  }
+
+  final String id;
+  final int version;
+  final String workerId;
+  final String capability;
+  final List<String> destinations;
+
+  /// `proposed`, `qualified`, `rejected`, `restricted` or `expired`.
+  final String state;
+  final String explanation;
+}
+
+/// A cron-like schedule as `schedule.list` reports it — distinct from a
+/// `Responsibility`'s event-driven triggers. Real timezone/expression fields
+/// this client renders as the actual schedule; trigger strings are never
+/// substituted for it.
+class Schedule {
+  const Schedule({
+    required this.id,
+    required this.version,
+    required this.workerId,
+    required this.timezone,
+    required this.expression,
+    required this.misfire,
+    required this.catchUpSeconds,
+    required this.paused,
+    this.nextWake,
+  });
+
+  factory Schedule.fromJson(Object? json) {
+    final o = StrictObject(json, 'schedule');
+    Scope.fromJson(o.object('scope'));
+    final taskTemplate = Task.fromJson(o.object('task_template'));
+    final s = Schedule(
+      id: o.string('id'),
+      version: o.integer('version'),
+      workerId: taskTemplate.workerId,
+      timezone: o.string('timezone'),
+      expression: o.string('expression'),
+      misfire: o.string('misfire'),
+      catchUpSeconds: o.integer('catch_up_seconds'),
+      paused: o.boolean('paused'),
+      nextWake: o.optionalDateTime('next_wake'),
+    );
+    o.finish();
+    return s;
+  }
+
+  final String id;
+  final int version;
+
+  /// The worker this schedule's task template targets — read from
+  /// `task_template.worker_id`, never guessed from the schedule's own scope.
+  final String workerId;
+  final String timezone;
+  final String expression;
+
+  /// `coalesce` or `skip`: what happens to occurrences missed while this
+  /// schedule could not run.
+  final String misfire;
+  final int catchUpSeconds;
+  final bool paused;
+  final DateTime? nextWake;
 }

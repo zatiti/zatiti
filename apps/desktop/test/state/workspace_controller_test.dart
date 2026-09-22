@@ -431,6 +431,63 @@ void main() {
       expect(view.phase, RoutinePhase.paused);
       expect(view.routine.paused, isTrue);
     });
+
+    test('a responsibility-to-schedule link renders real timezone/expression, '
+        'never a trigger string standing in for a schedule', () {
+      final routine = c.routinesFor(DemoWorkspaceSource.ledger).single.routine;
+      expect(routine.triggers, isNotEmpty);
+      expect(routine.schedule, isNotNull);
+      expect(routine.schedule!.timezone, 'America/Los_Angeles');
+      expect(routine.schedule!.expression, isNotEmpty);
+    });
+  });
+
+  group('memory: authorized claims, source, freshness, retract', () {
+    test('a populated claim renders as active and retractable', () {
+      final claim = c.memoryFor(DemoWorkspaceSource.marketing).single;
+      expect(claim.claim.active, isTrue);
+      expect(claim.canRetract, isTrue);
+      expect(claim.statusLabel, 'Active');
+    });
+
+    test('retracting shows submitting, then updates the claim as inactive '
+        'without hiding the retained audit record', () async {
+      final claim = c.memoryFor(DemoWorkspaceSource.marketing).single.claim;
+      final gate = Completer<void>();
+      source.beforeSubmit = () => gate.future;
+      final done = c.retractClaim(claim.id, 'No longer accurate.');
+      await Future<void>.delayed(Duration.zero);
+      expect(
+        c.memoryFor(DemoWorkspaceSource.marketing).single.phase,
+        ClaimActionPhase.submitting,
+      );
+
+      gate.complete();
+      await done;
+      final after = c.memoryFor(DemoWorkspaceSource.marketing);
+      expect(
+        after,
+        hasLength(1),
+        reason: 'retraction removes recall, not the audit entry',
+      );
+      expect(after.single.claim.active, isFalse);
+      expect(after.single.canRetract, isFalse);
+    });
+  });
+
+  group('autonomy evidence and recovery obligations', () {
+    test('autonomy evidence names the exact capability, never a score', () {
+      final autonomy = c.autonomyFor(DemoWorkspaceSource.quality);
+      expect(autonomy, isNotEmpty);
+      expect(autonomy.single.capability, 'Open a pull request');
+      expect(autonomy.single.state, 'restricted');
+    });
+
+    test('recovery obligations render from the source, never invented', () {
+      final recovery = c.recoveryFor(DemoWorkspaceSource.quality);
+      expect(recovery, isNotEmpty);
+      expect(recovery.single.obligations, isNotEmpty);
+    });
   });
 
   group('prerequisites', () {
@@ -539,6 +596,13 @@ class _Delegating implements WorkspaceSource {
       inner.prepareMessage(c, body);
   @override
   PendingSubmission preparePause(RoutineEntry r) => inner.preparePause(r);
+  @override
+  ResourceSubmission<MemoryRetractOutcome> prepareMemoryRetract(
+    MemoryEntry claim,
+    String reason,
+  ) => inner.prepareMemoryRetract(claim, reason);
+  @override
+  Future<String> checkMemoryJob(String jobId) => inner.checkMemoryJob(jobId);
   @override
   ResourceSubmission<DraftedResource> prepareCreateOrganization({
     required String key,

@@ -39,6 +39,12 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
 
+  # Used directly by test/app/credential_store_test.dart to substitute the
+  # unavoidable native Keychain/Secret Service channel with the package's
+  # own officially shipped test platform (`TestFlutterSecureStoragePlatform`)
+  # while exercising the real `SecureCredentialStore` end to end.
+  flutter_secure_storage_platform_interface: ^2.1.1
+
   # The "flutter_lints" package below contains a set of recommended lints to
   # encourage good coding practices. The lint set provided by the package is
   # activated in the `analysis_options.yaml` file located at the root of your

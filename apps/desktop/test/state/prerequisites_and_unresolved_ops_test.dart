@@ -163,6 +163,21 @@ void main() {
             },
           }),
         );
+      case 'budget.get':
+        return completed(
+          jsonEncode({
+            'limits': {
+              'currency': 'XXX',
+              'spend_micro_units': 0,
+              'concurrency': 1,
+              'model_steps': 1,
+              'child_count': 0,
+              'delegation_depth': 0,
+              'attempt_seconds': 60,
+              'root_deadline': '2027-01-01T00:00:00Z',
+            },
+          }),
+        );
       default:
         return items(list(op));
     }
