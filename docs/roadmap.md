@@ -3013,6 +3013,29 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   missing from its embedded $defs copy, and installation.verifier.list
   having zero Go implementation) -- both already tracked, both squarely
   inside P25's own write scope, about to be dispatched next.
+- 2026-09-22 ~23:52 PT -- WAVE 12 DISPATCHED (P25 internal/installation
+  + P42 apps/desktop), together, in parallel -- the first genuine 2-way
+  parallel dispatch of this whole 24h-max-parallelization stretch
+  (everything since P23 has been a strict serial dependency chain).
+  depends_on for both confirmed landed (P24 just landed; P10/P34/P37
+  confirmed via their own Shipped entries for P42). Disjoint write
+  roots, no same-owner conflict -- internal/installation is finally
+  clear of the scope_required fix and P24, both fully merged.
+  P25 briefed on the two known internal/installation gaps still
+  keeping cmd/zatiti/internal/application/tests/integration/tests/
+  qualification on expected-red.txt (Status.runtime_ready missing from
+  its embedded $defs; installation.verifier.list unimplemented) and
+  asked to fix them if in scope or explicitly report if not, since
+  they're squarely relevant to "provision trusted installed verifier
+  profiles" (assignment item 3). P42 briefed that it's a Flutter/Dart
+  project (dart format/flutter analyze/flutter test), not Go, and
+  warned about this machine's severe load spikes this session before
+  running any heavy analyze/test pass. Verified expected-red.txt
+  cannot be trimmed yet: cmd/zatiti (11 failures), internal/
+  installation, internal/application (TestLandedDriftIsDomainSide),
+  tests/integration and tests/qualification all still genuinely fail,
+  every one tracing to the single remaining internal/installation
+  Status/verifier.list cause P25 is now addressing.
 
 ## Planned
 
