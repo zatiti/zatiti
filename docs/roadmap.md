@@ -3769,3 +3769,18 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
 
   NEXT: P48 (.github/workflows) is now dependency-ready (needs P46, P47,
   P02 -- all three landed). Dispatching next.
+- 2026-09-22 ~19:45 PT -- P48 DISPATCHED (.github/workflows, "Enforce full
+  runtime and release gates in CI"), claim P48 held, worktree
+  .claude/worktrees/p48-ci-gates, branch p48-ci-gates. Dependency-ready (P46,
+  P47, P02 all landed). Briefed on what "enumerate every required case" now
+  concretely means given P45/P46/P47's just-landed real harnesses (only
+  23/116 qualification cases have an executable identity; the gate logic
+  needs to read tests/qualification's own release-report.json and treat
+  missing/skipped required journeys as blocked release claims, per the
+  card's own required behavioral tests). Pointed at the existing
+  .github/workflows/cigate package (gate.go/policy.go/tree.go/yaml.go/
+  flutter.go/gotest.go, all pre-existing -- this is an extension task, not
+  from-scratch) and at docs/implementation-remediation/audit.md for the
+  P30-era platform regressions step 6 references. Not yet reviewed or
+  landed. P49 (documentation, depends on P48+P02) is the final card in the
+  plan, fully serial after this one.
