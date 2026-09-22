@@ -2638,7 +2638,27 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   flagged and I did not independently expand scope to fix: verification
   itself (claim->Verify->record) has no durable crash recovery yet
   (journaling exists for jobs, not yet extended to kindVerification).
-  CI pending.
+  CI: build-and-test failures confirmed zero "skill" mentions and zero
+  internal/controller package failures (grepped the actual failure
+  log directly, not just eyeballed pass/fail) -- only cmd/zatiti,
+  internal/application, internal/installation, the established
+  pattern. Rebase-merged. Re-ran go test ./internal/controller myself
+  on the real post-merge main -- ok, 28.1s. Worktree/branch cleaned
+  up, P23 claim released.
+  WAVE 10 COMPLETE. 36 of 50 cards landed (72%, up from 70%).
+- 2026-09-22 ~01:56 PT -- WAVE 11 DISPATCHED (P24, cmd/zatiti, "wire
+  the implemented runtime and secure setup helper"). depends_on
+  P23/P06/P13/P02, all landed (P06 PR #10, P13 PR #15, confirmed this
+  session). This is the card that actually assembles every prior
+  card's work into a runnable production binary: registers the
+  responses.New adapter, attaches the real verifier/job-adapters/
+  worker-operator P23 just built in superviseController (currently
+  only Identity/Blobs attached), implements the credential-setup
+  helper. Briefed on P23's exact Collaborators shape and P21's
+  job_runner.go pattern. Pre-read P25 (internal/installation) and P42
+  (apps/desktop) -- wave 12's two cards, disjoint write roots -- ahead
+  of time so both can dispatch together the instant P24 lands, per
+  David's 24h max-parallelization authorization (2026-09-21).
 
 ## Planned
 
