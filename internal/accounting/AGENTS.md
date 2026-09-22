@@ -1,6 +1,6 @@
 # Implementation assignment: `internal/accounting`
 
-Generated specification revision 3; source digest `67ab25bc368b7818e80307a39aa404c12edb5fd35d3ee695380609e37a1d2718`. This file is committed implementation context. Do not independently edit it. Everything required from the product specification and adjacent interfaces is embedded below; no RFC copy is required.
+Generated specification revision 3; source digest `0188756ab0f87a6bc50a07b5c4c84539c15e3e0b50ba9787f54fdea2615a3f84`. This file is committed implementation context. Do not independently edit it. Everything required from the product specification and adjacent interfaces is embedded below; no RFC copy is required.
 
 ## Mission and scope
 
@@ -293,8 +293,11 @@ type VerifierDependencies struct { Clock Clock; Blobs BlobStore }
 // it structurally. Entrypoint assembly supplies it to installation only.
 type DatabaseBackup interface { Backup(ctx context.Context, w io.Writer) error }
 
-// Revision 3: worker operation execution, durable job registry and restore
-// capability. Same package, same import set; no new dependency.
+// Revision 3: worker operation execution and durable job registry. Same
+// package, same import set; no new dependency. (Revision 3 also introduces a
+// restore capability, but as shipped it is `controller.RestoreLifecycle`,
+// declared in internal/controller, not a contract-package type -- see
+// "Restore protocol (revision 3)" below.)
 type WorkerRequest struct {
     TurnID ID
     ProposalID string
@@ -341,30 +344,17 @@ type Requirement struct {
     ResourceID *ID `json:"resource_id,omitempty"`
     ChallengeID *ID `json:"challenge_id,omitempty"`
 }
-// SnapshotInventory/RestoreCoordinator are a narrow entrypoint-owned capability
-// separate from ordinary DatabaseBackup, mirroring its supply discipline: entrypoint
-// assembly may pass RestoreCoordinator only to internal/installation, never to the
-// controller or any other module. Inventory/Prepare/Commit exchange the exact
-// BackupManifest/RecoveryOverlay documents embedded in adapter-schemas.json; they
-// are declared json.RawMessage here for the same reason Verification/VerificationResult
-// are, so this package does not import a domain schema type.
-type SnapshotInventory interface {
-    // Inventory returns the exact BackupManifest document.
-    Inventory(context.Context) (json.RawMessage, error)
-}
-type RestoreCoordinator interface {
-    // Prepare validates the source bundle and stages a RecoveryOverlay; it performs
-    // no destructive action. Commit atomically switches the database/blobs under
-    // exclusive maintenance ownership after Prepare succeeds and the caller has
-    // captured the current recovery overlay (step 3 of the restore protocol below).
-    Prepare(context.Context, ArtifactRef) (json.RawMessage, error) // RecoveryOverlay
-    Commit(context.Context, json.RawMessage) error // the same RecoveryOverlay, unmodified
-}
 ```
 
 ### Restore protocol (revision 3)
 
-`RestoreCoordinator` implements the six-step protocol frozen by contract-proposals.md section 7, supplied by entrypoint assembly to `internal/installation` only, exactly as `DatabaseBackup` is: (1) enter exclusive maintenance, close new admissions, account for in-flight effects; (2) verify the source bundle, all required artifacts, installation binding, schema compatibility and secure key availability in staging; (3) capture an authenticated current monotonic `RecoveryOverlay` (revocations, cancellations, consumed claims, provider dedup keys, unresolved effects/costs, retained evidence); (4) shut down old application/server/database handles while retaining exclusive installation ownership, stage image and blobs, then atomically switch the database without mixing WAL files; (5) reopen with a newer controller generation and import the overlay through owner-defined merge methods — never resurrect a revoked credential, resend a consumed dispatch or erase a liability absent from the older snapshot; (6) verify image/blob digests, record the durable restore result, expose paused state, and require an explicit authorized resume that rechecks prerequisites again. A clean destination additionally needs a secure key-transfer/provisioning route; an opaque source secret-store reference alone is not portability. Missing required Serenity export guarantees blocks a full-memory backup claim; an empty `Brains` array must never be reported complete.
+The six-step offline restore protocol (contract-proposals.md section 7) is split across two owners as shipped, not implemented by a single entrypoint-owned capability supplied to `internal/installation` alone: `internal/installation`'s public `installation.restore` operation performs steps 1-3 without ever touching the live database file, and `internal/controller` performs steps 4-6. `installation.restore` runs the same synchronous LocalIO Prepare/Perform/Finish flow as `installation.backup` (`internal/installation/restore.go`): Prepare requires exclusive maintenance, validates the pinned backup artifact and creates the durable job; Perform (outside any transaction) decrypts and verifies the uploaded bundle's binding, integrity and framed image, then — before any rewind — exports a sealed, published `RecoveryOverlay` document of this installation's CURRENT pre-restore state (source database digest from the `DatabaseBackup` capability, plus the obligations `snapshotObligations` captured at Prepare time from pending effects and unresolved memory writes); Finish registers that overlay artifact and leaves the job `running` with an `external_action_required` requirement naming the verified backup image. `internal/installation` never swaps the SQLite file itself: a domain module cannot replace the live database out from under its own open handle mid-process, so the installation stays merely paused, not yet rewound, once `installation.restore` completes.
+
+That handoff is driven forward by `RestoreLifecycle`, declared in `internal/controller` (`internal/controller/restore.go`) — not `contract.SnapshotInventory`/`contract.RestoreCoordinator` as this section previously described; no such contract-package types exist. `RestoreLifecycle` has two methods: `StageCandidate(ctx context.Context, restoreJobID contract.ID, dir string) (RestoreCandidate, error)` resolves the job's already-verified backup artifact into a locally staged, decrypted candidate database file, and `MergeOverlay(ctx context.Context, u contract.Unit, restoreJobID contract.ID) error` folds the already-captured `RecoveryOverlay` into every owner's own tables monotonically — never resurrecting a revoked credential, resending a consumed dispatch or erasing a liability absent from the older snapshot — inside one transaction. It is a field of `controller.Collaborators` (`RestoreLifecycle RestoreLifecycle`), attached through `Controller.Attach` exactly like `Verifier`/`Operator`/`Blobs`: only entrypoint assembly may supply an implementation, because only it has direct Go access to `internal/installation`'s private bundle/key/overlay code, and the controller itself never decrypts a backup bundle or resolves a secret reference. `cmd/zatiti/restore.go` defines the one production implementation (unexported `restoreLifecycle{}`); `cmd/zatiti/serve.go`'s `superviseController` wires it into `Collaborators.RestoreLifecycle` alongside every other trusted collaborator before `ctl.Attach(collab)`.
+
+Once a job reaches `running`/`external_action_required`, the controller's own tick flow claims it and `runRestore` drives the remaining steps: quiesce admission and drain every other in-flight unit (`drainOrdinary`), stage the candidate image via `RestoreLifecycle.StageCandidate` and hand it to `storage.Restorable.PrepareRestore`/`CommitRestore` for the atomic file-level swap and generation advance (`performSwap`), fold the overlay via `RestoreLifecycle.MergeOverlay` inside the transaction `storage.Restorable.WriteRestoreOverlay` opens on the freshly reopened, still-paused database, then call `storage.Restorable.ResumeAfterRestore` to lift the write gate (`mergeAndResume`), and finally report the durable disposition back to `internal/installation` through its own internal `_installation.restore.record` operation (`failRestore`/`settleRestore`). A controller lifetime that itself performs the swap cannot continue afterward: its `*application.Application` was built over the now-closed pre-restore database handle and there is no seam to repoint it, so `Controller.Run` returns the `ErrRestoreHandoff` sentinel error — not a fault — the instant the swap, overlay merge and storage resume are durable. `cmd/zatiti`'s `runServe` is an outer loop around exactly this signal: on `ErrRestoreHandoff` it calls `reassembleAfterRestoreHandoff` (closes the stale `Application` and database, reopens storage at the same path — which already observes the swap — and calls `Database.StartGeneration` again to fence out the lifetime that just ended) under the SAME held installation lock, then runs again. A crash mid-protocol recovers the same way at the next startup: `recoverRestoreBeforeFence` runs before the ordinary generation fence and drives any journal entry left open forward from its last durable phase, re-checking `storage.Restorable.RestorePaused` rather than trusting the last written phase, so it never repeats an already-committed swap or loses track of one.
+
+Current state, honestly: production's only `RestoreLifecycle` implementation, `cmd/zatiti`'s `restoreLifecycle{}`, fails both methods closed with `contract.CodePrerequisiteMissing` rather than guessing or fabricating success — exactly the fallback `Collaborators.RestoreLifecycle`'s own doc comment designs for. `StageCandidate` fails because no operation, public or internal, exposes a pending restore job's original backup-artifact reference to entrypoint assembly (public `job.get`'s wire projection never carries `Input`; only the controller's own internal `_execution.job.claim` call does, and that result stays in the controller's private journal entry). `MergeOverlay` fails because no owner-defined merge operation yet exists in `internal/effects`, `internal/identity` or `internal/memory` to fold a `RecoveryOverlay`'s obligations into their own tables, and because credential/grant revocation obligations are never captured into the overlay to begin with: `snapshotObligations` (`internal/installation/restore.go`) records only `claimed_effect`/`unknown_effect` and `memory_write` obligation kinds. This is a scoped, tracked gap — new merge operations spanning effects/identity/memory, revocation-obligation capture in `snapshotObligations`, a job-input lookup path for `StageCandidate` — not a defect in what shipped: a restore observed without a working merge/staging path is recorded failed with `prerequisite_missing`, and the database is never touched by an incomplete attempt. A clean destination additionally needs a secure key-transfer/provisioning route; an opaque source secret-store reference alone is not portability. Missing required Serenity export guarantees blocks a full-memory backup claim; an empty `Brains` array must never be reported complete.
 
 Identity Service also implements Authenticator. Application receives this interface explicitly in New; it uses a dedicated read snapshot and never reads identity-owned tables itself. Only the byte-slice credential boundary carries secret authentication material, never Invocation JSON. Zero sensitive buffers after use where practical; no logging. Certificate authentication resolves a preprovisioned credential reference and follows the same current principal/revocation rules.
 
