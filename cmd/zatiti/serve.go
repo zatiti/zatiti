@@ -10,6 +10,7 @@ import (
 
 	"github.com/zatiti/zatiti/internal/contract"
 	"github.com/zatiti/zatiti/internal/controller"
+	"github.com/zatiti/zatiti/internal/execution"
 	"github.com/zatiti/zatiti/internal/server"
 )
 
@@ -25,6 +26,13 @@ type serveOptions struct {
 	// listening is called once the socket is bound, before any request is
 	// served. Tests use it to know when to connect.
 	listening func()
+	// afterAttach, if set, is called with the exact Collaborators just
+	// attached to the controller, right after ctl.Attach succeeds and
+	// before Run starts admitting. Production never sets it; a test uses
+	// it to inspect what was actually wired (P24: proving the attached
+	// Verifier is the real, non-stub internal/execution.NewVerifier
+	// construction, not merely that Attach returned nil).
+	afterAttach func(controller.Collaborators)
 }
 
 // runServe is `zatiti serve`: the startup holder, the private socket and
@@ -60,6 +68,7 @@ func runServe(ctx context.Context, cfg config, log *slog.Logger, opts serveOptio
 	for _, name := range unimplementedAdapters {
 		log.Warn("adapter package has not landed; dispatches to it are recorded not_sent", "adapter", name)
 	}
+	unregistered := append(append([]string{}, missing...), unimplementedAdapters...)
 
 	var tlsCfg *tls.Config
 	if cfg.RemoteAddress != "" {
@@ -86,7 +95,7 @@ func runServe(ctx context.Context, cfg config, log *slog.Logger, opts serveOptio
 	controllerDone := make(chan error, 1)
 	running := make(chan *controller.Controller, 1)
 	go func() {
-		controllerDone <- superviseController(serveCtx, h, adapters, log, opts.pollInterval, running)
+		controllerDone <- superviseController(serveCtx, h, adapters, unregistered, log, opts.pollInterval, opts.afterAttach, running)
 	}()
 
 	var cause error
@@ -134,11 +143,13 @@ func runServe(ctx context.Context, cfg config, log *slog.Logger, opts serveOptio
 
 // superviseController brings the one controller of this installation up
 // once the installation exists: it waits for bootstrap to commit, completes
-// bootstrap in the process that served it, attaches the service identity and
-// runs the scheduler until ctx ends or admission stops. The controller is
-// published on running right before Run so shutdown can Stop it; the
-// return value is Run's verdict or the startup failure.
-func superviseController(ctx context.Context, h *installationHandle, adapters map[string]contract.Adapter, log *slog.Logger, poll time.Duration, running chan<- *controller.Controller) error {
+// bootstrap in the process that served it, attaches the service identity
+// and every supported collaborator (P24 item 2: the real trusted verifier,
+// every landed local job adapter and the real worker operator, not only
+// Identity/Blobs) and runs the scheduler until ctx ends or admission stops.
+// The controller is published on running right before Run so shutdown can
+// Stop it; the return value is Run's verdict or the startup failure.
+func superviseController(ctx context.Context, h *installationHandle, adapters map[string]contract.Adapter, unregisteredAdapters []string, log *slog.Logger, poll time.Duration, afterAttach func(controller.Collaborators), running chan<- *controller.Controller) error {
 	installationID, err := h.initialized(ctx)
 	if err != nil {
 		return err
@@ -160,14 +171,46 @@ func superviseController(ctx context.Context, h *installationHandle, adapters ma
 		return err
 	}
 
+	// The trusted verifier independently establishes task acceptance
+	// (internal/execution.NewVerifier is the real, landed constructor --
+	// never a stub); its own construction failure fails startup here rather
+	// than silently leaving Collaborators.Verifier nil.
+	verifier, err := execution.NewVerifier(contract.VerifierDependencies{Clock: h.clock, Blobs: h.plat.Blobs()})
+	if err != nil {
+		return fmt.Errorf("constructing the trusted verifier: %w", err)
+	}
+	jobs := buildJobRunners(h.jobRunners)
+
 	ctl, err := controller.New(controller.Config{StateDir: h.cfg.StateDir, TickInterval: h.cfg.TickInterval}, h.app, h.db, h.own, adapters, h.clock)
 	if err != nil {
 		return err
 	}
-	if err := ctl.Attach(controller.Collaborators{Identity: identity, Blobs: h.plat.Blobs()}); err != nil {
+	collab := controller.Collaborators{
+		Identity: identity,
+		Blobs:    h.plat.Blobs(),
+		Jobs:     jobs,
+		// h.app (*application.Application) implements contract.WorkerOperator
+		// directly (internal/application/worker.go); no separate
+		// construction step exists.
+		Operator: h.app,
+		Verifier: verifier,
+	}
+	if err := ctl.Attach(collab); err != nil {
 		return err
 	}
-	log.Info("controller running", "installation_id", installationID, "generation", h.generation, "controller_principal", identity.PrincipalID)
+	if afterAttach != nil {
+		afterAttach(collab)
+	}
+
+	missingRunners := missingJobRunners(jobs)
+	for _, k := range missingRunners {
+		log.Warn("catalog job kind has no attached runner; a pending job of this kind is never claimed", "owner", k.Owner, "operation", k.Operation)
+	}
+	level, reqs := assemblyReadiness(adapters, unregisteredAdapters, missingRunners, true, helperReceiptKeyProvisioned(ctx, h.plat.Secrets()))
+	for _, r := range reqs {
+		log.Warn("startup requirement", "categories", r.Categories, "message", r.Message)
+	}
+	log.Info("controller running", "installation_id", installationID, "generation", h.generation, "controller_principal", identity.PrincipalID, "readiness", level)
 	running <- ctl
 	return ctl.Run(ctx)
 }

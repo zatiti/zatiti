@@ -78,7 +78,15 @@ var moduleOrder = []string{
 // is the application's authenticator and resolves the controller principal. No constructor queries a peer or starts
 // a goroutine, so this is safe before Bind and safe in a descriptor-only
 // process.
-func modules(router *application.PortRouter, clock contract.Clock, ids contract.IDSource, secrets contract.SecretStore, blobs contract.BlobStore, backup contract.DatabaseBackup) ([]contract.Module, *identity.Service, error) {
+//
+// The third return value is every constructed module that also implements
+// contract.LocalJobRunner, keyed by its owner/module name (m.Name()) --
+// discovered generically by type assertion rather than a hardcoded package
+// list, so a future job-owning module needs no change here. cmd/zatiti's
+// jobs.go (buildJobRunners) turns this into the controller.JobRunner map
+// Collaborators.Jobs requires, keyed by the frozen owner/operation job
+// kinds each of these owners actually implements (landedJobKinds).
+func modules(router *application.PortRouter, clock contract.Clock, ids contract.IDSource, secrets contract.SecretStore, blobs contract.BlobStore, backup contract.DatabaseBackup) ([]contract.Module, *identity.Service, map[string]contract.LocalJobRunner, error) {
 	deps := func(owner string) contract.Dependencies {
 		return contract.Dependencies{Clock: clock, IDs: ids, Ports: router.For(owner), Secrets: secrets, Blobs: blobs}
 	}
@@ -101,20 +109,32 @@ func modules(router *application.PortRouter, clock contract.Clock, ids contract.
 	}
 	idn, err := identity.New(deps("identity"))
 	if err != nil {
-		return nil, nil, fmt.Errorf("identity: %w", err)
+		return nil, nil, nil, fmt.Errorf("identity: %w", err)
 	}
 	out := []contract.Module{idn}
+	jobRunners := map[string]contract.LocalJobRunner{}
+	addJobRunner(jobRunners, idn)
 	for _, name := range moduleOrder[1:] {
 		m, err := constructors[name](deps(name))
 		if err != nil {
-			return nil, nil, fmt.Errorf("%s: %w", name, err)
+			return nil, nil, nil, fmt.Errorf("%s: %w", name, err)
 		}
 		if m.Name() != name {
-			return nil, nil, fmt.Errorf("module %s does not carry its assembly name %s", m.Name(), name)
+			return nil, nil, nil, fmt.Errorf("module %s does not carry its assembly name %s", m.Name(), name)
 		}
 		out = append(out, m)
+		addJobRunner(jobRunners, m)
 	}
-	return out, idn, nil
+	return out, idn, jobRunners, nil
+}
+
+// addJobRunner records m under its own name when it implements
+// contract.LocalJobRunner, discovered generically by type assertion (see
+// modules' doc comment).
+func addJobRunner(jobRunners map[string]contract.LocalJobRunner, m contract.Module) {
+	if r, ok := m.(contract.LocalJobRunner); ok {
+		jobRunners[m.Name()] = r
+	}
 }
 
 // inertBlobs is the blob store of a descriptor-only assembly (the CLI and
@@ -140,7 +160,7 @@ func inertBlobFault() error {
 // It opens no storage, no platform and no socket.
 func catalog() ([]contract.Descriptor, error) {
 	router := application.NewPorts()
-	mods, _, err := modules(router, systemClock{}, randomIDs{}, nil, inertBlobs{}, databaseBackup{})
+	mods, _, _, err := modules(router, systemClock{}, randomIDs{}, nil, inertBlobs{}, databaseBackup{})
 	if err != nil {
 		return nil, err
 	}
@@ -201,6 +221,11 @@ type installationHandle struct {
 	secrets    *custodySecrets
 	clock      contract.Clock
 	generation int64
+	// jobRunners is every constructed module that implements
+	// contract.LocalJobRunner, keyed by owner/module name (modules()'s
+	// third return value). superviseController turns it into the
+	// controller.JobRunner map Collaborators.Jobs requires.
+	jobRunners map[string]contract.LocalJobRunner
 }
 
 // openInstallation is the frozen startup order: platform.Open -> Acquire ->
@@ -230,11 +255,12 @@ func openInstallation(ctx context.Context, cfg config) (_ *installationHandle, e
 
 	h.secrets = &custodySecrets{SecretStore: plat.Secrets()}
 	router := application.NewPorts()
-	mods, idn, err := modules(router, h.clock, randomIDs{}, h.secrets, plat.Blobs(), databaseBackup{db: h.db})
+	mods, idn, jobRunners, err := modules(router, h.clock, randomIDs{}, h.secrets, plat.Blobs(), databaseBackup{db: h.db})
 	if err != nil {
 		return nil, err
 	}
 	h.identity = idn
+	h.jobRunners = jobRunners
 	var migrations []contract.Migration
 	for _, m := range mods {
 		migrations = append(migrations, m.Migrations()...)
