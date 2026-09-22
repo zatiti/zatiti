@@ -2610,6 +2610,35 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   climbing, with memory healthy at ~506MB) -- proceeded, since
   dispatching one agent is lightweight on this session's own end
   regardless of where the agent's later heavy work lands.
+- 2026-09-21 ~18:47 PT -- P23 independently reviewed and opened as PR
+  #39 (branch P23-verifier-jobs-reconciliation, rebased onto current
+  main, whole-repo build/vet clean). The most complex controller card
+  yet: verification/job execution now run on bounded worker goroutines
+  outside the tick loop instead of blocking it; a new reconcile.go
+  discovers outcome_unknown/awaiting_confirmation operations and
+  drives exactly one bounded _effects.reconciliation.prepare/.record
+  read per operation via Adapter.Reconcile (never Invoke, never a
+  second write) with a journal-open no-double-dispatch guard and
+  backoff pacing; a durable _execution.job.claim lookup replaces the
+  old phaseStranded-on-ambiguity behavior, with a new opt-in
+  ResumableJobRunner interface (default: always outcome_unknown, never
+  blindly re-run). Independently confirmed _effects.reconciliation.
+  prepare/.record and Adapter.Reconcile were already-authorized,
+  pre-existing contract surface (controller already in the caller
+  allowlist) -- this wires up an existing seam, not a new gap like the
+  P22 one. Given the scope, gave particular scrutiny to the four
+  PRE-EXISTING tests this card modified (their old assertion was
+  "reconciliation never happens", now legitimately false) -- read each
+  diff directly and confirmed the core safety invariants (Invoke-count
+  never changes, i.e. "never resends") stay strictly, unconditionally
+  pinned; only the new reconciliation dimension is added with precise
+  accounting, not weakened. Red->green verified the no-double-dispatch
+  guard myself: disabled it, confirmed 5 Reconcile calls instead of 1
+  across 5 ticks, restored, confirmed green. Disclosed gap the agent
+  flagged and I did not independently expand scope to fix: verification
+  itself (claim->Verify->record) has no durable crash recovery yet
+  (journaling exists for jobs, not yet extended to kindVerification).
+  CI pending.
 
 ## Planned
 
