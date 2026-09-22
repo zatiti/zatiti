@@ -3723,3 +3723,44 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   rebasing and landing, exactly as done for every other card. The
   runtime_ready bug is apps/desktop's, not mine to fix inline -- will
   surface it to David as a new, separate finding once P47 itself lands.
+- 2026-09-22 ~11:00-19:43 PT -- P47 LANDED (PR #58, commits b9b3d1a +
+  d08dbdf). 48/50 cards. Independently reviewed the full diff myself before
+  landing (real controlled-TLS simulator for the Responses adapter, real
+  live_test subprocess wiring for desktop, real zatiti-pack subprocess
+  driver for packaging against sandboxed temp-directory hosts, no real
+  network/service-manager/keychain touches anywhere) -- confirmed non-
+  vacuous and consistent with P45/P46's established patterns.
+
+  FOUNDER DECISION (David, 2026-09-22): P47's new real desktop-journey test
+  (Z21.first_conversation, driving apps/desktop/live_test against a real
+  controller for the first time) found a genuine bug outside P47's own
+  write root: apps/desktop's Dart InstallationStatus.fromJson rejected the
+  real, landed, additive-optional runtime_ready field (P25/PR #43) with
+  "carries unknown field(s): runtime_ready", violating the frozen
+  contract's own additive-field rule -- would have failed CI on this PR as
+  shipped. Presented three options (fix inline / skip-and-file-separately /
+  hold for a separate PR first); David chose "fix inline now". Fixed with
+  one line (apps/desktop/lib/src/api/models.dart: o.optional('runtime_ready')
+  in InstallationStatus.fromJson, matching the exact idiom Organization/
+  Project already use there for limits/extensions -- fields acknowledged
+  but not yet surfaced in the UI). Verified directly before landing: ran
+  TestZ21DesktopJourneys myself pre-fix (failed exactly as reported) and
+  post-fix (Z21.first_conversation passes for real, a genuine red->green).
+
+  Verification: build/vet/gofmt clean repo-wide; full tests/qualification
+  suite green (Z01.duplicate_controller, Z04/Z16 retrofitted onto
+  baseline_mcp, Z13, Z21.first_conversation, QUALIFICATION.macos_distribution
+  all real passes; Linux distribution and real-provider/named-client cases
+  correctly not_run/skip with concrete, specific reasons); rebased cleanly
+  onto real origin/main (only docs/roadmap.md conflicted, resolved by
+  keeping this file's own already-comprehensive entry over P47's duplicate
+  one); all 7 CI checks passed clean; merged --rebase onto real origin/main
+  (d08dbdf), confirmed via merge-base --is-ancestor.
+
+  Scope note: 23/116 named qualification cases now have an executable
+  identity (up from 19); the remaining ~93 are honestly not_run, not
+  stubbed -- unchanged assessment from P47's own report, not attempted at
+  scale this pass by design (real fixture work, not decorative stubs).
+
+  NEXT: P48 (.github/workflows) is now dependency-ready (needs P46, P47,
+  P02 -- all three landed). Dispatching next.
