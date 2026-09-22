@@ -194,9 +194,17 @@ func (o *fakeOwnership) lose() {
 
 var errAckLost = errors.New("acknowledgement lost after commit")
 
-// faultyDB loses the acknowledgement of a committed write on demand.
+// faultyDB loses the acknowledgement of a committed write on demand. It
+// embeds storage.Restorable, not the bare contract.Database interface, so
+// the offline restore protocol's extra methods (PrepareRestore,
+// CommitRestore, WriteRestoreOverlay, RestorePaused, ResumeAfterRestore) are
+// still promoted onto *faultyDB and its type assertion to storage.Restorable
+// in restore.go still succeeds: Go only promotes an embedded interface
+// field's own declared method set, and storage.Restorable's is a strict
+// superset of contract.Database's, so every existing use of *faultyDB as a
+// plain contract.Database is unaffected.
 type faultyDB struct {
-	contract.Database
+	storage.Restorable
 	mu   sync.Mutex
 	lose bool
 }
@@ -208,7 +216,7 @@ func (d *faultyDB) armLostAck() {
 }
 
 func (d *faultyDB) Write(ctx context.Context, actor contract.Actor, scope contract.Scope, fn func(contract.Unit) error) error {
-	err := d.Database.Write(ctx, actor, scope, fn)
+	err := d.Restorable.Write(ctx, actor, scope, fn)
 	d.mu.Lock()
 	lose := d.lose
 	d.lose = false
@@ -287,18 +295,21 @@ type fx struct {
 	db  *faultyDB
 	app *application.Application
 
-	mu       sync.Mutex
-	calls    map[string]int
-	limits   map[string]int64
-	inject   map[string][]injection
-	ctl      *Controller
-	adapters map[string]contract.Adapter
-	blobs    contract.BlobStore
-	jobs     map[string]JobRunner
-	verifier contract.Verifier
-	operator contract.WorkerOperator
-	ready    int
-	paused   map[contract.ID]bool
+	mu               sync.Mutex
+	calls            map[string]int
+	limits           map[string]int64
+	inject           map[string][]injection
+	ctl              *Controller
+	adapters         map[string]contract.Adapter
+	blobs            contract.BlobStore
+	jobs             map[string]JobRunner
+	verifier         contract.Verifier
+	operator         contract.WorkerOperator
+	restoreLifecycle RestoreLifecycle
+	restoreBackups   map[contract.ID]restoreBackupImage
+	restoreMerge     map[contract.ID]func(context.Context, contract.Unit) error
+	ready            int
+	paused           map[contract.ID]bool
 }
 
 func newFx(t *testing.T) *fx {
@@ -308,17 +319,19 @@ func newFx(t *testing.T) *fx {
 		dir = resolved
 	}
 	f := &fx{
-		t:        t,
-		dir:      dir,
-		spec:     loadSpec(t),
-		clock:    newFakeClock(),
-		install:  contract.NewID(),
-		actor:    contract.Actor{PrincipalID: contract.NewID(), Kind: contract.KindService},
-		calls:    map[string]int{},
-		limits:   map[string]int64{},
-		inject:   map[string][]injection{},
-		adapters: map[string]contract.Adapter{},
-		paused:   map[contract.ID]bool{},
+		t:              t,
+		dir:            dir,
+		spec:           loadSpec(t),
+		clock:          newFakeClock(),
+		install:        contract.NewID(),
+		actor:          contract.Actor{PrincipalID: contract.NewID(), Kind: contract.KindService},
+		calls:          map[string]int{},
+		limits:         map[string]int64{},
+		inject:         map[string][]injection{},
+		adapters:       map[string]contract.Adapter{},
+		paused:         map[contract.ID]bool{},
+		restoreBackups: map[contract.ID]restoreBackupImage{},
+		restoreMerge:   map[contract.ID]func(context.Context, contract.Unit) error{},
 	}
 	f.boot(true)
 	t.Cleanup(func() { _ = f.raw.Close() })
@@ -338,7 +351,11 @@ func (f *fx) boot(first bool) {
 		f.t.Fatalf("Migrate: %v", err)
 	}
 	f.raw = raw
-	f.db = &faultyDB{Database: raw}
+	restorable, ok := raw.(storage.Restorable)
+	if !ok {
+		f.t.Fatalf("storage.Open does not implement storage.Restorable")
+	}
+	f.db = &faultyDB{Restorable: restorable}
 	app, err := application.New(f.db, f.catalog(), fakeAuth{}, f.clock, newIDs{})
 	if err != nil {
 		f.t.Fatalf("application.New: %v", err)
@@ -398,7 +415,10 @@ func (f *fx) controller(own contract.Ownership) *Controller {
 	if err != nil {
 		f.t.Fatalf("New: %v", err)
 	}
-	if err := c.Attach(Collaborators{Identity: f.actor, Blobs: f.blobs, Jobs: f.jobs, Verifier: f.verifier, Operator: f.operator}); err != nil {
+	if err := c.Attach(Collaborators{
+		Identity: f.actor, Blobs: f.blobs, Jobs: f.jobs, Verifier: f.verifier, Operator: f.operator,
+		RestoreLifecycle: f.restoreLifecycle,
+	}); err != nil {
 		f.t.Fatalf("Attach: %v", err)
 	}
 	f.mu.Lock()
@@ -664,6 +684,13 @@ CREATE TABLE scheduling_cycles (occurrence_key TEXT PRIMARY KEY, wake_id TEXT NO
 		mig("skills", `CREATE TABLE skills_evaluations (evaluation_id TEXT PRIMARY KEY, job_id TEXT NOT NULL, version INTEGER NOT NULL,
 	verifier_id TEXT NOT NULL DEFAULT '', verifier_version TEXT NOT NULL DEFAULT '', passed INTEGER NOT NULL DEFAULT 0,
 	state TEXT NOT NULL DEFAULT 'pending');`),
+		// marker_value stands in for ordinary application data a restore's
+		// atomic swap must actually change; restored_obligations stands in
+		// for an owner's own monotonic evidence (a revocation, an
+		// unresolved effect) that a restore's overlay merge must preserve
+		// even though the swapped-in file predates it.
+		mig("marker", `CREATE TABLE marker_value (id INTEGER PRIMARY KEY CHECK (id = 1), value TEXT NOT NULL);
+CREATE TABLE marker_restored_obligations (id TEXT PRIMARY KEY, kind TEXT NOT NULL);`),
 	}
 }
 

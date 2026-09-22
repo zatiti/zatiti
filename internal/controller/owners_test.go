@@ -665,7 +665,13 @@ func (f *fx) jobPending(ctx context.Context, u contract.Unit, input json.RawMess
 	if err := decode(input, &in); err != nil {
 		return nil, err
 	}
-	rows, err := u.QueryContext(ctx, `SELECT id FROM execution_jobs WHERE state IN ('pending','outcome_unknown') ORDER BY seq LIMIT ?`, in.Limit)
+	// Mirrors internal/execution/job_ops.go's real handleJobPending filter
+	// (widened 2026-09-22 to include "running": a synchronous local IO
+	// mutation's own Finish can transition a job straight to "running"
+	// without any controller claim -- installation.restore's
+	// external_action_required handoff -- and _execution.job.pending is the
+	// only call that ever lets the controller discover it).
+	rows, err := u.QueryContext(ctx, `SELECT id FROM execution_jobs WHERE state IN ('pending','running','outcome_unknown') ORDER BY seq LIMIT ?`, in.Limit)
 	if err != nil {
 		return nil, err
 	}

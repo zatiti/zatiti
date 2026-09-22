@@ -60,6 +60,15 @@ type Collaborators struct {
 	// verifier code. Without it a claimed VerificationRequest is never
 	// executed and stays an open obligation.
 	Verifier contract.Verifier
+	// RestoreLifecycle drives the two steps of an exclusive restore handoff
+	// only entrypoint assembly can perform, because they need internal/
+	// installation's own private backup-bundle/key/overlay code, which the
+	// controller must not duplicate: staging a verified backup artifact
+	// into a decrypted local candidate database file, and merging a
+	// restore's captured RecoveryOverlay into every owner's own tables. A
+	// restore job observed without it is recorded failed with
+	// prerequisite_missing, never guessed at.
+	RestoreLifecycle RestoreLifecycle
 }
 
 // Controller owns one controller lifetime: the scheduler loop, adapter
@@ -85,6 +94,16 @@ type Controller struct {
 	// closed stops admission; abandoned forbids every further write.
 	closed    atomic.Bool
 	abandoned atomic.Bool
+	// restoring is true from the moment an exclusive restore handoff is
+	// discovered or resumed; ordinary admission (wakes, ready scan,
+	// execution tick, turn work, jobs, dispatch) stops for the rest of this
+	// lifetime the instant it is set, since a lifetime that itself performs
+	// the swap never admits again (see restore.go, ErrRestoreHandoff).
+	restoring atomic.Bool
+	// restoreHandoff is closed exactly once, by the restore goroutine that
+	// itself performed a swap, to end Run without treating it as a fault or
+	// a displacement.
+	restoreHandoff chan struct{}
 	// gate serializes the force-stop against write steps in flight, so no
 	// worker writes after Stop has returned at its deadline.
 	gate sync.RWMutex
@@ -234,6 +253,7 @@ func New(
 		stopCh:           make(chan struct{}),
 		done:             make(chan struct{}),
 		force:            make(chan struct{}),
+		restoreHandoff:   make(chan struct{}),
 		slots:            make(chan struct{}, concurrency),
 		busy:             map[string]struct{}{},
 		backoff:          map[contract.ID]backoffState{},
@@ -273,7 +293,10 @@ func (c *Controller) Status() Status {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	out := c.status
-	out.Admitting = c.state == stateRunning && c.admitting()
+	// An exclusive restore handoff closes ordinary admission even though
+	// c.admitting() (governing effect/job claim eligibility, unrelated to
+	// this reporting) does not itself know about it.
+	out.Admitting = c.state == stateRunning && c.admitting() && !c.restoring.Load()
 	out.Obligations = append([]Obligation(nil), c.status.Obligations...)
 	if c.status.LastFault != nil {
 		f := *c.status.LastFault
@@ -330,6 +353,10 @@ loop:
 		case <-c.own.Lost():
 			release()
 			cause = unavailable("installation ownership was lost; admission stopped")
+			break loop
+		case <-c.restoreHandoff:
+			release()
+			cause = ErrRestoreHandoff
 			break loop
 		case <-wait:
 		}

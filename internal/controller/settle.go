@@ -63,6 +63,16 @@ func (c *Controller) settle(ctx context.Context, sess *session, recovering bool)
 			c.settleJob(ctx, sess, e)
 		case e.Kind == kindReconcile:
 			c.settleReconcileEntry(ctx, sess, e)
+		case e.Kind == kindRestore && e.Phase == phaseRestoreResumed:
+			// The swap, owner overlay merge and storage resume are all
+			// durable; only the final _installation.restore.record call --
+			// an ordinary owner write -- remains, so it is safe inline here.
+			c.settleRestore(ctx, sess, e)
+		case e.Kind == kindRestore:
+			// Never touched here: every earlier phase involves real local
+			// IO (staging a candidate image, the atomic swap itself) that
+			// settle must never invoke, exactly as it never invokes a job
+			// runner. restoreWork (tick.go, ordinary flow) resumes it.
 		}
 	}
 }

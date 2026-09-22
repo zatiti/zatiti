@@ -64,6 +64,28 @@ const (
 	phaseTurnClaiming   phase = "turn_claiming"
 	phaseContextStaging phase = "context_staging"
 	phaseContextStaged  phase = "context_staged"
+
+	// Restore phases (kindRestore; restore.go). Every phase here is written
+	// before the step it announces might have happened, exactly like an
+	// effect's phases, but the ambiguity it bounds is resolved by checking
+	// reality (storage.Restorable.RestorePaused) rather than by an owner's
+	// evidence, because the swap is entirely local: nothing outside this
+	// process's own database file is ever ambiguous.
+	//
+	//	admitted            installation.restore's job was observed running;
+	//	                     its original input (the verified backup
+	//	                     reference) may have been read back
+	//	restore_quiescing   new admission is closed and every other in-flight
+	//	                     unit has drained; the atomic swap may have run
+	//	restore_swapped     the swap is confirmed durable (checked against
+	//	                     RestorePaused, never merely assumed); the owner
+	//	                     overlay merge may have committed
+	//	restore_resumed     the merge and storage resume are both confirmed
+	//	                     durable; only the final _installation.restore.
+	//	                     record call remains
+	phaseRestoreQuiescing phase = "restore_quiescing"
+	phaseRestoreSwapped   phase = "restore_swapped"
+	phaseRestoreResumed   phase = "restore_resumed"
 )
 
 const (
@@ -80,6 +102,14 @@ const (
 	// Adapter.Reconcile, never Adapter.Invoke, and settles through
 	// _effects.reconciliation.record, never _effects.record (reconcile.go).
 	kindReconcile = "reconcile"
+	// kindRestore is one exclusive restore handoff (restore.go): the
+	// controller's own database swap, owner overlay merge and storage
+	// resume, driven from the durable job installation.restore's Finish
+	// left "running". It shares no owner call with kindJob: installation.
+	// restore is deliberately never handed to an ordinary JobRunner (a
+	// JobRunner is invoked while the SAME application/database handle stays
+	// open, which database replacement cannot tolerate).
+	kindRestore = "restore"
 )
 
 const (
