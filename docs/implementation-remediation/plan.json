@@ -1550,6 +1550,48 @@
       "serialized_global": true,
       "verification_command": "python3 tools/specgen/render.py --check (plus assignment-specific checks above)",
       "integration_wave": 19
+    },
+    {
+      "id": "P50",
+      "title": "Complete the restore handoff: candidate staging and owner overlay merge",
+      "owner": "internal/installation + internal/effects + internal/identity + internal/memory + internal/controller + cmd/zatiti (coordinated restore completion)",
+      "write_roots": [
+        "tools/specgen",
+        "docs/implementation/operations.json",
+        "internal/installation",
+        "internal/effects",
+        "internal/identity",
+        "internal/memory",
+        "internal/controller",
+        "cmd/zatiti"
+      ],
+      "depends_on": [
+        "P31",
+        "P32",
+        "P33"
+      ],
+      "priority": "P1",
+      "status": "planned",
+      "steps": [
+        "Extend the frozen contract via tools/specgen/model.py (never hand-edit operations.json): add _effects.restore.merge, _identity.restore.merge and _memory.restore.merge (internal mutations, owners effects/identity/memory, callers: [\"controller\"]) that each fold their slice of a decoded RecoveryOverlay's obligations into their own tables monotonically; add _identity.revocations (internal query, owner identity, callers: [\"installation\"]) reporting current credential/grant revocation state; and add _installation.restore.overlay (internal query, owner installation, callers: [\"controller\"]) returning the published recovery-overlay artifact reference already recorded against a restore job. Regenerate assignments/fixtures and run python3 tools/specgen/render.py --check before any downstream step starts.",
+        "internal/identity: implement _identity.revocations, and implement _identity.restore.merge to re-apply (never lift) named credential/grant revocations monotonically -- never resurrecting a revocation newer than the overlay's own capture point, and idempotent under a repeated call with the same restore job's obligations.",
+        "internal/effects: implement _effects.restore.merge folding claimed_effect/unknown_effect obligations back into effects' own tables -- never resurrecting a completed dispatch, never resending a consumed one, idempotent under replay.",
+        "internal/memory: implement _memory.restore.merge folding memory_write obligations back into memory's own tables, idempotent under replay.",
+        "internal/installation: (a) call the new _identity.revocations peer op from snapshotObligations/prepareBackup/prepareRestore and add revoked_credential/revoked_grant to manifestObligation.Kind, so backup manifests and restore overlays actually carry revocations -- this is the exact gap internal/installation/restore_test.go's TestRestoreOverlayPreservesPostBackupUnknownEffectAcrossRewind doc comment names as currently unexercisable; (b) implement _installation.restore.overlay by promoting the overlay artifact reference finishRestore already writes into the local jobRow's Requirements to a typed field the new query can read directly; (c) export ResolveBackupCandidate and OpenRecoveryOverlay, thin wrappers taking no contract.Unit (pure SecretStore/BlobStore IO, mirroring how Perform already runs outside any transaction) around the existing unexported readPublished/decodeArtifact/resolveBackupKey/openBackupBundle/openRecoveryOverlay pipeline, so no caller outside this package ever reimplements the bundle's AEAD framing.",
+        "internal/controller: (a) extend RestoreLifecycle.StageCandidate to accept the restore job's original input (json.RawMessage) -- exactly what restoreClaim already captures via _execution.job.claim into e.JobInput today and currently discards; (b) add an OverlayArtifact field to the journal entry, populated in restoreClaim via the new _installation.restore.overlay call in the same pre-swap window as the existing _execution.job.claim call, so it survives a crash between claim and swap exactly as e.JobID/e.JobInput already do; (c) extend RestoreLifecycle.MergeOverlay to accept that overlay artifact reference; (d) thread both through performSwap's and mergeAndResume's existing call sites.",
+        "cmd/zatiti: (a) give restoreLifecycle real fields -- the already-available contract.SecretStore/contract.BlobStore, plus direct contract.Module references to the constructed effects/identity/memory services, selected from modules()'s returned slice at assembly exactly as buildJobRunners already selects contract.LocalJobRunner implementers; (b) StageCandidate decodes the backup artifact reference from the passed job input, calls installation.ResolveBackupCandidate directly and stages the result under dir; (c) MergeOverlay calls installation.OpenRecoveryOverlay with the passed overlay reference, buckets the decoded obligations by Owner, and for each bucket calls that owner Module's Handle(ctx, u, Invocation{Operation: \"_owner.restore.merge\", ...}) directly -- never through Application/Ports, because no live Application exists for the freshly reopened database until reassembleAfterRestoreHandoff runs later in this same process (Application.Internal itself is provably unusable here: this lifetime's own Application was built over the database handle CommitRestore already closed). Each new merge handler independently re-verifies unit.Actor() names the controller's own service principal before writing, since this call path bypasses Application.Internal's centralized caller check; (d) delete errNoCandidateLookup/errNoOwnerMerge and their fail-closed stubs.",
+        "Note for the integration owner: this card is deliberately multi-root because the gap it closes is genuinely cross-cutting, unlike P31/P32/P33's single-owner shape. It may be split into per-owner sub-cards sequenced exactly as steps 1-7 above (contract freeze, then identity, then effects, then memory, then installation, then controller, then cmd/zatiti) if isolated single-integration-owner execution is preferred; depends_on and write_roots here describe the whole, not a claim that one worktree must do it all at once."
+      ],
+      "required_tests": [
+        "A real installation.backup followed by domain mutation (a newly accepted task, a new effect dispatch, one credential revocation and one grant revocation) followed by installation.restore to the earlier backup drives an actual controller swap; the resumed installation reads the backed-up task/effect state but the post-backup credential and grant remain revoked -- the exact behavior TestRestoreOverlayPreservesPostBackupUnknownEffectAcrossRewind's doc comment names as currently unexercisable.",
+        "Killing the process between a successful StageCandidate/CommitRestore and a completed MergeOverlay, then restarting, resumes from the journaled phase and finishes without re-decrypting the backup bundle or double-applying any merged obligation; repeating MergeOverlay against an already-merged state asserts no duplicate effect/revocation/memory rows.",
+        "Calling _effects.restore.merge, _identity.restore.merge or _memory.restore.merge with a non-controller actor is refused; StageCandidate and MergeOverlay's cmd/zatiti implementations are exercised against a real published, encrypted backup bundle and a real sealed overlay artifact, never a fake or an in-memory shortcut.",
+        "Backup and restore of an installation with zero pending obligations still succeeds (nothing to merge is not an error), and _identity.revocations reports zero revocations when the installation was bootstrapped and never restricted."
+      ],
+      "deliverable": "A backup/restore protocol that completes end-to-end in production: RestoreLifecycle.StageCandidate and MergeOverlay perform real work instead of failing closed with prerequisite_missing.",
+      "serialized_global": true,
+      "verification_command": "go test ./internal/installation ./internal/effects ./internal/identity ./internal/memory ./internal/controller ./cmd/zatiti && python3 tools/specgen/render.py --check",
+      "integration_wave": 20
     }
   ]
 }
