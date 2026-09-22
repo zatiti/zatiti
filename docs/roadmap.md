@@ -2893,6 +2893,21 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   override to find and remove) and instructed to prove success via
   TestLandedDriftIsDomainSide reaching zero remaining scope_required
   failures, not just task.start's.
+- 2026-09-22 05:59 PT -- P24 LANDED (PR #41, 744853dc). CI's build-and-
+  test failures confirmed unchanged from the pre-merge baseline (16
+  "scope requirements" mentions, zero "redefines the shared definition"
+  -- grepped the actual failure log directly). Rebase-merged. Re-ran
+  go test ./cmd/zatiti myself on real post-merge main -- same 11
+  failures as before merging, all scope_required, zero regression.
+  Worktree/branch cleaned up, P24 claim released.
+  This is the piece that finally makes the whole worker-turn pipeline
+  (context build -> model dispatch -> interpretation -> verification
+  -> reconciliation -> job execution) reachable through the actual
+  production binary rather than only through internal package tests --
+  the concrete product milestone this entire remediation effort exists
+  to deliver, pending only the scope_required fix now in flight to
+  prove it end to end.
+  37 of 50 cards landed (74%, up from 72%).
 
 ## Planned
 
