@@ -42,18 +42,36 @@ import (
 //     which _accounting.reserve's own frozen schema (format: uuid) rejected
 //     on every single call, for every worker. This file was rebased onto
 //     that fix.
-//  2. FIXED (founder-authorized, same fix landed alongside finding 3): a
+//  2. FIXED (founder-authorized, separate change from findings 1/3): a
 //     worker-level accounting double-reservation -- handleClaim resolves
 //     the reservation's cost bound from _configuration.snapshot's SCOPE-
 //     level worker (Scope.WorkerID), so a task must be worker-scoped for
 //     run.claim to get a real (non-empty) currency at all -- but
 //     internal/tasks/admission.go's own task.create-time reservation ALSO
-//     charges every level the task's scope implies, worker included. A
-//     worker-scoped task is therefore charged worker-level concurrency
-//     TWICE for the same conceptual attempt. Not touched by the landed fix
-//     (that fix was scoped to findings 1/3 only) -- still routed around
-//     below (both the worker and the task declare a real concurrency
-//     ceiling of 2, a legitimate declared value, not a disguised bypass).
+//     charged every level the task's scope implied, worker included. A
+//     worker-scoped task was therefore charged worker-level concurrency
+//     TWICE for the same conceptual attempt: task.create's own reservation
+//     is never settled by internal/tasks (no task.* operation ever calls
+//     _accounting.settle against it), so that charge permanently held the
+//     worker's shipped default concurrency of one before any attempt was
+//     ever claimed. Fixed by admission.go's reserveBudget no longer naming
+//     the worker in the scope it sends to _accounting.reserve --
+//     run.claim's own per-attempt reservation (settled at attempt.report/
+//     checkpoint or the verification verdict) is now the sole worker-level
+//     charge point, as intended. See
+//     TestRunClaimSucceedsAtDefaultWorkerConcurrency below for this fix's
+//     own regression coverage (a worker at the true shipped default, no
+//     concurrency override at all). The workaround below (both the worker
+//     and the task declare a real concurrency ceiling of 2) stays in place
+//     unchanged: the worker's own 2 is no longer required but is still a
+//     legitimate declared value, and the task's own root concurrency of 2
+//     is required for a different, intentional reason unrelated to this
+//     fix -- a task's admission reservation and its attempts' reservations
+//     are meant to share the root-task position (internal/accounting's own
+//     TestReserveRootDimensions and its reserveIn fixture, which likewise
+//     defaults root concurrency to 2), so a task's own declared root
+//     concurrency must already be >=2 before any attempt can ever be
+//     claimed, independent of the worker-level fix here.
 //  3. FIXED (founder-authorized): two independent defects in the evidence-
 //     recording path, both confirmed by direct code reading and both
 //     required together to reach a real attempt.report success:
@@ -568,4 +586,96 @@ func TestCooperativeClaimAndCheckpointAreIdenticalOverCLIAndMCP(t *testing.T) {
 // _execution.report share.
 func zeroUsage(currency string) map[string]any {
 	return map[string]any{"currency": currency, "spent": 0, "reserved": 0, "estimated": 0, "unknown": 0, "advisory": false}
+}
+
+// defaultConcurrencyWorkerDefinition is cooperativeWorkerDefinition with no
+// worker-level limits override at all ("limits": nil): the worker relies
+// entirely on the shipped default concurrency of one
+// (internal/accounting/limits.go's defaultWorkerConcurrency), the ordinary
+// zero-configuration case that exposed finding 2 above -- task.create's own
+// admission-time reservation used to permanently consume that lone slot
+// before any attempt was ever claimed. See
+// TestRunClaimSucceedsAtDefaultWorkerConcurrency below, this fix's own
+// regression coverage.
+func defaultConcurrencyWorkerDefinition(orgID contract.ID, key string) map[string]any {
+	return map[string]any{
+		"organization_id": orgID, "key": key, "name": "Default Concurrency Worker " + key,
+		"purpose": "integration worker at the shipped default concurrency", "instructions": "claim assigned tasks",
+		"skill_versions": []any{}, "bindings": []string{},
+		"profile": map[string]any{
+			"id": contract.NewID(), "version": 1,
+			"executor": "cooperative", "model": "", "connection_id": contract.NewID(),
+			"provider_destination": "", "capabilities": []string{},
+			"cost_bound":     map[string]any{"currency": "USD", "micro_units": 0},
+			"classification": "internal", "context_capture": "advisory",
+		},
+		"limits": nil,
+	}
+}
+
+// TestRunClaimSucceedsAtDefaultWorkerConcurrency is the regression test for
+// finding 2 above (this file's top comment, "a worker-level accounting
+// double-reservation"): a worker with no explicit concurrency override at
+// all (limits: null, not this file's own concurrency:2 workaround) can now
+// have its very first attempt claimed.
+//
+// Before the fix, internal/tasks/admission.go's reserveBudget forwarded the
+// task's own worker-scoped Scope unchanged to _accounting.reserve, so
+// task.create's admission-time reservation charged the worker-level
+// position exactly like run.claim's own attempt reservation
+// (internal/execution/run_ops.go's admitAttempt) would. That permanently
+// exhausted the worker's shipped default concurrency of one (accounting
+// never releases task.create's own reservation) before any attempt was ever
+// claimed: run.claim failed budget_unavailable ("concurrency exhausted at
+// worker ...: 1 live attempts against a ceiling of 1") for every
+// worker-scoped task, deterministically, on the very first claim.
+//
+// The task's own root concurrency is declared 2 here (not the schema
+// minimum of 1) so this test isolates the worker-level fix alone: a task's
+// admission reservation and its attempts' reservations sharing the
+// root-task position is intentional, proven safe by
+// internal/accounting/reserve_test.go's own TestReserveRootDimensions
+// (whose fixture default, env_test.go's reserveIn, likewise declares root
+// concurrency 2 for the identical reason) -- not part of this bug, and this
+// test must not accidentally exercise it.
+func TestRunClaimSucceedsAtDefaultWorkerConcurrency(t *testing.T) {
+	t.Parallel()
+	f := newBootstrappedFixture(t)
+	org, _ := f.rootOrganization()
+	f.activate("default-conc-worker", "worker.create", map[string]any{
+		"definition": defaultConcurrencyWorkerDefinition(org, "default-conc-worker"),
+	})
+	worker := f.findWorkerByKey("default-conc-worker")
+	scope := contract.Scope{InstallationID: f.installationID, OrganizationID: org, WorkerID: worker}
+
+	def := f.taskDefinition(scope, f.owner.PrincipalID, worker, unconfiguredCurrency)
+	def["limits"].(map[string]any)["concurrency"] = 2
+
+	created := f.must(f.owner, "task.create", "default-conc-task", map[string]any{"scope": scope, "definition": def})
+	var task struct {
+		Resource struct {
+			ID      contract.ID `json:"id"`
+			Version int64       `json:"version"`
+		} `json:"resource"`
+	}
+	decode(t, created.Data, &task)
+
+	startRes := f.must(f.owner, "task.start", "default-conc-start", map[string]any{
+		"scope": scope, "id": task.Resource.ID, "expected_version": task.Resource.Version,
+	})
+	var started startedTask
+	decode(t, startRes.Data, &started)
+
+	claimRes, err := f.invoke(f.owner, "run.claim", "default-conc-claim", map[string]any{
+		"scope": scope, "run_id": started.Run.ID, "worker_id": worker,
+		"expected_version": started.Run.Version, "capabilities": []string{},
+	})
+	if err != nil {
+		t.Fatalf("run.claim at the worker's default (unconfigured) concurrency: %v, want success -- see this test's own comment on finding 2's worker-level double reservation", err)
+	}
+	var claim claimedRun
+	decode(t, claimRes.Data, &claim)
+	if claim.Attempt.State != "claimed" {
+		t.Fatalf("run.claim attempt state %q, want claimed", claim.Attempt.State)
+	}
 }

@@ -335,9 +335,31 @@ func (s *Service) reserveBudget(ctx context.Context, unit contract.Unit, def *wi
 			inspect.Usage.Reserved+def.Limits.SpendMicroUnits, inspect.Limits.SpendMicroUnits)
 	}
 	reservationID := s.ids.New()
+	// This admission-time reservation is never settled by this package (no
+	// task.* operation ever calls _accounting.settle against it) -- it lives
+	// for the task's whole lifetime, anchoring the shared root-task position
+	// (root_task_id above) other reservations against the same task legally
+	// share (accounting/AGENTS.md's reservation-ownership comment; proven by
+	// internal/accounting's own TestReserveRootDimensions, which defaults its
+	// fixture root concurrency to 2 for exactly this reason) and holding the
+	// task's declared spend against installation/organization/project. It
+	// must NOT additionally charge the worker-level position: unlike the
+	// root (a position private to this one task, sized by the task's own
+	// declared concurrency) the worker position is shared, system-wide,
+	// across every task ever assigned to that worker, with a shipped default
+	// concurrency of exactly one (accounting/limits.go's
+	// defaultWorkerConcurrency). A permanent, unreleased hold there would
+	// exhaust a freshly configured worker's sole slot on its very first
+	// task.create, before any attempt is ever claimed. Worker-level
+	// concurrency belongs solely to run.claim's own per-attempt reservation
+	// (internal/execution/run_ops.go's admitAttempt), which is settled when
+	// that attempt concludes (attempt.report/checkpoint or the verification
+	// verdict) and so correctly frees the slot for the worker's next attempt.
+	reserveScope := def.Scope
+	reserveScope.WorkerID = ""
 	var reserved peerReserveOut
 	if err := s.callPeer(ctx, unit, "_accounting.reserve", peerReserveIn{
-		Scope:       def.Scope,
+		Scope:       reserveScope,
 		RootTaskID:  rootID,
 		OperationID: reservationID,
 		Amount:      wireMoney{Currency: def.Limits.Currency, MicroUnits: def.Limits.SpendMicroUnits},
