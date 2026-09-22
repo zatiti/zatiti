@@ -2939,6 +2939,55 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   integration/tests/qualification finally assemble the full registry
   cleanly, pending only internal/installation's own separate Status
   $defs gap and its unimplemented installation.verifier.list operation.
+- 2026-09-22 ~23:1x-23:30 PT -- PR #42's FIRST CI RUN FAILED, correctly:
+  "specification drift" (python3 tools/specgen/render.py --check) flagged
+  docs/implementation/operations.json as "stale/missing generated" --
+  the hand-patched 4-operation fix didn't match what the actual
+  generator produces. Investigated rather than just re-patching the
+  file again: the real bug is in tools/specgen/model.py itself -- its
+  scope_required computation loop ran ONCE, mid-file (line 385 of
+  ~506), so every operation added by an add() call physically LATER in
+  the file (23 of them) silently never got scope_required computed at
+  all, not even as an explicit empty array. Confirmed by directly
+  importing and inspecting model.OPS in Python: 23 operations missing
+  the key entirely; of those, exactly 7 genuinely need
+  scope_required=["installation_id"] (their own input schema requires
+  "scope") -- the original 4 (task.start, conversation.message.list,
+  memory.list, installation.verifier.list) plus 3 more the narrow fix
+  missed entirely (_execution.turn.admit, _execution.report,
+  _configuration.export.prepare) -- and the other 16 correctly need [].
+  One of the 7, _configuration.export.prepare, turned out to have a
+  genuine, independently-reasoned semantic exemption already documented
+  in internal/configuration/service.go's own scopeRequirementExempt
+  (its "scope" field names the export job's own resource, not the
+  calling principal's enforcement envelope) -- judged this NOT the same
+  bug (the other overrides' comments only ever said "matches the
+  frozen file, cause unknown"; this one gives actual domain reasoning)
+  and made the generator explicitly respect it rather than overriding
+  it, preserving internal/configuration's existing design untouched.
+  Fixed the generator properly (moved the computation to the true end
+  of the file, after every add() call), regenerated every output file
+  via python3 tools/specgen/render.py (never hand-edited again), and
+  extended the same noScopeRequired-override removal already applied
+  to tasks/messaging/memory to internal/execution's two newly-found
+  operations. Verified thoroughly before re-pushing: render.py --check
+  clean, the generator's own 13-test suite (test_render.py) passes,
+  every one of the 23 newly-computed values independently spot-checked
+  against each operation's own input schema, all 36 regenerated
+  AGENTS.md diffs confirmed to be EXACTLY their source-digest
+  fingerprint line and nothing else (zero content drift), go test
+  clean across tasks/messaging/memory/execution(191s)/configuration/
+  registry, TestLandedDriftIsDomainSide reaching only the distinct
+  already-tracked internal/installation Status issue, and the full
+  pre-commit hook run showing every remaining repo-wide failure
+  tracing to that same single cause. Rebased, whole-repo build/vet
+  clean, force-pushed the corrected branch, updated the PR title/body
+  to honestly describe the expanded scope rather than leaving a stale
+  description. This remains within the spirit of David's authorization
+  (fix the actual generator gap already diagnosed) -- it's the same
+  decision, executed completely rather than partially; not treated as
+  requiring a fresh escalation, unlike the earlier scope_required
+  discovery itself which did get escalated. CI running again.
 
 ## Planned
 
