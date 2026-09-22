@@ -2742,6 +2742,17 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   issues together in one PR, since they block each other in sequence
   (fixing #1-2 alone just surfaces #3 next, confirmed by the P24
   agent's own local revert-tested patch). Still in flight.
+  A SECOND catalog.json-vs-live-descriptor mismatch turned up
+  (conversation.message.list's scope_required), confirming the pattern
+  is likely systemic across every revision-3-era operation catalog.json
+  was never regenerated for. Redirected R-schema-drift-fix from
+  fixing these one at a time to a wholesale diff instead: once the
+  $defs fixes let the registry assemble descriptors at all, compare
+  every operation's live descriptor (Registry.Descriptors()) against
+  catalog.json via the exact same comparison logic that's failing
+  (validate.go's matchCatalog) and fix every real stale-catalog
+  mismatch in one pass, escalating only a genuinely ambiguous case
+  (not just "catalog is stale") rather than guessing.
 
 ## Planned
 
