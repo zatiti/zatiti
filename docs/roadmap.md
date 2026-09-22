@@ -3900,3 +3900,16 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
 - 2026-09-22 ~22:17 PT -- PR #61 LANDED (verification-record stale_version
   fix, commit 22b5ff9). All 7 CI checks passed clean on first run.
   Confirmed on real post-merge main via merge-base --is-ancestor.
+- 2026-09-22 ~22:25 PT -- R-task-event-scope-mismatch DISPATCHED
+  (read-only investigation, no fix). Investigating the new finding from
+  R-verification-stall-fix/PR #61: internal/tasks's emitTaskEvent stamps
+  task-transition events with the task's own scope, but controller-
+  internal calls run under bare installation scope, and internal/storage's
+  Unit.Emit requires exact scope equality -- refusing virtually every real
+  task's transition event. Asked to characterize whether this is
+  internal/tasks-specific or a broader Emit-call-site pattern, why the
+  exact-equality check exists (tenancy isolation vs. over-strict), and to
+  evaluate concrete fix options (omit explicit Scope and let storage
+  auto-stamp; loosen the equality check to a narrows/subset relationship;
+  give controller-internal calls a properly-scoped unit) before any fix is
+  authorized.
