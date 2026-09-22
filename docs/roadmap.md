@@ -3224,3 +3224,34 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   needs P01, P02 or P09 first, none of which are done) -- wave 13 (P31,
   P43) still needs P02 and P09 beyond P01 itself, so the next real
   parallel-dispatch opportunity depends on what P01 unblocks.
+- 2026-09-22 ~02:35 PT -- MAJOR TRACKING CORRECTION: my own "landed" list
+  used in every dependency-closure check this session (including the
+  ~00:58 PT "WAVE 13 ASSUMPTION CORRECTED" entry) was significantly
+  incomplete -- missing at least P01, P02, P08, P09, P23 and P25, each
+  landed on 2026-09-19 through this stretch but never folded into the
+  running list I was checking new dispatches against. Root cause: I was
+  maintaining that list by memory/prior-summary carryover across a
+  conversation compaction rather than re-deriving it from source each
+  time. Surfaced when P01's dispatched agent (correctly) found the P01
+  work already existed (landed 2026-09-19, PR #4, cd38926) and flagged
+  that its own dependency-closure math looked short by at least one card.
+  Rebuilt the landed set properly by systematically checking every P00-P49
+  ID against docs/roadmap.md text (regex for "<ID>...LANDED" and its
+  reverse) plus manual verification for the IDs that grep missed due to
+  inconsistent phrasing (P08, P23, P25 -- confirmed landed via direct text
+  search and `git merge-base --is-ancestor` against their cited commit
+  SHAs). Corrected count: 40 of 50 cards landed, not 27. Consequence: wave
+  13 (P31, P43) was NOT actually blocked -- P02 and P09, the two
+  dependencies I repeatedly cited as missing across three separate
+  messages this stretch, landed back on 2026-09-19. This was a real,
+  costly error: it cost a wave of genuine 2-way parallel dispatch
+  opportunity for roughly 2 hours while P01 ran alone on a redundant
+  assignment. P31 and P43 dispatched immediately on discovering this
+  (~02:32 PT), in true parallel, both dependency-ready and disjoint
+  write-root. Remaining un-landed cards, confirmed correct against this
+  rebuilt set: P31, P32, P33, P43, P44, P45, P46, P47, P48, P49 -- all
+  ten correctly still blocked on the two just-dispatched or their
+  downstream chain. No further silent gaps expected, but the lesson
+  (see docs/lore.md) is to re-derive the landed set from source on every
+  check going forward, never carry it forward across a compaction by
+  memory alone.
