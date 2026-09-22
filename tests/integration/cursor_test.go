@@ -90,24 +90,31 @@ func TestExpiredCursorDemandsSnapshotAndReplaysWithoutGap(t *testing.T) {
 	// Recovery: a fresh snapshot, paged from the start, is the complete
 	// history; the pages the client already had are its prefix and the gap
 	// event is present.
+	// P34 mints a resumable cursor even on a drained page (see
+	// internal/evidence/handlers.go's eventList: "the position it resumed
+	// from ... rather than no cursor at all"), so a nil cursor is never the
+	// drain signal. A short page (fewer than the requested limit) is.
 	var snapshot []contract.ID
 	var cursor *string
-	for {
+	for i := 0; ; i++ {
+		if i > 200 {
+			t.Fatalf("snapshot paging did not drain after %d pages; event.list is not advancing", i)
+		}
 		page, _, err := f.eventsPage(op, 5, cursor)
 		if err != nil {
 			t.Fatalf("snapshot page: %v", err)
 		}
 		snapshot = append(snapshot, page.ids...)
-		if page.cursor == nil {
+		cursor = page.cursor
+		if len(page.ids) < 5 {
 			break
 		}
-		cursor = page.cursor
 	}
 	full, _, err := f.eventsPage(op, 500, nil)
 	if err != nil {
 		t.Fatalf("full listing: %v", err)
 	}
-	if len(snapshot) != len(full.ids) || full.cursor != nil {
+	if len(snapshot) != len(full.ids) || full.cursor == nil {
 		t.Fatalf("paged snapshot has %d events, one-page listing %d (cursor %v)", len(snapshot), len(full.ids), full.cursor)
 	}
 	for i, id := range snapshot {
@@ -154,8 +161,17 @@ func TestRestartInvalidatesCursors(t *testing.T) {
 	default:
 		t.Fatalf("cursor from before the restart: %v, want a refusal", err)
 	}
+	// P34 mints a resumable cursor even on a drained page, so NextCursor's
+	// mere presence no longer signals more data; a short page under the
+	// requested limit does.
 	after := g.must(g.owner, "event.list", "", map[string]any{"scope": g.scope(), "limit": 500})
-	if after.NextCursor != nil {
+	var afterItems struct {
+		Items []struct {
+			ID contract.ID `json:"id"`
+		} `json:"items"`
+	}
+	decode(t, after.Data, &afterItems)
+	if len(afterItems.Items) >= 500 {
 		t.Fatal("a fresh snapshot after restart did not fit one page")
 	}
 }
