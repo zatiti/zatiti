@@ -3579,3 +3579,39 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   issue). Dispatched a dedicated investigation (not yet a fix) given the
   complexity and the shared-infrastructure blast radius if the bug turns
   out to affect other operations beyond this one.
+- 2026-09-22 ~09:35-09:40 PT -- P46 LANDED (PR #56). 47/50 cards.
+
+  The dedicated investigation into finding 6 (the _artifacts.metadata
+  schema rejection) landed a much more precise root cause than P46's own
+  attribution, which I verified end to end myself before deciding
+  anything: the REAL failing call is internal/tasks/transition.go's
+  recordEvidence, not internal/execution/peer.go's resolveOutputArtifacts
+  as P46 assumed -- recordEvidence mints ArtifactRef{ID: id} with an
+  empty Digest (the frozen _tasks.transition input only ever supplies
+  bare UUIDs, confirmed: evidence_ids is {"type":"array","items":
+  {"format":"uuid"}}, no digest field exists to receive one), while
+  _artifacts.metadata's frozen schema requires digest as a non-empty
+  {"pattern":"^[0-9a-f]{64}$"} field via the shared ArtifactRef $defs
+  entry -- even though the handler itself (internal/artifacts/ops.go:48)
+  ALREADY treats an empty digest as "no constraint, match by ID alone."
+  Confirmed independently: every claim checked out exactly (the mint
+  site, the frozen schema, the handler's existing leniency). Blast radius
+  is severe if real: every evidence-bearing task transition (verifying,
+  succeeded, manual acceptance, _tasks.evidence.record) funnels through
+  this same call.
+
+  The investigation also found a SECOND, independent defect while testing
+  whether the schema fix alone would unblock the journey: it doesn't --
+  multiple call sites (internal/execution/attempt_ops.go:314,
+  run_ops.go:391/644, controller_ops.go:714/720/742/762) pass an
+  attempt/run/verification-row ID as evidence_ids, but recordEvidence
+  resolves those AS ARTIFACT IDs, so even with a fixed schema the next
+  failure would be "artifact ... is not resolvable in scope."
+
+  FOUNDER DECISION (David, 2026-09-22): presented the schema-fix decision
+  (matching the scope_required-fix precedent, since it requires editing
+  the frozen operations.json) -- David chose "investigate the second
+  defect first" rather than authorizing the schema fix immediately, so
+  both defects can be decided together rather than fixing one and finding
+  the journey still doesn't complete. Dispatching that investigation now;
+  no frozen-contract change made yet.
