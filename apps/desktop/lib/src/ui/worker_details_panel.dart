@@ -8,6 +8,8 @@ import '../state/snapshot.dart';
 import '../state/view_state.dart';
 import '../state/workspace_controller.dart';
 import 'action_review_dialog.dart';
+import 'creation_dialogs.dart';
+import 'task_dialogs.dart';
 import 'theme.dart';
 import 'widgets.dart';
 
@@ -126,12 +128,46 @@ class WorkerDetailsPanel extends StatelessWidget {
         });
         final changes = inState({TaskEntryState.needsChanges});
         final done = inState({TaskEntryState.completed});
+        final setup = controller.prerequisitesForWorker(worker.id);
+        final other = controller.unresolvedOperationsFor(worker.id);
         return [
           note(
             worker.parentId == null
                 ? 'A shared view of the work ${worker.name} coordinates.'
                 : 'Work assigned to ${worker.name}.',
           ),
+          Padding(
+            padding: const EdgeInsets.only(bottom: Space.lg),
+            child: Wrap(
+              spacing: Space.sm,
+              children: [
+                OutlinedButton(
+                  key: ValueKey('new-task-${worker.id.value}'),
+                  onPressed: () =>
+                      showNewTaskDialog(context, controller, worker.id),
+                  child: const Text('New task'),
+                ),
+                OutlinedButton(
+                  key: ValueKey('new-responsibility-${worker.id.value}'),
+                  onPressed: () => showNewResponsibilityDialog(
+                    context,
+                    controller,
+                    worker.id,
+                  ),
+                  child: const Text('New responsibility'),
+                ),
+              ],
+            ),
+          ),
+          if (setup.isNotEmpty) const SectionLabel('Setup needed'),
+          for (final s in setup)
+            MiniCard(
+              title: s.title,
+              status: 'Needs setup',
+              statusIcon: Icons.info_outline,
+              statusIsDecision: true,
+              body: s.message,
+            ),
           if (decisions.isNotEmpty) const SectionLabel('Needs your decision'),
           for (final d in decisions)
             MiniCard(
@@ -157,6 +193,20 @@ class WorkerDetailsPanel extends StatelessWidget {
               statusIsDecision: true,
               body: t.detail,
               footnotes: [_owner(t.workerId)],
+              actions: [
+                if (t.manualAcceptance)
+                  OutlinedButton(
+                    key: ValueKey('task-results-${t.id}'),
+                    onPressed: () =>
+                        showTaskResultsDialog(context, controller, t),
+                    child: const Text('Review & decide'),
+                  ),
+                OutlinedButton(
+                  onPressed: () =>
+                      showDelegateTaskDialog(context, controller, t, worker.id),
+                  child: const Text('Delegate'),
+                ),
+              ],
             ),
           if (active.isNotEmpty) const SectionLabel('In progress'),
           for (final t in active)
@@ -168,6 +218,20 @@ class WorkerDetailsPanel extends StatelessWidget {
               statusIcon: Icons.schedule,
               body: t.detail,
               footnotes: [_owner(t.workerId)],
+              actions: [
+                if (t.manualAcceptance)
+                  OutlinedButton(
+                    key: ValueKey('task-results-${t.id}'),
+                    onPressed: () =>
+                        showTaskResultsDialog(context, controller, t),
+                    child: const Text('Review & decide'),
+                  ),
+                OutlinedButton(
+                  onPressed: () =>
+                      showDelegateTaskDialog(context, controller, t, worker.id),
+                  child: const Text('Delegate'),
+                ),
+              ],
             ),
           if (done.isNotEmpty) const SectionLabel('Completed'),
           for (final t in done)
@@ -176,8 +240,24 @@ class WorkerDetailsPanel extends StatelessWidget {
               status: t.detail.isEmpty ? 'Completed' : t.detail,
               statusIcon: Icons.check,
               footnotes: [_owner(t.workerId)],
+              actions: [
+                OutlinedButton(
+                  onPressed: () =>
+                      showTaskResultsDialog(context, controller, t),
+                  child: const Text('View results'),
+                ),
+              ],
             ),
-          if (decisions.isEmpty && tasks.isEmpty && !hasNotice)
+          if (other.isNotEmpty) const SectionLabel('Other activity'),
+          for (final o in other)
+            MiniCard(
+              key: ValueKey('unresolved-op-${o.id}'),
+              title: o.destination,
+              status: o.label,
+              statusIcon: Icons.hourglass_top_outlined,
+              footnotes: [_owner(worker.id)],
+            ),
+          if (decisions.isEmpty && tasks.isEmpty && other.isEmpty && !hasNotice)
             const EmptyState('No work yet. Start in the conversation.'),
         ];
 

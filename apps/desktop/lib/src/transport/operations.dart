@@ -43,7 +43,11 @@ abstract final class Operations {
   static const organizationList = OperationDescriptor.query(
     'organization.list',
   );
+  static const organizationCreate = OperationDescriptor.mutation(
+    'organization.create',
+  );
   static const workerList = OperationDescriptor.query('worker.list');
+  static const workerCreate = OperationDescriptor.mutation('worker.create');
 
   static const conversationList = OperationDescriptor.query(
     'conversation.list',
@@ -54,6 +58,13 @@ abstract final class Operations {
   static const conversationMessageSend = OperationDescriptor.mutation(
     'conversation.message.send',
   );
+  static const conversationCreate = OperationDescriptor.mutation(
+    'conversation.create',
+  );
+  static const conversationUpdate = OperationDescriptor.mutation(
+    'conversation.update',
+    expectedVersion: true,
+  );
 
   static const reviewList = OperationDescriptor.query('review.list');
   static const reviewGet = OperationDescriptor.query('review.get');
@@ -62,9 +73,33 @@ abstract final class Operations {
     expectedVersion: true,
   );
 
+  static const configurationPlan = OperationDescriptor.mutation(
+    'configuration.plan',
+    expectedVersion: true,
+  );
+  static const configurationApply = OperationDescriptor.mutation(
+    'configuration.apply',
+  );
+
   static const taskList = OperationDescriptor.query('task.list');
+  static const taskCreate = OperationDescriptor.mutation('task.create');
+  static const taskStart = OperationDescriptor.mutation(
+    'task.start',
+    expectedVersion: true,
+  );
+  static const taskDelegate = OperationDescriptor.mutation(
+    'task.delegate',
+    expectedVersion: true,
+  );
+  static const taskAccept = OperationDescriptor.mutation(
+    'task.accept',
+    expectedVersion: true,
+  );
   static const responsibilityList = OperationDescriptor.query(
     'responsibility.list',
+  );
+  static const responsibilityCreate = OperationDescriptor.mutation(
+    'responsibility.create',
   );
   static const responsibilityPause = OperationDescriptor.mutation(
     'responsibility.pause',
@@ -76,6 +111,10 @@ abstract final class Operations {
   static const operationList = OperationDescriptor.query('operation.list');
   static const toolGet = OperationDescriptor.query('tool.get');
   static const usageGet = OperationDescriptor.query('usage.get');
+  static const connectionList = OperationDescriptor.query('connection.list');
+  static const installationVerifierList = OperationDescriptor.query(
+    'installation.verifier.list',
+  );
 
   /// Every operation the client may call.
   static const List<OperationDescriptor> all = [
@@ -85,15 +124,26 @@ abstract final class Operations {
     eventList,
     principalList,
     organizationList,
+    organizationCreate,
     workerList,
+    workerCreate,
     conversationList,
     conversationMessageList,
     conversationMessageSend,
+    conversationCreate,
+    conversationUpdate,
     reviewList,
     reviewGet,
     reviewDecide,
+    configurationPlan,
+    configurationApply,
     taskList,
+    taskCreate,
+    taskStart,
+    taskDelegate,
+    taskAccept,
     responsibilityList,
+    responsibilityCreate,
     responsibilityPause,
     artifactList,
     artifactRead,
@@ -101,5 +151,7 @@ abstract final class Operations {
     operationList,
     toolGet,
     usageGet,
+    connectionList,
+    installationVerifierList,
   ];
 }

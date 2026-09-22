@@ -227,6 +227,90 @@ class Organization {
   final String? parentId;
 }
 
+/// A worker's spend ceiling and step/child bounds. `currency` "XXX" is the
+/// wire's explicit "no currency configured" sentinel (see
+/// `internal/installation/firsttask.go`): a zero-spend task is possible in
+/// it, but nothing with a positive cost ever is.
+class Limits {
+  const Limits({
+    required this.currency,
+    required this.spendMicroUnits,
+    required this.concurrency,
+    required this.modelSteps,
+    required this.childCount,
+    required this.delegationDepth,
+    required this.attemptSeconds,
+    required this.rootDeadline,
+  });
+
+  factory Limits.fromJson(Object? json) {
+    final o = StrictObject(json, 'limits');
+    final l = Limits(
+      currency: o.string('currency'),
+      spendMicroUnits: o.integer('spend_micro_units'),
+      concurrency: o.integer('concurrency'),
+      modelSteps: o.integer('model_steps'),
+      childCount: o.integer('child_count'),
+      delegationDepth: o.integer('delegation_depth'),
+      attemptSeconds: o.integer('attempt_seconds'),
+      rootDeadline: o.dateTime('root_deadline'),
+    );
+    o.finish();
+    return l;
+  }
+
+  final String currency;
+  final int spendMicroUnits;
+  final int concurrency;
+  final int modelSteps;
+  final int childCount;
+  final int delegationDepth;
+  final int attemptSeconds;
+  final DateTime rootDeadline;
+
+  /// True for the wire's explicit "no currency configured" placeholder,
+  /// never guessed from an empty string.
+  bool get isUnconfigured => currency == 'XXX';
+}
+
+/// A worker's provider/model binding. Null on the worker itself (not this
+/// type) means no provider is configured yet; see `Worker.profile`.
+class ExecutionProfile {
+  const ExecutionProfile({
+    required this.id,
+    required this.version,
+    required this.executor,
+    required this.model,
+    required this.connectionId,
+    required this.providerDestination,
+  });
+
+  factory ExecutionProfile.fromJson(Object? json) {
+    final o = StrictObject(json, 'execution profile');
+    final p = ExecutionProfile(
+      id: o.string('id'),
+      version: o.integer('version'),
+      executor: o.string('executor'),
+      model: o.string('model'),
+      connectionId: o.string('connection_id'),
+      providerDestination: o.string('provider_destination'),
+    );
+    o.list('capabilities');
+    o.object('cost_bound');
+    o.string('classification');
+    o.string('context_capture');
+    o.finish();
+    return p;
+  }
+
+  final String id;
+  final int version;
+  final String executor;
+  final String model;
+  final String connectionId;
+  final String providerDestination;
+}
+
 class Worker {
   const Worker({
     required this.id,
@@ -235,6 +319,8 @@ class Worker {
     required this.key,
     required this.name,
     required this.purpose,
+    this.profile,
+    this.limits,
   });
 
   factory Worker.fromJson(Object? json) {
@@ -246,12 +332,16 @@ class Worker {
       key: o.string('key'),
       name: o.string('name'),
       purpose: o.string('purpose'),
+      profile: o.nullable('profile') == null
+          ? null
+          : ExecutionProfile.fromJson(o.object('profile')),
+      limits: o.nullable('limits') == null
+          ? null
+          : Limits.fromJson(o.object('limits')),
     );
     o.string('instructions');
     o.list('skill_versions');
     o.list('bindings');
-    o.nullable('profile');
-    o.nullable('limits');
     o.optional('extensions');
     o.finish();
     return w;
@@ -263,6 +353,13 @@ class Worker {
   final String key;
   final String name;
   final String purpose;
+
+  /// The provider/model this worker runs on. Null means no provider is
+  /// configured: it can chat, but hosted execution refuses paid work.
+  final ExecutionProfile? profile;
+
+  /// The worker's spend/step ceiling. Null means no budget was configured.
+  final Limits? limits;
 }
 
 enum ConversationKind { direct, group }
@@ -572,11 +669,13 @@ class Task {
     required this.id,
     required this.version,
     required this.scope,
+    required this.ownerId,
     required this.workerId,
     required this.outcome,
     required this.requiredOutputs,
     required this.state,
     this.waitingReason,
+    this.manualAcceptance = false,
   });
 
   factory Task.fromJson(Object? json) {
@@ -586,6 +685,7 @@ class Task {
       id: o.string('id'),
       version: o.integer('version'),
       scope: Scope.fromJson(o.object('scope')),
+      ownerId: o.string('owner_id'),
       workerId: o.string('worker_id'),
       outcome: o.string('outcome'),
       requiredOutputs: o.stringList('required_outputs'),
@@ -596,8 +696,8 @@ class Task {
         ),
       ),
       waitingReason: o.optionalString('waiting_reason'),
+      manualAcceptance: o.optionalBoolean('manual_acceptance') ?? false,
     );
-    o.string('owner_id');
     o.list('inputs');
     o.object('acceptance');
     o.object('limits');
@@ -605,7 +705,6 @@ class Task {
     o.optionalString('parent_id');
     o.optionalString('root_id');
     o.optionalBoolean('cancellation_requested');
-    o.optionalBoolean('manual_acceptance');
     o.finish();
     return t;
   }
@@ -613,11 +712,43 @@ class Task {
   final String id;
   final int version;
   final Scope scope;
+  final String ownerId;
   final String workerId;
   final String outcome;
   final List<String> requiredOutputs;
   final TaskState state;
   final String? waitingReason;
+
+  /// True when this task's success can only be established by an eligible
+  /// human calling `task.accept` — never by an automated verifier. See
+  /// `internal/tasks/acceptance.go`'s `evaluateSuccess`.
+  final bool manualAcceptance;
+}
+
+/// One execution of a task's definition. This client only needs to know
+/// that `task.start` produced one; the run's own progress is read back
+/// through the task's own state.
+class Run {
+  const Run({required this.id, required this.version, required this.taskId});
+
+  factory Run.fromJson(Object? json) {
+    final o = StrictObject(json, 'run');
+    final r = Run(
+      id: o.string('id'),
+      version: o.integer('version'),
+      taskId: o.string('task_id'),
+    );
+    o.integer('configuration_revision');
+    o.list('input_versions');
+    o.string('state');
+    o.list('attempt_ids');
+    o.finish();
+    return r;
+  }
+
+  final String id;
+  final int version;
+  final String taskId;
 }
 
 class Responsibility {
@@ -786,6 +917,7 @@ class ExternalOperation {
     required this.version,
     required this.actionDigest,
     required this.state,
+    required this.action,
   });
 
   factory ExternalOperation.fromJson(Object? json) {
@@ -795,8 +927,8 @@ class ExternalOperation {
       version: o.integer('version'),
       actionDigest: o.string('action_digest'),
       state: o.string('state'),
+      action: ActionPreview.fromJson(o.object('action')),
     );
-    ActionPreview.fromJson(o.object('action'));
     o.stringList('attempt_ids');
     o.optionalString('linked_operation_id');
     o.optionalString('relationship');
@@ -808,6 +940,7 @@ class ExternalOperation {
   final int version;
   final String actionDigest;
   final String state;
+  final ActionPreview action;
 }
 
 class Usage {
@@ -929,4 +1062,236 @@ class Page<T> {
   const Page(this.items, this.nextCursor);
   final List<T> items;
   final String? nextCursor;
+}
+
+/// One problem the compiler found in a draft or a plan's candidate.
+class Diagnostic {
+  const Diagnostic({
+    required this.path,
+    required this.code,
+    required this.message,
+    required this.severity,
+  });
+
+  factory Diagnostic.fromJson(Object? json) {
+    final o = StrictObject(json, 'diagnostic');
+    final d = Diagnostic(
+      path: o.string('path'),
+      code: o.string('code'),
+      message: o.string('message'),
+      severity: o.string('severity'),
+    );
+    o.finish();
+    return d;
+  }
+
+  final String path;
+  final String code;
+  final String message;
+
+  /// `error`, `warning` or `info`, exactly as the compiler reports it.
+  final String severity;
+}
+
+/// A staged, not-yet-active set of changes: the "draft" step of
+/// draft/plan/review/apply. `version` is what `configuration.plan` binds to
+/// as `expected_version`.
+class Draft {
+  const Draft({
+    required this.id,
+    required this.version,
+    required this.baseRevision,
+    required this.changeCount,
+    required this.diagnostics,
+  });
+
+  factory Draft.fromJson(Object? json) {
+    final o = StrictObject(json, 'draft');
+    final changes = o.list('changes');
+    final d = Draft(
+      id: o.string('id'),
+      version: o.integer('version'),
+      baseRevision: o.integer('base_revision'),
+      changeCount: changes.length,
+      diagnostics: [
+        for (final e in o.list('diagnostics')) Diagnostic.fromJson(e),
+      ],
+    );
+    o.finish();
+    return d;
+  }
+
+  final String id;
+  final int version;
+  final int baseRevision;
+  final int changeCount;
+  final List<Diagnostic> diagnostics;
+}
+
+/// A sealed candidate ready for `configuration.apply`: the "plan" and
+/// "review" step. Nothing is active yet.
+class Plan {
+  const Plan({
+    required this.id,
+    required this.version,
+    required this.draftId,
+    required this.baseRevision,
+    required this.candidateDigest,
+    required this.authorityRequirements,
+    required this.decisions,
+    required this.diagnostics,
+    required this.requirements,
+  });
+
+  factory Plan.fromJson(Object? json) {
+    final o = StrictObject(json, 'plan');
+    final p = Plan(
+      id: o.string('id'),
+      version: o.integer('version'),
+      draftId: o.string('draft_id'),
+      baseRevision: o.integer('base_revision'),
+      candidateDigest: o.string('candidate_digest'),
+      authorityRequirements: [
+        for (final e in o.list('authority_requirements'))
+          Requirement.fromJson(e),
+      ],
+      decisions: [
+        for (final e in o.list('decisions')) DecisionRequirement.fromJson(e),
+      ],
+      diagnostics: [
+        for (final e in o.list('diagnostics')) Diagnostic.fromJson(e),
+      ],
+      requirements: [
+        for (final e in o.list('requirements')) Requirement.fromJson(e),
+      ],
+    );
+    o.list('changes');
+    o.list('dependencies');
+    o.string('compiler_version');
+    o.string('schema_version');
+    o.finish();
+    return p;
+  }
+
+  final String id;
+  final int version;
+  final String draftId;
+  final int baseRevision;
+  final String candidateDigest;
+  final List<Requirement> authorityRequirements;
+  final List<DecisionRequirement> decisions;
+  final List<Diagnostic> diagnostics;
+  final List<Requirement> requirements;
+
+  /// Whether this plan can be applied as-is: no diagnostic at error severity
+  /// and no outstanding authority/decision requirement.
+  bool get isClean =>
+      authorityRequirements.isEmpty &&
+      decisions.isEmpty &&
+      requirements.isEmpty &&
+      diagnostics.every((d) => d.severity != 'error');
+}
+
+/// The activated result of `configuration.apply`. Once this exists, the
+/// plan's changes are live and visible through the ordinary list operations.
+class Revision {
+  const Revision({
+    required this.id,
+    required this.version,
+    required this.planId,
+    required this.candidateDigest,
+    required this.activatedAt,
+  });
+
+  factory Revision.fromJson(Object? json) {
+    final o = StrictObject(json, 'revision');
+    final r = Revision(
+      id: o.string('id'),
+      version: o.integer('version'),
+      planId: o.string('plan_id'),
+      candidateDigest: o.string('candidate_digest'),
+      activatedAt: o.dateTime('activated_at'),
+    );
+    o.finish();
+    return r;
+  }
+
+  final String id;
+  final int version;
+  final String planId;
+  final String candidateDigest;
+  final DateTime activatedAt;
+}
+
+/// A trusted verifier identity this installation actually has, as
+/// `installation.verifier.list` reports it. A task or responsibility's
+/// acceptance contract must name one of these, never an invented identity.
+class VerifierDescriptor {
+  const VerifierDescriptor({
+    required this.id,
+    required this.version,
+    required this.kind,
+    required this.classification,
+  });
+
+  factory VerifierDescriptor.fromJson(Object? json) {
+    final o = StrictObject(json, 'verifier descriptor');
+    final v = VerifierDescriptor(
+      id: o.string('id'),
+      version: o.integer('version'),
+      kind: o.string('kind'),
+      classification: o.string('classification'),
+    );
+    o.finish();
+    return v;
+  }
+
+  final String id;
+  final int version;
+  final String kind;
+  final String classification;
+}
+
+enum ConnectionValidationState { unverified, valid, invalid, expired, revoked }
+
+/// A provider/account binding a worker's execution profile depends on.
+class Connection {
+  const Connection({
+    required this.id,
+    required this.version,
+    required this.provider,
+    required this.accountIdentity,
+    required this.validationState,
+  });
+
+  factory Connection.fromJson(Object? json) {
+    final o = StrictObject(json, 'connection');
+    final stateWire = o.string('validation_state');
+    final c = Connection(
+      id: o.string('id'),
+      version: o.integer('version'),
+      provider: o.string('provider'),
+      accountIdentity: o.string('account_identity'),
+      validationState: ConnectionValidationState.values.firstWhere(
+        (s) => s.name == stateWire,
+        orElse: () => throw StrictJsonException(
+          'connection validation_state "$stateWire" is not in the contract',
+        ),
+      ),
+    );
+    o.object('scope');
+    o.string('credential_ref');
+    o.list('destinations');
+    o.list('allowed_scopes');
+    o.optionalDateTime('validated_at');
+    o.optionalDateTime('valid_until');
+    o.finish();
+    return c;
+  }
+
+  final String id;
+  final int version;
+  final String provider;
+  final String accountIdentity;
+  final ConnectionValidationState validationState;
 }

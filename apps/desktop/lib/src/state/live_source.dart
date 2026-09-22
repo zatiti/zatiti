@@ -26,6 +26,24 @@ class _LiveSubmission implements PendingSubmission {
   String get description => submission.operation;
 }
 
+/// A [ResourceSubmission] whose acknowledged (or `command.get`-resolved)
+/// response is decoded into [T] as a side effect of [LiveWorkspaceSource.
+/// submit]/[LiveWorkspaceSource.resolve] — never guessed, never set from the
+/// request the client sent.
+class _LiveResourceSubmission<T> implements ResourceSubmission<T> {
+  _LiveResourceSubmission(this.submission, this.decode, this._description);
+
+  final Submission submission;
+  final T Function(Map<String, Object?> data) decode;
+  final String _description;
+
+  @override
+  T? result;
+
+  @override
+  String get description => _description;
+}
+
 /// What this source knows about one conversation from the last snapshot,
 /// enough to interpret a message's authorship without ever querying "who am
 /// I": the catalog has no such operation (see the class doc below).
@@ -184,21 +202,382 @@ class LiveWorkspaceSource implements WorkspaceSource {
     ),
   );
 
+  // ---- organization/worker/group/task/responsibility creation -----------
+
+  DraftedResource _draftedResource(
+    Map<String, Object?> data,
+    String operation,
+    (String, String?) Function(Map<String, Object?> resource) idOf,
+  ) {
+    final o = StrictObject(data, operation);
+    final draft = wire.Draft.fromJson(o.object('draft'));
+    final (resourceId, conversationTarget) = idOf(o.object('resource'));
+    o.finish();
+    return DraftedResource(
+      draftId: draft.id,
+      draftVersion: draft.version,
+      resourceId: resourceId,
+      conversationTargetId: conversationTarget,
+    );
+  }
+
+  @override
+  ResourceSubmission<DraftedResource> prepareCreateOrganization({
+    required String key,
+    required String name,
+    String? parentOrganizationId,
+    required String chiefKey,
+    required String chiefName,
+    required String chiefPurpose,
+    required String chiefInstructions,
+  }) => _LiveResourceSubmission(
+    api.prepareOrganizationCreate(
+      key: key,
+      name: name,
+      parentOrganizationId: parentOrganizationId,
+      chiefKey: chiefKey,
+      chiefName: chiefName,
+      chiefPurpose: chiefPurpose,
+      chiefInstructions: chiefInstructions,
+    ),
+    (data) => _draftedResource(data, 'organization.create', (r) {
+      final org = wire.Organization.fromJson(r);
+      return (org.id, org.chiefId);
+    }),
+    'create organization $key',
+  );
+
+  @override
+  ResourceSubmission<DraftedResource> prepareCreateWorker({
+    required String organizationId,
+    required String key,
+    required String name,
+    required String purpose,
+    required String instructions,
+  }) => _LiveResourceSubmission(
+    api.prepareWorkerCreate(
+      organizationId: organizationId,
+      key: key,
+      name: name,
+      purpose: purpose,
+      instructions: instructions,
+    ),
+    (data) => _draftedResource(data, 'worker.create', (r) {
+      final worker = wire.Worker.fromJson(r);
+      return (worker.id, worker.id);
+    }),
+    'create worker $key',
+  );
+
+  @override
+  ResourceSubmission<DraftedResource> prepareCreateResponsibility({
+    required String workerId,
+    required String outcome,
+    required List<String> triggers,
+    required int minIntervalSeconds,
+    required VerifierIdentity verifier,
+    required DateTime rootDeadline,
+    String currency = 'XXX',
+  }) => _LiveResourceSubmission(
+    api.prepareResponsibilityCreate(
+      workerId: workerId,
+      outcome: outcome,
+      triggers: triggers,
+      minIntervalSeconds: minIntervalSeconds,
+      verifier: wire.VerifierDescriptor(
+        id: verifier.id,
+        version: verifier.version,
+        kind: 'artifact',
+        classification: 'internal',
+      ),
+      rootDeadline: rootDeadline,
+      currency: currency,
+    ),
+    (data) => _draftedResource(
+      data,
+      'responsibility.create',
+      (r) => (wire.Responsibility.fromJson(r).id, null),
+    ),
+    'create responsibility for $workerId',
+  );
+
+  @override
+  ResourceSubmission<PlanOutcome> preparePlan({
+    required String draftId,
+    required int expectedVersion,
+  }) => _LiveResourceSubmission(
+    api.preparePlan(draftId: draftId, expectedVersion: expectedVersion),
+    (data) {
+      final o = StrictObject(data, 'configuration.plan');
+      final plan = wire.Plan.fromJson(o.object('resource'));
+      o.finish();
+      return PlanOutcome(
+        planId: plan.id,
+        baseRevision: plan.baseRevision,
+        candidateDigest: plan.candidateDigest,
+        diagnostics: [
+          for (final d in plan.diagnostics) '${d.severity}: ${d.message}',
+        ],
+        pendingRequirements: [
+          for (final r in plan.authorityRequirements)
+            'Authority needed: ${r.message}',
+          for (final d in plan.decisions)
+            'A decision is needed on action ${d.actionDigest.substring(0, 8)}…',
+          for (final r in plan.requirements) r.message,
+        ],
+      );
+    },
+    'plan draft $draftId',
+  );
+
+  @override
+  ResourceSubmission<PlanOutcome> prepareApplyPlan(PlanOutcome plan) =>
+      _LiveResourceSubmission(
+        api.prepareApplyPlan(
+          planId: plan.planId,
+          baseRevision: plan.baseRevision,
+          candidateDigest: plan.candidateDigest,
+        ),
+        (data) {
+          final o = StrictObject(data, 'configuration.apply');
+          wire.Revision.fromJson(o.object('resource'));
+          o.finish();
+          return plan;
+        },
+        'apply plan ${plan.planId}',
+      );
+
+  ConversationOutcome _conversationOutcome(
+    Map<String, Object?> data,
+    String operation,
+  ) {
+    final o = StrictObject(data, operation);
+    final c = wire.Conversation.fromJson(o.object('resource'));
+    o.finish();
+    return ConversationOutcome(id: c.id, version: c.version);
+  }
+
+  @override
+  ResourceSubmission<ConversationOutcome> prepareOpenDirectConversation({
+    required String humanPrincipalId,
+    required String workerId,
+    required String title,
+  }) => _LiveResourceSubmission(
+    api.prepareConversationCreate(
+      kind: 'direct',
+      participantIds: [humanPrincipalId, workerId],
+      title: title,
+    ),
+    (data) => _conversationOutcome(data, 'conversation.create'),
+    'open a conversation with $workerId',
+  );
+
+  @override
+  ResourceSubmission<ConversationOutcome> prepareCreateGroup({
+    required String title,
+    required List<String> participantIds,
+  }) => _LiveResourceSubmission(
+    api.prepareConversationCreate(
+      kind: 'group',
+      participantIds: participantIds,
+      title: title,
+    ),
+    (data) => _conversationOutcome(data, 'conversation.create'),
+    'create group $title',
+  );
+
+  @override
+  ResourceSubmission<ConversationOutcome> prepareAddParticipant({
+    required ConversationEntry conversation,
+    required int expectedVersion,
+    required String newParticipantId,
+  }) => _LiveResourceSubmission(
+    api.prepareConversationUpdate(
+      id: conversation.id.value,
+      expectedVersion: expectedVersion,
+      participantIds: {
+        ...conversation.participantIds,
+        newParticipantId,
+      }.toList(),
+    ),
+    (data) => _conversationOutcome(data, 'conversation.update'),
+    'add a participant to ${conversation.id.value}',
+  );
+
+  TaskOutcome _taskOutcome(wire.Task task) =>
+      TaskOutcome(id: task.id, version: task.version, state: task.state.name);
+
+  @override
+  ResourceSubmission<TaskOutcome> prepareCreateTask({
+    required String ownerId,
+    required String workerId,
+    required String outcome,
+    required List<String> requiredOutputs,
+    required VerifierIdentity verifier,
+    required DateTime rootDeadline,
+    String currency = 'XXX',
+  }) => _LiveResourceSubmission(
+    api.prepareTaskCreate(
+      ownerId: ownerId,
+      workerId: workerId,
+      outcome: outcome,
+      requiredOutputs: requiredOutputs,
+      verifier: wire.VerifierDescriptor(
+        id: verifier.id,
+        version: verifier.version,
+        kind: 'artifact',
+        classification: 'internal',
+      ),
+      rootDeadline: rootDeadline,
+      currency: currency,
+    ),
+    (data) {
+      final o = StrictObject(data, 'task.create');
+      final task = wire.Task.fromJson(o.object('resource'));
+      o.finish();
+      return _taskOutcome(task);
+    },
+    'create task for $workerId',
+  );
+
+  @override
+  ResourceSubmission<TaskOutcome> prepareStartTask({
+    required String id,
+    required int expectedVersion,
+  }) => _LiveResourceSubmission(
+    api.prepareTaskStart(id: id, expectedVersion: expectedVersion),
+    (data) {
+      final o = StrictObject(data, 'task.start');
+      final started = wire.Task.fromJson(o.object('task'));
+      wire.Run.fromJson(o.object('run'));
+      o.finish();
+      return _taskOutcome(started);
+    },
+    'start task $id',
+  );
+
+  @override
+  ResourceSubmission<TaskOutcome> prepareDelegateTask({
+    required String parentId,
+    required int parentExpectedVersion,
+    required String ownerId,
+    required String childWorkerId,
+    required String outcome,
+    required List<String> requiredOutputs,
+    required VerifierIdentity verifier,
+    required DateTime rootDeadline,
+    String currency = 'XXX',
+  }) => _LiveResourceSubmission(
+    api.prepareTaskDelegate(
+      id: parentId,
+      expectedVersion: parentExpectedVersion,
+      ownerId: ownerId,
+      childWorkerId: childWorkerId,
+      outcome: outcome,
+      requiredOutputs: requiredOutputs,
+      verifier: wire.VerifierDescriptor(
+        id: verifier.id,
+        version: verifier.version,
+        kind: 'artifact',
+        classification: 'internal',
+      ),
+      rootDeadline: rootDeadline,
+      currency: currency,
+    ),
+    (data) {
+      final o = StrictObject(data, 'task.delegate');
+      final task = wire.Task.fromJson(o.object('resource'));
+      o.finish();
+      return _taskOutcome(task);
+    },
+    'delegate $parentId to $childWorkerId',
+  );
+
+  @override
+  ResourceSubmission<TaskOutcome> prepareAcceptTask({
+    required String id,
+    required int expectedVersion,
+    required bool accept,
+    String reason = '',
+  }) => _LiveResourceSubmission(
+    api.prepareTaskAccept(
+      id: id,
+      expectedVersion: expectedVersion,
+      accept: accept,
+      reason: reason,
+    ),
+    (data) {
+      final o = StrictObject(data, 'task.accept');
+      final decided = wire.Task.fromJson(o.object('resource'));
+      o.finish();
+      return _taskOutcome(decided);
+    },
+    '${accept ? 'accept' : 'reject'} task $id',
+  );
+
+  @override
+  Future<List<VerifierIdentity>> loadTrustedVerifiers() => _guard(() async {
+    final verifiers = await api.trustedVerifiers();
+    return [
+      for (final v in verifiers) VerifierIdentity(id: v.id, version: v.version),
+    ];
+  });
+
+  @override
+  Future<List<TaskArtifactEntry>> loadTaskArtifacts(String taskId) =>
+      _guard(() async {
+        final artifacts = await api.taskArtifacts(taskId);
+        return [
+          for (final a in artifacts)
+            TaskArtifactEntry(
+              id: a.id,
+              digest: a.digest,
+              mediaType: a.mediaType,
+              sizeBytes: a.size,
+              createdAt: a.createdAt,
+            ),
+        ];
+      });
+
+  @override
+  Future<ReviewContentPart> readTaskArtifact(TaskArtifactEntry artifact) =>
+      _guard(
+        () => _contentPart(
+          1,
+          wire.ArtifactRef(id: artifact.id, digest: artifact.digest),
+          label: artifact.mediaType,
+        ),
+      );
+
   @override
   Future<void> submit(PendingSubmission submission) => _guard(() async {
+    if (submission is _LiveResourceSubmission) {
+      final envelope = await api.client.submit(submission.submission);
+      submission.result = submission.decode(
+        envelope.requireData(submission.submission.operation),
+      );
+      return;
+    }
     final live = submission as _LiveSubmission;
     await api.client.submit(live.submission);
   });
 
   @override
   Future<Resolution> resolve(PendingSubmission submission) => _guard(() async {
-    final live = submission as _LiveSubmission;
-    switch (await api.client.resolve(live.submission)) {
+    final inner = submission is _LiveResourceSubmission
+        ? submission.submission
+        : (submission as _LiveSubmission).submission;
+    switch (await api.client.resolve(inner)) {
       case DispositionNotCommitted():
         return const ResolvedNotReceived();
       case DispositionFound(:final original):
         final fault = original.error;
         if (fault != null) return ResolvedRefused(_refusal(fault));
+        if (submission is _LiveResourceSubmission) {
+          submission.result = submission.decode(
+            original.requireData(inner.operation),
+          );
+        }
         return const ResolvedAcknowledged();
     }
   });
@@ -382,6 +761,7 @@ class LiveWorkspaceSource implements WorkspaceSource {
       Operations.principalList,
       wire.Principal.fromJson,
     );
+    final connections = await api.connections();
     await _baselineEvents();
 
     final workerEntries = _tree(organizations, workers, conversations);
@@ -518,9 +898,113 @@ class LiveWorkspaceSource implements WorkspaceSource {
               'offers no operation that lists a worker’s claims, so there '
               'is nothing to show or remove here.',
         ),
+        ..._workerSetupPrerequisites(workers, connections),
       ],
+      unresolvedOperations: _unresolvedOperations(
+        operations,
+        reviewEntries,
+        workerIds,
+      ),
     );
   });
+
+  /// Setup a task or responsibility actually needs: a worker's own execution
+  /// profile (provider/model), its budget currency and the connection that
+  /// profile depends on. Every fact here is real (`Worker.profile`,
+  /// `Worker.limits`, `connection.list`'s `validation_state`), never
+  /// inferred from a task's own success or failure.
+  List<PrerequisiteNotice> _workerSetupPrerequisites(
+    List<wire.Worker> workers,
+    List<wire.Connection> connections,
+  ) {
+    final connectionsById = {for (final c in connections) c.id: c};
+    final notices = <PrerequisiteNotice>[];
+    for (final w in workers) {
+      final workerId = WorkerId(w.id);
+      final profile = w.profile;
+      if (profile == null) {
+        notices.add(
+          PrerequisiteNotice(
+            workerId: workerId,
+            tab: DetailsTab.work,
+            title: 'No provider configured for ${w.name}',
+            message:
+                '${w.name} can be talked to, but hosted execution refuses '
+                'paid work until a provider and model are configured '
+                '(execution_profile.create).',
+          ),
+        );
+      } else {
+        final connection = connectionsById[profile.connectionId];
+        if (connection == null ||
+            connection.validationState !=
+                wire.ConnectionValidationState.valid) {
+          notices.add(
+            PrerequisiteNotice(
+              workerId: workerId,
+              tab: DetailsTab.work,
+              title: 'Credential needs action for ${w.name}',
+              message: connection == null
+                  ? '${w.name}’s provider connection is not listed here.'
+                  : '${w.name}’s connection to ${connection.provider} is '
+                        '${connection.validationState.name}, not valid.',
+            ),
+          );
+        }
+      }
+      final limits = w.limits;
+      if (limits == null || limits.isUnconfigured) {
+        notices.add(
+          PrerequisiteNotice(
+            workerId: workerId,
+            tab: DetailsTab.work,
+            title: 'No budget configured for ${w.name}',
+            message:
+                'Only a zero-spend task or responsibility is possible for '
+                '${w.name} until a currency and spend limit are configured.',
+          ),
+        );
+      }
+    }
+    return notices;
+  }
+
+  /// Operations an authorized worker started on its own that no review
+  /// names — a message send, or a worker-driven action under an existing
+  /// grant — and whose disposition is not yet settled. Never silently
+  /// dropped: [_reviewEntry] already reads a matching operation's state for
+  /// the reviews it does explain; this is the remainder.
+  List<UnresolvedOperationEntry> _unresolvedOperations(
+    List<wire.ExternalOperation> operations,
+    List<ReviewEntry> reviews,
+    Set<String> workerIds,
+  ) {
+    final reviewed = {for (final r in reviews) r.actionDigest};
+    const settled = {'succeeded', 'failed', 'denied', 'expired', 'cancelled'};
+    final out = <UnresolvedOperationEntry>[];
+    for (final op in operations) {
+      if (reviewed.contains(op.actionDigest)) continue;
+      if (settled.contains(op.state)) continue;
+      final workerId = op.action.scope.workerId;
+      out.add(
+        UnresolvedOperationEntry(
+          id: op.id,
+          workerId: workerId != null && workerIds.contains(workerId)
+              ? WorkerId(workerId)
+              : null,
+          title: op.action.destination,
+          destination: op.action.destination,
+          state: switch (op.state) {
+            'executing' => EffectState.executing,
+            'awaiting_confirmation' => EffectState.deliveryAccepted,
+            'outcome_unknown' => EffectState.outcomeUnknown,
+            _ => EffectState.notStarted,
+          },
+        ),
+      );
+    }
+    return out;
+  }
 
   String _short(String id) => id.length <= 8 ? id : id.substring(0, 8);
 
@@ -670,6 +1154,8 @@ class LiveWorkspaceSource implements WorkspaceSource {
       unreadCount: c.callerUnreadCount ?? 0,
       lastReadMarker: c.callerLastReadMarker,
       lastMeaningfulEvent: c.lastMeaningfulEvent,
+      participantIds: c.participantIds,
+      version: c.version,
     );
   }
 
@@ -677,6 +1163,9 @@ class LiveWorkspaceSource implements WorkspaceSource {
     id: t.id,
     workerId: WorkerId(t.workerId),
     title: t.outcome,
+    version: t.version,
+    ownerId: t.ownerId,
+    manualAcceptance: t.manualAcceptance,
     state: switch (t.state) {
       wire.TaskState.draft ||
       wire.TaskState.ready ||
@@ -781,11 +1270,12 @@ class LiveWorkspaceSource implements WorkspaceSource {
 
   Future<ReviewContentPart> _contentPart(
     int index,
-    wire.ArtifactRef ref,
-  ) async {
-    final label = 'Content $index';
+    wire.ArtifactRef ref, {
+    String? label,
+  }) async {
+    final resolvedLabel = label ?? 'Content $index';
     ReviewContentPart unavailable(String reason) => ReviewContentPart(
-      label: label,
+      label: resolvedLabel,
       digest: ref.digest,
       unavailableReason: reason,
     );
@@ -814,7 +1304,7 @@ class LiveWorkspaceSource implements WorkspaceSource {
     }
     try {
       return ReviewContentPart(
-        label: label,
+        label: resolvedLabel,
         digest: ref.digest,
         text: const Utf8Decoder(allowMalformed: false).convert(bytes),
       );

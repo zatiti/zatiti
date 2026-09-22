@@ -540,6 +540,155 @@ class _Delegating implements WorkspaceSource {
   @override
   PendingSubmission preparePause(RoutineEntry r) => inner.preparePause(r);
   @override
+  ResourceSubmission<DraftedResource> prepareCreateOrganization({
+    required String key,
+    required String name,
+    String? parentOrganizationId,
+    required String chiefKey,
+    required String chiefName,
+    required String chiefPurpose,
+    required String chiefInstructions,
+  }) => inner.prepareCreateOrganization(
+    key: key,
+    name: name,
+    parentOrganizationId: parentOrganizationId,
+    chiefKey: chiefKey,
+    chiefName: chiefName,
+    chiefPurpose: chiefPurpose,
+    chiefInstructions: chiefInstructions,
+  );
+  @override
+  ResourceSubmission<DraftedResource> prepareCreateWorker({
+    required String organizationId,
+    required String key,
+    required String name,
+    required String purpose,
+    required String instructions,
+  }) => inner.prepareCreateWorker(
+    organizationId: organizationId,
+    key: key,
+    name: name,
+    purpose: purpose,
+    instructions: instructions,
+  );
+  @override
+  ResourceSubmission<DraftedResource> prepareCreateResponsibility({
+    required String workerId,
+    required String outcome,
+    required List<String> triggers,
+    required int minIntervalSeconds,
+    required VerifierIdentity verifier,
+    required DateTime rootDeadline,
+    String currency = 'XXX',
+  }) => inner.prepareCreateResponsibility(
+    workerId: workerId,
+    outcome: outcome,
+    triggers: triggers,
+    minIntervalSeconds: minIntervalSeconds,
+    verifier: verifier,
+    rootDeadline: rootDeadline,
+    currency: currency,
+  );
+  @override
+  ResourceSubmission<PlanOutcome> preparePlan({
+    required String draftId,
+    required int expectedVersion,
+  }) => inner.preparePlan(draftId: draftId, expectedVersion: expectedVersion);
+  @override
+  ResourceSubmission<PlanOutcome> prepareApplyPlan(PlanOutcome plan) =>
+      inner.prepareApplyPlan(plan);
+  @override
+  ResourceSubmission<ConversationOutcome> prepareOpenDirectConversation({
+    required String humanPrincipalId,
+    required String workerId,
+    required String title,
+  }) => inner.prepareOpenDirectConversation(
+    humanPrincipalId: humanPrincipalId,
+    workerId: workerId,
+    title: title,
+  );
+  @override
+  ResourceSubmission<ConversationOutcome> prepareCreateGroup({
+    required String title,
+    required List<String> participantIds,
+  }) => inner.prepareCreateGroup(title: title, participantIds: participantIds);
+  @override
+  ResourceSubmission<ConversationOutcome> prepareAddParticipant({
+    required ConversationEntry conversation,
+    required int expectedVersion,
+    required String newParticipantId,
+  }) => inner.prepareAddParticipant(
+    conversation: conversation,
+    expectedVersion: expectedVersion,
+    newParticipantId: newParticipantId,
+  );
+  @override
+  ResourceSubmission<TaskOutcome> prepareCreateTask({
+    required String ownerId,
+    required String workerId,
+    required String outcome,
+    required List<String> requiredOutputs,
+    required VerifierIdentity verifier,
+    required DateTime rootDeadline,
+    String currency = 'XXX',
+  }) => inner.prepareCreateTask(
+    ownerId: ownerId,
+    workerId: workerId,
+    outcome: outcome,
+    requiredOutputs: requiredOutputs,
+    verifier: verifier,
+    rootDeadline: rootDeadline,
+    currency: currency,
+  );
+  @override
+  ResourceSubmission<TaskOutcome> prepareStartTask({
+    required String id,
+    required int expectedVersion,
+  }) => inner.prepareStartTask(id: id, expectedVersion: expectedVersion);
+  @override
+  ResourceSubmission<TaskOutcome> prepareDelegateTask({
+    required String parentId,
+    required int parentExpectedVersion,
+    required String ownerId,
+    required String childWorkerId,
+    required String outcome,
+    required List<String> requiredOutputs,
+    required VerifierIdentity verifier,
+    required DateTime rootDeadline,
+    String currency = 'XXX',
+  }) => inner.prepareDelegateTask(
+    parentId: parentId,
+    parentExpectedVersion: parentExpectedVersion,
+    ownerId: ownerId,
+    childWorkerId: childWorkerId,
+    outcome: outcome,
+    requiredOutputs: requiredOutputs,
+    verifier: verifier,
+    rootDeadline: rootDeadline,
+    currency: currency,
+  );
+  @override
+  ResourceSubmission<TaskOutcome> prepareAcceptTask({
+    required String id,
+    required int expectedVersion,
+    required bool accept,
+    String reason = '',
+  }) => inner.prepareAcceptTask(
+    id: id,
+    expectedVersion: expectedVersion,
+    accept: accept,
+    reason: reason,
+  );
+  @override
+  Future<List<VerifierIdentity>> loadTrustedVerifiers() =>
+      inner.loadTrustedVerifiers();
+  @override
+  Future<List<TaskArtifactEntry>> loadTaskArtifacts(String taskId) =>
+      inner.loadTaskArtifacts(taskId);
+  @override
+  Future<ReviewContentPart> readTaskArtifact(TaskArtifactEntry artifact) =>
+      inner.readTaskArtifact(artifact);
+  @override
   Future<void> submit(PendingSubmission s) => inner.submit(s);
   @override
   Future<Resolution> resolve(PendingSubmission s) => inner.resolve(s);
