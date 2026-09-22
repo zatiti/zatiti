@@ -78,4 +78,60 @@ void main() {
     );
     expect(part.isShowable, isFalse);
   });
+
+  group('memory claim retraction', () {
+    MemoryEntry claim({bool active = true, bool canRetract = true}) =>
+        MemoryEntry(
+          id: const ClaimId('c1'),
+          workerId: const WorkerId('w1'),
+          bindingId: 'b1',
+          brainId: 'brain1',
+          claimVersion: 1,
+          title: 't',
+          text: 'text',
+          provenance: const [],
+          freshness: now,
+          active: active,
+          canRetract: canRetract,
+        );
+
+    test('an active, authorized claim can be retracted', () {
+      final view = MemoryClaimView(claim: claim());
+      expect(view.canRetract, isTrue);
+      expect(view.statusLabel, 'Active');
+    });
+
+    test(
+      'a claim without retract permission is unsupported, never offered',
+      () {
+        final view = MemoryClaimView(claim: claim(canRetract: false));
+        expect(view.canRetract, isFalse);
+      },
+    );
+
+    test('a retracted claim stays visible, labeled retracted', () {
+      final view = MemoryClaimView(claim: claim(active: false));
+      expect(view.canRetract, isFalse);
+      expect(view.statusLabel, 'Retracted');
+    });
+
+    test('a submission in flight is shown before any job status exists', () {
+      final view = MemoryClaimView(
+        claim: claim(),
+        phase: ClaimActionPhase.submitting,
+      );
+      expect(view.canRetract, isFalse);
+      expect(view.statusLabel, 'Retracting…');
+    });
+
+    test('an accepted retraction shows the job’s own status, never a claim '
+        'of completion the controller has not confirmed', () {
+      final view = MemoryClaimView(
+        claim: claim(),
+        phase: ClaimActionPhase.requested,
+        note: 'In progress',
+      );
+      expect(view.statusLabel, 'In progress');
+    });
+  });
 }

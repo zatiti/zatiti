@@ -24,6 +24,16 @@ class _RoutineOverlay {
   String? note;
 }
 
+/// One claim's retraction in progress, keyed by [ClaimId]. Mirrors
+/// [_RoutineOverlay]'s shape; [jobStatus] holds the last known `Job.label`
+/// once the retraction was acknowledged.
+class _MemoryOverlay {
+  ClaimActionPhase? phase;
+  ResourceSubmission<MemoryRetractOutcome>? pending;
+  String? jobId;
+  String? jobStatus;
+}
+
 /// One draft/plan/review/apply flow in progress: organization, worker or
 /// responsibility creation. Exactly one of [stagePending]/[planPending]/
 /// [applyPending] is ever set at a time, and it is the same object across a
@@ -159,6 +169,8 @@ class WorkspaceController extends ChangeNotifier {
       <ReviewId, _ReviewOverlay>{};
   final Map<RoutineId, _RoutineOverlay> _routineOverlays =
       <RoutineId, _RoutineOverlay>{};
+  final Map<ClaimId, _MemoryOverlay> _memoryOverlays =
+      <ClaimId, _MemoryOverlay>{};
   final Map<DraftFlowKind, _DraftFlowOverlay> _draftFlows =
       <DraftFlowKind, _DraftFlowOverlay>{};
   _TaskFlowOverlay? _taskFlow;
@@ -281,6 +293,16 @@ class WorkspaceController extends ChangeNotifier {
       if (overlay.phase != RoutinePhase.paused) return false;
       for (final r in next.routines) {
         if (r.id == id) return r.paused;
+      }
+      return true;
+    });
+    // A retraction overlay retires once the controller's own record agrees
+    // the claim is no longer active, or the claim has left this view
+    // entirely (for example, its brain became unlisted).
+    _memoryOverlays.removeWhere((id, overlay) {
+      if (overlay.phase != ClaimActionPhase.requested) return false;
+      for (final m in next.memory) {
+        if (m.id == id) return !m.active;
       }
       return true;
     });
@@ -976,10 +998,19 @@ class WorkspaceController extends ChangeNotifier {
   List<FileEntry> filesFor(WorkerId w) =>
       _inBranch(w, snapshot.files, (f) => f.workerId).toList();
 
-  List<MemoryEntry> memoryFor(WorkerId w) => [
+  List<MemoryClaimView> memoryFor(WorkerId w) => [
     for (final m in snapshot.memory)
-      if (m.workerId == w) m,
+      if (m.workerId == w) _memoryClaimView(m),
   ];
+
+  MemoryClaimView _memoryClaimView(MemoryEntry claim) {
+    final overlay = _memoryOverlays[claim.id];
+    return MemoryClaimView(
+      claim: claim,
+      phase: overlay?.phase,
+      note: overlay?.jobStatus,
+    );
+  }
 
   List<AccessEntry> accessFor(WorkerId w) => [
     for (final a in snapshot.access)
@@ -992,6 +1023,19 @@ class WorkspaceController extends ChangeNotifier {
     }
     return null;
   }
+
+  /// Capability-specific autonomy evidence for one worker (R16-009): never a
+  /// single trust score.
+  List<AutonomyEntry> autonomyFor(WorkerId w) => [
+    for (final a in snapshot.autonomy)
+      if (a.workerId == w) a,
+  ];
+
+  /// Recovery obligations any of this worker's still-live runs carry.
+  List<RecoveryEntry> recoveryFor(WorkerId w) => [
+    for (final r in snapshot.recovery)
+      if (r.workerId == w) r,
+  ];
 
   List<ProposalEntry> proposalsFor(WorkerId w) => [
     for (final p in snapshot.proposals)
@@ -1093,6 +1137,113 @@ class WorkspaceController extends ChangeNotifier {
     } on AcknowledgmentUnknown {
       overlay.note = 'Still checking.';
       _changed();
+    }
+  }
+
+  // ---- memory: authorized claims, source/freshness and retraction --------
+
+  /// Retracts a memory claim. Shown as done only once the controller
+  /// acknowledges the retraction *request* — retraction itself is a `Job`,
+  /// so "acknowledged" means accepted, not yet necessarily applied; the
+  /// acknowledgment rule applies to the job's own state exactly as it does
+  /// to a review or a pause.
+  Future<void> retractClaim(ClaimId id, String reason) async {
+    MemoryEntry? claim;
+    for (final m in snapshot.memory) {
+      if (m.id == id) claim = m;
+    }
+    if (claim == null || !_memoryClaimView(claim).canRetract) return;
+    final overlay = _memoryOverlays.putIfAbsent(id, _MemoryOverlay.new);
+    overlay
+      ..pending ??= source.prepareMemoryRetract(claim, reason)
+      ..phase = ClaimActionPhase.submitting
+      ..jobStatus = null;
+    _changed();
+    try {
+      await source.submit(overlay.pending!);
+      final result = overlay.pending!.result;
+      overlay
+        ..phase = ClaimActionPhase.requested
+        ..jobId = result?.jobId
+        ..jobStatus = result?.jobStatus
+        ..pending = null;
+      _changed();
+      await _reloadQuietly();
+    } on SourceUnavailable catch (e) {
+      overlay
+        ..phase = null
+        ..jobStatus = 'Not sent. The claim is still active.';
+      _goOffline(e.message);
+    } on AcknowledgmentUnknown {
+      overlay.phase = ClaimActionPhase.acknowledgmentUnknown;
+      _changed();
+      await checkMemoryRetract(id);
+    } on SourceRefusal catch (e) {
+      overlay
+        ..phase = null
+        ..pending = null
+        ..jobStatus = e.message;
+      _changed();
+    }
+  }
+
+  /// Looks up a retraction request whose acknowledgment is unknown. Never
+  /// resends.
+  Future<void> checkMemoryRetract(ClaimId id) async {
+    final overlay = _memoryOverlays[id];
+    final pending = overlay?.pending;
+    if (overlay == null ||
+        pending == null ||
+        overlay.phase != ClaimActionPhase.acknowledgmentUnknown) {
+      return;
+    }
+    try {
+      switch (await source.resolve(pending)) {
+        case ResolvedAcknowledged():
+          final result = pending.result;
+          overlay
+            ..phase = ClaimActionPhase.requested
+            ..jobId = result?.jobId
+            ..jobStatus = result?.jobStatus
+            ..pending = null;
+          _changed();
+          await _reloadQuietly();
+        case ResolvedRefused(:final refusal):
+          overlay
+            ..phase = null
+            ..pending = null
+            ..jobStatus = refusal.message;
+          _changed();
+        case ResolvedNotReceived():
+          overlay
+            ..phase = null
+            ..jobStatus =
+                'The retraction was not received. The claim is still active.';
+          _changed();
+      }
+    } on SourceUnavailable catch (e) {
+      _goOffline(e.message);
+    } on AcknowledgmentUnknown {
+      overlay.jobStatus = 'Still checking.';
+      _changed();
+    }
+  }
+
+  /// Re-checks a retraction job already known to have been accepted,
+  /// refreshing its status in words. Never a background poll: called only
+  /// when the person asks.
+  Future<void> checkMemoryJobStatus(ClaimId id) async {
+    final overlay = _memoryOverlays[id];
+    final jobId = overlay?.jobId;
+    if (overlay == null || jobId == null) return;
+    try {
+      overlay.jobStatus = await source.checkMemoryJob(jobId);
+      _changed();
+      await _reloadQuietly();
+    } on SourceUnavailable catch (e) {
+      _goOffline(e.message);
+    } on AcknowledgmentUnknown {
+      // Nothing new yet; keep the last known status.
     }
   }
 

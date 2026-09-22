@@ -124,6 +124,90 @@ class ControllerApi {
     return Usage.fromJson(_resource(r.data, 'usage.get'));
   }
 
+  /// The effective spend/step ceiling for one scope: installation, ancestor,
+  /// project, worker and root limits already intersected by the controller —
+  /// never recomputed locally from a worker's own possibly-narrower
+  /// `Worker.limits`.
+  Future<Limits> budget({required String workerId}) async {
+    final r = await client.query(Operations.budgetGet, {
+      'scope': client.scope(workerId: workerId),
+    });
+    final o = StrictObject(r.requireData('budget.get'), 'budget.get');
+    final limits = Limits.fromJson(o.object('limits'));
+    o.finish();
+    return limits;
+  }
+
+  // ---- memory: authorized claims, source/freshness and retraction --------
+
+  Future<List<MemoryBinding>> memoryBindings() =>
+      listAll(Operations.memoryBindingList, MemoryBinding.fromJson);
+
+  /// The authorized claims for exactly the bindings named, never a paid
+  /// retrieval: `memory.list` only ever reads what is already recorded.
+  Future<List<Claim>> memoryClaims(List<String> bindingIds) {
+    if (bindingIds.isEmpty) return Future.value(const []);
+    return listAll(
+      Operations.memoryList,
+      Claim.fromJson,
+      extra: {'binding_ids': bindingIds},
+    );
+  }
+
+  /// Freezes a retraction bound to the exact claim version this view saw.
+  /// Retraction is a `Job`: the acknowledgment rule applies to its `state`
+  /// exactly as it does to a review or a pause, never to submission alone.
+  Submission prepareMemoryRetract({
+    required String brainId,
+    required String claimId,
+    required int claimVersion,
+    required String reason,
+  }) => client.prepare(Operations.memoryRetract, {
+    'scope': client.scope(),
+    'brain_id': brainId,
+    'claim': {'id': claimId, 'version': claimVersion},
+    'reason': reason,
+  });
+
+  /// Looks up a retraction job whose acknowledgment was unknown, or whose
+  /// last known state was still `pending`/`running`.
+  Future<Job> memoryJobGet(String id) async {
+    final r = await client.query(Operations.memoryJobGet, {
+      'scope': client.scope(),
+      'id': id,
+    });
+    return Job.fromJson(_resource(r.data, 'memory.job.get'));
+  }
+
+  // ---- responsibility-to-schedule links -----------------------------------
+
+  Future<List<Schedule>> schedules() =>
+      listAll(Operations.scheduleList, Schedule.fromJson);
+
+  // ---- autonomy evidence and recovery obligations -------------------------
+
+  Future<List<Qualification>> autonomyQualifications() =>
+      listAll(Operations.autonomyQualificationList, Qualification.fromJson);
+
+  Future<List<Run>> runs() => listAll(Operations.runList, Run.fromJson);
+
+  /// Generation, leases, conflicting resources and effect obligations this
+  /// run still carries — read before any replacement, never invented from
+  /// the run's bare state.
+  Future<List<Requirement>> runRecovery(String runId) async {
+    final r = await client.query(Operations.runRecovery, {
+      'scope': client.scope(),
+      'id': runId,
+    });
+    final o = StrictObject(r.requireData('run.recovery'), 'run.recovery');
+    Run.fromJson(o.object('resource'));
+    final obligations = [
+      for (final req in o.list('obligations')) Requirement.fromJson(req),
+    ];
+    o.finish();
+    return obligations;
+  }
+
   /// Reads up to 1 MiB from the start of an artifact.
   Future<ArtifactRead> artifactRead(String id) async {
     final r = await client.query(Operations.artifactRead, {

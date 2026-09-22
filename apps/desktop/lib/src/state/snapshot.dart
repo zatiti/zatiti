@@ -8,6 +8,7 @@ extension type const OrganizationId(String value) {}
 extension type const ConversationId(String value) {}
 extension type const ReviewId(String value) {}
 extension type const RoutineId(String value) {}
+extension type const ClaimId(String value) {}
 
 /// One worker in the organization tree.
 class WorkerEntry {
@@ -313,26 +314,69 @@ class VerifierIdentity {
   final int version;
 }
 
+/// A real cron-like `Schedule` linked to a responsibility's worker, read from
+/// `schedule.list` — kept a distinct object from [RoutineEntry.triggers] so
+/// an event trigger string is never rendered as though it were a schedule.
+class ScheduleLink {
+  const ScheduleLink({
+    required this.id,
+    required this.timezone,
+    required this.expression,
+    required this.misfire,
+    required this.catchUpSeconds,
+    required this.paused,
+    this.nextWake,
+  });
+
+  final String id;
+  final String timezone;
+  final String expression;
+  final String misfire;
+  final int catchUpSeconds;
+  final bool paused;
+  final DateTime? nextWake;
+}
+
 class RoutineEntry {
   const RoutineEntry({
     required this.id,
     required this.version,
     required this.workerId,
     required this.title,
-    required this.schedule,
+    required this.triggers,
+    required this.signals,
+    required this.minIntervalSeconds,
     required this.paused,
-    this.boundary = '',
+    this.lastCycleId,
     this.nextRun,
+    this.schedule,
   });
 
   final RoutineId id;
   final int version;
   final WorkerId workerId;
   final String title;
-  final String schedule;
+
+  /// Event strings that admit a new cycle. Never shown as though it were a
+  /// schedule description on its own.
+  final List<String> triggers;
+
+  /// What this responsibility watches for a trigger to react to.
+  final List<String> signals;
+  final int minIntervalSeconds;
   final bool paused;
-  final String boundary;
+
+  /// The most recent cycle this responsibility actually ran, when the
+  /// controller has recorded one.
+  final String? lastCycleId;
+
+  /// This responsibility's own next-wake decision.
   final DateTime? nextRun;
+
+  /// A real cron-like `Schedule` targeting this worker, when one exists.
+  /// Null is an honest "no schedule links this worker", never an unresolved
+  /// load.
+  final ScheduleLink? schedule;
 }
 
 class FileEntry {
@@ -342,29 +386,118 @@ class FileEntry {
     required this.title,
     required this.detail,
     required this.verified,
+    required this.digest,
+    required this.classification,
+    this.taskId,
+    this.taskTitle,
+    this.checks = const [],
   });
 
   final String id;
   final WorkerId workerId;
   final String title;
   final String detail;
+
+  /// `true` only for the controller's own `available` state. `false` means
+  /// `fault` — an integrity failure or missing bytes, not merely "not yet
+  /// checked".
   final bool verified;
+
+  /// The full, immutable content digest — never truncated for display here;
+  /// a caller that wants a short label truncates it itself.
+  final String digest;
+  final String classification;
+
+  /// The task this artifact's provenance names, when the controller recorded
+  /// one (`Artifact.scope.task_id`).
+  final String? taskId;
+  final String? taskTitle;
+
+  /// The task's own sealed checks, as plain labels — the *configured*
+  /// verifier contract, never a claim about which of them actually passed
+  /// (that fact belongs to the owning task's own state/detail).
+  final List<String> checks;
 }
 
 class MemoryEntry {
   const MemoryEntry({
     required this.id,
     required this.workerId,
+    required this.bindingId,
+    required this.brainId,
+    required this.claimVersion,
     required this.title,
     required this.text,
     required this.provenance,
+    required this.freshness,
+    required this.active,
+    this.confidence,
+    this.canRetract = false,
+  });
+
+  final ClaimId id;
+  final WorkerId workerId;
+  final String bindingId;
+  final String brainId;
+
+  /// The claim's own resource version — what `memory.retract` binds as
+  /// `claim.version`.
+  final int claimVersion;
+  final String title;
+  final String text;
+  final List<String> provenance;
+  final DateTime freshness;
+
+  /// `false` means a retraction has already excluded this claim from
+  /// recall. The claim itself stays listed — retraction removes it from
+  /// active recall, never from this audit view (R15-006).
+  final bool active;
+
+  /// 0..1000000 (parts-per-million), when the controller reported one.
+  final int? confidence;
+
+  /// Whether the binding this claim came through actually grants `retract`
+  /// for the caller — an unsupported action is never offered as a live
+  /// button.
+  final bool canRetract;
+}
+
+/// One capability-specific autonomy record for a worker — never a global
+/// trust score (R16-009).
+class AutonomyEntry {
+  const AutonomyEntry({
+    required this.id,
+    required this.workerId,
+    required this.capability,
+    required this.destinations,
+    required this.state,
+    required this.explanation,
   });
 
   final String id;
   final WorkerId workerId;
-  final String title;
-  final String text;
-  final List<String> provenance;
+  final String capability;
+  final List<String> destinations;
+
+  /// `proposed`, `qualified`, `rejected`, `restricted` or `expired`.
+  final String state;
+  final String explanation;
+}
+
+/// Recovery obligations a non-terminal run still carries, read from
+/// `run.recovery` — never inferred from a task's bare state.
+class RecoveryEntry {
+  const RecoveryEntry({
+    required this.id,
+    required this.workerId,
+    required this.label,
+    required this.obligations,
+  });
+
+  final String id;
+  final WorkerId workerId;
+  final String label;
+  final List<String> obligations;
 }
 
 class AccessEntry {
@@ -423,6 +556,8 @@ class SpendingEntry {
     required this.headline,
     required this.detail,
     this.fraction,
+    this.ceiling,
+    this.contextCapture,
   });
 
   final WorkerId workerId;
@@ -431,6 +566,16 @@ class SpendingEntry {
 
   /// Spent share of the limit, 0..1, when a limit exists.
   final double? fraction;
+
+  /// The worker's own effective spend/step ceiling, in words, when one is
+  /// configured — real cost liability, not merely what has been spent so
+  /// far.
+  final String? ceiling;
+
+  /// `complete`, `partial` or `advisory`: how much of a model step's real
+  /// context this worker's execution profile actually captures. Null means
+  /// no profile is configured, never a guessed default.
+  final String? contextCapture;
 }
 
 /// The details-panel tabs.
@@ -512,6 +657,8 @@ class WorkspaceSnapshot {
     this.memory = const [],
     this.access = const [],
     this.spending = const [],
+    this.autonomy = const [],
+    this.recovery = const [],
     this.principals = const [],
     this.prerequisites = const [],
     this.unresolvedOperations = const [],
@@ -539,6 +686,8 @@ class WorkspaceSnapshot {
   final List<MemoryEntry> memory;
   final List<AccessEntry> access;
   final List<SpendingEntry> spending;
+  final List<AutonomyEntry> autonomy;
+  final List<RecoveryEntry> recovery;
 
   /// Every identity the controller authenticates, in stable name order.
   final List<PrincipalEntry> principals;

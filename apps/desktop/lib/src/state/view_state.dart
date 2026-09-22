@@ -358,3 +358,31 @@ class RoutineView {
     RoutinePhase.paused => 'Paused',
   };
 }
+
+/// Where a claim's own retraction stands, before the acknowledgment rule
+/// lets this view claim anything happened. Mirrors [RoutinePhase]'s shape.
+enum ClaimActionPhase { submitting, acknowledgmentUnknown, requested }
+
+/// A memory claim as the Memory tab renders it: the controller's own record,
+/// plus whatever this window has submitted toward retracting it.
+class MemoryClaimView {
+  const MemoryClaimView({required this.claim, this.phase, this.note});
+
+  final MemoryEntry claim;
+  final ClaimActionPhase? phase;
+
+  /// The last known retraction job status, once one was requested.
+  final String? note;
+
+  String get statusLabel => switch (phase) {
+    ClaimActionPhase.submitting => 'Retracting…',
+    ClaimActionPhase.acknowledgmentUnknown =>
+      'Checking whether this was received',
+    ClaimActionPhase.requested => note ?? 'Retraction requested',
+    null => claim.active ? 'Active' : 'Retracted',
+  };
+
+  /// True only when nothing is in flight, the claim is still active, and the
+  /// binding it came through actually grants `retract`.
+  bool get canRetract => phase == null && claim.active && claim.canRetract;
+}

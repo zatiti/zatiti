@@ -9,6 +9,7 @@ import '../state/view_state.dart';
 import '../state/workspace_controller.dart';
 import 'action_review_dialog.dart';
 import 'creation_dialogs.dart';
+import 'memory_dialogs.dart';
 import 'task_dialogs.dart';
 import 'theme.dart';
 import 'widgets.dart';
@@ -279,14 +280,7 @@ class WorkerDetailsPanel extends StatelessWidget {
         final files = controller.filesFor(worker.id);
         return [
           note('Results stay here, even after the conversation moves on.'),
-          for (final f in files)
-            MiniCard(
-              title: f.title,
-              status: f.verified ? 'Available' : 'Not verified',
-              statusIcon: Icons.description_outlined,
-              body: f.detail,
-              footnotes: [_owner(f.workerId)],
-            ),
+          for (final f in files) _file(f),
           if (files.isEmpty && !hasNotice)
             const EmptyState('No completed files in this conversation.'),
         ];
@@ -294,14 +288,11 @@ class WorkerDetailsPanel extends StatelessWidget {
       case DetailsTab.memory:
         final memory = controller.memoryFor(worker.id);
         return [
-          note('Useful context, with a clear source and sharing scope.'),
-          for (final m in memory)
-            MiniCard(
-              title: m.title,
-              status: 'Shared preference',
-              body: m.text,
-              footnotes: m.provenance,
-            ),
+          note(
+            'Read-only claims with source, freshness and retraction. New '
+            'memory is added through conversation, not this panel.',
+          ),
+          for (final m in memory) _memory(context, m),
           if (memory.isEmpty && !hasNotice)
             const EmptyState('No shared preferences in this scope.'),
         ];
@@ -309,6 +300,8 @@ class WorkerDetailsPanel extends StatelessWidget {
       case DetailsTab.access:
         final access = controller.accessFor(worker.id);
         final spending = controller.spendingFor(worker.id);
+        final autonomy = controller.autonomyFor(worker.id);
+        final recovery = controller.recoveryFor(worker.id);
         return [
           note(
             '${worker.name}’s permissions are specific. New '
@@ -333,15 +326,97 @@ class WorkerDetailsPanel extends StatelessWidget {
                   ),
               ],
             ),
+          if (autonomy.isNotEmpty)
+            const SectionLabel('Autonomy — exact capability, not a score'),
+          for (final a in autonomy) _autonomy(a),
           if (spending != null) ...[
-            const SectionLabel('Spending'),
+            const SectionLabel('Cost and execution posture'),
             _Spending(spending),
           ],
-          if (access.isEmpty && spending == null && !hasNotice)
+          if (recovery.isNotEmpty) const SectionLabel('Recovery obligations'),
+          for (final r in recovery) _recovery(r),
+          if (access.isEmpty &&
+              spending == null &&
+              autonomy.isEmpty &&
+              recovery.isEmpty &&
+              !hasNotice)
             const EmptyState('No access is recorded for this worker.'),
         ];
     }
   }
+
+  Widget _file(FileEntry f) => MiniCard(
+    key: ValueKey('file-${f.id}'),
+    title: f.title,
+    status: f.verified ? 'Available' : 'Integrity failure',
+    statusIcon: f.verified ? Icons.description_outlined : Icons.error_outline,
+    statusIsDecision: !f.verified,
+    body: f.detail,
+    footnotes: [
+      'Digest: ${f.digest.isEmpty ? 'not recorded' : f.digest}',
+      'Sharing: ${f.classification}',
+      if (f.taskId != null) 'From task: ${f.taskTitle ?? f.taskId}',
+      for (final check in f.checks) 'Sealed check — $check',
+      _owner(f.workerId),
+    ],
+  );
+
+  Widget _memory(BuildContext context, MemoryClaimView v) {
+    final claim = v.claim;
+    return MiniCard(
+      key: ValueKey('memory-${claim.id.value}'),
+      title: claim.title,
+      status: v.statusLabel,
+      statusIcon: claim.active ? Icons.check_circle_outline : Icons.block,
+      statusIsDecision: !claim.active,
+      body: claim.text,
+      footnotes: [
+        ...claim.provenance,
+        if (claim.confidence != null)
+          'Confidence: ${(claim.confidence! / 10000).toStringAsFixed(1)}%',
+        if (!claim.canRetract && claim.active)
+          'Retraction is not authorized for this claim from this client.',
+      ],
+      actions: [
+        if (v.canRetract)
+          OutlinedButton(
+            key: ValueKey('memory-retract-${claim.id.value}'),
+            onPressed: () =>
+                showMemoryRetractDialog(context, controller, claim),
+            child: const Text('Retract'),
+          ),
+      ],
+    );
+  }
+
+  Widget _autonomy(AutonomyEntry a) => MiniCard(
+    key: ValueKey('autonomy-${a.id}'),
+    title: a.capability,
+    status: switch (a.state) {
+      'qualified' => 'Qualified',
+      'restricted' => 'Restricted',
+      'rejected' => 'Not qualified',
+      'proposed' => 'Proposed · awaiting evidence',
+      'expired' => 'Expired',
+      _ => a.state,
+    },
+    statusIcon: a.state == 'qualified' ? Icons.check : Icons.shield_outlined,
+    statusIsDecision: a.state != 'qualified',
+    body: a.explanation,
+    footnotes: [
+      if (a.destinations.isNotEmpty)
+        'Destinations: ${a.destinations.join(', ')}',
+    ],
+  );
+
+  Widget _recovery(RecoveryEntry r) => MiniCard(
+    key: ValueKey('recovery-${r.id}'),
+    title: r.label,
+    status: 'Needs review',
+    statusIcon: Icons.build_circle_outlined,
+    statusIsDecision: true,
+    footnotes: r.obligations,
+  );
 
   String _owner(WorkerId id) {
     final w = controller.snapshot.worker(id);
@@ -349,13 +424,41 @@ class WorkerDetailsPanel extends StatelessWidget {
     return [w.name, ...w.organizationPath.skip(1).take(1)].join(' · ');
   }
 
+  /// A trigger string is never rendered as a schedule: a real cron-like
+  /// `Schedule` (when one links this worker) shows its own expression,
+  /// timezone and misfire policy; otherwise this names exactly what admits a
+  /// cycle, honestly labeled as event-driven.
+  String _scheduleLine(RoutineEntry routine) {
+    final s = routine.schedule;
+    if (s != null) {
+      final paused = s.paused ? ' · schedule paused' : '';
+      return '${s.expression} (${s.timezone}) · misfire: ${s.misfire}$paused';
+    }
+    return routine.triggers.isEmpty
+        ? 'Event-driven: runs when a watched signal changes. No cron-like '
+              'schedule links this worker.'
+        : 'Event-driven on: ${routine.triggers.join(', ')}. No cron-like '
+              'schedule links this worker.';
+  }
+
   Widget _routine(RoutineView r) => MiniCard(
+    key: ValueKey('routine-${r.routine.id.value}'),
     title: r.routine.title,
     status: r.label,
     statusIcon: r.phase == RoutinePhase.paused ? Icons.pause : Icons.schedule,
-    body: r.routine.schedule,
+    body: _scheduleLine(r.routine),
     footnotes: [
-      if (r.routine.boundary.isNotEmpty) r.routine.boundary,
+      if (r.routine.signals.isNotEmpty)
+        'Watches: ${r.routine.signals.join(', ')}',
+      'Minimum interval between cycles: ${r.routine.minIntervalSeconds}s',
+      r.routine.nextRun != null
+          ? 'Next wake: ${r.routine.nextRun!.toIso8601String()}'
+          : 'No next-wake decision recorded yet.',
+      if (r.routine.schedule?.nextWake != null)
+        'Schedule next wake: ${r.routine.schedule!.nextWake!.toIso8601String()}',
+      r.routine.lastCycleId != null
+          ? 'Last cycle: ${r.routine.lastCycleId}'
+          : 'No cycle has run yet.',
       if (r.phase != RoutinePhase.paused)
         'Pausing stops new runs of this responsibility only. Work already '
             'started continues, and unrelated tasks are not cancelled.',
@@ -484,6 +587,25 @@ class _Spending extends StatelessWidget {
               ),
             ),
           Text(entry.detail, style: text.bodySmall),
+          if (entry.ceiling != null)
+            Padding(
+              padding: const EdgeInsets.only(top: Space.sm),
+              child: Text(entry.ceiling!, style: text.bodySmall),
+            ),
+          if (entry.contextCapture != null)
+            Padding(
+              padding: const EdgeInsets.only(top: Space.sm),
+              child: Text(switch (entry.contextCapture) {
+                'complete' => 'Context capture: complete.',
+                'partial' =>
+                  'Context capture: partial — some execution '
+                      'context may not be captured.',
+                'advisory' =>
+                  'Context capture: advisory only — outputs '
+                      'here are suggestions, never confirmed state.',
+                final other => 'Context capture: $other.',
+              }, style: text.bodySmall),
+            ),
         ],
       ),
     );

@@ -177,6 +177,21 @@ class _CreationWorld {
             },
           }),
         );
+      case 'budget.get':
+        return completed(
+          jsonEncode({
+            'limits': {
+              'currency': 'XXX',
+              'spend_micro_units': 0,
+              'concurrency': 1,
+              'model_steps': 1,
+              'child_count': 0,
+              'delegation_depth': 0,
+              'attempt_seconds': 60,
+              'root_deadline': '2026-09-18T18:00:00Z',
+            },
+          }),
+        );
       case 'installation.verifier.list':
         return items([
           {
