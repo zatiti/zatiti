@@ -10,14 +10,17 @@ No release exists. The controller binary (`cmd/zatiti`) is landed but no
 release build of it has been packaged; the Flutter desktop client
 (`apps/desktop`) has not been built for release; the Serenity pin and the
 Flutter, Dart, and plugin pins are unresolved in
-`docs/implementation/dependencies.lock.json`. Nothing in this directory is
-an installation command, and nothing here claims that an artifact is signed,
-notarized, or published.
+`docs/implementation/dependencies.lock.json`. The `zatiti-pack` executable
+below is a real packaging/install driver, not an installation command for a
+release: it needs a staged tree, and none exists until the gaps above close.
+Nothing here claims that an artifact is signed, notarized, or published.
 
 Everything in this root is proven against synthetic trees in temporary
-directories. Behavior against a real binary, a real Flutter build, a real
-`launchd` or `systemd`, and a real keychain is qualification work. See
-[QUALIFICATION.md](QUALIFICATION.md).
+directories, including `zatiti-pack`'s own tests, which run the real
+executable's code (in-process, against a recording stand-in for `launchctl`
+and `systemctl`, never the host's real ones). Behavior against a real
+binary, a real Flutter build, a real `launchd` or `systemd`, and a real
+keychain is qualification work. See [QUALIFICATION.md](QUALIFICATION.md).
 
 ## What the package provides
 
@@ -35,6 +38,70 @@ directories. Behavior against a real binary, a real Flutter build, a real
 | `desktop.go` | The desktop distribution's manifest rules |
 | `desktop_bundle.go` | Deterministic bundle archive assembly, extraction, and verification |
 | `desktop_install.go` | Desktop layout, install, upgrade, uninstall, audit, and the Linux launcher entry |
+| `cli.go`, `cli_*.go` | The packaging/install driver's implementation (`RunCLI`), built entirely on the exported functions above |
+| `cmd/zatiti-pack` | The driver's five-line executable entry point; `go build ./packaging/cmd/zatiti-pack` |
+
+## The packaging/install driver
+
+`zatiti-pack` is an executable command-line driver over this package's
+library: it assembles a manifest from a staged tree, signs and verifies it,
+and plans and applies install, upgrade, and uninstall for either
+distribution. It adds no capability the library does not already have -
+`RunCLI` (`cli.go`) parses flags and calls the same exported functions this
+package's own tests call, which is also why `go test ./packaging` exercises
+the driver's exact code, not a stand-in for it.
+
+```
+go build -o zatiti-pack ./packaging/cmd/zatiti-pack
+zatiti-pack help
+```
+
+Every subcommand prints one JSON document to stdout on success, or one JSON
+error document to stderr (`{"error": {"code", "message", "findings"}}`) on
+failure, and exits 0 on success or a small nonzero code modeled on the
+frozen CLI convention (`invalid_input`=2, `conflict`=4,
+`prerequisite_missing`/`capability_unsupported`=5, otherwise 1).
+
+- `assemble --root <tree> --descriptor <file.json> [--write]` builds a
+  manifest from a staged tree and a descriptor file (the same fields
+  `BuildInput` takes, as JSON) and, with `--write`, writes it into the tree
+  as `manifest.json`. `assemble-bundle --dir <built bundle> --archive <out>`
+  does the same for the desktop application bundle.
+- `keygen --private-out <file> --public-out <file>` generates a local
+  Ed25519 key pair for development and testing signatures only. This
+  repository holds no release identity, and this command must never be used
+  to mint one for an actual release: `sign` and `verify` never claim, and
+  this driver never performs, a real release signing, notarization,
+  publication, or deployment.
+- `sign --manifest <file> --key <PEM PKCS8 file>` and
+  `verify --manifest <file> --sig <file> --trusted <PEM PKIX file>...
+  [--tree <dir>]` wrap `Sign` and `VerifySignature` (and, with `--tree`,
+  `VerifyTree`).
+- `install` and `uninstall` (each `--distribution controller|desktop --os
+  darwin|linux --home <dir> --state-dir <dir> ...`) plan an install,
+  upgrade, or uninstall and, with `--apply`, execute it; omitted, they are a
+  dry run that touches nothing on disk. `install` requires a verified
+  signature (`--trusted`, and `--sig` if it is not next to the manifest)
+  unless the caller explicitly accepts `--allow-unsigned`, so a tampered
+  manifest, artifact, secure helper declaration, or profile claim is
+  refused before any service is touched. A controller `install` additionally
+  takes `--services <file.json>`, an array of service specifications in the
+  same shape `ServiceSpec` takes.
+- `service --verb load|unload|restart --label <label> --unit <file> --os
+  <os>` drives one launcher directly, outside of a plan - `restart` is
+  `unload` followed by `load` through the same manager.
+- `audit` and `inspect` wrap `AuditInstalled`/`AuditDesktopInstalled` and
+  `Inspect`.
+- `master-key provision --key-path <file> ...` and
+  `master-key check --key-path <file>` wrap `ProvisionMasterKey` and
+  `CheckMasterKey`.
+
+`install`, `uninstall`, and `service` take `--service-manager
+launchd|systemd|none|auto` (`auto`, the default, follows `--os`), and
+`--launchctl`/`--systemctl` to override the default absolute tool path
+(`DefaultLaunchctl`/`DefaultSystemctl`) - most useful for pointing the
+driver at a recording stand-in while testing or auditing this tool, the same
+substitution its own tests make.
 
 ## Release manifest
 
