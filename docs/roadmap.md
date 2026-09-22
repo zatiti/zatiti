@@ -3141,3 +3141,16 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   merge-blocking check in this repo. Every other check (specification
   drift, static checks, workflow validation, flutter desktop client x2)
   passed clean. Worktree/branch cleaned up, P42 claim released.
+- 2026-09-22 ~01:20 PT -- OPERATIONAL FINDING: the pre-commit hook runs
+  `go test -p 2 -timeout 30m ./...` with no per-package timeout override,
+  so as long as tests/integration's TestExpiredCursorDemandsSnapshotAnd-
+  ReplaysWithoutGap hang (see ~00:40 PT entry, internal/contract.
+  ValidateSchema/strictParse) remains unfixed, EVERY commit touching a
+  non-expected-red package pays up to the full 30-minute ceiling waiting
+  for that one package's test binary to time out, even though the failure
+  itself is already tracked/tolerated. This is a real productivity cost
+  across the rest of this session, not just a one-off. Worth prioritizing
+  a real fix for the internal/contract hang sooner rather than leaving it
+  as a low-priority out-of-scope note -- flagging for founder visibility
+  rather than unilaterally spinning up a new card outside the current
+  plan's numbering.
