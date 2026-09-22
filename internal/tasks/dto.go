@@ -41,10 +41,17 @@ func (w wireScope) toContract() contract.Scope {
 	}
 }
 
-// wireArtifactRef mirrors #/$defs/ArtifactRef.
+// wireArtifactRef mirrors #/$defs/ArtifactRef when Digest is set (every
+// caller that has real published bytes to pin always sets it, unaffected by
+// omitempty below). recordEvidence (transition.go) is the one caller that
+// never has a digest -- evidence_ids arrives as bare UUIDs, by the frozen
+// _tasks.transition input shape -- and omitempty is what lets that ID-only
+// reference actually reach the wire as {"id":...} rather than the invalid
+// {"id":...,"digest":""}: _artifacts.metadata's own input schema requires
+// digest to match ^[0-9a-f]{64}$ only when the field is present at all.
 type wireArtifactRef struct {
 	ID     contract.ID     `json:"id"`
-	Digest contract.Digest `json:"digest"`
+	Digest contract.Digest `json:"digest,omitempty"`
 }
 
 // wireRef mirrors #/$defs/Ref.

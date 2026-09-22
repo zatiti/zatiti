@@ -1,6 +1,6 @@
 # Implementation assignment: `internal/artifacts`
 
-Generated specification revision 3; source digest `699397bd82e8dc5145849c385b02103be70ff8493e938d273d9b6e61313d78c7`. This file is committed implementation context. Do not independently edit it. Everything required from the product specification and adjacent interfaces is embedded below; no RFC copy is required.
+Generated specification revision 3; source digest `67ab25bc368b7818e80307a39aa404c12edb5fd35d3ee695380609e37a1d2718`. This file is committed implementation context. Do not independently edit it. Everything required from the product specification and adjacent interfaces is embedded below; no RFC copy is required.
 
 ## Mission and scope
 
@@ -536,11 +536,11 @@ An accepted output slot freezes name, classification, media type, max bytes and 
 
 Allowed internal callers: execution, tasks, effects, memory, messaging, skills, installation. Submission key: not required at this internal/query/bootstrap boundary.
 
-Validate scope, digests, availability and classification of pinned artifacts before disclosure or acceptance.
+Validate scope, availability and classification of pinned artifacts, by id alone or id-plus-digest, before disclosure or acceptance; a caller with only an id (evidence and acceptance references never carry one) resolves by id, and one that also supplies a digest additionally fences the match against it.
 
 Input schema:
 ```json
-{"type":"object","additionalProperties":false,"properties":{"scope":{"$ref":"#/$defs/Scope"},"artifacts":{"type":"array","items":{"$ref":"#/$defs/ArtifactRef"},"maxItems":4096}},"required":["scope","artifacts"]}
+{"type":"object","additionalProperties":false,"properties":{"scope":{"$ref":"#/$defs/Scope"},"artifacts":{"type":"array","items":{"type":"object","additionalProperties":false,"properties":{"id":{"type":"string","format":"uuid"},"digest":{"type":"string","pattern":"^[0-9a-f]{64}$"}},"required":["id"]},"maxItems":4096}},"required":["scope","artifacts"]}
 ```
 Output data schema:
 ```json

@@ -388,7 +388,7 @@ func (s *Service) admitAttempt(ctx context.Context, unit contract.Unit, r *runRo
 	if err := updateRun(ctx, unit, r); err != nil {
 		return contract.Outcome[claimBody]{}, err
 	}
-	if _, err := s.transitionTask(ctx, unit, task.ID, task.Version, "running", []contract.ID{a.ID}, "", false); err != nil {
+	if _, err := s.transitionTask(ctx, unit, task.ID, task.Version, "running", []contract.ID{}, "", false); err != nil {
 		return contract.Outcome[claimBody]{}, err
 	}
 	if err := emitTransition(ctx, unit, eventRunClaimed, r.ID, r.Version); err != nil {
@@ -641,7 +641,7 @@ func (s *Service) handleRunCancel(ctx context.Context, unit contract.Unit, in ca
 	}
 	task, err := s.callTaskSnapshot(ctx, unit, r.Scope, r.TaskID)
 	if err == nil && task.State != "cancelled" {
-		if _, err := s.transitionTask(ctx, unit, task.ID, task.Version, "cancelled", []contract.ID{r.ID}, "", false); err != nil {
+		if _, err := s.transitionTask(ctx, unit, task.ID, task.Version, "cancelled", []contract.ID{}, "", false); err != nil {
 			return contract.Outcome[dispositionBody]{}, err
 		}
 	}
