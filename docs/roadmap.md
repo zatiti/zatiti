@@ -3395,3 +3395,44 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   pattern already in cmd/zatiti as the convention to extend. Also flagged
   the untriaged cmd/zatiti CI flake (TestServeCompletesBootstrapOverThe
   Socket) as environmental noise, not something to chase or work around.
+- 2026-09-22 ~05:45 PT -- SIGNIFICANT FINDING (P33, not yet a founder
+  decision needed -- tactical path is clear and safe, flagging for
+  visibility): after three cards (P31 internal/installation, P32
+  internal/controller, P33 cmd/zatiti in progress), the offline restore
+  protocol (P00-011) still cannot complete end to end in production.
+  P33's agent found, and I independently verified two of the four claims
+  myself before agreeing: (1) no merge operation exists anywhere across
+  internal/effects, internal/identity, internal/memory, internal/accounting
+  to fold a RecoveryOverlay into another owner's tables -- the ops simply
+  don't exist yet, not a missing wrapper; (2) P31's own landed test
+  (restore_test.go:386) already documents that identity/grant revocations
+  were never captured into the overlay in the first place, since no port
+  installation may call enumerates them; (3) StageCandidate structurally
+  cannot resolve which backup artifact to stage from a bare job ID --
+  verified myself: execution's jobOut() (dto.go:499) never sets Input on
+  the public job.get response, only job.claim returns it, and the
+  controller already consumes and keeps that in its own process memory,
+  never passed to RestoreLifecycle; (4) the actual bundle decrypt/decode
+  logic (internal/installation/bundle.go, crypto.go) is unexported --
+  genuinely unreachable from cmd/zatiti by Go visibility rules, so
+  RestoreLifecycle's own doc comment's claim of "direct Go access" is
+  inaccurate as written. Approved landing P33's achievable, honest subset
+  (outer ErrRestoreHandoff reassembly loop, a startup-order fix closing a
+  real race between listener admission and the controller's own startup
+  fence, Collaborators wiring, resume/status reporting) with MergeOverlay/
+  StageCandidate returning prerequisite_missing rather than faking success
+  -- this is literally the fallback path P32's own design already built
+  for exactly this situation, not new invented behavior. Declined the
+  alternative (duplicating the bundle's AES-256-GCM crypto logic in
+  cmd/zatiti) as a real security/maintenance liability for a single card's
+  convenience. The actual follow-up work needed before restore can
+  genuinely complete: new merge operations spanning effects/identity/
+  memory/accounting, revocation-obligation capture added to P31's
+  snapshotObligations, and a real job-input lookup path for StageCandidate
+  -- a coordinated, multi-package contract-adjacent change, not something
+  any single remaining plan card's scope covers. Also found: docs/
+  implementation/contracts.md's own restore-protocol section is stale
+  against what P32 actually shipped (still describes RestoreCoordinator/
+  SnapshotInventory as installation-only, never the controller) -- P33
+  correctly left it untouched (outside cmd/zatiti); tracking as my own
+  tiny docs-only follow-up.
