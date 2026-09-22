@@ -102,6 +102,12 @@ abstract interface class WorkspaceSource {
   /// Fetches the current preview of one review.
   Future<ReviewEntry> refreshReview(ReviewId id);
 
+  /// Reads the full authorized message history for [conversation], oldest
+  /// first: the real reply history, never a fabricated local response and
+  /// never limited to what this window happens to remember. Called lazily,
+  /// only for a conversation the person has actually opened.
+  Future<List<ChatMessage>> loadMessages(ConversationId conversation);
+
   /// Freezes a decision bound to the exact version and digest of [review].
   PendingSubmission prepareDecision(ReviewEntry review, DecisionChoice choice);
 

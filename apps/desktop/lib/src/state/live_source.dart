@@ -7,6 +7,7 @@ import 'dart:convert';
 
 import '../api/controller_api.dart';
 import '../api/models.dart' as wire;
+import '../app/local_store.dart';
 import '../transport/controller_client.dart';
 import '../transport/envelope.dart';
 import '../transport/errors.dart';
@@ -17,36 +18,85 @@ import 'snapshot.dart';
 import 'workspace_source.dart';
 
 class _LiveSubmission implements PendingSubmission {
-  _LiveSubmission(this.submission, {this.onAcknowledged});
+  _LiveSubmission(this.submission);
 
   final Submission submission;
-  final void Function()? onAcknowledged;
 
   @override
   String get description => submission.operation;
 }
 
+/// What this source knows about one conversation from the last snapshot,
+/// enough to interpret a message's authorship without ever querying "who am
+/// I": the catalog has no such operation (see the class doc below).
+class _ConversationMeta {
+  const _ConversationMeta({required this.kind, this.workerId});
+  final wire.ConversationKind kind;
+  final String? workerId;
+}
+
 class LiveWorkspaceSource implements WorkspaceSource {
+  /// [initialEventCursor]/[initialLastSequence] resume event replay across a
+  /// restart instead of re-baselining to "now", which would silently skip
+  /// whatever happened while the app was closed; the caller reads them from
+  /// [LocalStore] once at startup, before this source exists. [localStore]
+  /// (optional; omitted in tests) is where this source persists the cursor
+  /// as it advances, read-modify-write against the same file the controller
+  /// persists its own selection/cache fields to.
   LiveWorkspaceSource(
     ControllerClient client, {
-    this.principalId,
     String? endpointLabel,
     DateTime Function()? clock,
+    String? initialEventCursor,
+    int initialLastSequence = 0,
+    LocalStore? localStore,
   }) : api = ControllerApi(client),
        _clock = clock ?? (() => DateTime.now().toUtc()),
-       label = endpointLabel ?? 'Controller';
+       label = endpointLabel ?? 'Controller',
+       _eventCursor = initialEventCursor,
+       _lastSequence = initialLastSequence,
+       _localStore = localStore,
+       _installationId = client.installationId;
 
   final ControllerApi api;
 
-  /// The caller's own principal, needed by `mailbox.list`. Startup
-  /// configuration: the catalog has no operation that returns it.
-  final String? principalId;
-
   final DateTime Function() _clock;
   final Map<String, String> _toolNames = {};
-  final Map<String, List<ChatMessage>> _sentThisSession = {};
+  final Map<String, _ConversationMeta> _conversationMeta = {};
+
+  /// Every known identity's display name, from the last `principal.list`
+  /// read. Used to label a group message's real sender (see [_chatMessage]);
+  /// never used to guess which identity is "me".
+  final Map<String, String> _principalNames = {};
   String? _eventCursor;
-  int _lastSequence = 0;
+  int _lastSequence;
+  final LocalStore? _localStore;
+  final String _installationId;
+
+  /// Persists the fully-consistent (cursor, sequence) pair once the page
+  /// loop that may have advanced both has finished — never mid-page, so a
+  /// persisted pair is never observed half-updated. Read-modify-write: the
+  /// controller may hold the same file's selection/cache fields, so this
+  /// only ever changes the cursor fields, never overwriting the rest with a
+  /// stale copy. Best-effort: a write failure here changes nothing about
+  /// event replay, which the in-memory cursor keeps regardless.
+  Future<void> _persistCursor() async {
+    final cursor = _eventCursor;
+    final store = _localStore;
+    if (cursor == null || store == null) return;
+    try {
+      final current = await store.read(_installationId);
+      await store.write(
+        current.copyWith(
+          installationId: _installationId,
+          eventCursor: cursor,
+          lastSequence: _lastSequence,
+        ),
+      );
+    } on Object {
+      // Best-effort, as documented above.
+    }
+  }
 
   @override
   SourceKind get kind => SourceKind.controller;
@@ -115,26 +165,15 @@ class LiveWorkspaceSource implements WorkspaceSource {
 
   @override
   PendingSubmission prepareMessage(ConversationId conversation, String body) {
+    // The controller keeps the message_id this client mints, so once this
+    // submission is acknowledged, the next `conversation.message.list` read
+    // returns the same message by the same id: the single authoritative
+    // copy, not a locally remembered echo.
     final prepared = api.prepareMessageSend(
       conversationId: conversation.value,
       body: body,
     );
-    return _LiveSubmission(
-      prepared.submission,
-      onAcknowledged: () {
-        (_sentThisSession[conversation.value] ??= []).add(
-          ChatMessage(
-            // The controller keeps this id, so a copy of this message that
-            // arrives through the mailbox is recognized and not shown twice.
-            id: prepared.messageId,
-            fromUser: true,
-            senderName: 'You',
-            body: body,
-            at: _clock(),
-          ),
-        );
-      },
-    );
+    return _LiveSubmission(prepared.submission);
   }
 
   @override
@@ -149,7 +188,6 @@ class LiveWorkspaceSource implements WorkspaceSource {
   Future<void> submit(PendingSubmission submission) => _guard(() async {
     final live = submission as _LiveSubmission;
     await api.client.submit(live.submission);
-    live.onAcknowledged?.call();
   });
 
   @override
@@ -161,10 +199,43 @@ class LiveWorkspaceSource implements WorkspaceSource {
       case DispositionFound(:final original):
         final fault = original.error;
         if (fault != null) return ResolvedRefused(_refusal(fault));
-        live.onAcknowledged?.call();
         return const ResolvedAcknowledged();
     }
   });
+
+  // ---- messages -----------------------------------------------------------
+
+  @override
+  Future<List<ChatMessage>> loadMessages(ConversationId conversation) =>
+      _guard(() async {
+        final meta = _conversationMeta[conversation.value];
+        final messages = await api.listMessages(conversation.value);
+        return [for (final m in messages) _chatMessage(m, meta)]
+          ..sort((a, b) => a.at.compareTo(b.at));
+      });
+
+  /// Whether a message is shown as the person's own. A direct conversation
+  /// has exactly the worker and the human as participants, so a sender who
+  /// is not that worker is the human — derived from data the contract
+  /// actually returns, never from a "current identity" operation the
+  /// catalog does not have (see the class doc). A group conversation may
+  /// hold more than one non-worker participant, and this client cannot
+  /// safely tell "me" apart from another human or client agent there
+  /// without that operation; it never guesses, so a group message always
+  /// renders under its real sender name instead of a fabricated "you".
+  ChatMessage _chatMessage(wire.Message m, _ConversationMeta? meta) {
+    final fromUser =
+        meta != null &&
+        meta.kind == wire.ConversationKind.direct &&
+        m.senderId != meta.workerId;
+    return ChatMessage(
+      id: m.id,
+      fromUser: fromUser,
+      senderName: fromUser ? 'You' : _principalNames[m.senderId] ?? 'Worker',
+      body: m.body,
+      at: m.createdAt,
+    );
+  }
 
   // ---- events -----------------------------------------------------------------
 
@@ -185,6 +256,7 @@ class LiveWorkspaceSource implements WorkspaceSource {
             changed = true;
           }
         }
+        await _persistCursor();
         return changed;
       });
     } on SourceRefusal {
@@ -195,8 +267,33 @@ class LiveWorkspaceSource implements WorkspaceSource {
     }
   }
 
+  /// Baselines the event cursor to "now" only when nothing was resumed from
+  /// a prior launch, or a resumed cursor turned out to be expired. A cursor
+  /// already in hand (from [LocalStore], across a restart) is replayed
+  /// forward instead, so a fresh launch never silently skips whatever
+  /// happened while the app was closed.
   Future<void> _baselineEvents() async {
-    _eventCursor = null;
+    if (_eventCursor != null) {
+      try {
+        final events = await api.listAll(
+          Operations.eventList,
+          wire.WireEvent.fromJson,
+          startCursor: _eventCursor,
+          onCursor: (c) => _eventCursor = c,
+        );
+        for (final e in events) {
+          if (e.sequence > _lastSequence) _lastSequence = e.sequence;
+        }
+        await _persistCursor();
+        return;
+      } on OperationFailedException catch (e) {
+        if (e.fault.code != FaultCode.cursorExpired) rethrow;
+        // snapshot_required: the resumed cursor is gone. The snapshot this
+        // call is already building is the recovery itself; only the cursor
+        // for subsequent quiet polling needs a fresh baseline.
+        _eventCursor = null;
+      }
+    }
     final events = await api.listAll(
       Operations.eventList,
       wire.WireEvent.fromJson,
@@ -205,6 +302,7 @@ class LiveWorkspaceSource implements WorkspaceSource {
     for (final e in events) {
       if (e.sequence > _lastSequence) _lastSequence = e.sequence;
     }
+    await _persistCursor();
   }
 
   // ---- snapshot -----------------------------------------------------------------
@@ -284,29 +382,24 @@ class LiveWorkspaceSource implements WorkspaceSource {
       Operations.principalList,
       wire.Principal.fromJson,
     );
-    // The inbox is one surface of the workspace, not the workspace. The
-    // controller keeps a mailbox private to its own recipient, so a
-    // misconfigured principal is refused here; that must cost the person
-    // their inbox, not their conversations, decisions and work.
-    var received = const <wire.Message>[];
-    String? inboxRefusal;
-    if (principalId != null) {
-      try {
-        received = await api.listAll(
-          Operations.mailboxList,
-          wire.Message.fromJson,
-          extra: {'recipient_id': principalId},
-        );
-      } on OperationFailedException catch (e) {
-        inboxRefusal = e.fault.message;
-      }
-    }
     await _baselineEvents();
 
     final workerEntries = _tree(organizations, workers, conversations);
     final workerIds = {for (final w in workerEntries) w.id.value};
-    final names = {for (final w in workers) w.id: w.name};
-    final principalNames = {for (final p in principals) p.id: p.name};
+    _principalNames
+      ..clear()
+      ..addAll({for (final p in principals) p.id: p.name});
+    final principalNames = _principalNames;
+    _conversationMeta
+      ..clear()
+      ..addEntries(
+        conversations.map(
+          (c) => MapEntry(
+            c.id,
+            _ConversationMeta(kind: c.kind, workerId: _workerOf(c, workerIds)),
+          ),
+        ),
+      );
 
     final reviewEntries = <ReviewEntry>[];
     for (final r in reviews) {
@@ -340,8 +433,7 @@ class LiveWorkspaceSource implements WorkspaceSource {
       workspaceName: 'Installation ${_short(status.installationId)}',
       workers: workerEntries,
       conversations: [
-        for (final c in conversations)
-          _conversation(c, workerIds, received, names, inboxRefusal),
+        for (final c in conversations) _conversation(c, workerIds),
       ],
       reviews: reviewEntries,
       tasks: [
@@ -418,15 +510,6 @@ class LiveWorkspaceSource implements WorkspaceSource {
           ),
         for (final r in status.requirements)
           PrerequisiteNotice(title: r.code, message: r.message),
-        if (inboxRefusal != null)
-          PrerequisiteNotice(
-            title: 'Your inbox could not be read',
-            message:
-                '$inboxRefusal A mailbox is private to its own recipient, so '
-                'the principal this app is configured with must be your own. '
-                'Conversations, decisions and work are unaffected.',
-            setupPath: 'ZATITI_PRINCIPAL_ID',
-          ),
         const PrerequisiteNotice(
           tab: DetailsTab.memory,
           title: 'Memory cannot be listed yet',
@@ -553,41 +636,29 @@ class LiveWorkspaceSource implements WorkspaceSource {
     return out;
   }
 
-  ConversationEntry _conversation(
-    wire.Conversation c,
-    Set<String> workerIds,
-    List<wire.Message> received,
-    Map<String, String> names,
-    String? inboxRefusal,
-  ) {
-    String? workerId;
-    if (c.kind == wire.ConversationKind.direct) {
-      final scoped = c.scope.workerId;
-      if (scoped != null && workerIds.contains(scoped)) {
-        workerId = scoped;
-      } else {
-        for (final p in c.participantIds) {
-          if (workerIds.contains(p)) workerId = p;
-        }
-      }
+  /// The worker a direct conversation belongs to: its scoped worker when
+  /// that worker is visible, otherwise the first participant this client
+  /// recognizes as a worker. Null for a group, and for a direct
+  /// conversation whose worker is not (yet) visible.
+  String? _workerOf(wire.Conversation c, Set<String> workerIds) {
+    if (c.kind != wire.ConversationKind.direct) return null;
+    final scoped = c.scope.workerId;
+    if (scoped != null && workerIds.contains(scoped)) return scoped;
+    for (final p in c.participantIds) {
+      if (workerIds.contains(p)) return p;
     }
-    final sent = _sentThisSession[c.id] ?? const <ChatMessage>[];
-    final sentIds = {for (final m in sent) m.id};
-    final messages = <ChatMessage>[
-      for (final m in received)
-        // A message this window sent is already listed below under the id it
-        // minted. The controller keeps that id, so a copy delivered back
-        // through the mailbox is the same message, not a second one.
-        if (m.conversationId == c.id && !sentIds.contains(m.id))
-          ChatMessage(
-            id: m.id,
-            fromUser: false,
-            senderName: names[m.senderId] ?? 'Worker',
-            body: m.body,
-            at: m.createdAt,
-          ),
-      ...sent,
-    ]..sort((a, b) => a.at.compareTo(b.at));
+    return null;
+  }
+
+  /// Builds the conversation entry from what a snapshot can cheaply know for
+  /// every conversation: identity, kind, the controller's own unread/read-
+  /// marker projection and its meaningful-activity ordering signal. The
+  /// message history itself is not fetched here — eagerly reading every
+  /// conversation's full history on every snapshot does not scale, and only
+  /// an opened conversation needs it. [WorkspaceController] overlays
+  /// [loadMessages]'s result onto this entry once the person opens it.
+  ConversationEntry _conversation(wire.Conversation c, Set<String> workerIds) {
+    final workerId = _workerOf(c, workerIds);
     return ConversationEntry(
       id: ConversationId(c.id),
       title: c.title,
@@ -595,25 +666,10 @@ class LiveWorkspaceSource implements WorkspaceSource {
           ? ConversationKind.group
           : ConversationKind.direct,
       workerId: workerId == null ? null : WorkerId(workerId),
-      messages: messages,
-      historyNotice: switch ((principalId, inboxRefusal)) {
-        (null, _) =>
-          'Earlier messages cannot be shown. The controller offers no '
-              'operation that reads a conversation’s history, and no '
-              'principal is configured for reading your inbox. Messages you '
-              'send from this window appear once the controller acknowledges '
-              'them.',
-        (_, final String refusal) =>
-          'Your inbox could not be read, so messages delivered to you are '
-              'not listed: $refusal A mailbox is private to its own '
-              'recipient, so the configured principal must be your own. '
-              'Everything else on this screen is current.',
-        _ =>
-          'Showing messages delivered to you and messages sent from this '
-              'window. The controller offers no operation that reads a '
-              'conversation’s full history, so your earlier messages are not '
-              'listed.',
-      },
+      messages: const [],
+      unreadCount: c.callerUnreadCount ?? 0,
+      lastReadMarker: c.callerLastReadMarker,
+      lastMeaningfulEvent: c.lastMeaningfulEvent,
     );
   }
 

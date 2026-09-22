@@ -84,6 +84,12 @@ class _WorkspaceSettingsState extends State<WorkspaceSettings> {
     try {
       await widget.credentials!.write(value);
       _credential.clear();
+      // A new credential may name a different principal. This client has
+      // no `identity.current` operation to confirm either way, so it never
+      // takes the chance: every locally cached identity, selection and
+      // fetched message is dropped before the reconnect that would
+      // otherwise briefly show them under the new credential.
+      await widget.controller.resetForCredentialChange();
       await _describeStored();
       await widget.controller.reconnect();
     } on Exception {
@@ -102,6 +108,7 @@ class _WorkspaceSettingsState extends State<WorkspaceSettings> {
     } on Exception {
       // Reported by the status line below.
     }
+    await widget.controller.resetForCredentialChange();
     await _describeStored();
   }
 
@@ -217,11 +224,193 @@ class _WorkspaceSettingsState extends State<WorkspaceSettings> {
                   'your controller.',
                   style: text.bodySmall,
                 ),
+                const SizedBox(height: Space.xl),
+                _TlsProfileImport(credentials: widget.credentials!),
               ],
             ],
           ),
         ),
       ),
+    );
+  }
+}
+
+/// Imports the client certificate, private key and (optionally) a trusted
+/// root bundle an explicitly configured remote controller needs for mutual
+/// TLS. This is local file/text import only: no operation in the public
+/// catalog provisions this client's own TLS material (`connection.setup.*`
+/// is for third-party service connections, not this client's identity to
+/// its own controller), so the material never leaves this dialog except
+/// into secure storage. Pasting text, not a native file picker, keeps this
+/// free of an unpinned file-picker plugin the desktop's AGENTS.md would
+/// require a dependency-lock-report to add.
+class _TlsProfileImport extends StatefulWidget {
+  const _TlsProfileImport({required this.credentials});
+  final CredentialStore credentials;
+
+  @override
+  State<_TlsProfileImport> createState() => _TlsProfileImportState();
+}
+
+class _TlsProfileImportState extends State<_TlsProfileImport> {
+  final TextEditingController _certificate = TextEditingController();
+  final TextEditingController _privateKey = TextEditingController();
+  final TextEditingController _trustedRoots = TextEditingController();
+  String? _status;
+
+  @override
+  void initState() {
+    super.initState();
+    _describeStored();
+  }
+
+  Future<void> _describeStored() async {
+    final keys = widget.credentials.keys;
+    final cert = await widget.credentials.readNamed(keys.clientCertificate);
+    if (!mounted) return;
+    setState(
+      () => _status = cert == null
+          ? 'No TLS profile is stored.'
+          : 'A TLS profile is stored. Its key material is never shown.',
+    );
+  }
+
+  Future<void> _import() async {
+    final certificate = _certificate.text.trim();
+    final privateKey = _privateKey.text.trim();
+    if (certificate.isEmpty || privateKey.isEmpty) {
+      setState(
+        () => _status =
+            'A client certificate and a private key are both required.',
+      );
+      return;
+    }
+    final keys = widget.credentials.keys;
+    try {
+      await widget.credentials.writeNamed(keys.clientCertificate, certificate);
+      await widget.credentials.writeNamed(keys.clientPrivateKey, privateKey);
+      final roots = _trustedRoots.text.trim();
+      if (roots.isEmpty) {
+        await widget.credentials.deleteNamed(keys.trustedRoots);
+      } else {
+        await widget.credentials.writeNamed(keys.trustedRoots, roots);
+      }
+      _certificate.clear();
+      _privateKey.clear();
+      _trustedRoots.clear();
+      await _describeStored();
+    } on Exception {
+      if (mounted) {
+        setState(
+          () => _status =
+              'Secure storage refused the TLS profile. Nothing was saved.',
+        );
+      }
+    }
+  }
+
+  Future<void> _remove() async {
+    final keys = widget.credentials.keys;
+    try {
+      await widget.credentials.deleteNamed(keys.clientCertificate);
+      await widget.credentials.deleteNamed(keys.clientPrivateKey);
+      await widget.credentials.deleteNamed(keys.trustedRoots);
+    } on Exception {
+      // Reported by the status line below.
+    }
+    await _describeStored();
+  }
+
+  @override
+  void dispose() {
+    _certificate.dispose();
+    _privateKey.dispose();
+    _trustedRoots.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final text = Theme.of(context).textTheme;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SectionLabel('Remote connection (mutual TLS)'),
+        const SizedBox(height: Space.sm),
+        Text(
+          'Only needed for an explicitly configured remote controller. A '
+          'local controller on this computer does not use this.',
+          style: text.bodySmall,
+        ),
+        const SizedBox(height: Space.sm),
+        Text(_status ?? 'Checking…', style: text.bodySmall),
+        const SizedBox(height: Space.md),
+        Semantics(
+          label: 'Client certificate',
+          child: TextField(
+            key: const ValueKey('tls-certificate-field'),
+            controller: _certificate,
+            maxLines: 3,
+            enableSuggestions: false,
+            autocorrect: false,
+            decoration: const InputDecoration(
+              hintText: 'Paste the client certificate (PEM)',
+            ),
+          ),
+        ),
+        const SizedBox(height: Space.sm),
+        Semantics(
+          label: 'Client private key',
+          child: TextField(
+            key: const ValueKey('tls-private-key-field'),
+            controller: _privateKey,
+            maxLines: 3,
+            obscureText: true,
+            enableSuggestions: false,
+            autocorrect: false,
+            decoration: const InputDecoration(
+              hintText: 'Paste the client private key (PEM)',
+            ),
+          ),
+        ),
+        const SizedBox(height: Space.sm),
+        Semantics(
+          label: 'Trusted roots, optional',
+          child: TextField(
+            key: const ValueKey('tls-trusted-roots-field'),
+            controller: _trustedRoots,
+            maxLines: 3,
+            enableSuggestions: false,
+            autocorrect: false,
+            decoration: const InputDecoration(
+              hintText: 'Trusted root bundle (PEM), optional',
+            ),
+          ),
+        ),
+        const SizedBox(height: Space.md),
+        Wrap(
+          spacing: Space.sm,
+          children: [
+            FilledButton(
+              key: const ValueKey('tls-profile-save'),
+              onPressed: _import,
+              child: const Text('Save TLS profile to secure storage'),
+            ),
+            TextButton(
+              key: const ValueKey('tls-profile-remove'),
+              onPressed: _remove,
+              child: const Text('Remove stored TLS profile'),
+            ),
+          ],
+        ),
+        const SizedBox(height: Space.sm),
+        Text(
+          'This material goes to your operating system’s secure storage, '
+          'exactly like the credential above, and is presented only to the '
+          'remote controller you explicitly configure.',
+          style: text.bodySmall,
+        ),
+      ],
     );
   }
 }

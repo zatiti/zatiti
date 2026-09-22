@@ -355,6 +355,23 @@ class _ThreadState extends State<_Thread> {
             ),
           for (final m in c?.messages ?? const <ChatMessage>[])
             _MessageBubble(message: m),
+          // A worker turn's other six states — acknowledgement, refusal,
+          // review-waiting and blocked-setup — already render as their own
+          // dedicated card below (an outgoing bubble, a decision card, a
+          // prerequisite notice). This is the one state with no existing
+          // card of its own: delivered, and nothing has come back yet.
+          if (c != null &&
+              outgoing.isEmpty &&
+              controller.turnStatusFor(c.id, worker: w?.id) ==
+                  TurnStatus.waitingForReply)
+            Padding(
+              padding: const EdgeInsets.only(bottom: Space.lg),
+              child: Text(
+                TurnStatus.waitingForReply.label,
+                key: const ValueKey('turn-waiting-for-reply'),
+                style: text.bodySmall,
+              ),
+            ),
           for (final pr in proposals)
             MiniCard(
               title: pr.title,

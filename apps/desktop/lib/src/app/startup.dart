@@ -11,7 +11,6 @@ class ConnectionProfile {
     required this.installationId,
     this.socketPath,
     this.remoteUrl,
-    this.principalId,
   });
 
   final String profile;
@@ -23,9 +22,6 @@ class ConnectionProfile {
 
   /// An explicitly configured remote controller, https only.
   final Uri? remoteUrl;
-
-  /// The caller's own principal, for reading the inbox. Optional.
-  final String? principalId;
 }
 
 sealed class StartupPlan {
@@ -53,7 +49,6 @@ const envSocket = 'ZATITI_SOCKET';
 const envRemoteUrl = 'ZATITI_REMOTE_URL';
 const envInstallation = 'ZATITI_INSTALLATION_ID';
 const envProfile = 'ZATITI_PROFILE';
-const envPrincipal = 'ZATITI_PRINCIPAL_ID';
 
 final RegExp _uuid = RegExp(
   r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
@@ -97,10 +92,6 @@ StartupPlan resolveStartup({
   } else if (!_uuid.hasMatch(installation)) {
     missing.add('$envInstallation must be a lowercase UUID');
   }
-  final principal = value(envPrincipal);
-  if (principal != null && !_uuid.hasMatch(principal)) {
-    missing.add('$envPrincipal must be a lowercase UUID');
-  }
 
   if (missing.isNotEmpty) {
     return NeedsConfiguration(missing, demoOffered: !releaseMode);
@@ -111,7 +102,6 @@ StartupPlan resolveStartup({
       installationId: installation!,
       socketPath: socket,
       remoteUrl: remoteUri,
-      principalId: principal,
     ),
   );
 }

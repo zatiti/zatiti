@@ -4,6 +4,7 @@
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:zatiti_desktop/src/app/local_store.dart';
 import 'package:zatiti_desktop/src/state/live_source.dart';
 import 'package:zatiti_desktop/src/state/snapshot.dart';
 import 'package:zatiti_desktop/src/state/view_state.dart';
@@ -107,12 +108,31 @@ class _World {
   Reply? decideReply;
   bool decideCommitted = false;
 
-  /// What `mailbox.list` answers. Null means an empty inbox.
-  Reply? mailboxReply;
+  /// Overrides the next `conversation.message.send` reply. The message is
+  /// still committed (added to [sentMessages]) even when this drops the
+  /// connection, mirroring `decideReply`/`review.decide` below: the fixture
+  /// can prove "the controller has it but the client does not know that".
+  Reply? sendReply;
+
+  /// What `conversation.message.list` answers. Null means the fixture's own
+  /// default: exactly what `conversation.message.send` has accepted so far,
+  /// oldest first — the single authoritative history, never a separate
+  /// locally remembered echo.
+  Reply? messageListReply;
 
   /// Messages the fake has accepted through `conversation.message.send`,
   /// by the `message_id` the client minted.
   final List<Map<String, Object?>> sentMessages = [];
+
+  /// Every submission_key committed by any mutation, so a generic
+  /// `command.get` lookup can find any of them, not only a review decision.
+  final Set<String> committedSubmissionKeys = {};
+
+  /// The controller's own unread projection for [_conversation], as
+  /// `conversation.list` reports it. Zero/null (the default) omits the
+  /// field entirely, exactly like a controller that has not computed one.
+  int callerUnreadCount = 0;
+  String? callerLastReadMarker;
 
   Reply handle(RecordedRequest r) {
     final op = r.path.substring('/v1/operations/'.length);
@@ -183,6 +203,10 @@ class _World {
             'participant_ids': [_chief],
             'title': 'Wren',
             'pinned': true,
+            if (callerUnreadCount != 0)
+              'caller_unread_count': callerUnreadCount,
+            if (callerLastReadMarker != null)
+              'caller_last_read_marker': callerLastReadMarker,
           },
         ]);
       case 'principal.list':
@@ -220,6 +244,9 @@ class _World {
       case 'conversation.message.send':
         // The controller keeps the client's message_id and returns it as the
         // message's own id; the live proof observes exactly this.
+        final scripted = sendReply;
+        sendReply = null;
+        if (scripted is RawReply) return scripted;
         final message = {
           'id': r.input['message_id'],
           'version': 1,
@@ -234,9 +261,13 @@ class _World {
           'conversation_id': r.input['conversation_id'],
         };
         sentMessages.add(message);
+        if (r.submissionKey != null) {
+          committedSubmissionKeys.add(r.submissionKey!);
+        }
+        if (scripted is DropReply) return scripted;
         return completed(jsonEncode({'resource': message}));
-      case 'mailbox.list':
-        return mailboxReply ?? items([]);
+      case 'conversation.message.list':
+        return messageListReply ?? items(sentMessages);
       case 'review.list':
         return items([_reviewJson(version: reviewVersion, state: reviewState)]);
       case 'review.get':
@@ -299,7 +330,11 @@ class _World {
           }),
         );
       case 'command.get':
-        if (!decideCommitted) {
+        final lookupKey = r.input['submission_key'] as String?;
+        final committed =
+            decideCommitted ||
+            (lookupKey != null && committedSubmissionKeys.contains(lookupKey));
+        if (!committed) {
           return fault(404, 'not_found', 'command not found');
         }
         return completed(
@@ -307,9 +342,9 @@ class _World {
             'resource': {
               'id': _id(800),
               'principal_id': _id(900),
-              'operation': 'review.decide',
-              'operation_version': 1,
-              'submission_key': r.input['submission_key'],
+              'operation': r.input['operation'],
+              'operation_version': r.input['operation_version'],
+              'submission_key': lookupKey,
               'request_digest': 'f' * 64,
               'status': 'completed',
               'data': <String, Object?>{},
@@ -447,10 +482,11 @@ void main() {
       c.prerequisitesFor(DetailsTab.memory).single.title,
       'Memory cannot be listed yet',
     );
-    expect(
-      c.selectedConversation!.historyNotice,
-      contains('no operation that reads a conversation’s history'),
-    );
+    // conversation.message.list is a real operation this client now calls;
+    // the selected conversation's history is read for real, not excused by
+    // a "no operation exists" notice.
+    expect(c.selectedConversation!.historyNotice, isNull);
+    expect(fake.requestsFor('conversation.message.list'), isNotEmpty);
     final called = fake.requests.map((r) => r.path.split('/').last).toSet();
     expect(called.any((op) => op.startsWith('memory.')), isFalse);
   });
@@ -470,6 +506,27 @@ void main() {
       expect(c.decision(ReviewId(_reviewId))!.canDecide, isFalse);
       await approve();
       expect(fake.requestsFor('review.decide'), isEmpty);
+    },
+  );
+
+  test(
+    'a controller too old for conversation.message.list shows a named '
+    'unsupported state, never a silent failure or a fabricated history',
+    () async {
+      world.served = [
+        for (final o in Operations.all)
+          if (o.id != 'conversation.message.list') o,
+      ];
+      await c.reconnect();
+      expect(c.connection, ConnectionPhase.unsupported);
+      expect(
+        c.connectionMessage,
+        contains('conversation.message.list is not offered'),
+      );
+      expect(c.showsSavedView, isTrue);
+      // The exact failure mode this guards against: an older controller's
+      // absent operation must never be read as "no messages yet".
+      expect(c.connectionMessage, isNot(contains('no messages')));
     },
   );
 
@@ -502,62 +559,272 @@ void main() {
     );
   });
 
-  group('the inbox', () {
-    /// A source that reads an inbox, built on the same fake controller.
-    LiveWorkspaceSource inboxSource() => LiveWorkspaceSource(
+  group('message history', () {
+    /// A plain source on the same fake controller, for tests that read
+    /// message history directly rather than through the controller.
+    LiveWorkspaceSource source() => LiveWorkspaceSource(
       ControllerClient(
         endpoint: LocalSocketEndpoint(fake.socketPath),
         installationId: testInstallationId,
         credentials: () async => 'Bearer test-fixture-credential',
         timeout: const Duration(seconds: 5),
       ),
-      principalId: _id(900),
       clock: () => now,
     );
 
-    test('a refused inbox costs the inbox, not the workspace', () async {
-      world.mailboxReply = fault(
-        403,
-        'permission_denied',
-        'mailbox listing is private to the recipient',
-      );
-      final snapshot = await inboxSource().loadSnapshot();
+    test(
+      'a refused message list costs that conversation, not the workspace',
+      () async {
+        world.messageListReply = fault(
+          403,
+          'permission_denied',
+          'this history is not disclosed to you',
+        );
+        // The controller-level read (through WorkspaceController, as the UI
+        // actually calls it) records a per-conversation notice; everything
+        // else on screen — the tree, the pending review — is unaffected.
+        await c.reconnect();
+        expect(c.snapshot.workers, isNotEmpty);
+        expect(c.needsYou, isNotEmpty);
+        expect(
+          c.selectedConversation!.historyNotice,
+          contains('not disclosed to you'),
+        );
+      },
+    );
 
-      expect(
-        snapshot.workers,
-        isNotEmpty,
-        reason: 'the rest of the workspace still loads',
-      );
-      expect(snapshot.reviews, isNotEmpty);
-      expect(
-        snapshot.prerequisites.map((p) => p.title),
-        contains('Your inbox could not be read'),
-      );
-      expect(
-        snapshot.conversations.single.historyNotice,
-        contains('private to its own recipient'),
-      );
-    });
+    test('send while online then reload: the real reply is not fabricated, '
+        'and the sent message is never duplicated', () async {
+      final src = source();
+      await src.loadSnapshot();
 
-    test('a message this window sent is never shown twice', () async {
-      final source = inboxSource();
-      await source.loadSnapshot();
-
-      final pending = source.prepareMessage(
+      final pending = src.prepareMessage(
         ConversationId(_conversation),
         'Create a marketing chief.',
       );
-      await source.submit(pending);
+      await src.submit(pending);
 
-      // The controller now delivers that same message back through the
-      // mailbox, under the id the client minted.
-      world.mailboxReply = completed(jsonEncode({'items': world.sentMessages}));
-      final after = await source.loadSnapshot();
+      // conversation.message.list is the single authoritative source: the
+      // fixture already reflects the accepted send, no separate local
+      // echo is merged in.
+      final messages = await src.loadMessages(ConversationId(_conversation));
+      expect(messages.map((m) => m.body), ['Create a marketing chief.']);
+      expect(messages.single.fromUser, isTrue);
+      expect(fake.requestsFor('conversation.message.send'), hasLength(1));
 
-      expect(after.conversations.single.messages.map((m) => m.body), [
+      // Reading it again — as a reopened app would — returns the exact
+      // same one message, not a second copy.
+      final again = await src.loadMessages(ConversationId(_conversation));
+      expect(again, hasLength(1));
+      expect(fake.requestsFor('conversation.message.send'), hasLength(1));
+    });
+
+    test('a dropped send acknowledgment is resolved by command.get, never '
+        'resent, and creates no duplicate turn', () async {
+      final src = source();
+      await src.loadSnapshot();
+      final pending = src.prepareMessage(
+        ConversationId(_conversation),
+        "Reconcile this week's expenses.",
+      );
+
+      // The fake controller commits the message but drops the connection
+      // before answering: this client cannot tell success from loss.
+      world.sendReply = const DropReply();
+      await expectLater(
+        src.submit(pending),
+        throwsA(isA<AcknowledgmentUnknown>()),
+      );
+      expect(
+        fake.requestsFor('conversation.message.send'),
+        hasLength(1),
+        reason: 'exactly one physical send, whatever the client learned',
+      );
+
+      // Resolving looks the original submission up by command.get's own
+      // record of it — it never mints a second submission_key and never
+      // calls conversation.message.send a second time.
+      final resolution = await src.resolve(pending);
+      expect(resolution, isA<ResolvedAcknowledged>());
+      expect(fake.requestsFor('conversation.message.send'), hasLength(1));
+      expect(fake.requestsFor('command.get'), isNotEmpty);
+
+      // The single committed message is the whole history: no duplicate
+      // turn was created by the drop, the retry-avoidance, or the resolve.
+      final messages = await src.loadMessages(ConversationId(_conversation));
+      expect(messages.map((m) => m.body), ["Reconcile this week's expenses."]);
+    });
+
+    test(
+      'turnStatusFor reports waiting for a reply only from real delivery '
+      'and arrival timestamps, and clears once the real reply lands',
+      () async {
+        // _chief is the root, so its subtree includes every worker; resolve
+        // the fixture's one pending review first so it does not take
+        // priority over the "waiting for a reply" status this test proves.
+        await approve();
+        final chat = ConversationId(_conversation);
+        expect(
+          c.turnStatusFor(chat, worker: WorkerId(_chief)),
+          isNot(TurnStatus.waitingForReply),
+          reason: 'nothing has been sent yet',
+        );
+
+        c.setDraft(chat, 'Keep our expenses organized every Friday.');
+        await c.sendDraft(chat);
+        expect(
+          c.turnStatusFor(chat, worker: WorkerId(_chief)),
+          TurnStatus.waitingForReply,
+          reason: 'delivered, and the fixture has not added a reply yet',
+        );
+
+        // The real reply lands; the status line for a worker turn in
+        // progress clears itself, never lingering past what happened.
+        world.sentMessages.add({
+          'id': _id(951),
+          'version': 1,
+          'sender_id': _chief,
+          'recipient_ids': [_id(900)],
+          'scope': _scope(),
+          'task_ids': <Object?>[],
+          'body': 'Done for this week.',
+          'attachments': <Object?>[],
+          'state': 'admitted',
+          'created_at': '2026-09-18T13:00:00Z',
+          'conversation_id': _conversation,
+        });
+        // reconnect always refreshes (poll only refreshes when event.list
+        // reports a change, and this fixture's event.list is always empty).
+        await c.reconnect();
+        expect(
+          c.turnStatusFor(chat, worker: WorkerId(_chief)),
+          isNot(TurnStatus.waitingForReply),
+        );
+      },
+    );
+  });
+
+  group('durability across restart', () {
+    /// Builds a controller/source pair against the shared [fake]/[world],
+    /// resuming from whatever [localStore] already holds — exactly what a
+    /// fresh launch does after close/reopen, given the same installation.
+    Future<WorkspaceController> open(LocalStore localStore) async {
+      final initial = await localStore.read(testInstallationId);
+      final client = ControllerClient(
+        endpoint: LocalSocketEndpoint(fake.socketPath),
+        installationId: testInstallationId,
+        credentials: () async => 'Bearer test-fixture-credential',
+        timeout: const Duration(seconds: 5),
+      );
+      final controller = WorkspaceController(
+        LiveWorkspaceSource(
+          client,
+          clock: () => now,
+          initialEventCursor: initial.eventCursor,
+          initialLastSequence: initial.lastSequence,
+          localStore: localStore,
+        ),
+        clock: () => now,
+        localStore: localStore,
+        installationId: testInstallationId,
+        initialLocal: initial,
+      );
+      await controller.start();
+      return controller;
+    }
+
+    test('send to chief, close/reopen app: both messages and the real reply '
+        'remain, with correct read state', () async {
+      final localStore = MemoryLocalStore();
+
+      // First launch: send to the chief.
+      final first = await open(localStore);
+      expect(first.selectedConversation!.id.value, _conversation);
+      final chat = ConversationId(_conversation);
+      first.setDraft(chat, 'Create a marketing chief.');
+      await first.sendDraft(chat);
+      expect(
+        first.outgoingFor(chat),
+        isEmpty,
+        reason: 'delivered, not stuck as unsent',
+      );
+      expect(
+        first.selectedConversation!.messages.map((m) => m.body),
+        contains('Create a marketing chief.'),
+      );
+
+      // The worker's real reply arrives, and the controller now reports
+      // an unread count for it — both are facts this fixture asserts as
+      // controller state, never rendered from local invention.
+      world.sentMessages.add({
+        'id': _id(950),
+        'version': 1,
+        'sender_id': _chief,
+        'recipient_ids': [_id(900)],
+        'scope': _scope(),
+        'task_ids': <Object?>[],
+        'body': 'Done. Marketing chief created.',
+        'attachments': <Object?>[],
+        'state': 'admitted',
+        'created_at': '2026-09-18T12:05:00Z',
+        'conversation_id': _conversation,
+      });
+      world.callerUnreadCount = 1;
+      world.callerLastReadMarker = '2026-09-18T12:00:00Z';
+
+      // Close: a real app disposes its controller; nothing further reads
+      // or writes through `first` from here on.
+      first.dispose();
+
+      // Reopen: a fresh controller and source, same installation, same
+      // on-disk local store (here: the same store instance standing in
+      // for it) and the same controller behind the same fake socket.
+      final second = await open(localStore);
+      final conversation = second.selectedConversation!;
+      expect(
+        conversation.id.value,
+        _conversation,
+        reason: 'the chief’s conversation opens again, not a blank one',
+      );
+      expect(conversation.messages.map((m) => m.body), [
         'Create a marketing chief.',
+        'Done. Marketing chief created.',
       ]);
-      expect(after.conversations.single.messages.single.fromUser, isTrue);
+      expect(
+        conversation.messages.first.fromUser,
+        isTrue,
+        reason: 'the message this window sent is still attributed to you',
+      );
+      expect(
+        conversation.messages.last.fromUser,
+        isFalse,
+        reason: 'the real reply is shown as the worker’s, never as yours',
+      );
+      expect(conversation.unreadCount, 1);
+      expect(
+        conversation.lastReadMarker,
+        DateTime.parse('2026-09-18T12:00:00Z'),
+      );
+    });
+
+    test('account switch clears the cache: no other account’s identities or '
+        'selection carry over', () async {
+      final localStore = MemoryLocalStore();
+      final first = await open(localStore);
+      first.selectWorker(WorkerId(_engChief));
+      await Future<void>.delayed(Duration.zero); // let selection persist
+      final stored = await localStore.read(testInstallationId);
+      expect(stored.selectedWorkerId, _engChief);
+      expect(stored.workers, isNotEmpty);
+
+      // A credential change is the only signal this client has for a
+      // possible account switch (no `identity.current` to confirm either
+      // way), so it always clears rather than risk showing the wrong
+      // account's cache.
+      await first.resetForCredentialChange();
+      expect(await localStore.read(testInstallationId), LocalState.empty);
+      expect(first.snapshot, WorkspaceSnapshot.empty);
+      expect(first.selectedWorker, isNull);
     });
   });
 

@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
@@ -5,6 +6,7 @@ import 'package:flutter/material.dart';
 
 import 'src/app/app.dart';
 import 'src/app/credential_store.dart';
+import 'src/app/local_store.dart';
 import 'src/app/startup.dart';
 import 'src/state/demo_source.dart';
 import 'src/state/live_source.dart';
@@ -52,6 +54,11 @@ class _RootState extends State<_Root> {
     if (!mounted) return;
     final plan = _plan;
     WorkspaceSource? source;
+    LocalStore localStore = MemoryLocalStore();
+    String? installationId;
+    LocalState initialLocal = LocalState.empty;
+    Map<String, String> initialDrafts = const {};
+    Future<void> Function(Map<String, String> drafts)? persistDrafts;
     switch (plan) {
       case NeedsConfiguration():
         return;
@@ -60,6 +67,25 @@ class _RootState extends State<_Root> {
       case StartLive(:final profile):
         final store = SecureCredentialStore(profile.profile);
         _credentials = store;
+        installationId = profile.installationId;
+        final keys = CredentialKeys(profile.profile);
+        // Read once, synchronously into local variables, so construction
+        // stays as it was: everything the controller and the live source
+        // need to resume across a restart is ready before either exists.
+        final fileStore = FileLocalStore(profile.profile);
+        localStore = fileStore;
+        initialLocal = await fileStore.read(profile.installationId);
+        final draftsJson = await store.readNamed(keys.drafts);
+        if (draftsJson != null) {
+          try {
+            initialDrafts = (jsonDecode(draftsJson) as Map<String, Object?>)
+                .map((k, v) => MapEntry(k, v! as String));
+          } on FormatException {
+            // Corrupt drafts blob: start with none rather than fail startup.
+          }
+        }
+        persistDrafts = (drafts) =>
+            store.writeNamed(keys.drafts, jsonEncode(drafts));
         try {
           source = LiveWorkspaceSource(
             ControllerClient(
@@ -67,10 +93,12 @@ class _RootState extends State<_Root> {
               installationId: profile.installationId,
               credentials: store.read,
             ),
-            principalId: profile.principalId,
             endpointLabel: profile.socketPath != null
                 ? 'Your controller on this computer'
                 : 'Your controller at ${profile.remoteUrl!.host}',
+            initialEventCursor: initialLocal.eventCursor,
+            initialLastSequence: initialLocal.lastSequence,
+            localStore: localStore,
           );
         } on InvalidRequestException catch (e) {
           if (mounted) setState(() => _startupError = e.message);
@@ -78,7 +106,14 @@ class _RootState extends State<_Root> {
         }
         if (!mounted) return;
     }
-    final controller = WorkspaceController(source);
+    final controller = WorkspaceController(
+      source,
+      localStore: localStore,
+      installationId: installationId,
+      initialLocal: initialLocal,
+      initialDrafts: initialDrafts,
+      persistDrafts: persistDrafts,
+    );
     setState(() => _controller = controller);
     await controller.start();
   }
