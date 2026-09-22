@@ -3818,3 +3818,18 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   agent-a3bd4c9fd21431d37), the four above (each own worktree, all
   claims held). None share a write root with another in-flight agent.
   None yet reviewed or landed.
+- 2026-09-22 ~20:15 PT -- P50 SCOPED AND LANDED (plan.json + assignments/
+  P50.md, commit bad9248, direct to main -- meta-planning doc, not a PR).
+  "Complete the restore handoff: candidate staging and owner overlay
+  merge." Every architectural claim in the proposal independently
+  verified against real source before landing (errNoCandidateLookup/
+  errNoOwnerMerge in cmd/zatiti/restore.go; WriteRestoreOverlay's Unit
+  comes from internal/storage, not internal/application, confirming the
+  card's central claim that owner-merge calls structurally cannot route
+  through Application.Internal/Ports at MergeOverlay time). Deliberately
+  multi-root (6 write roots: tools/specgen, internal/installation,
+  internal/effects, internal/identity, internal/memory,
+  internal/controller, cmd/zatiti) -- the honest shape of a genuinely
+  cross-cutting gap, unlike every prior card's single-owner shape. Not
+  yet dispatched for implementation; 51 total cards now tracked
+  (P00-P50). R-restore-merge-scope claim released.
