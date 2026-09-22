@@ -139,6 +139,11 @@ class InstallationStatus {
       ],
       version: o.integer('version'),
     );
+    // runtime_ready is a real, additive-optional revision-3 field this
+    // client does not yet surface; read and discard, matching Organization/
+    // Project's own limits/extensions pattern for fields not yet modeled,
+    // per the frozen contract's additive-field rule.
+    o.optional('runtime_ready');
     o.finish();
     return s;
   }
