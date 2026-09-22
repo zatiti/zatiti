@@ -3467,3 +3467,14 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   myself. Flagging for the same founder decision batch as the restore-
   protocol-completeness finding above (~05:45 PT entry) -- both concern
   the same six-step restore protocol and are naturally one conversation.
+- 2026-09-22 ~07:05 PT -- WAVE 16 DISPATCHED (P45 packaging + P46
+  tests/integration), true 2-way parallel -- likely the LAST parallel
+  dispatch opportunity in the whole plan: P47 needs P46, P48 needs
+  P46+P47, P49 needs P48, a fully serial chain from here. 45/50 landed,
+  both cards' full dependency lists satisfied, disjoint write roots.
+  Both briefed on the restore-protocol data-merge gap (P31/P32/P33) so
+  neither wastes effort trying to make a currently-impossible full
+  restore-to-resumed scenario pass; P45 additionally reminded "no
+  publishing or deployment" is a hard constraint of its own card text.
+  P46 flagged as likely too large for one pass and told explicitly that
+  honest partial coverage beats padded-shallow or silent-partial.
