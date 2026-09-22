@@ -1,6 +1,6 @@
 # Implementation assignment: `internal/execution`
 
-Generated specification revision 3; source digest `0188756ab0f87a6bc50a07b5c4c84539c15e3e0b50ba9787f54fdea2615a3f84`. This file is committed implementation context. Do not independently edit it. Everything required from the product specification and adjacent interfaces is embedded below; no RFC copy is required.
+Generated specification revision 3; source digest `4bd1a053e261facd9a3b800dab1996aa35b5ffc5019dd5a1fac2645baf834870`. This file is committed implementation context. Do not independently edit it. Everything required from the product specification and adjacent interfaces is embedded below; no RFC copy is required.
 
 ## Mission and scope
 
@@ -957,7 +957,7 @@ Output data schema:
 
 Allowed internal callers: controller. Submission key: not required at this internal/query/bootstrap boundary.
 
-Exact version+generation claim of one sealed VerificationRequest for the trusted verifier identity only; lost claim acknowledgement resolves through this same generation-bound token, never by assuming unclaimed.
+Exact version+generation claim of one sealed VerificationRequest for the trusted verifier identity only; lost claim acknowledgement resolves through this same generation-bound token, never by assuming unclaimed. Also returns the claimed attempt's current live version, read in the same transaction, so the caller can fence its later verification.record call against a real value instead of a guess.
 
 Input schema:
 ```json
@@ -965,7 +965,7 @@ Input schema:
 ```
 Output data schema:
 ```json
-{"type":"object","additionalProperties":false,"properties":{"request":{"$ref":"#/$defs/Adapter_VerificationRequest"},"claim_token":{"type":"string","maxLength":8192}},"required":["request","claim_token"]}
+{"type":"object","additionalProperties":false,"properties":{"request":{"$ref":"#/$defs/Adapter_VerificationRequest"},"claim_token":{"type":"string","maxLength":8192},"attempt_version":{"type":"integer","minimum":1,"maximum":9223372036854775807}},"required":["request","claim_token","attempt_version"]}
 ```
 
 ### `_execution.verification.pending` v1 — execution / internal / query / local

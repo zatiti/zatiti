@@ -869,5 +869,15 @@ func (s *Service) handleVerificationClaim(ctx context.Context, unit contract.Uni
 	if err := decodeJSON(string(v.Request), &req); err != nil {
 		return contract.Outcome[verificationClaimBody]{}, err
 	}
-	return completedOutcome(verificationClaimBody{Request: req, ClaimToken: token})
+	// Read the claimed attempt's current live version in this same
+	// transaction -- the freshest possible read, with the smallest
+	// staleness window before the caller uses it to fence its later
+	// verification.record call. The attempt's version is never 1 by the
+	// time verification runs (claim/checkpoint/report each advance it), so
+	// a caller that hardcoded 1 here would refuse every realistic journey.
+	a, err := loadAttempt(ctx, unit, v.AttemptID)
+	if err != nil {
+		return contract.Outcome[verificationClaimBody]{}, err
+	}
+	return completedOutcome(verificationClaimBody{Request: req, ClaimToken: token, AttemptVersion: a.Version})
 }

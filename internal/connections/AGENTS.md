@@ -1,6 +1,6 @@
 # Implementation assignment: `internal/connections`
 
-Generated specification revision 3; source digest `0188756ab0f87a6bc50a07b5c4c84539c15e3e0b50ba9787f54fdea2615a3f84`. This file is committed implementation context. Do not independently edit it. Everything required from the product specification and adjacent interfaces is embedded below; no RFC copy is required.
+Generated specification revision 3; source digest `4bd1a053e261facd9a3b800dab1996aa35b5ffc5019dd5a1fac2645baf834870`. This file is committed implementation context. Do not independently edit it. Everything required from the product specification and adjacent interfaces is embedded below; no RFC copy is required.
 
 ## Mission and scope
 

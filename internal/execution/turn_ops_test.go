@@ -1,6 +1,7 @@
 package execution
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -666,4 +667,68 @@ func TestVerificationPendingAndClaimAreGenerationBound(t *testing.T) {
 	_ = e.expectFault(opVerificationClaim, verificationClaimInput{
 		RequestID: job.ID, ExpectedVersion: 1, Generation: gen + 1,
 	}, contract.CodeConflict)
+}
+
+// TestVerificationClaimReturnsCurrentAttemptVersionAndFencesRecord
+// reproduces R-verification-stall-fix directly against real version
+// fencing: an attempt's version advances by exactly 1 on every claim,
+// checkpoint (pinContext) and report, so it is never 1 by the time
+// verification runs for any attempt that did more than a bare claim --
+// every realistic cooperative journey. internal/controller/turns.go's
+// runVerification used to hardcode ExpectedVersion: 1 on the
+// _execution.verification.record call that follows a claim, which
+// therefore refused with stale_version every single time, forever (the
+// verification job's own state column never left 'pending', so the
+// controller's next tick re-claimed and re-invoked the trusted verifier
+// again, indefinitely).
+//
+// This test first proves the fault text a hardcoded 1 actually produces
+// (the exact regression, independent of any controller wiring), then
+// proves _execution.verification.claim's widened output carries the real
+// live version the caller needs to avoid it, and that using that real
+// value lets record genuinely succeed.
+func TestVerificationClaimReturnsCurrentAttemptVersionAndFencesRecord(t *testing.T) {
+	e := newEnv(t)
+	worker := e.ids.New()
+	e.installWorkerSnapshot(worker, fixtureHostedProfile(worker))
+	run := e.enqueueTask(worker, nil)
+	claim := e.claimRun(run.ID, worker)
+	e.pinContext(claim.Attempt.ID, 1)
+	e.reportAccepted(claim, wireUsage{Currency: "USD"})
+	job := e.readVerificationJob(claim.Attempt.ID)
+
+	realVersion := e.readAttempt(claim.Attempt.ID).Version
+	if realVersion == 1 {
+		t.Fatalf("attempt version is 1 after claim+checkpoint+report, want >1 (checkpoint/report each advance it) -- this test would not exercise the bug")
+	}
+
+	gen := e.generation()
+	claimed := e.mustOK(opVerificationClaim, verificationClaimInput{RequestID: job.ID, ExpectedVersion: 1, Generation: gen})
+	var claimedBody verificationClaimBody
+	e.decode(claimed.Data, &claimedBody)
+	if claimedBody.AttemptVersion != realVersion {
+		t.Fatalf("verification.claim attempt_version = %d, want the attempt's real current version %d", claimedBody.AttemptVersion, realVersion)
+	}
+
+	// RED: this is the exact bug -- a hardcoded ExpectedVersion: 1, as
+	// internal/controller/turns.go's runVerification used to send, is
+	// refused with stale_version naming the real current version.
+	f := e.expectFault(opVerificationRec, verificationRecordInput{
+		AttemptID: claim.Attempt.ID, ExpectedVersion: 1,
+		Result: resultFor(e, job, "passed", passedChecks()),
+	}, contract.CodeStaleVersion)
+	if !strings.Contains(f.Message, "does not match expected version 1") {
+		t.Fatalf("stale_version fault message %q does not contain %q", f.Message, "does not match expected version 1")
+	}
+	if !strings.Contains(f.Message, fmt.Sprintf("version %d", realVersion)) {
+		t.Fatalf("stale_version fault message %q does not name the real version %d", f.Message, realVersion)
+	}
+
+	// GREEN: the real value verification.claim returned -- exactly what
+	// runVerification now threads through instead of 1 -- lets record
+	// genuinely succeed.
+	e.mustOK(opVerificationRec, verificationRecordInput{
+		AttemptID: claim.Attempt.ID, ExpectedVersion: claimedBody.AttemptVersion,
+		Result: resultFor(e, job, "passed", passedChecks()),
+	})
 }
