@@ -3554,3 +3554,28 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   untriaged; internal/platform's concurrent-acquire race -- untriaged).
   Worth a real investigation into GitHub's runner contention/scheduling if
   this keeps recurring, but not chasing further tonight.
+- 2026-09-22 ~09:00-09:30 PT -- P46 independently reviewed, PR #56 opened.
+  This is the single largest, most consequential card of this whole
+  session: the first real controller fixture (actual scheduler loop, real
+  verifier, real WorkerOperator, every landed job runner, wired identically
+  to cmd/zatiti's own assembly) that any test in this tree has run. Six
+  real production bugs found this stretch, one already fixed (run.claim's
+  operation_id, PR #55). Independently reviewed in full: read every new
+  test file, traced the binding mechanism confirming attempt.report's
+  positional output-name resolution genuinely reaches _artifacts.metadata
+  (not a false alarm), ran every new required-behavior test myself, ran
+  the full package suite fresh (-count=1, 206s, green), red->green
+  verified finding 5 (worker double-reservation) by reverting the
+  concurrency workaround to the shipped default of 1 and reproducing the
+  exact "1 live attempts against a ceiling of 1" refusal.
+
+  Investigated finding 6 (the _artifacts.metadata schema rejection)
+  myself before dispatching further: confirmed catalog.json's own
+  embedded ArtifactRef def is byte-for-byte identical to the canonical
+  operations.json's -- ruling out the stale-embedded-$defs bug class that
+  explained several EARLIER findings this session (this is a genuinely
+  different, deeper bug in the registry's own schema merge/prune logic,
+  internal/registry/bind.go's cat.mergedSchema, not a data staleness
+  issue). Dispatched a dedicated investigation (not yet a fix) given the
+  complexity and the shared-infrastructure blast radius if the bug turns
+  out to affect other operations beyond this one.
