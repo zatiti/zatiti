@@ -54,14 +54,14 @@ func (c *Controller) start(ctx context.Context) (*session, error) {
 	if !c.own.Held() {
 		return nil, unavailable("installation ownership is not held; another controller owns this state directory")
 	}
-	events, err := c.db.Events(ctx, 0, 1)
+	events, err := c.database().Events(ctx, 0, 1)
 	if err != nil {
 		return nil, err
 	}
 	if len(events) == 0 || events[0].Scope.InstallationID == "" {
 		return nil, prerequisiteMissing("installation is not initialized; there is nothing to schedule")
 	}
-	generation, err := c.db.Generation(ctx)
+	generation, err := c.database().Generation(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -79,6 +79,22 @@ func (c *Controller) start(ctx context.Context) (*session, error) {
 		journal:    journal,
 	}
 	c.count(func(s *Status) { s.Generation = generation })
+
+	// A restore left mid-protocol by a dead process refuses ordinary writes
+	// -- including the fence below -- until driven back to resumed; recover
+	// it (or discover this exact lifetime just performed a fresh swap of
+	// its own, making its own Application stale before the fence could ever
+	// run) before attempting anything else.
+	if err := c.recoverRestoreBeforeFence(ctx, sess); err != nil {
+		_ = journal.close()
+		return nil, err
+	}
+	select {
+	case <-c.restoreHandoff:
+		_ = journal.close()
+		return nil, ErrRestoreHandoff
+	default:
+	}
 
 	// Fence first: no earlier generation may keep a governed lease while
 	// this one admits. A failed fence fails the start closed.
@@ -103,7 +119,7 @@ func (c *Controller) start(ctx context.Context) (*session, error) {
 
 // superseded reports whether a newer generation now owns the installation.
 func (c *Controller) superseded(ctx context.Context, sess *session) (bool, error) {
-	current, err := c.db.Generation(ctx)
+	current, err := c.database().Generation(ctx)
 	if err != nil {
 		return false, err
 	}

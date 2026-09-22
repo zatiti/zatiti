@@ -209,30 +209,53 @@ func TestJobsAreClaimedOnlyWhenRunnable(t *testing.T) {
 			t.Fatalf("job is %s, want outcome_unknown", f.jobState(job))
 		}
 	})
-	t.Run("restore disposition reaches the installation owner", func(t *testing.T) {
+	t.Run("installation.restore is never claimed as an ordinary job runner", func(t *testing.T) {
+		// Superseded by restore_test.go's dedicated handoff coverage: unlike
+		// every other job kind, database replacement is never handed to an
+		// attached JobRunner, even when one is registered under this exact
+		// key -- a JobRunner is invoked while this same application/
+		// database handle stays open, which the restore protocol cannot
+		// tolerate (see restore.go, jobs.go's jobs()).
 		f := newFx(t)
-		runner := &countingRunner{outcome: JobOutcome{
-			State:        jobStateFailed,
-			Requirements: []Requirement{{Code: contract.CodePrerequisiteMissing, Message: "master key is absent"}},
-		}}
+		runner := &countingRunner{outcome: JobOutcome{State: jobStateSucceeded}}
 		f.jobs = map[string]JobRunner{JobKey(restoreOwner, restoreOperation): runner}
-		job := f.job(restoreOwner, restoreOperation, "")
+		job := f.restoreJob(t)
+		f.restoreBackups[job] = f.buildBackupImage("backup-content")
+		f.restoreLifecycle = fakeRestoreLifecycle{f: f}
 		c, sess := f.started()
-		f.arm("_installation.restore.record", injection{loseAck: true})
 		for i := 0; i < 3; i++ {
 			if err := f.pass(c, sess); err != nil {
 				t.Fatalf("tick: %v", err)
 			}
 		}
-		if f.jobState(job) != "failed" || runner.calls.Load() != 1 {
-			t.Fatalf("state %s runs %d", f.jobState(job), runner.calls.Load())
+		if runner.calls.Load() != 0 {
+			t.Fatalf("installation.restore was claimed by the attached JobRunner: %d calls", runner.calls.Load())
 		}
-		if got := f.queryString(`SELECT state || ':' || requirements FROM installation_restores ORDER BY seq LIMIT 1`); got !=
-			`failed:[{"code":"prerequisite_missing","message":"master key is absent"}]` {
-			t.Fatalf("restore record %s", got)
+		if f.called("_execution.job.claim") == 0 {
+			t.Fatalf("restore.go's own handoff never claimed the job either")
 		}
-		if f.called("_execution.job.record") != 1 {
-			t.Fatalf("job recorded %d times", f.called("_execution.job.record"))
+	})
+	t.Run("installation.restore is skipped by the ordinary claim loop even while still pending", func(t *testing.T) {
+		// A job.State != jobStatePending check alone would already exclude
+		// the "running" case above; this proves jobs()'s own explicit
+		// owner/operation guard, not that incidental filter, is what
+		// protects the narrow pending window between Prepare's commit and
+		// Finish's transition to "running" -- the one moment a registered
+		// runner really could otherwise win the race.
+		f := newFx(t)
+		runner := &countingRunner{outcome: JobOutcome{State: jobStateSucceeded}}
+		f.jobs = map[string]JobRunner{JobKey(restoreOwner, restoreOperation): runner}
+		job := f.job(restoreOwner, restoreOperation, "")
+		c, sess := f.started()
+		if err := f.pass(c, sess); err != nil {
+			t.Fatalf("tick: %v", err)
+		}
+		if runner.calls.Load() != 0 || f.called("_execution.job.claim") != 0 {
+			t.Fatalf("a pending installation.restore job was claimed by the ordinary loop: runner calls %d, claims %d",
+				runner.calls.Load(), f.called("_execution.job.claim"))
+		}
+		if f.jobState(job) != "pending" {
+			t.Fatalf("job state changed to %q while still pending Finish", f.jobState(job))
 		}
 	})
 }

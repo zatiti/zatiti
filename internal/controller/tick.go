@@ -18,6 +18,18 @@ func (c *Controller) tick(ctx, workCtx context.Context, sess *session) error {
 	if !c.admitting() {
 		return nil
 	}
+	if c.restoring.Load() {
+		// An exclusive restore handoff owns admission: generation just
+		// advanced under this controller's own hand, not a rival's, so the
+		// ordinary supersession check below must not fire, and no ordinary
+		// admission call (wakes, ready scan, execution tick, turn work,
+		// jobs, dispatch) runs for the rest of this lifetime. Only settle
+		// (the final _installation.restore.record call once resumed) and
+		// restoreWork (resuming the swap/merge itself) progress.
+		c.settle(ctx, sess, false)
+		c.restoreWork(ctx, workCtx, sess)
+		return nil
+	}
 	replaced, err := c.superseded(ctx, sess)
 	if err != nil {
 		c.note(err)
@@ -29,6 +41,14 @@ func (c *Controller) tick(ctx, workCtx context.Context, sess *session) error {
 
 	c.resumeClaimedJobs(ctx, workCtx, sess)
 	c.settle(ctx, sess, false)
+	c.restoreWork(ctx, workCtx, sess)
+	if c.restoring.Load() {
+		// A restore was just admitted (or an already-open entry this
+		// settle pass surfaced was just resumed): admission closes at
+		// once, before any ordinary work is admitted this same tick, never
+		// deferred to the next one.
+		return nil
+	}
 	c.wakes(ctx, sess)
 	c.readyScan(ctx, sess)
 	c.executionTick(ctx, sess)

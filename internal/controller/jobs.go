@@ -8,6 +8,12 @@ import (
 )
 
 const (
+	// restoreOwner/restoreOperation identify installation.restore's durable
+	// job (execution_jobs owner/operation), which jobs() below never hands
+	// to an ordinary JobRunner and settleJob never finishes: it is driven
+	// exclusively by restore.go's own handoff (restoreWork/runRestore/
+	// settleRestore), because database replacement cannot run as a runner
+	// invoked while this same application/database handle stays open.
 	restoreOwner     = "installation"
 	restoreOperation = "installation.restore"
 
@@ -100,6 +106,13 @@ func (c *Controller) jobs(ctx, workCtx context.Context, sess *session) map[contr
 	for _, job := range pending.Items {
 		if job.OperationID != "" {
 			waiting[job.OperationID] = job
+			continue
+		}
+		if job.Owner == restoreOwner && job.Operation == restoreOperation {
+			// Never an ordinary JobRunner claim: database replacement is an
+			// exclusive handoff (restore.go, restoreWork), not a runner
+			// invoked while this same application/database handle stays
+			// open and serving other work.
 			continue
 		}
 		if job.State != jobStatePending {
@@ -387,31 +400,6 @@ func (c *Controller) settleJob(ctx context.Context, sess *session, e entry) {
 	}
 	if e.Phase != phaseRecorded {
 		return
-	}
-	if e.JobOwner == restoreOwner && e.JobOp == restoreOperation {
-		// The installation owner keeps its own maintenance bookkeeping and
-		// learns the disposition of controller-performed IO only from here.
-		requirements := e.Outcome.Requirements
-		if requirements == nil {
-			requirements = []Requirement{}
-		}
-		state := e.Outcome.State
-		if state == jobStateCancelled {
-			state = jobStateFailed
-			requirements = append(requirements, Requirement{Code: contract.CodeConflict, Message: "the restore job was cancelled"})
-		}
-		err := c.write(func() error {
-			return c.call(ctx, sess, "_installation.restore.record", restoreRecordInput{
-				JobID: e.JobID, State: state, Requirements: requirements,
-			}, nil)
-		})
-		if err != nil {
-			c.note(err)
-			if !transient(err) {
-				c.refuseJob(sess, &e, faultOf(err))
-			}
-			return
-		}
 	}
 	if e.JobOwner == configurationOwner && e.Outcome.State == jobStateSucceeded {
 		if !c.finishConfigurationExport(ctx, sess, &e) {

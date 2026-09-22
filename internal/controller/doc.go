@@ -34,11 +34,31 @@
 // # Database
 //
 // The controller never hands its contract.Database, or any capability over
-// it, to a module. A backup or restore job is only the invocation of the
-// installation owner's own plan through an attached JobRunner; a plan that
-// reports prerequisite_missing for the database backup capability is
-// recorded as a failed job with that requirement, never substituted by a
-// controller-side file copy.
+// it, to a module. A backup job is only the invocation of the installation
+// owner's own plan through an attached JobRunner; a plan that reports
+// prerequisite_missing for the database backup capability is recorded as a
+// failed job with that requirement, never substituted by a controller-side
+// file copy.
+//
+// A restore job is the one exception: installation.restore's own Prepare/
+// Perform/Finish already ran synchronously (verifying the backup, capturing
+// the paused RecoveryOverlay of this installation's current state) and left
+// its job "running" with an external_action_required requirement -- a
+// domain module cannot swap the live SQLite file out from under its own
+// open database mid-process. restore.go drives that handoff directly: it is
+// never an ordinary JobRunner claim (one is invoked while this same
+// application/database handle stays open, which database replacement
+// cannot tolerate). It closes admission, drains every other in-flight unit,
+// hands the already-verified backup to storage.Restorable for the atomic
+// file swap and generation advance, merges the RecoveryOverlay through an
+// entrypoint-supplied RestoreLifecycle, and lifts the storage write gate.
+// The lifetime that itself performs the swap ends deliberately
+// (ErrRestoreHandoff, never a fault) the moment that is durable, because its
+// own Application was built over the now-closed pre-restore database
+// handle; the caller reassembles Application/Controller over the freshly
+// reopened database and runs again, and that resumed lifetime's own start()
+// finishes recording the disposition under its own, current generation --
+// so no old-generation controller or worker can ever commit after reopen.
 //
 // # Shutdown
 //
