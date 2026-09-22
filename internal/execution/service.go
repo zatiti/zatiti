@@ -102,12 +102,6 @@ type opMeta struct {
 	expected   bool // descriptor advertises optimistic version fencing
 	callers    []string
 	cli        string // CLI tokens below the root command, space separated; empty for internal operations
-	// noScopeRequired forces an empty ScopeRequired despite the input schema
-	// requiring a scope field: the frozen catalog's revision-3 additions
-	// (_execution.turn.admit, _execution.report) carry an explicit scope
-	// input but are not scope-required in the frozen catalog, the same
-	// documented quirk tasks.task.start already carries.
-	noScopeRequired bool
 }
 
 // opMetas lists every owned operation: internal first, then the public
@@ -137,7 +131,7 @@ var opMetas = []opMeta{
 	{id: opVerificationRec, visibility: "internal", mode: "mutation", expected: true,
 		callers: []string{"controller"}},
 
-	{id: opTurnAdmit, visibility: "internal", mode: "mutation", noScopeRequired: true,
+	{id: opTurnAdmit, visibility: "internal", mode: "mutation",
 		callers: []string{"controller", "scheduling"}},
 	{id: opWorkPending, visibility: "internal", mode: "query",
 		callers: []string{"controller"}},
@@ -151,7 +145,7 @@ var opMetas = []opMeta{
 		callers: []string{"controller"}},
 	{id: opProposalRecord, visibility: "internal", mode: "mutation", expected: true,
 		callers: []string{"controller"}},
-	{id: opExecutionReport, visibility: "internal", mode: "mutation", expected: true, noScopeRequired: true,
+	{id: opExecutionReport, visibility: "internal", mode: "mutation", expected: true,
 		callers: []string{"controller"}},
 	{id: opVerificationPend, visibility: "internal", mode: "query",
 		callers: []string{"controller"}},
@@ -255,10 +249,7 @@ func (s *Service) assemble() error {
 		if err != nil {
 			return fmt.Errorf("execution: operation %s output schema: %w", m.id, err)
 		}
-		var scopeRequired []string
-		if !m.noScopeRequired {
-			scopeRequired = scopeRequirement(inputSchema)
-		}
+		scopeRequired := scopeRequirement(inputSchema)
 		d := contract.Descriptor{
 			ID:              m.id,
 			Version:         1,

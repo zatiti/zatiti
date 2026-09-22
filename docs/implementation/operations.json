@@ -26469,6 +26469,9 @@
       "callers": [
         "controller",
         "scheduling"
+      ],
+      "scope_required": [
+        "installation_id"
       ]
     },
     {
@@ -26515,7 +26518,8 @@
       "expected_version": false,
       "callers": [
         "controller"
-      ]
+      ],
+      "scope_required": []
     },
     {
       "id": "_execution.work.claim",
@@ -26579,7 +26583,8 @@
       "expected_version": true,
       "callers": [
         "controller"
-      ]
+      ],
+      "scope_required": []
     },
     {
       "id": "_execution.context.prepare",
@@ -26632,7 +26637,8 @@
       "expected_version": true,
       "callers": [
         "controller"
-      ]
+      ],
+      "scope_required": []
     },
     {
       "id": "_execution.context.commit",
@@ -26689,7 +26695,8 @@
       "expected_version": true,
       "callers": [
         "controller"
-      ]
+      ],
+      "scope_required": []
     },
     {
       "id": "_execution.proposal.prepare",
@@ -26747,7 +26754,8 @@
       "expected_version": true,
       "callers": [
         "controller"
-      ]
+      ],
+      "scope_required": []
     },
     {
       "id": "_execution.proposal.record",
@@ -26805,7 +26813,8 @@
       "expected_version": true,
       "callers": [
         "controller"
-      ]
+      ],
+      "scope_required": []
     },
     {
       "id": "_execution.report",
@@ -26884,6 +26893,9 @@
       "expected_version": true,
       "callers": [
         "controller"
+      ],
+      "scope_required": [
+        "installation_id"
       ]
     },
     {
@@ -26930,7 +26942,8 @@
       "expected_version": false,
       "callers": [
         "controller"
-      ]
+      ],
+      "scope_required": []
     },
     {
       "id": "_execution.verification.claim",
@@ -26988,7 +27001,8 @@
       "expected_version": true,
       "callers": [
         "controller"
-      ]
+      ],
+      "scope_required": []
     },
     {
       "id": "task.start",
@@ -27138,7 +27152,8 @@
       "expected_version": true,
       "callers": [
         "execution"
-      ]
+      ],
+      "scope_required": []
     },
     {
       "id": "_tasks.dependencies.wake",
@@ -27198,7 +27213,8 @@
       "callers": [
         "execution",
         "controller"
-      ]
+      ],
+      "scope_required": []
     },
     {
       "id": "_messaging.ready",
@@ -27245,7 +27261,8 @@
       "callers": [
         "execution",
         "controller"
-      ]
+      ],
+      "scope_required": []
     },
     {
       "id": "_messaging.processed",
@@ -27299,7 +27316,8 @@
       "expected_version": false,
       "callers": [
         "execution"
-      ]
+      ],
+      "scope_required": []
     },
     {
       "id": "conversation.message.list",
@@ -27409,7 +27427,8 @@
       "expected_version": true,
       "callers": [
         "controller"
-      ]
+      ],
+      "scope_required": []
     },
     {
       "id": "_effects.reconciliation.record",
@@ -27465,7 +27484,8 @@
       "expected_version": false,
       "callers": [
         "controller"
-      ]
+      ],
+      "scope_required": []
     },
     {
       "id": "_skills.evaluation.record",
@@ -27541,7 +27561,8 @@
       "callers": [
         "execution",
         "controller"
-      ]
+      ],
+      "scope_required": []
     },
     {
       "id": "_configuration.export.prepare",
@@ -27592,7 +27613,8 @@
       "callers": [
         "controller",
         "application"
-      ]
+      ],
+      "scope_required": []
     },
     {
       "id": "_configuration.export.record",
@@ -27649,7 +27671,8 @@
       "expected_version": true,
       "callers": [
         "controller"
-      ]
+      ],
+      "scope_required": []
     },
     {
       "id": "memory.list",

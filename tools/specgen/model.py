@@ -383,7 +383,6 @@ D['Result']=obj(schema={'const':'zatiti.result/v1'},command_id=ID,status=enum('c
 D['Command']['properties']['result']=ref('Result');D['Command']['required'].append('result')
 D['Descriptor']['properties']['completion_schema']=JSON
 for _o in OPS:
-    _o['scope_required']=['installation_id'] if 'scope' in _o['input_schema'].get('required',[]) else []
     if _o['id']=='_evidence.command.finish':
         _o['input_schema']=obj(command_id=ID,result=ref('Result'))
         _o['behavior']+=' Retain complete original result envelope including Fault message/details/retryability and cursor; replays return it exactly. Command ID must match result.command_id.'
@@ -504,3 +503,27 @@ D['ClarifyProposal']=obj(question=S)
 D['ReportOutputsProposal']=obj(bindings=arr(obj(name=S,artifact=ref('ArtifactRef'))))
 D['CycleDecisionProposal']=obj(decision=enum('continue','wait','escalate','done'),reason=S,**{'next_wake?':TIME})
 D['LocalDecisionTool']={'oneOf':[dict(ref('ReplyProposal'),description='reply'),dict(ref('ClarifyProposal'),description='clarify'),dict(ref('ReportOutputsProposal'),description='report_outputs'),dict(ref('CycleDecisionProposal'),description='cycle_decision')]}
+
+# scope_required must be computed last, after every add() call above: it was
+# previously computed mid-file (once, by iterating OPS at that point), so
+# every operation added afterward -- 23 of them, including several
+# revision-3 additions such as task.start, conversation.message.list,
+# memory.list and installation.verifier.list -- silently never received a
+# scope_required value at all. Fixed here by moving the computation to the
+# true end of the file, after OPS holds every operation this module ever
+# adds, so it covers all of them exactly once.
+#
+# _configuration.export.prepare is a deliberate exception, not a stale
+# omission: its own owning package (internal/configuration/service.go's
+# scopeRequirementExempt) documents that this internal operation's "scope"
+# input field names the export job ledger's resource -- which installation
+# the job belongs to -- not the enforced authorization envelope of the
+# calling principal (always controller/application, an already-trusted
+# internal peer), so it is deliberately never counted as scope_required the
+# way an ordinary caller-facing operation's "scope" is.
+_SCOPE_REQUIRED_EXEMPT={'_configuration.export.prepare'}
+for _o in OPS:
+    if _o['id'] in _SCOPE_REQUIRED_EXEMPT:
+        _o['scope_required']=[]
+    else:
+        _o['scope_required']=['installation_id'] if 'scope' in _o['input_schema'].get('required',[]) else []
