@@ -2812,6 +2812,39 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   yet acted on): internal/installation's Status def is also missing
   runtime_ready -- same stale-defs class, a further follow-up once
   the scope_required fix lands.
+- 2026-09-22 05:13 PT -- SCHEMA-DRIFT FIX ITEMS 1-4 LANDED (PR #40,
+  1891064). CI confirmed zero "redefines the shared definition"
+  failures remain anywhere (grepped the actual failure log directly)
+  -- every remaining cmd/zatiti/internal/application/internal/
+  installation CI failure now traces to exactly one cause,
+  task.start's scope_required mismatch, precisely the issue just
+  founder-authorized for the next fix. Rebase-merged.
+  Machine hit a second, worse load spike immediately after (125.59/
+  206.56/160.48 on this 2-core machine, vs ~60 earlier) -- investigated
+  before waiting blindly: memory is healthy (~900MB free, so this is
+  pure CPU/scheduling contention, not memory pressure), no single
+  runaway process (683 processes, broad multi-session contention --
+  a sire-session TypeScript compile among the visible load). Holding
+  all new dispatch and heavy local verification until it settles.
+  Also: P24's agent flagged what it believed was a NEW internal/
+  execution registry-assembly failure (naming review_flow_test.go/
+  bootstrap_test.go/atomicity_test.go as if defined there) and asked
+  whether to add internal/execution to expected-red.txt or commit
+  --no-verify. Independently checked directly before agreeing to
+  either (go test ./internal/execution passed clean on current main;
+  none of those three test files exist in that package at all -- they
+  belong to tests/integration and internal/installation, both already
+  correctly on the list) -- declined both options, asked for a precise
+  re-check instead. The agent's own re-check (intersecting every real
+  func Test* in internal/execution against the hook's FAIL lines)
+  found its first pass had misattributed an internal/installation
+  failure under a same-named test to internal/execution, and found
+  exactly one genuine internal/execution failure --
+  TestRepositoryCommandTimeoutKillsOwnedProcessGroup (P20's own
+  process-group-timeout proof) -- plausibly a load-induced flake given
+  the timeout margin was sized for normal load, not 100x+ oversubscription.
+  Not yet confirmed flake vs. real; will re-run in isolation once load
+  settles before deciding.
 
 ## Planned
 
