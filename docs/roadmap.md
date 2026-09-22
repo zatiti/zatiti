@@ -2753,6 +2753,65 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   (validate.go's matchCatalog) and fix every real stale-catalog
   mismatch in one pass, escalating only a genuinely ambiguous case
   (not just "catalog is stale") rather than guessing.
+- 2026-09-22 ~03:0x PT -- SELF-CORRECTION, verified: R-schema-drift-fix
+  applied its 3 remaining catalog.json edits, then ran internal/
+  registry's OWN governing test (TestCatalogMatchesFrozenContract,
+  which independently re-derives the catalog from internal/registry/
+  AGENTS.md's embedded input schemas, a source separate from docs/
+  implementation/operations.json) and found it FAILS on the edited
+  file but PASSES on the original -- meaning catalog.json's original
+  ["installation_id"] values for task.start/conversation.message.list/
+  memory.list/installation.verifier.list were already correct.
+  Reverted all 4 catalog.json edits (confirmed zero diff from origin/
+  main). Lead independently re-verified this is real, not a false
+  alarm: read conform()'s own doc comment in internal/application/
+  assembly_test.go (it only excuses scope_required drift for
+  installation.init specifically, contradicting the agent's own first-
+  pass generalization that "scope requirements" was a broadly accepted
+  drift category) and ran TestLandedDriftIsDomainSide directly, twice
+  -- confirming it STILL fails on task.start's mismatch even with
+  catalog.json at its original value, and that internal/tasks/
+  catalog_test.go's TestDescriptorsMatchFrozenCatalog reads docs/
+  implementation/operations.json directly and would break if the
+  module's own descriptor were changed to match catalog.json instead.
+  CONCLUSION: this is a genuine three-way frozen-contract inconsistency
+  (operations.json's recorded scope_required for 4 operations
+  contradicts those same operations' own input schemas; catalog.json/
+  registry.AGENTS.md correctly reflect the input-schema truth; each of
+  operations.json and catalog.json has its own test that breaks if the
+  other "wins") -- not a stale-copy bug, and fixing it means editing a
+  frozen contract file (operations.json itself), which every card is
+  told never to do without integration sign-off. Escalated to David
+  via AskUserQuestion rather than deciding unilaterally or having an
+  agent guess. FOUNDER DECISION (David, 2026-09-22): authorize the fix
+  now -- correct operations.json's scope_required for these 4
+  operations to match their own input schemas (the "generator gap"
+  internal/tasks/service.go's own code comment already diagnosed and
+  flagged for the integration owner), then update the 4 owning modules
+  (tasks, messaging, memory, installation) to drop their now-
+  unnecessary null overrides. This is the one remaining thing standing
+  between this effort and a fully green registry.
+  Meanwhile, R-schema-drift-fix landed items 1-4 (the $defs fixes)
+  cleanly, opened as PR #40. Lead's own independent verification, not
+  trusted from the report: wrote a standalone script re-verifying
+  every one of the 6 fixed defs (Responsibility x2, Operation x2,
+  Artifact x2, Conversation x1, plus the 2 new OperationAttempt/
+  CallbackRoute defs in 2 packages) byte-for-byte against operations.
+  json; wrote a second script confirming zero defs were removed or
+  altered beyond the intended additions in all 4 files. Ran go build/
+  vet/gofmt/test myself on all 4 packages (installation's own single
+  remaining failure independently confirmed as the separate, already-
+  tracked installation.verifier.list-has-no-implementation issue, not
+  a $defs problem). Red->green verified myself: reverted internal/
+  policy's fix alone, confirmed TestLandedDriftIsDomainSide reproduces
+  the exact original "redefines the shared definition Operation"
+  error, restored, confirmed the registry now only reaches the
+  separate scope_required issue. Rebased onto current main, whole-repo
+  build/vet clean. CI pending.
+  Also newly found (via the fix's own full-suite pre-commit run, not
+  yet acted on): internal/installation's Status def is also missing
+  runtime_ready -- same stale-defs class, a further follow-up once
+  the scope_required fix lands.
 
 ## Planned
 
