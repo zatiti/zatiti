@@ -3615,3 +3615,16 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   both defects can be decided together rather than fixing one and finding
   the journey still doesn't complete. Dispatching that investigation now;
   no frozen-contract change made yet.
+- 2026-09-22 ~09:45 PT -- P47 DISPATCHED (tests/qualification, "replace
+  unconditional qualification skips with executable harnesses"),
+  single-lane -- dependency-ready (all 7 deps landed), no conflict with
+  the artifacts.metadata investigation (read-only, different package).
+  Briefed with hard constraints re-emphasized beyond the card text: never
+  a real network/billed call to an external provider, never installs
+  against this actual host (must use P45's own temp-directory/recording-
+  stand-in pattern), no publishing/deployment. Pointed at P45's packaging
+  driver and P46's controlled-provider Responses test as the concrete
+  patterns to extend. Warned it will likely hit the same known,
+  already-tracked evidence-recording ceiling (artifacts.metadata /
+  ID-confusion) if any journey reaches real task completion -- told to
+  document that as known state, not re-report it as new.
