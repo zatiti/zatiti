@@ -2908,6 +2908,37 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   to deliver, pending only the scope_required fix now in flight to
   prove it end to end.
   37 of 50 cards landed (74%, up from 72%).
+- 2026-09-22 ~23:06 PT -- SCOPE_REQUIRED FIX independently reviewed and
+  opened as PR #42 (branch scope-required-fix). Two commits: docs/
+  implementation/operations.json corrected for the 4 operations (lead
+  independently verified byte-for-byte before dispatch AND again after
+  the agent's commit -- exactly the 4 additions, JSON parses, nothing
+  else touched); internal/tasks/internal/messaging/internal/memory's
+  now-unnecessary noScopeRequired-style overrides removed, including
+  the paired TestDescriptorsExactness hardcoded carve-outs (a genuine
+  strengthening -- the general rule now applies uniformly, no special
+  case). internal/installation correctly untouched (installation.
+  verifier.list has zero Go implementation anywhere, confirmed by
+  grep, a separate already-tracked gap).
+  Lead's own independent verification, not trusted from the report:
+  ran internal/registry's TestCatalogMatchesFrozenContract myself
+  (pass, confirms catalog.json still untouched/correct). Ran internal/
+  application's TestLandedDriftIsDomainSide (the real 16-module
+  registry assembly) myself -- confirmed ZERO scope_required failures
+  remain anywhere; the only remaining failure is the distinct,
+  already-tracked internal/installation Status $defs gap PR #40's own
+  investigation surfaced. Red->green verified myself: reverted
+  internal/tasks/service.go's fix alone, confirmed
+  TestLandedDriftIsDomainSide reproduces the exact original task.start
+  scope-mismatch error, restored, confirmed clean. Rebased onto
+  current main, whole-repo build/vet clean. CI pending.
+  This is the single fix that closes the registry-assembly incident
+  this whole 24h-parallelization stretch has been chasing: schema
+  $defs drift (PR #40) plus this scope_required contract fix (PR #42)
+  together should let cmd/zatiti/internal/application/tests/
+  integration/tests/qualification finally assemble the full registry
+  cleanly, pending only internal/installation's own separate Status
+  $defs gap and its unimplemented installation.verifier.list operation.
 
 ## Planned
 
