@@ -3116,3 +3116,28 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   this one test -- worth a dedicated card (internal/contract, scope:
   ValidateSchema/strictParse's $ref resolution) rather than folding into
   an unrelated one. Not yet added to plan.json; flagging here first.
+- 2026-09-22 08:00 UTC -- P42 LANDED (PR #44, a1a8770), rebase-merged.
+  Independently reviewed and verified myself, not just from the agent's
+  report: read the full diff (18 files, +1638/-181), confirmed the new
+  tests are real (local_store_test.dart's bounded-cache/corrupt-file/
+  cross-installation-isolation cases; live_source_test.dart's durability-
+  across-restart, dropped-ack-resolves-without-duplicate, unsupported-
+  controller-state cases), ran dart format/flutter analyze/flutter test
+  myself (171/171 pass, clean), red->green verified the installation-
+  gating security property (removing FileLocalStore's installation-id
+  check reproduces the expected "a stored file for a different
+  installation is never returned" failure, restored after). Two genuine
+  contract gaps found and honestly worked around rather than invented:
+  identity.current does not exist anywhere in the 287-operation frozen
+  catalog (confirmed directly), so a direct conversation's "fromUser" is
+  derived from real participant structure instead; no public "mark read"
+  operation exists, so unread/read-marker stay server-only projections,
+  never client-set. "build and test" (both OS) failed CI on the same
+  known, tracked internal/installation Status $defs registry-assembly
+  issue P25 fixes -- confirmed via the actual CI log this is the identical
+  already-expected-red condition, not a new regression, and confirmed via
+  gh pr checks that PR #41 and PR #42 (both already merged this session)
+  show the exact same "build and test" failure pattern, so it is not a
+  merge-blocking check in this repo. Every other check (specification
+  drift, static checks, workflow validation, flutter desktop client x2)
+  passed clean. Worktree/branch cleaned up, P42 claim released.
