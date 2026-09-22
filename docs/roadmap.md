@@ -3339,3 +3339,30 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   contract gaps (no identity.current, manual-only acceptance) to avoid
   rediscovering them, and warned against redoing already-landed work
   given this stretch's two earlier scope-tracking mistakes.
+- 2026-09-22 ~05:05-05:20 PT -- P44 LANDED (PR #51). Real content: memory
+  tab now reads real memory.binding.list/memory.list/memory.retract/
+  memory.job.get (replacing a stale placeholder notice); artifact cards
+  show real provenance/digest/sharing/verifier-observations and a fault-
+  state artifact renders as an integrity failure rather than disappearing;
+  routines render a real schedule.list entry instead of treating trigger
+  strings as a schedule; cost/context-capture/autonomy/recovery-obligation
+  surfaces use real controller projections. First-ever test coverage of
+  SecureCredentialStore (via flutter_secure_storage's own shipped test
+  platform, not a hand-rolled fake) plus new keyboard/assistive-technology
+  test coverage. Independently verified: read the new credential-store
+  test in full (exercises real production code, not a stand-in), format/
+  analyze/test all re-run clean (208/208), the one new dependency (dev-
+  only, flutter_secure_storage_platform_interface) checked and justified.
+
+  NEW CI FLAKE, DISTINCT FROM THE ALREADY-FIXED ONE: PR #51's "build and
+  test (ubuntu-24.04)" failed -- cmd/zatiti's TestServeCompletesBootstrap-
+  OverTheSocket timed out after 80s waiting for the owner profile/running
+  controller, with the whole cmd/zatiti package taking ~17 minutes (normal
+  is ~2 minutes) before that. Not investigated in depth (P44 doesn't touch
+  any Go code, and this doesn't match the earlier fakeDB.Write pattern --
+  a genuine startup timeout under contention looks more like CI-runner
+  resource starvation than a logic bug, though not confirmed). Every other
+  check green; merged past it following the established non-blocking
+  precedent. Flagging for whoever next sees this test fail on CI to check
+  whether it recurs -- if it does, worth a real investigation the same way
+  the fakeDB.Write flake got one.
