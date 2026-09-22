@@ -62,6 +62,7 @@ type command struct {
 var commands = map[string]command{
 	"lint":          {"validate the workflow files against the policy", runLint},
 	"gate":          {"evaluate the release qualification verdict from the needs context", runGate},
+	"qualevidence":  {"enforce enumeration and freshness of tests/qualification's release report", runQualEvidence},
 	"gotest":        {"run go test and retain a bounded summary and log", runGoTest},
 	"inputs":        {"resolve and validate release qualification inputs", runInputs},
 	"lock":          {"verify the Go toolchain and dependency lock agree", runLock},
@@ -140,6 +141,18 @@ func parseFlags(fs *flag.FlagSet, args []string) error {
 		return faultf(codeInvalidInput, "%v", err)
 	}
 	return nil
+}
+
+// splitCSV splits a comma-separated flag value into trimmed, non-empty
+// items. An empty or all-whitespace input yields no items.
+func splitCSV(s string) []string {
+	var out []string
+	for _, part := range strings.Split(s, ",") {
+		if p := strings.TrimSpace(part); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 func runLint(_ context.Context, args []string, stdout, stderr io.Writer) error {

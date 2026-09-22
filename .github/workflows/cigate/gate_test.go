@@ -264,6 +264,205 @@ func TestRunInputs(t *testing.T) {
 	}
 }
 
+// qualReport builds a synthetic qualificationReport by round-tripping a map
+// through JSON, exercising the real decoder instead of constructing the Go
+// struct by hand.
+func qualReport(t *testing.T, m map[string]any) qualificationReport {
+	t.Helper()
+	data, err := json.Marshal(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var r qualificationReport
+	if err := json.Unmarshal(data, &r); err != nil {
+		t.Fatal(err)
+	}
+	return r
+}
+
+// healthyQualReport is a report at the given revision and go.mod digest with
+// every case passed and every listed gate at passed_cases_only.
+func healthyQualReport(revision, digest string) map[string]any {
+	return map[string]any{
+		"versions": map[string]string{"source_revision": revision, "module_root_go_mod": digest},
+		"cases": []map[string]any{
+			{"case": "Z01.duplicate_controller", "status": "passed"},
+			{"case": "QUALIFICATION.baseline_mcp", "status": "passed"},
+		},
+		"gates": []map[string]any{
+			{"gate": "Z01", "status": "passed_cases_only"},
+			{"gate": "QUALIFICATION", "status": "passed_cases_only"},
+		},
+	}
+}
+
+// TestQualificationEvidenceEnumeratesEveryRequiredGate proves P48.md's
+// required behavioral test "Deliberately omit or skip one required journey:
+// release gate fails." A gate that never appears in the report (its case
+// was deleted outright, so go test itself has nothing to report) and a gate
+// whose case is retained but not_run both block, exactly as omitting or
+// skipping a required journey must.
+func TestQualificationEvidenceEnumeratesEveryRequiredGate(t *testing.T) {
+	t.Parallel()
+	const rev, digest = "deadbeef", "cafef00d"
+	cases := []struct {
+		name      string
+		report    map[string]any
+		required  []string
+		qualified bool
+		blocking  string
+	}{
+		{"every required gate present and passed", healthyQualReport(rev, digest), []string{"Z01", "QUALIFICATION"}, true, ""},
+		{"required gate omitted from the report entirely", healthyQualReport(rev, digest), []string{"Z01", "QUALIFICATION", "Z99"}, false, "Z99: required gate produced no evidence"},
+		{"required gate's only case is not_run", map[string]any{
+			"versions": map[string]string{"source_revision": rev, "module_root_go_mod": digest},
+			"cases":    []map[string]any{{"case": "Z01.duplicate_controller", "status": "not_run", "reason": "controller binary unavailable"}},
+			"gates":    []map[string]any{{"gate": "Z01", "status": "not_run"}},
+		}, []string{"Z01"}, false, "Z01: not_run"},
+		{"gate present with cases only partially executed", map[string]any{
+			"versions": map[string]string{"source_revision": rev, "module_root_go_mod": digest},
+			"cases":    []map[string]any{{"case": "QUALIFICATION.baseline_mcp", "status": "passed"}},
+			"gates":    []map[string]any{{"gate": "QUALIFICATION", "status": "no_case_executed_here"}},
+		}, []string{"QUALIFICATION"}, false, "QUALIFICATION: no_case_executed_here"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			v := evaluateQualificationEvidence(qualReport(t, tc.report), rev, digest, tc.required)
+			if v.Qualified != tc.qualified {
+				t.Fatalf("Qualified = %v, want %v; blocking %v", v.Qualified, tc.qualified, v.Blocking)
+			}
+			if tc.blocking != "" && !strings.Contains(strings.Join(v.Blocking, "|"), tc.blocking) {
+				t.Errorf("Blocking = %v, want an entry containing %q", v.Blocking, tc.blocking)
+			}
+		})
+	}
+}
+
+// TestQualificationEvidenceInvalidatesStaleRevisionOrDigest proves P48.md's
+// required behavioral test "A stale source revision or changed
+// catalog/profile digest invalidates prior evidence." Evidence where every
+// case and gate is otherwise healthy still cannot qualify a release when it
+// was generated from a different commit or against a different go.mod.
+func TestQualificationEvidenceInvalidatesStaleRevisionOrDigest(t *testing.T) {
+	t.Parallel()
+	const generatedRev, generatedDigest = "deadbeef", "cafef00d"
+	report := healthyQualReport(generatedRev, generatedDigest)
+	required := []string{"Z01", "QUALIFICATION"}
+	cases := []struct {
+		name             string
+		checkedOutRev    string
+		checkedOutDigest string
+		blocking         string
+	}{
+		{"fresh evidence at the checked-out commit qualifies", generatedRev, generatedDigest, ""},
+		{"stale source revision", "othercommit", generatedDigest, "stale evidence: report source revision"},
+		{"changed go.mod digest", generatedRev, "differentdigest", "stale evidence: report go.mod digest"},
+		{"both stale", "othercommit", "differentdigest", "stale evidence: report source revision"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			v := evaluateQualificationEvidence(qualReport(t, report), tc.checkedOutRev, tc.checkedOutDigest, required)
+			if tc.blocking == "" {
+				if !v.Qualified {
+					t.Fatalf("fresh evidence did not qualify: %+v", v)
+				}
+				return
+			}
+			if v.Qualified {
+				t.Fatalf("stale evidence qualified: %+v", v)
+			}
+			if !strings.Contains(strings.Join(v.Blocking, "|"), tc.blocking) {
+				t.Errorf("Blocking = %v, want an entry containing %q", v.Blocking, tc.blocking)
+			}
+		})
+	}
+}
+
+// TestQualificationEvidenceAcceptsHealthyFreshReport proves P48.md's
+// required behavioral test "Healthy baseline, renderer and completed
+// journey matrices pass with linked artifacts": fresh evidence at the
+// checked-out revision with every required gate at passed_cases_only
+// qualifies cleanly, with no blocking entries at all.
+func TestQualificationEvidenceAcceptsHealthyFreshReport(t *testing.T) {
+	t.Parallel()
+	const rev, digest = "deadbeef", "cafef00d"
+	v := evaluateQualificationEvidence(qualReport(t, healthyQualReport(rev, digest)), rev, digest, []string{"Z01", "QUALIFICATION"})
+	if !v.Qualified || len(v.Blocking) != 0 || v.Schema != qualificationEvidenceSchema {
+		t.Fatalf("healthy fresh report = %+v", v)
+	}
+}
+
+// TestRunQualEvidenceWritesVerdictAndBlocksOnOmittedGate drives the command
+// end to end through real files, proving the CLI wiring (flag parsing, exit
+// codes, retained verdict file) around evaluateQualificationEvidence.
+func TestRunQualEvidenceWritesVerdictAndBlocksOnOmittedGate(t *testing.T) {
+	dir := t.TempDir()
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example\n\ngo 1.26.0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	digest, _, err := fileSHA256(filepath.Join(root, "go.mod"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	const rev = "abc123"
+	reportPath := filepath.Join(dir, "release-report.json")
+	data, err := json.Marshal(healthyQualReport(rev, digest))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(reportPath, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(dir, "verdict.json")
+	var stdout, stderr bytes.Buffer
+
+	// Z99 is not in the report: a deliberately omitted required journey.
+	args := []string{"qualevidence", "-report", reportPath, "-root", root, "-revision", rev, "-require-gate", "Z01,Z99", "-out", out}
+	if code := run(context.Background(), args, &stdout, &stderr); code != 1 {
+		t.Fatalf("exit code = %d, want 1; stderr %s", code, stderr.String())
+	}
+	var v qualificationVerdict
+	blocked, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("the blocking verdict was not retained: %v", err)
+	}
+	if err := json.Unmarshal(blocked, &v); err != nil {
+		t.Fatal(err)
+	}
+	if v.Qualified || !contains(v.Blocking, "Z99: required gate produced no evidence in this report") {
+		t.Errorf("verdict = %+v", v)
+	}
+
+	// Every required gate present and passed: qualifies.
+	args = []string{"qualevidence", "-report", reportPath, "-root", root, "-revision", rev, "-require-gate", "Z01,QUALIFICATION", "-out", out}
+	if code := run(context.Background(), args, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit code = %d, want 0; stderr %s", code, stderr.String())
+	}
+	data, err = os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(data, &v); err != nil {
+		t.Fatal(err)
+	}
+	if !v.Qualified || len(v.Blocking) != 0 {
+		t.Errorf("healthy verdict = %+v", v)
+	}
+
+	// Missing -report is invalid_input; an absent report file is
+	// prerequisite_missing.
+	if code := run(context.Background(), []string{"qualevidence", "-out", out}, &stdout, &stderr); code != 2 {
+		t.Errorf("missing -report: exit %d, want 2", code)
+	}
+	args = []string{"qualevidence", "-report", filepath.Join(dir, "absent.json"), "-revision", rev, "-out", out}
+	if code := run(context.Background(), args, &stdout, &stderr); code != 5 {
+		t.Errorf("absent report file: exit %d, want 5 (prerequisite_missing)", code)
+	}
+}
+
 func TestRunRejectsUnknownCommandsAndFlags(t *testing.T) {
 	t.Parallel()
 	var stdout, stderr bytes.Buffer

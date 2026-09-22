@@ -259,13 +259,13 @@ jobs:
           TMPDIR: /tmp/zt
         run: |
           mkdir -p /tmp/zt
-          go run ./.github/workflows/cigate gotest -strict -name unit -out-dir "$EVIDENCE" -- -timeout 30m ./...
+          go run ./.github/workflows/cigate gotest -strict -name unit -require-tests "github.com/zatiti/zatiti/internal/platform#TestListenPrivateRefusesSymlinkedRunDirectory,github.com/zatiti/zatiti/internal/platform#TestBlobTamperedObjectFailsPublishOverExisting" -out-dir "$EVIDENCE" -- -timeout 30m ./...
       - name: Test with the race detector without skips
         env:
           TMPDIR: /tmp/zt
         run: |
           mkdir -p /tmp/zt
-          go run ./.github/workflows/cigate gotest -strict -name race -out-dir "$EVIDENCE" -- -timeout 40m -race ./...
+          go run ./.github/workflows/cigate gotest -strict -name race -require-tests "github.com/zatiti/zatiti/internal/platform#TestListenPrivateRefusesSymlinkedRunDirectory,github.com/zatiti/zatiti/internal/platform#TestBlobTamperedObjectFailsPublishOverExisting" -out-dir "$EVIDENCE" -- -timeout 40m -race ./...
       - name: Retain evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -389,9 +389,12 @@ jobs:
       - name: Run the qualification suite without skips
         env:
           TMPDIR: /tmp/zt
+          ZATITI_QUALIFICATION_EVIDENCE: ${{ runner.temp }}/evidence/qualification-cases
         run: |
           mkdir -p /tmp/zt
           go run ./.github/workflows/cigate gotest -strict -name qualification -out-dir "$EVIDENCE" -- -timeout 40m ./tests/qualification/...
+      - name: Enforce qualification case enumeration and evidence freshness
+        run: go run ./.github/workflows/cigate qualevidence -report "$EVIDENCE/qualification-cases/release-report.json" -require-gate "Z01,Z04,Z13,Z16,Z21,JOURNEY,QUALIFICATION" -out "$EVIDENCE/qualification-verdict.json"
       - name: Retain evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

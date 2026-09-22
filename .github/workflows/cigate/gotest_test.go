@@ -51,7 +51,12 @@ func TestMain(m *testing.M) {
 
 func collect(t *testing.T, strict bool, exit int, lines ...string) testSummary {
 	t.Helper()
-	c := newTestCollector("unit", []string{"./..."}, strict)
+	return collectRequire(t, strict, nil, exit, lines...)
+}
+
+func collectRequire(t *testing.T, strict bool, required []string, exit int, lines ...string) testSummary {
+	t.Helper()
+	c := newTestCollector("unit", []string{"./..."}, strict, required)
 	if err := c.consume(strings.NewReader(strings.Join(lines, "\n"))); err != nil {
 		t.Fatalf("consume: %v", err)
 	}
@@ -91,6 +96,56 @@ func TestCollectorVerdicts(t *testing.T) {
 			}
 			if tc.blocking != "" && !strings.Contains(strings.Join(s.Blocking, "|"), tc.blocking) {
 				t.Errorf("Blocking = %v, want %q", s.Blocking, tc.blocking)
+			}
+		})
+	}
+}
+
+// TestRequiredTestMustBeObservedPassing proves the platform regression
+// protection (docs/implementation-remediation/audit.md, "Hosted CI
+// follow-up"; see policy.go's requiredPlatformRegressionTests): a required
+// pkg#Test identity that never appears with a "pass" action blocks the run
+// even when every test that DID run passed and the process exited zero.
+// This is the guard -strict's own skip detection cannot provide, because a
+// deleted or renamed test function emits no pass, fail, or skip event at
+// all -- there is nothing in the stream to detect.
+func TestRequiredTestMustBeObservedPassing(t *testing.T) {
+	t.Parallel()
+	pass := `{"Action":"pass","Package":"p","Test":"TestA"}`
+	other := `{"Action":"pass","Package":"p","Test":"TestOther"}`
+	cases := []struct {
+		name     string
+		required []string
+		lines    []string
+		passed   bool
+		blocking string
+	}{
+		{"required test observed passing", []string{"p#TestA"}, []string{pass}, true, ""},
+		{"no required tests configured", nil, []string{pass}, true, ""},
+		{"required test never ran at all", []string{"p#TestMissing"}, []string{pass}, false, "p#TestMissing"},
+		{"required test renamed: identity absent even though the suite is green", []string{"p#TestRenamedAway"}, []string{pass, other}, false, "p#TestRenamedAway"},
+		{"required test ran but was skipped, not passed", []string{"p#TestA"}, []string{`{"Action":"skip","Package":"p","Test":"TestA"}`, other}, false, "p#TestA"},
+		{"required test ran but failed", []string{"p#TestA"}, []string{`{"Action":"fail","Package":"p","Test":"TestA"}`}, false, "p#TestA"},
+		{"a different package's same-named test does not satisfy the requirement", []string{"q#TestA"}, []string{pass}, false, "q#TestA"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			s := collectRequire(t, false, tc.required, 0, tc.lines...)
+			if s.Passed != tc.passed {
+				t.Fatalf("Passed = %v, want %v; blocking %v; required_missing %v", s.Passed, tc.passed, s.Blocking, s.RequiredMissing)
+			}
+			if tc.blocking == "" {
+				if len(s.RequiredMissing) != 0 {
+					t.Errorf("RequiredMissing = %v, want none", s.RequiredMissing)
+				}
+				return
+			}
+			if !contains(s.RequiredMissing, tc.blocking) {
+				t.Errorf("RequiredMissing = %v, want %q", s.RequiredMissing, tc.blocking)
+			}
+			if !strings.Contains(strings.Join(s.Blocking, "|"), tc.blocking) {
+				t.Errorf("Blocking = %v, want to mention %q", s.Blocking, tc.blocking)
 			}
 		})
 	}
@@ -170,6 +225,25 @@ func TestRunGoTestSubprocess(t *testing.T) {
 
 	if _, s, _, _ = runHelper(t, "args"); len(s.Failed) != 1 || s.Failed[0].Output != "test -json -race ./..." {
 		t.Fatalf("go test was not invoked as \"test -json <args>\": %+v", s.Failed)
+	}
+}
+
+// TestRunGoTestSubprocessRequireTests proves -require-tests reaches the real
+// CLI flag parsing and subprocess path, not just the in-memory collector:
+// the "pass" helper scenario always exits 0 and reports zero failures, so
+// only the -require-tests check can turn it into a blocking exit.
+func TestRunGoTestSubprocessRequireTests(t *testing.T) {
+	code, s, _, _ := runHelper(t, "pass", "-require-tests", "p#TestA")
+	if code != 0 || !s.Passed || len(s.RequiredMissing) != 0 {
+		t.Fatalf("satisfied requirement: code %d, summary %+v", code, s)
+	}
+
+	code, s, _, console := runHelper(t, "pass", "-require-tests", "p#TestNeverRan")
+	if code != 1 || s.Passed || !contains(s.RequiredMissing, "p#TestNeverRan") {
+		t.Fatalf("unsatisfied requirement: code %d, summary %+v", code, s)
+	}
+	if !strings.Contains(console, "MISSING required test p#TestNeverRan") {
+		t.Errorf("console report = %q", console)
 	}
 }
 
