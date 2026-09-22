@@ -61,6 +61,7 @@ type testSummary struct {
 	Failed               []failedTest `json:"failed"`
 	SkippedTests         []string     `json:"skipped_tests"`
 	PackagesWithoutTests []string     `json:"packages_without_tests"`
+	RequiredMissing      []string     `json:"required_missing"`
 	UnparsedLines        int          `json:"unparsed_lines"`
 	OmittedEntries       int          `json:"omitted_entries"`
 	LogTruncated         bool         `json:"log_truncated"`
@@ -69,19 +70,31 @@ type testSummary struct {
 }
 
 // testCollector folds a go test -json stream into a testSummary while holding
-// a bounded amount of output per running test.
+// a bounded amount of output per running test. required names the
+// "pkg#Test" identities (see runGoTest's -require-tests) that must be
+// observed passing; a required identity whose test function was renamed or
+// deleted never emits a pass, fail or skip event at all, so this is
+// independent of, and stricter than, -strict's skip detection.
 type testCollector struct {
-	sum    testSummary
-	output map[string]*boundedBuffer
+	sum      testSummary
+	output   map[string]*boundedBuffer
+	required map[string]bool
+	seenPass map[string]bool
 }
 
-func newTestCollector(name string, args []string, strict bool) *testCollector {
+func newTestCollector(name string, args []string, strict bool, required []string) *testCollector {
+	req := make(map[string]bool, len(required))
+	for _, r := range required {
+		req[r] = true
+	}
 	return &testCollector{
 		sum: testSummary{
 			Schema: testSummarySchema, Name: name, Args: args, Strict: strict,
-			Failed: []failedTest{}, SkippedTests: []string{}, PackagesWithoutTests: []string{}, Blocking: []string{},
+			Failed: []failedTest{}, SkippedTests: []string{}, PackagesWithoutTests: []string{}, RequiredMissing: []string{}, Blocking: []string{},
 		},
-		output: map[string]*boundedBuffer{},
+		output:   map[string]*boundedBuffer{},
+		required: req,
+		seenPass: map[string]bool{},
 	}
 }
 
@@ -120,6 +133,9 @@ func (c *testCollector) event(ev testEvent) {
 			c.sum.Packages.Passed++
 		} else {
 			c.sum.Tests.Passed++
+			if req := ev.Package + "#" + ev.Test; c.required[req] {
+				c.seenPass[req] = true
+			}
 		}
 		delete(c.output, key)
 	case "skip":
@@ -176,6 +192,15 @@ func (c *testCollector) finish(exit int, logTruncated bool) testSummary {
 	}
 	if s.Strict && s.Tests.Skipped > 0 {
 		s.Blocking = append(s.Blocking, fmt.Sprintf("%d skipped tests; a required qualification that did not run blocks", s.Tests.Skipped))
+	}
+	for req := range c.required {
+		if !c.seenPass[req] {
+			s.RequiredMissing = append(s.RequiredMissing, req)
+		}
+	}
+	sort.Strings(s.RequiredMissing)
+	if len(s.RequiredMissing) > 0 {
+		s.Blocking = append(s.Blocking, fmt.Sprintf("%d required tests were never observed passing: %s", len(s.RequiredMissing), strings.Join(s.RequiredMissing, ", ")))
 	}
 	s.Passed = len(s.Blocking) == 0
 	return *s
@@ -238,6 +263,7 @@ func runGoTest(ctx context.Context, args []string, stdout, stderr io.Writer) err
 	name := fs.String("name", "", "evidence name, for example unit or race")
 	outDir := fs.String("out-dir", "", "evidence directory")
 	strict := fs.Bool("strict", false, "block on skipped tests")
+	requireTests := fs.String("require-tests", "", "comma-separated pkg#Test identities that must be observed passing, regardless of overall pass/fail counts")
 	goBin := fs.String("go", "go", "go command")
 	timeout := fs.Duration("timeout", 40*time.Minute, "overall time limit")
 	maxLog := fs.Int64("max-log-bytes", 8<<20, "size limit of the retained event log")
@@ -271,7 +297,7 @@ func runGoTest(ctx context.Context, args []string, stdout, stderr io.Writer) err
 		_ = logFile.Close()
 		return faultf(codePrerequisiteMissing, "starting %s: %v", *goBin, err)
 	}
-	col := newTestCollector(*name, fs.Args(), *strict)
+	col := newTestCollector(*name, fs.Args(), *strict, splitCSV(*requireTests))
 	readErr := col.consume(io.TeeReader(pipe, log))
 	if readErr != nil {
 		// Keep draining so the child is not blocked on a full pipe.
@@ -323,6 +349,9 @@ func printSummary(w io.Writer, s testSummary) {
 			break
 		}
 		say(w, "FAIL %s %s\n%s", f.Package, f.Test, boundString(f.Output, 2<<10))
+	}
+	for _, m := range s.RequiredMissing {
+		say(w, "MISSING required test %s", m)
 	}
 	for i, t := range s.SkippedTests {
 		if i == maxPrinted {

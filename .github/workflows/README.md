@@ -8,7 +8,7 @@ deploys, and neither references a secret.
 |---|---|---|
 | `ci.yml` | Pull requests, pushes to `main` | Specification drift check, workflow validation, static checks, Go build and tests, and the Flutter desktop client on Linux and macOS. |
 | `release-qualification.yml` | A version tag push, or a manual dispatch started from a version tag | Decides whether the tagged commit is qualified. Produces a verdict and evidence only. |
-| `cigate/` | Called by both workflows with `go run` | Policy validation, release verdict, bounded test evidence, input resolution, Flutter SDK pin, lock and drift checks. Standard library only. |
+| `cigate/` | Called by both workflows with `go run` | Policy validation, release verdict, qualification-evidence enumeration and freshness, bounded test evidence, input resolution, Flutter SDK pin, lock and drift checks. Standard library only. |
 
 ## Validate locally
 
@@ -71,6 +71,17 @@ one property at a time and requires each rule to fire.
   10-minute package timeout under load) and `-short` is rejected, because it
   would skip the end-to-end and integration tests that prove the product
   runs.
+- The whole-module `go test ./...` run in the `test` job's unit and race
+  steps, on both workflows, must pass `cigate gotest -require-tests` naming
+  the exact `internal/platform` regression tests a hosted Linux/macOS run
+  once observed failing while the local run stayed green (see "Platform
+  regression protection" below). A workflow edit that drops or shortens that
+  list fails the `platform-regressions` rule.
+- The `qualification` gate of `release-qualification.yml` must run `cigate
+  qualevidence` (the `release-gates` rule), so a required Z-gate whose case
+  identity was deleted outright -- which leaves go test nothing to report, so
+  `-strict` cannot see it -- still blocks instead of passing on an empty
+  gate.
 
 ## Release qualification
 
@@ -110,6 +121,73 @@ result, not a defect.
 
 A passing verdict is evidence, not permission. Publishing is a separate,
 reviewed, human process that this directory does not implement.
+
+## Qualification evidence enumeration and freshness
+
+`tests/qualification` writes `release-report.json` on every run: a case
+record for every named acceptance case it owns a harness identity for
+(`passed`, `failed`, or `not_run` with the blocking reason), rolled up per
+gate (`Z01`-`Z21`, `JOURNEY`, `QUALIFICATION`). `cigate gotest -strict`
+already blocks the `qualification` gate on any case that ran and was skipped
+or failed. It cannot catch a case whose test function was deleted outright:
+that leaves no pass, fail, or skip event for go test to report at all, so
+the process exits clean while the retained report quietly drops the case
+from its gate.
+
+`cigate qualevidence` closes that gap by reading the retained report
+directly instead of trusting the exit code alone:
+
+1. It refuses evidence whose `versions.source_revision` is not the
+   checked-out commit, or whose `versions.module_root_go_mod` digest is not
+   the checked-out `go.mod`: evidence from an earlier run or a different
+   revision can never stand in for the tree actually being qualified.
+2. It requires every case the report does carry to read `passed`.
+3. For each gate named with `-require-gate`, it requires the report to
+   carry that gate at all, and at its best reachable status,
+   `passed_cases_only` -- never `no_case_executed_here` (no case exists),
+   `not_run`, or `failed`. `-require-gate` is set explicitly in the workflow
+   step, naming only the gates `tests/qualification` currently owns a real
+   case for (`Z01`, `Z04`, `Z13`, `Z16`, `Z21`, `JOURNEY`, `QUALIFICATION`,
+   per its own committed `beginCase` calls); extending that list as more
+   cases land is a reviewable one-line workflow change, not a Go-code
+   change, since which gates this package currently owns is that package's
+   decision, not this directory's to invent.
+
+`release_claimable` in the raw report is always `false` and every gate
+always lands in the report's own `blocking` list by design (its doc comment:
+"this report never counts an absent case as a pass") -- `cigate qualevidence`
+does not read either field; it evaluates the report's `cases` and `gates`
+directly against the explicit, reviewable required-gate list instead.
+
+The `qualification` job sets `ZATITI_QUALIFICATION_EVIDENCE` so
+`release-report.json` and every individual case file land under
+`$RUNNER_TEMP/evidence/qualification-cases` and are retained by the job's
+`actions/upload-artifact` step; without that variable the report goes to a
+throwaway temporary directory and is lost after the run.
+
+## Platform regression protection
+
+[PR #2 CI run 35473210732](https://github.com/zatiti/zatiti/actions/runs/35473210732)
+observed `internal/platform.TestListenPrivateRefusesSymlinkedRunDirectory`
+fail on hosted Linux and macOS, and
+`internal/platform.TestBlobTamperedObjectFailsPublishOverExisting`
+additionally fail on hosted macOS, while the local run of the same source
+stayed green (`docs/implementation-remediation/audit.md`, "Hosted CI
+follow-up"). `go test ./...` already runs both tests; nothing before this
+change verified that they specifically ran and passed, so a rename or
+deletion of either test would not have been caught by the aggregate
+pass/fail counts.
+
+The `test` job's unit and race steps, on both `ci.yml` and
+`release-qualification.yml`, now pass `cigate gotest -require-tests` naming
+both tests as `pkg#Test` identities. A required identity that is never
+observed with a `pass` action in the `go test -json` stream blocks the run,
+independent of `-strict` and independent of the overall exit code, and is
+recorded in `<name>.summary.json`'s `required_missing` field. `cigate lint`
+enforces the `-require-tests` argument's presence and contents (rule
+`platform-regressions`) on every whole-module `go test ./...` invocation in
+the `test` job, so a future edit cannot drop this protection without the
+policy failing closed.
 
 ## Flutter desktop client
 
@@ -156,6 +234,8 @@ so it cannot dirty the tree that drift and provenance checks inspect.
 | `<name>.log`, `<name>.result.json` | Output of one bounded command (`pub-get`, `dart-format`, `flutter-analyze`, `flutter-build`), truncated at 4 MiB, with its exit code. |
 | `flutter-pin.json`, `flutter-version.json`, `flutter-layout.json` | The pinned SDK, the installed SDK as reported by `flutter --version --machine`, and which optional application parts exist. |
 | `inputs.json`, `provenance.json`, `verdict.json` | Release inputs, build provenance of the candidate binary, and the verdict. |
+| `qualification-cases/release-report.json`, `qualification-cases/<case>.json` | `tests/qualification`'s own per-case evidence and gate rollup (see "Qualification evidence enumeration and freshness"). |
+| `qualification-verdict.json` | `cigate qualevidence`'s enumeration-and-freshness verdict against the required gate list. |
 
 Console output is a bounded summary. Candidate binaries are not uploaded;
 `provenance.json` records the `zatiti` binary's digest, toolchain,

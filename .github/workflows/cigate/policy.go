@@ -54,6 +54,21 @@ var requiredReleaseGates = []string{
 // platformReleaseGates must run on every supported release platform.
 var platformReleaseGates = []string{"test", "flutter", "qualification", "build"}
 
+// requiredPlatformRegressionTests are the internal/platform security
+// regressions that a hosted Linux and macOS run actually observed failing
+// while every affected local run stayed green (docs/implementation-remediation/audit.md,
+// "Hosted CI follow-up": TestListenPrivateRefusesSymlinkedRunDirectory failed
+// on both hosted platforms, TestBlobTamperedObjectFailsPublishOverExisting
+// additionally failed on hosted macOS). The whole-module "test" job in both
+// workflows must name both with cigate gotest -require-tests, so a hosted
+// platform failure this specific and this expensive to rediscover can never
+// again be silently superseded by a passing local run or by these tests
+// being renamed or deleted without anyone noticing.
+var requiredPlatformRegressionTests = []string{
+	"github.com/zatiti/zatiti/internal/platform#TestListenPrivateRefusesSymlinkedRunDirectory",
+	"github.com/zatiti/zatiti/internal/platform#TestBlobTamperedObjectFailsPublishOverExisting",
+}
+
 var supportedRunners = []string{"ubuntu-24.04", "macos-15"}
 
 const (
@@ -61,6 +76,7 @@ const (
 	flutterJob       = "flutter"
 	specJob          = "spec"
 	inputsJob        = "inputs"
+	qualificationJob = "qualification"
 	specCheckCommand = "python3 tools/specgen/render.py --check"
 	cacheKeyHash     = "hashFiles('go.mod', 'go.sum', 'docs/implementation/dependencies.lock.json')"
 	pubCacheKeyHash  = "hashFiles('apps/desktop/pubspec.lock')"
@@ -430,14 +446,14 @@ func (l *linter) checkStep(jobName string, index int, st *node) {
 		}
 	}
 	if hasRun {
-		l.checkRun(where, st.get("run").Line, run)
+		l.checkRun(jobName, where, st.get("run").Line, run)
 	}
 	if uses != nil {
 		l.checkUses(where, name, uses, st)
 	}
 }
 
-func (l *linter) checkRun(where string, line int, run string) {
+func (l *linter) checkRun(jobName, where string, line int, run string) {
 	if strings.Contains(run, "${{") {
 		l.add(line, "script-injection", "%s: expressions are not allowed inside run scripts; pass values through env", where)
 	}
@@ -463,6 +479,13 @@ func (l *linter) checkRun(where string, line int, run string) {
 		if _, goArgs, ok := strings.Cut(ln, " -- "); !ok || !strings.Contains(goArgs, "-timeout ") {
 			l.add(line, "go-test-timeout", "%s: every go test run must pass an explicit -timeout after --", where)
 		}
+		if jobName == "test" && wholeModuleArg(ln) {
+			for _, want := range requiredPlatformRegressionTests {
+				if !strings.Contains(ln, want) {
+					l.add(line, "platform-regressions", "%s: the whole-module test run must require %q with -require-tests, so a hosted-only platform regression cannot be silently dropped again", where, want)
+				}
+			}
+		}
 	}
 	if l.prof == profileRelease {
 		for _, ln := range strings.Split(run, "\n") {
@@ -471,6 +494,18 @@ func (l *linter) checkRun(where string, line int, run string) {
 			}
 		}
 	}
+}
+
+// wholeModuleArg reports whether run line ln passes "./..." as a standalone
+// argument, the pattern that runs every package in the module and so must
+// carry the platform regression requirement.
+func wholeModuleArg(ln string) bool {
+	for _, f := range strings.Fields(ln) {
+		if f == "./..." {
+			return true
+		}
+	}
+	return false
 }
 
 func (l *linter) checkUses(where, name string, uses, st *node) {
@@ -639,6 +674,17 @@ func (l *linter) checkReleaseGates(jobs *node) {
 		}
 		if ff, _ := j.Value.path("strategy", "fail-fast").scalar(); ff != "false" {
 			l.add(j.Line, "release-gates", "gate %s must set fail-fast: false so every platform reports", g)
+		}
+		if g == qualificationJob {
+			var sawQualEvidence bool
+			for _, st := range j.Value.get("steps").items() {
+				if run, _ := st.get("run").scalar(); strings.Contains(run, "cigate qualevidence") {
+					sawQualEvidence = true
+				}
+			}
+			if !sawQualEvidence {
+				l.add(j.Line, "release-gates", "gate %s must enforce case enumeration and evidence freshness with \"cigate qualevidence\"", g)
+			}
 		}
 	}
 	v, ok := byName[verdictJob]

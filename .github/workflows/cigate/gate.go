@@ -225,6 +225,123 @@ func runInputs(ctx context.Context, args []string, stdout, stderr io.Writer) err
 	return nil
 }
 
+// qualificationReport is the subset of tests/qualification's
+// release-report.json (QUALIFICATION.release_evidence) this command reads.
+// It never imports the qualification package (not an allowed import from
+// this root); this struct is the coordinated read-only contract with that
+// file's committed JSON shape (tests/qualification/evidence_test.go).
+type qualificationReport struct {
+	Versions map[string]string `json:"versions"`
+	Cases    []struct {
+		Case   string `json:"case"`
+		Status string `json:"status"`
+		Reason string `json:"reason"`
+	} `json:"cases"`
+	Gates []struct {
+		Gate   string `json:"gate"`
+		Status string `json:"status"`
+	} `json:"gates"`
+}
+
+const (
+	qualificationEvidenceSchema = "zatiti.ci.qualification_evidence/v1"
+	qualStatusPassed            = "passed"
+	qualGatePassedCasesOnly     = "passed_cases_only"
+)
+
+// qualificationVerdict is the retained decision of whether one qualification
+// evidence run enumerates every required case, fresh from the checked-out
+// source, with every case observed to have passed.
+type qualificationVerdict struct {
+	Schema      string   `json:"schema"`
+	Qualified   bool     `json:"qualified"`
+	Revision    string   `json:"revision"`
+	GoModSHA256 string   `json:"go_mod_sha256"`
+	Blocking    []string `json:"blocking"`
+}
+
+// evaluateQualificationEvidence enumerates every required case instead of
+// trusting that tests/qualification's own process exit code alone proves
+// completeness: a case whose test function was deleted outright leaves no
+// pass, fail or skip event for go test to report, but it does leave the
+// gate at less than passed_cases_only in the retained report, which this
+// function still catches. It also refuses evidence generated from a
+// different commit or a changed go.mod, so a stale report from an earlier
+// run or a different revision can never stand in for the checked-out tree.
+func evaluateQualificationEvidence(report qualificationReport, revision, goModDigest string, requiredGates []string) qualificationVerdict {
+	v := qualificationVerdict{Schema: qualificationEvidenceSchema, Revision: revision, GoModSHA256: goModDigest, Blocking: []string{}}
+	if got := report.Versions["source_revision"]; got != revision {
+		v.Blocking = append(v.Blocking, fmt.Sprintf("stale evidence: report source revision %q does not match the checked-out %q", got, revision))
+	}
+	if got := report.Versions["module_root_go_mod"]; got != goModDigest {
+		v.Blocking = append(v.Blocking, fmt.Sprintf("stale evidence: report go.mod digest %q does not match the checked-out %q", got, goModDigest))
+	}
+	for _, c := range report.Cases {
+		if c.Status == qualStatusPassed {
+			continue
+		}
+		msg := fmt.Sprintf("case %s: %s", c.Case, c.Status)
+		if c.Reason != "" {
+			msg += " (" + c.Reason + ")"
+		}
+		v.Blocking = append(v.Blocking, msg)
+	}
+	byGate := map[string]string{}
+	for _, g := range report.Gates {
+		byGate[g.Gate] = g.Status
+	}
+	for _, want := range requiredGates {
+		status, ok := byGate[want]
+		switch {
+		case !ok:
+			v.Blocking = append(v.Blocking, fmt.Sprintf("%s: required gate produced no evidence in this report", want))
+		case status != qualGatePassedCasesOnly:
+			v.Blocking = append(v.Blocking, fmt.Sprintf("%s: %s", want, status))
+		}
+	}
+	v.Qualified = len(v.Blocking) == 0
+	return v
+}
+
+func runQualEvidence(_ context.Context, args []string, stdout, stderr io.Writer) error {
+	fs := newFlags("qualevidence", stderr)
+	reportPath := fs.String("report", "", "tests/qualification release-report.json")
+	root := fs.String("root", ".", "repository checkout")
+	revision := fs.String("revision", os.Getenv("GITHUB_SHA"), "commit the evidence must have been generated from")
+	requireGate := fs.String("require-gate", "", "comma-separated gate names that must read passed_cases_only in the report")
+	out := fs.String("out", "", "verdict file to write")
+	if err := parseFlags(fs, args); err != nil {
+		return err
+	}
+	if *reportPath == "" || *revision == "" || *out == "" {
+		return faultf(codeInvalidInput, "-report, -revision (or GITHUB_SHA) and -out are required")
+	}
+	data, err := os.ReadFile(*reportPath)
+	if err != nil {
+		return faultf(codePrerequisiteMissing, "reading the qualification release report: %v", err)
+	}
+	var report qualificationReport
+	if err := json.Unmarshal(data, &report); err != nil {
+		return faultf(codeInvalidInput, "qualification release report is not valid JSON: %v", err)
+	}
+	goModDigest, _, err := fileSHA256(under(*root, "go.mod"))
+	if err != nil {
+		return faultf(codePrerequisiteMissing, "hashing go.mod: %v", err)
+	}
+	v := evaluateQualificationEvidence(report, *revision, goModDigest, splitCSV(*requireGate))
+	if err := writeJSON(*out, v); err != nil {
+		return err
+	}
+	for _, b := range v.Blocking {
+		say(stdout, "%v", b)
+	}
+	if !v.Qualified {
+		return faultf(codeVerificationFailed, "qualification evidence is not release-claimable: %s", strings.Join(v.Blocking, "; "))
+	}
+	say(stdout, "qualification evidence at revision %s is fresh, and every required gate reports %s", *revision, qualGatePassedCasesOnly)
+	return nil
+}
+
 // writeJSON writes v as indented JSON, creating parent directories.
 func writeJSON(path string, v any) error {
 	data, err := json.MarshalIndent(v, "", "  ")
