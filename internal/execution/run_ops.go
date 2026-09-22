@@ -318,7 +318,12 @@ func (s *Service) admitAttempt(ctx context.Context, unit contract.Unit, r *runRo
 	}
 
 	// Reserve the budget envelope for the attempt; an accounting fault rolls
-	// the claim back and the run stays ready.
+	// the claim back and the run stays ready. _accounting.reserve's own
+	// frozen schema requires operation_id as a non-empty uuid, and no real
+	// effects Operation exists yet at claim time (the worker has not chosen
+	// what to do), so this mints a fresh identity for the reservation itself
+	// -- the same pattern internal/tasks/admission.go's own budget
+	// reservation already uses for the identical "no operation yet" case.
 	amount := wireMoney{}
 	if snapshot.Worker != nil && snapshot.Worker.Profile != nil {
 		amount = snapshot.Worker.Profile.CostBound
@@ -327,7 +332,7 @@ func (s *Service) admitAttempt(ctx context.Context, unit contract.Unit, r *runRo
 	if rootTaskID == "" {
 		rootTaskID = task.ID
 	}
-	reservation, err := s.reserveBudget(ctx, unit, r.Scope, rootTaskID, "", amount, task.Limits)
+	reservation, err := s.reserveBudget(ctx, unit, r.Scope, rootTaskID, s.newID(), amount, task.Limits)
 	if err != nil {
 		return contract.Outcome[claimBody]{}, err
 	}
