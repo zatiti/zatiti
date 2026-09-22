@@ -128,38 +128,9 @@ func (s *Service) prepareRestore(ctx context.Context, unit contract.Unit, inv co
 	if err != nil {
 		return contract.IOPlan{}, err
 	}
-	now := s.deps.Clock.Now()
-	var obligations []manifestObligation
-	for _, op := range pending {
-		row := obligationRow{
-			ID: s.deps.IDs.New(), InstallationID: in.Scope.InstallationID, RestoreJobID: job.ID,
-			Owner: "effects", Kind: "claimed_effect", ResourceID: op.ID,
-			ResourceVersion: contract.Version(op.Version), State: op.State, RecordedAt: now,
-		}
-		row.RecordArtifact, row.RecordDigest = obligationRecord(row)
-		if err := insertObligation(ctx, unit, row); err != nil {
-			return contract.IOPlan{}, err
-		}
-		obligations = append(obligations, row.manifest())
-	}
-	for _, req := range manifest.Obligations {
-		resourceID := s.deps.IDs.New()
-		if req.ResourceID != nil {
-			resourceID = *req.ResourceID
-		}
-		row := obligationRow{
-			ID: s.deps.IDs.New(), InstallationID: in.Scope.InstallationID, RestoreJobID: job.ID,
-			Owner: "memory", Kind: "memory_write", ResourceID: resourceID, ResourceVersion: 1,
-			State: req.Code, RecordedAt: now,
-		}
-		row.RecordArtifact, row.RecordDigest = obligationRecord(row)
-		if err := insertObligation(ctx, unit, row); err != nil {
-			return contract.IOPlan{}, err
-		}
-		obligations = append(obligations, row.manifest())
-	}
-	if obligations == nil {
-		obligations = []manifestObligation{}
+	obligations, err := s.snapshotObligations(ctx, unit, in.Scope.InstallationID, job.ID, pending, manifest.Obligations)
+	if err != nil {
+		return contract.IOPlan{}, err
 	}
 
 	prepared, err := json.Marshal(restorePlan{
@@ -198,6 +169,59 @@ func (o obligationRow) manifest() manifestObligation {
 		ID: o.ID, Owner: o.Owner, Kind: o.Kind, ResourceID: o.ResourceID, ResourceVersion: o.ResourceVersion,
 		RecordArtifact: o.RecordArtifact, RecordDigest: o.RecordDigest, State: o.State, RecordedAt: formatStamp(o.RecordedAt),
 	}
+}
+
+// snapshotObligations captures this installation's currently pending
+// effects and unresolved memory obligations as durable RecoveryObligation
+// rows tied to jobID (a backup or restore job), so they stay inspectable
+// and mergeable independent of any sealed bundle's own encrypted bytes.
+// Each pending Operation is classified by its actual state rather than one
+// undifferentiated bucket: outcome_unknown becomes kind unknown_effect
+// (contract.RecoveryObligation names it separately from an ordinary
+// in-flight claim precisely so a later monotonic merge can tell an unknown
+// outcome apart from a claim that is merely still running), everything
+// else becomes claimed_effect. Both installation.backup (the paused/
+// quiesced snapshot item 2 requires) and installation.restore (the
+// monotonic recovery overlay item 3 requires) call this at Prepare time.
+func (s *Service) snapshotObligations(ctx context.Context, unit contract.Unit, installationID, jobID contract.ID, pending []peerOperation, memObligations []wireRequirement) ([]manifestObligation, error) {
+	now := s.deps.Clock.Now()
+	var obligations []manifestObligation
+	for _, op := range pending {
+		kind := "claimed_effect"
+		if op.State == "outcome_unknown" {
+			kind = "unknown_effect"
+		}
+		row := obligationRow{
+			ID: s.deps.IDs.New(), InstallationID: installationID, RestoreJobID: jobID,
+			Owner: "effects", Kind: kind, ResourceID: op.ID,
+			ResourceVersion: contract.Version(op.Version), State: op.State, RecordedAt: now,
+		}
+		row.RecordArtifact, row.RecordDigest = obligationRecord(row)
+		if err := insertObligation(ctx, unit, row); err != nil {
+			return nil, err
+		}
+		obligations = append(obligations, row.manifest())
+	}
+	for _, req := range memObligations {
+		resourceID := s.deps.IDs.New()
+		if req.ResourceID != nil {
+			resourceID = *req.ResourceID
+		}
+		row := obligationRow{
+			ID: s.deps.IDs.New(), InstallationID: installationID, RestoreJobID: jobID,
+			Owner: "memory", Kind: "memory_write", ResourceID: resourceID, ResourceVersion: 1,
+			State: req.Code, RecordedAt: now,
+		}
+		row.RecordArtifact, row.RecordDigest = obligationRecord(row)
+		if err := insertObligation(ctx, unit, row); err != nil {
+			return nil, err
+		}
+		obligations = append(obligations, row.manifest())
+	}
+	if obligations == nil {
+		obligations = []manifestObligation{}
+	}
+	return obligations, nil
 }
 
 func (s *Service) performRestore(ctx context.Context, plan contract.IOPlan) (contract.IOResult, error) {

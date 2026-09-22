@@ -31,6 +31,10 @@ type backupPlan struct {
 	// KeyRef is the recorded backup key reference, empty before the first
 	// backup custodied one.
 	KeyRef string `json:"key_ref"`
+	// Obligations is the paused/quiesced snapshot of currently pending
+	// effects and unresolved memory obligations Prepare captured, sealed
+	// into the manifest's retained_obligations by Perform.
+	Obligations []manifestObligation `json:"obligations"`
 }
 
 // backupPerformed is Perform's outcome: the published sealed bundle and the
@@ -160,6 +164,19 @@ func (s *Service) prepareBackup(ctx context.Context, unit contract.Unit, inv con
 	if err != nil {
 		return contract.IOPlan{}, err
 	}
+	// The consistent paused/quiesced snapshot item 2 requires: currently
+	// pending effects and unresolved memory obligations, captured now
+	// (inside this transaction, at the same moment the manifest pins
+	// generation and brain revisions) so the manifest's retained
+	// obligations describe this exact boundary, not a later, drifted one.
+	pending, err := s.effectsPending(ctx, unit, 50)
+	if err != nil {
+		return contract.IOPlan{}, err
+	}
+	obligations, err := s.snapshotObligations(ctx, unit, in.Scope.InstallationID, job.ID, pending, manifest.Obligations)
+	if err != nil {
+		return contract.IOPlan{}, err
+	}
 	keyRef, err := loadBackupKeyRef(ctx, unit, in.Scope.InstallationID)
 	if err != nil {
 		return contract.IOPlan{}, err
@@ -168,6 +185,7 @@ func (s *Service) prepareBackup(ctx context.Context, unit contract.Unit, inv con
 	prepared, err := json.Marshal(backupPlan{
 		JobID: job.ID, InstallationID: in.Scope.InstallationID, Generation: unit.Generation(),
 		BrainRevisions: manifest.BrainRevisions, CreatedAt: formatStamp(now), KeyRef: keyRef,
+		Obligations: obligations,
 	})
 	if err != nil {
 		return contract.IOPlan{}, fmt.Errorf("installation: encode backup plan: %w", err)
@@ -212,17 +230,29 @@ func (s *Service) performBackup(ctx context.Context, plan contract.IOPlan) (cont
 	}
 
 	sourceRevision, controllerVersion := buildRevision()
-	brains := make([]manifestBrainEntry, 0)
+	obligations := p.Obligations
+	if obligations == nil {
+		obligations = []manifestObligation{}
+	}
 	manifest := backupManifestDoc{
 		Schema: backupManifestSchema, InstallationID: p.InstallationID, BackupID: p.JobID,
 		Generation: p.Generation, CreatedAt: p.CreatedAt,
 		DatabaseDigest: imageDigest, DatabaseSize: imageSize, DatabaseArchiveEntry: databaseArchiveEntry,
 		// Migration metadata is storage-private; this package cannot read it
 		// and lists no schema versions rather than guessing them.
-		DatabaseSchemaVersions:   []manifestSchemaVersion{},
+		DatabaseSchemaVersions: []manifestSchemaVersion{},
+		// No owner port enumerates this installation's pinned artifacts (only
+		// _artifacts.metadata, which validates an already-known ref list), and
+		// _memory.manifest -- the only memory-owner port this package may
+		// call -- names brain_revisions as bare id/version Refs, none of the
+		// digest/observed_at/export_artifact/writer_owner/adapter_profile_digest
+		// a BackupBrainEntry requires. Both lists stay empty regardless of how
+		// many artifacts or brains this installation actually has (pre-dates
+		// this change; unaltered here) until a coordinated contract change
+		// supplies that data -- see the P31 handoff.
 		Artifacts:                []manifestArtifactEntry{},
-		Brains:                   brains,
-		RetainedObligations:      []manifestObligation{},
+		Brains:                   []manifestBrainEntry{},
+		RetainedObligations:      obligations,
 		KeyPrerequisites:         []string{keyRef},
 		SourceRevision:           sourceRevision,
 		ControllerVersion:        controllerVersion,

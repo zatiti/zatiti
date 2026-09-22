@@ -48,8 +48,10 @@ type jobRow struct {
 }
 
 type obligationRow struct {
-	ID              contract.ID
-	InstallationID  contract.ID
+	ID             contract.ID
+	InstallationID contract.ID
+	// RestoreJobID names the backup or restore job this obligation was
+	// captured for (the column predates backup also using this table).
 	RestoreJobID    contract.ID
 	Owner           string
 	Kind            string

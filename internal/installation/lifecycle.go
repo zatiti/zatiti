@@ -188,10 +188,12 @@ func handleJobGet(ctx context.Context, s *Service, unit contract.Unit, inv contr
 		return contract.Payload{}, notFound("job %s is unknown in this installation", in.ID)
 	}
 	out := j.wire()
-	if j.Kind == "restore" {
-		// Surface what this package preserved toward the recovery overlay it
-		// could not publish (see restore.go), so an inspector can see the
-		// obligations survived even though the encrypted artifact did not.
+	if j.Kind == "restore" || j.Kind == "backup" {
+		// Surface the paused/quiesced snapshot (backup) or the recovery
+		// overlay's obligations (restore) this package preserved durably,
+		// independent of whether the encrypted bundle/overlay artifact
+		// itself could be built -- so an inspector sees what survived even
+		// when the job ultimately failed (see backup.go, restore.go).
 		obligations, err := listObligationsByJob(ctx, unit, j.ID)
 		if err != nil {
 			return contract.Payload{}, err
