@@ -28,17 +28,17 @@
 # scope_required drift, and P25 (PR #43, 2026-09-22) fixed internal/
 # installation's remaining Status.runtime_ready gap and implemented
 # installation.verifier.list -- the last thing keeping registry assembly
-# from succeeding module-wide. cmd/zatiti, internal/application,
-# internal/installation and tests/qualification are confirmed green again
-# on real post-merge main and removed from this list.
+# from succeeding module-wide.
 #
-# tests/integration stays listed for a DIFFERENT, newly-tracked reason:
-# TestExpiredCursorDemandsSnapshotAndReplaysWithoutGap hangs on a genuine
-# CPU-bound performance bug in internal/contract.ValidateSchema/strictParse
-# (likely non-memoized $ref resolution on the _policy.check authorization
-# gate's Action schema validation), only reachable now that registry
-# assembly succeeds -- see docs/roadmap.md's 2026-09-22 ~00:40 PT entry for
-# the full goroutine-dump diagnosis. Remove this line once that bug has its
-# own fix landed.
-
-tests/integration
+# tests/integration briefly stayed listed after the above for what first
+# looked like a separate CPU-bound hang in internal/contract.ValidateSchema.
+# It wasn't: PR #45 (2026-09-22) found and fixed the real cause, an
+# infinite loop in TestExpiredCursorDemandsSnapshotAndReplaysWithoutGap that
+# assumed event.list's NextCursor goes nil on a drained page, when P34 (PR
+# #16) intentionally made it always non-nil -- see docs/roadmap.md's
+# 2026-09-22 ~01:20-01:45 PT entries for the full diagnosis and the earlier,
+# incorrect $ref-resolution theory this superseded.
+#
+# All entries confirmed green on real post-merge main and removed. This
+# list is currently empty -- every package this rollout has touched passes
+# clean. The next entry, if any, documents a NEW gap, not a stale one.
