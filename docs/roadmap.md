@@ -3897,3 +3897,6 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   captured fault (self-checking: it fails loudly if this assumption ever
   goes stale). This needs its own founder-authorized fix, same pattern as
   every other defect this session -- not yet decided or dispatched.
+- 2026-09-22 ~22:17 PT -- PR #61 LANDED (verification-record stale_version
+  fix, commit 22b5ff9). All 7 CI checks passed clean on first run.
+  Confirmed on real post-merge main via merge-base --is-ancestor.
