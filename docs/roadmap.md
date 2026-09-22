@@ -2659,6 +2659,46 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   (apps/desktop) -- wave 12's two cards, disjoint write roots -- ahead
   of time so both can dispatch together the instant P24 lands, per
   David's 24h max-parallelization authorization (2026-09-21).
+- 2026-09-22 ~02:24 PT -- SCHEMA-DRIFT FIX DISPATCHED (not a plan
+  P-number, a same-day cross-cutting fix, claimed as
+  R-schema-drift-fix), in parallel with P24 (disjoint write roots:
+  internal/policy, internal/accounting, internal/installation vs
+  cmd/zatiti). P24's own agent found and reported, mid-implementation,
+  that the full registry assembly (registry.New over every landed
+  module -- the thing openInstallation/catalog/serve all build) fails
+  with "operation _policy.activate: input schema: operation schema
+  redefines the shared definition Responsibility/Operation" --
+  confirmed PRE-EXISTING on main (reproduced against a clean worktree
+  at 27ba3fd, no cmd/zatiti changes), and root-caused to internal/
+  policy, internal/accounting and internal/installation carrying stale
+  pre-revision-3 embedded $defs -- the exact same class of bug P19
+  fixed for internal/skills earlier this session.
+  Lead's own independent verification before dispatching anything, not
+  trusted from the report: wrote a standalone Python script extracting
+  each package's own embedded $defs JSON literal and diffing property
+  keys directly -- confirmed internal/policy's Responsibility def is
+  missing last_cycle_id and its Operation def is missing attempts/
+  callback_route; confirmed internal/accounting's Responsibility def
+  is also missing last_cycle_id; confirmed internal/installation's
+  Operation def is also missing attempts/callback_route -- against
+  internal/scheduling's own copy (which already carries all of these)
+  as a known-good reference. This blocks the ENTIRE remaining expected
+  -red baseline (cmd/zatiti, internal/application, internal/
+  installation, tests/integration, tests/qualification) from ever
+  going green, and blocks P24's own required end-to-end tests, so
+  dispatching a same-day fix now (rather than letting P24 route around
+  it, or waiting for a later card to stumble onto it) is high-leverage
+  and squarely within David's 24h max-parallelization authorization.
+  Scoped as mechanical/additive-only (matching P19's precedent and the
+  revision-3 contract's own "additive and optional" framing for these
+  fields): add only the missing fields to each package's own embedded
+  copy, byte-for-byte verified against docs/implementation/
+  operations.json (the frozen canonical source), nothing else touched.
+  P24 itself is NOT blocked on this landing first -- its own wiring
+  code builds/vets/gofmts clean regardless, only its full-registry
+  end-to-end tests need the fix to go green, and it's writing every
+  test that doesn't require the full registry in the meantime,
+  disclosing the rest rather than working around it.
 
 ## Planned
 
