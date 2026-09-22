@@ -3833,3 +3833,6 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   cross-cutting gap, unlike every prior card's single-owner shape. Not
   yet dispatched for implementation; 51 total cards now tracked
   (P00-P50). R-restore-merge-scope claim released.
+- 2026-09-22 ~20:53 PT -- PR #59 LANDED (contracts.md restore-protocol
+  correction, commit e495a92). All 7 CI checks passed clean on first run.
+  Confirmed on real post-merge main via merge-base --is-ancestor.
