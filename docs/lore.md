@@ -240,3 +240,32 @@ assume the hook's own cleanup ran just because the shell command
 returned. When an agent reports "waiting for lease/lock acquisition" and
 you don't have an immediate other explanation, check `refs/claims/*`
 directly before assuming it's a normal, temporary wait.
+
+## Never carry the "landed cards" set forward by memory across a compaction
+
+A dependency-closure check ("which cards are dispatch-ready?") is only as
+good as its landed-set input. This session carried that set forward
+conversationally across a context compaction and it silently drifted --
+missing P01, P02, P08, P09, P23, P25 by the time it mattered (2026-09-22),
+each landed days or hours earlier but never re-added to the list being
+checked against. The check itself (comparing plan.json's depends_on
+against the set) was correct; the input was stale.
+
+Cost: wave 13 (P31, P43) was reported "blocked" three separate times when
+it had actually been dependency-ready since 2026-09-19 -- roughly 2 hours
+of lost 2-way parallel dispatch opportunity under an explicit
+max-parallelization mandate, plus one fully redundant card dispatch (P01,
+re-verified already-shipped work instead of doing anything new).
+
+Mitigation: re-derive the landed set from source EVERY time a dependency-
+closure check matters for a real dispatch decision, never from memory or
+a prior message in the conversation. `grep -n "LANDED" docs/roadmap.md`
+is a reasonable start but is NOT sufficient alone -- phrasing varies
+("P23 independently reviewed and opened as PR #39... claim released" has
+no literal "P23 LANDED" substring). Cross-check every ID systematically
+(a small script iterating P00-P49 against multiple regex patterns), and
+for any ID the regex can't confirm, search its bare mention manually and
+verify the cited commit SHA is a real ancestor of origin/main via
+`git merge-base --is-ancestor <sha> origin/main` before trusting it either
+way -- both false negatives (this incident) and false positives (trusting
+a claimed SHA that was never actually merged) are real risks.
