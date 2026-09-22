@@ -18,20 +18,6 @@ type opMeta struct {
 	expectedVersion bool
 	callers         []string
 	cli             string // CLI tokens below the root command, space separated; empty for internal operations
-
-	// noScopeRequired forces an empty ScopeRequired despite the input schema
-	// requiring a scope member. task.start is the sole owned operation where
-	// this is set: every sibling operation whose input requires scope
-	// carries scope_required ["installation_id"] in the frozen catalog
-	// (docs/implementation/operations.json), but task.start's frozen entry
-	// carries scope_required null even though its own input schema requires
-	// scope exactly like task.create's and task.assign's do. Catalog
-	// conformance is pinned by TestDescriptorsMatchFrozenCatalog against
-	// that frozen file, which this package must not edit, so the descriptor
-	// here matches the frozen value as authored. Flagged to the plan's
-	// integration owner as a likely generator gap; the real scope
-	// containment check in handleTaskStart does not depend on this field.
-	noScopeRequired bool
 }
 
 // opMetas lists every owned operation: the four internal peer operations
@@ -61,7 +47,7 @@ var opMetas = []opMeta{
 	{id: "task.get", visibility: "public", mode: "query", cli: "task get"},
 	{id: "task.list", visibility: "public", mode: "query", cli: "task list"},
 	{id: "task.retry", visibility: "public", mode: "mutation", submission: true, expectedVersion: true, cli: "task retry"},
-	{id: "task.start", visibility: "public", mode: "mutation", submission: true, expectedVersion: true, cli: "task start", noScopeRequired: true},
+	{id: "task.start", visibility: "public", mode: "mutation", submission: true, expectedVersion: true, cli: "task start"},
 	{id: "task.update", visibility: "public", mode: "mutation", submission: true, expectedVersion: true, cli: "task update"},
 }
 
@@ -119,10 +105,7 @@ func (s *Service) Descriptors() []contract.Descriptor { return s.descriptors }
 func buildDescriptors(catalog map[string]contract.Descriptor) []contract.Descriptor {
 	out := make([]contract.Descriptor, 0, len(opMetas))
 	for _, m := range opMetas {
-		var scopeRequired []string
-		if !m.noScopeRequired {
-			scopeRequired = scopeRequirement(inputSchema(m.id))
-		}
+		scopeRequired := scopeRequirement(inputSchema(m.id))
 		d := contract.Descriptor{
 			ID:              m.id,
 			Version:         1,

@@ -70,22 +70,6 @@ type opMeta struct {
 	expected   bool
 	callers    []string
 	cli        string // CLI tokens below the root command, space separated; empty for internal operations
-
-	// noScopeRequired overrides the derived scope_required for one operation
-	// to empty even though its input schema requires "scope". It exists for
-	// exactly one confirmed drift in the frozen catalog of record
-	// (docs/implementation/operations.json): memory.list requires scope in
-	// its input schema like every sibling memory.* operation, but its frozen
-	// descriptor entry omits scope_required entirely, unlike every one of
-	// them (including internal operations with an empty scope_required
-	// array). TestDescriptorsMatchFrozenCatalog pins this package to that
-	// frozen entry field by field, and the shared registry refuses to
-	// assemble a module whose descriptor surface drifts from it, so this
-	// package matches the frozen (apparently mistaken) entry rather than the
-	// general rule -- the same precedent internal/messaging recorded for
-	// conversation.message.list. Reported upstream at landing rather than
-	// silently invented around.
-	noScopeRequired bool
 }
 
 // opMetas lists every owned operation: internal first, then the public
@@ -120,7 +104,7 @@ var opMetas = []opMeta{
 	{id: opJobGet, visibility: "public", mode: "query",
 		cli: "memory job get"},
 	{id: opList, visibility: "public", mode: "query",
-		cli: "memory list", noScopeRequired: true},
+		cli: "memory list"},
 	{id: opPromote, visibility: "public", mode: "mutation", submission: true,
 		effect: contract.EffectExternalMutation, cli: "memory promote"},
 	{id: opRecall, visibility: "public", mode: "mutation", submission: true,
@@ -213,9 +197,6 @@ func (s *Service) assemble() error {
 			return fmt.Errorf("memory: operation %s output schema: %w", m.id, err)
 		}
 		scopeRequired := scopeRequirement(inputSchema)
-		if m.noScopeRequired {
-			scopeRequired = nil
-		}
 		d := contract.Descriptor{
 			ID:              m.id,
 			Version:         1,
