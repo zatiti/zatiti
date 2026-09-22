@@ -68,6 +68,16 @@ type recordedSettle struct {
 	Nonexec       bool
 }
 
+// recordedReserve is one _accounting.reserve call: captures exactly what
+// this package actually sent, not what the fake pretends to have received,
+// so a test can assert against the real request shape (this fake never
+// schema-validates its input, unlike the real internal/accounting service --
+// see run_ops_test.go's TestClaimReservesBudgetWithAValidOperationID).
+type recordedReserve struct {
+	OperationID contract.ID
+	RootTaskID  contract.ID
+}
+
 // recordedProcessed is one _messaging.processed call.
 type recordedProcessed struct {
 	MessageID   contract.ID
@@ -133,6 +143,7 @@ type fakePorts struct {
 	rawFail         map[string]error
 	transitions     []recordedTransition
 	settles         []recordedSettle
+	reserves        []recordedReserve
 	prepared        []contract.ID
 	effectsPrepared []recordedEffectsPrepare
 	processed       []recordedProcessed
@@ -220,6 +231,12 @@ func (p *fakePorts) SettleCalls() []recordedSettle {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return append([]recordedSettle(nil), p.settles...)
+}
+
+func (p *fakePorts) ReserveCalls() []recordedReserve {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return append([]recordedReserve(nil), p.reserves...)
 }
 
 func (p *fakePorts) PreparedOps() []contract.ID {
@@ -338,6 +355,19 @@ func (p *fakePorts) Call(ctx context.Context, unit contract.Unit, inv contract.I
 			Resource wireTask `json:"resource"`
 		}{*task}
 	case peerAccountReserve:
+		var in map[string]any
+		if err := contract.DecodeStrict(inv.Input, &in); err != nil {
+			p.mu.Unlock()
+			return contract.Payload{}, err
+		}
+		rec := recordedReserve{}
+		if opID, ok := in["operation_id"].(string); ok {
+			rec.OperationID = contract.ID(opID)
+		}
+		if rootID, ok := in["root_task_id"].(string); ok {
+			rec.RootTaskID = contract.ID(rootID)
+		}
+		p.reserves = append(p.reserves, rec)
 		p.mu.Unlock()
 		res := peerReservation{ID: p.nextID(), Version: 1, State: "held"}
 		p.mu.Lock()

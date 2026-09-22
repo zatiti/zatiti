@@ -146,6 +146,48 @@ func TestRunClaimOneOwner(t *testing.T) {
 	}
 }
 
+// TestClaimReservesBudgetWithAValidOperationID proves a real, previously
+// undetected production bug is fixed: handleClaim used to send
+// _accounting.reserve a literal empty string for operation_id.
+// _accounting.reserve's own frozen schema (docs/implementation/
+// operations.json) requires operation_id as a non-empty {"format":"uuid"}
+// field, so every real claim -- hosted or cooperative -- would fail
+// schema validation against the actual internal/accounting service. This
+// package's own fakePorts test double never validated the field (it did
+// not even decode operation_id before this fix), which is exactly why no
+// existing internal/execution test caught it; this test asserts the real
+// request shape sent, the same check the real service performs, rather
+// than trusting the fake's unconditional success.
+func TestClaimReservesBudgetWithAValidOperationID(t *testing.T) {
+	e := newEnv(t)
+	worker := e.ids.New()
+	e.installWorkerSnapshot(worker, fixtureHostedProfile(worker))
+	run := e.enqueueTask(worker, nil)
+
+	payload := e.mustOK(opRunClaim, runClaimInput{
+		Scope: e.scope, RunID: run.ID, WorkerID: worker, ExpectedVersion: 1,
+		Capabilities: []string{"model.steps"},
+	})
+	var claim claimBody
+	e.decode(payload.Data, &claim)
+	if claim.Attempt.State != "claimed" {
+		t.Fatalf("claim attempt state %q, want claimed", claim.Attempt.State)
+	}
+
+	calls := e.ports.ReserveCalls()
+	if len(calls) != 1 {
+		t.Fatalf("_accounting.reserve calls = %d, want exactly 1", len(calls))
+	}
+	opID := calls[0].OperationID
+	if opID == "" {
+		t.Fatal("_accounting.reserve was sent an empty operation_id; the real service's frozen schema requires a non-empty uuid and would refuse this")
+	}
+	uuidSchema := []byte(`{"type":"string","format":"uuid"}`)
+	if err := contract.ValidateSchema(uuidSchema, []byte(`"`+string(opID)+`"`)); err != nil {
+		t.Fatalf("_accounting.reserve operation_id %q does not satisfy the real schema's uuid format: %v", opID, err)
+	}
+}
+
 func TestRunClaimReplaySameWorker(t *testing.T) {
 	e := newEnv(t)
 	worker := e.ids.New()
