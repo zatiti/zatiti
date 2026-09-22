@@ -210,14 +210,27 @@ func (s *Service) messagingBootstrap(ctx context.Context, unit contract.Unit, in
 const peerEffectsPending = "_effects.pending"
 
 type peerOperation struct {
-	ID                contract.ID     `json:"id"`
-	Version           int64           `json:"version"`
-	Action            json.RawMessage `json:"action"`
-	ActionDigest      string          `json:"action_digest"`
-	State             string          `json:"state"`
-	AttemptIDs        []contract.ID   `json:"attempt_ids"`
-	LinkedOperationID *contract.ID    `json:"linked_operation_id,omitempty"`
-	Relationship      *string         `json:"relationship,omitempty"`
+	ID                contract.ID        `json:"id"`
+	Version           int64              `json:"version"`
+	Action            json.RawMessage    `json:"action"`
+	ActionDigest      string             `json:"action_digest"`
+	State             string             `json:"state"`
+	AttemptIDs        []contract.ID      `json:"attempt_ids"`
+	LinkedOperationID *contract.ID       `json:"linked_operation_id,omitempty"`
+	Relationship      *string            `json:"relationship,omitempty"`
+	CallbackRoute     *peerCallbackRoute `json:"callback_route,omitempty"`
+}
+
+// peerCallbackRoute is the exact CallbackRoute $def shape: which durable
+// subsystem an outstanding Operation reports back to. DecodeStrict rejects
+// unknown fields even in a nested struct, so every optional field must be
+// declared even though installation only reads Kind, to classify a pending
+// effect as a stalled worker turn or an unclaimed job for doctor/status.
+type peerCallbackRoute struct {
+	Kind      string       `json:"kind"`
+	TurnID    *contract.ID `json:"turn_id,omitempty"`
+	StepIndex *int64       `json:"step_index,omitempty"`
+	JobID     *contract.ID `json:"job_id,omitempty"`
 }
 
 type effectsPendingInput struct {

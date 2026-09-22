@@ -236,6 +236,7 @@ func (s *Service) finishInit(ctx context.Context, unit contract.Unit, plan contr
 		Initialized:    true,
 		Requirements:   []wireRequirement{},
 		Version:        contract.Version(state.Version),
+		RuntimeReady:   runtimeReady(true, false, false),
 	}})
 }
 
