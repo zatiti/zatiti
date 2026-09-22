@@ -3209,3 +3209,18 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   but bounded ValidateSchema re-parse-per-call cost (~5.5ms x ~40 call
   sites), flagged for P01 to pick up alongside its own scope. Worktree/
   branch/claims cleaned up.
+- 2026-09-22 ~02:12 PT -- P01 DISPATCHED (internal/contract, "implement
+  shared types and strict validation for the new seams"). The sole
+  dependency-ready card confirmed by the earlier plan.json closure check
+  (deps: P00 only, landed) -- now safe to run since P25/P42 and the
+  cursor-drain/golden-count fix are all fully closed out, satisfying P01's
+  own foundation-serialization rule ("no child-package writers may run
+  while it changes shared files"). Briefed on: existing AGENTS.md/frozen-
+  schema-first discipline (never invent a shape, escalate real gaps
+  instead of silently working around them), the ValidateSchema re-parse
+  cost as optional in-scope pickup, and to avoid the four files PR #45
+  just touched. This is expected to be a longer-running single-lane card
+  (no second parallel card exists right now -- everything else remaining
+  needs P01, P02 or P09 first, none of which are done) -- wave 13 (P31,
+  P43) still needs P02 and P09 beyond P01 itself, so the next real
+  parallel-dispatch opportunity depends on what P01 unblocks.
