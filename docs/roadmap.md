@@ -3478,3 +3478,23 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   publishing or deployment" is a hard constraint of its own card text.
   P46 flagged as likely too large for one pass and told explicitly that
   honest partial coverage beats padded-shallow or silent-partial.
+- 2026-09-22 ~07:20 PT -- Resolved another fork-worktree false alarm during
+  P46 (identical pattern to the earlier P42 one, see ~00:xx PT entries):
+  P46's own unisolated research fork mistook its parent for a rival agent
+  after seeing shared scaffolding edited and getting a message from its
+  own parent's name. Settled directly with both, same playbook as before.
+  Separately, both P46 and its fork independently found (not yet verified
+  by me) a significant production gap worth flagging regardless of the
+  worktree confusion: internal/adapters/responses/interpret.go never
+  populates ModelOutput.tool_proposals from a real tool_calls response
+  (its own code has a "KNOWN CONTRACT GAP" comment, lines ~159-167:
+  ModelToolProposal.operation_id/operation_version are schema-required but
+  the adapter has no honest source for them). Downstream,
+  internal/execution/interpret.go (~169-178) refuses invalid_input on any
+  hosted model response with tool_calls, blocking the entire hosted
+  tool-call pipeline including the sealed local decision tools (reply/
+  report_outputs/clarify/cycle_decision) -- broader than the already-
+  logged chat-turn-has-no-attempt case from P16's landing note. Neither
+  agent attempted a fix; treating it like the restore gap, to verify and
+  prove the real ceiling rather than route around. Will independently
+  verify when P46 reports its full handoff.
