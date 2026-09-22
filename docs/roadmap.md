@@ -3542,3 +3542,15 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   (real task completion/verification/reply through a real cooperative
   claim) rather than just patching its now-incorrect "expect failure"
   assertions to match the old broken behavior.
+- 2026-09-22 ~08:49 PT -- P55 (run.claim fix) LANDED. All other checks
+  green; "build and test (macos-15)" failed on a THIRD distinct, untriaged
+  CI flake (internal/platform's TestConcurrentAcquireHasExactlyOneWinner,
+  "exactly one contender must win, got 2") -- confirmed unrelated to this
+  PR's actual change (different package entirely, installation-lock
+  acquisition vs. accounting/execution) and confirmed clean locally (3x
+  under -race, load 2.6). Merged past it per the established precedent.
+  Three now-known CI-runner-specific flakes this session (internal/server's
+  fakeDB write race -- fixed; cmd/zatiti's bootstrap-over-socket timeout --
+  untriaged; internal/platform's concurrent-acquire race -- untriaged).
+  Worth a real investigation into GitHub's runner contention/scheduling if
+  this keeps recurring, but not chasing further tonight.
