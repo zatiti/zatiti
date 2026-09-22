@@ -417,3 +417,51 @@ func TestValidateSchemaMemoizesParsedSchemaDocument(t *testing.T) {
 		t.Fatalf("a distinct schema document caused %d new misses, want exactly 1 (cache key too coarse)", afterDistinct-afterRepeats)
 	}
 }
+
+// TestValidateSchemaCacheStaysBoundedUnderManyDistinctSchemas proves
+// schemaCache cannot be grown without limit by a caller that controls the
+// schema argument. Not every ValidateSchema call site passes fixed,
+// developer-authored content: internal/execution/verifier.go and
+// internal/skills/jobs.go both validate against want.Schema, which mirrors
+// Adapter_InertSchema -- a field an ordinary task creator supplies on a
+// task's Acceptance.expected_observations at task-creation time
+// (Adapter_InertSchema's own frozen doc comment: "this is schema data, not
+// authority"). A caller creating many tasks with distinct
+// expected_observations[].schema values must not be able to grow
+// schemaCache's memory without bound. This test fails if schemaCache ever
+// regresses to an unbounded map (entry count would exceed
+// schemaCacheCapacity) or to a broken cache that silently refuses to store
+// anything (entry count would stay at 0, and the final LRU-recency check
+// below would also fail).
+//
+// Deliberately not t.Parallel(): shares the package-global schemaCache with
+// every other schema-validating test; see
+// TestValidateSchemaMemoizesParsedSchemaDocument's identical reasoning.
+func TestValidateSchemaCacheStaysBoundedUnderManyDistinctSchemas(t *testing.T) {
+	nonce := t.Name()
+	const n = schemaCacheCapacity * 3
+	for i := 0; i < n; i++ {
+		schema := json.RawMessage(fmt.Sprintf(`{"type":"object","title":%q}`, fmt.Sprintf("%s-%d", nonce, i)))
+		if err := ValidateSchema(schema, json.RawMessage(`{}`)); err != nil {
+			t.Fatalf("call %d: %v", i, err)
+		}
+		if got := schemaCache.len(); got > schemaCacheCapacity {
+			t.Fatalf("call %d: schemaCache holds %d entries, want <= schemaCacheCapacity (%d): the size bound regressed", i, got, schemaCacheCapacity)
+		}
+	}
+	if got := schemaCache.len(); got != schemaCacheCapacity {
+		t.Fatalf("after %d distinct schema documents, schemaCache holds %d entries, want exactly %d (full, oldest evicted): the cache may have stopped storing entries", n, got, schemaCacheCapacity)
+	}
+
+	// The most recently used entry must still be a cache hit: a correct LRU
+	// keeps recent entries and evicts old ones, rather than (for example)
+	// evicting at random or clearing itself once full.
+	lastSchema := json.RawMessage(fmt.Sprintf(`{"type":"object","title":%q}`, fmt.Sprintf("%s-%d", nonce, n-1)))
+	before := schemaCacheMisses.Load()
+	if err := ValidateSchema(lastSchema, json.RawMessage(`{}`)); err != nil {
+		t.Fatalf("re-validating the most recently used schema: %v", err)
+	}
+	if after := schemaCacheMisses.Load(); after != before {
+		t.Fatalf("the most recently used schema was evicted (recorded a fresh miss); eviction is not least-recently-used")
+	}
+}
