@@ -213,21 +213,30 @@ func (f *fx) effectsAdmit(ctx context.Context, u contract.Unit, input json.RawMe
 }
 
 type fxAttempt struct {
-	id, state  string
-	generation int64
-	consumed   int
+	id, state, kind string
+	generation      int64
+	consumed        int
 }
 
 func loadFxAttempt(ctx context.Context, u contract.Unit, operation, attempt contract.ID) (*fxAttempt, error) {
 	a := &fxAttempt{id: string(attempt)}
-	err := u.QueryRowContext(ctx, `SELECT generation, state, consumed FROM effects_attempts WHERE id = ? AND operation_id = ?`,
-		string(attempt), string(operation)).Scan(&a.generation, &a.state, &a.consumed)
+	err := u.QueryRowContext(ctx, `SELECT generation, state, consumed, kind FROM effects_attempts WHERE id = ? AND operation_id = ?`,
+		string(attempt), string(operation)).Scan(&a.generation, &a.state, &a.consumed, &a.kind)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, fxFault(contract.CodeNotFound, "attempt not found")
 	}
 	return a, err
 }
 
+// effectsClaim consumes the one-use claim of either an ordinary dispatch
+// attempt (requires the operation to be "ready", as a real admit already
+// left it) or a reconciliation attempt (_effects.reconciliation.prepare's
+// own attempt, admitted while the operation stays outcome_unknown/
+// awaiting_confirmation) -- the same call, mirroring the real owner's own
+// documented behavior: "The one-use claim this attempt gets is consumed
+// through the ordinary _effects.claim, exactly like a dispatch attempt's;
+// only the disposition rules at claim and record differ... reconciliation
+// never advances the operation to executing."
 func (f *fx) effectsClaim(ctx context.Context, u contract.Unit, input json.RawMessage) (any, error) {
 	var in effectsClaimInput
 	if err := decode(input, &in); err != nil {
@@ -244,14 +253,27 @@ func (f *fx) effectsClaim(ctx context.Context, u contract.Unit, input json.RawMe
 	if in.Generation != a.generation || a.generation != u.Generation() {
 		return nil, fxFault(contract.CodeConflict, "dispatch generation is fenced")
 	}
-	if o.state != "ready" || a.state != "prepared" || a.consumed != 0 {
+	if a.state != "prepared" || a.consumed != 0 {
 		return nil, fxFault(contract.CodeConflict, "dispatch claim is consumed or absent")
+	}
+	reconciling := a.kind == "reconciliation"
+	if !reconciling && o.state != "ready" {
+		return nil, fxFault(contract.CodeConflict, "dispatch claim is consumed or absent")
+	}
+	if reconciling {
+		switch o.state {
+		case "outcome_unknown", "awaiting_confirmation":
+		default:
+			return nil, fxFault(contract.CodeConflict, "operation is no longer reconcilable")
+		}
 	}
 	if _, err := u.ExecContext(ctx, `UPDATE effects_attempts SET state = 'claimed', consumed = 1 WHERE id = ? AND consumed = 0`, a.id); err != nil {
 		return nil, err
 	}
-	if err := o.transition(ctx, u, "executing"); err != nil {
-		return nil, err
+	if !reconciling {
+		if err := o.transition(ctx, u, "executing"); err != nil {
+			return nil, err
+		}
 	}
 	resource := map[string]any{
 		"operation_id": o.id, "attempt_id": a.id, "generation": a.generation, "adapter": o.adapter,
@@ -262,6 +284,88 @@ func (f *fx) effectsClaim(ctx context.Context, u contract.Unit, input json.RawMe
 		resource["callback_route"] = json.RawMessage(o.callbackRoute)
 	}
 	return map[string]any{"resource": resource}, nil
+}
+
+// effectsReconciliationPrepare admits a bounded reconciliation read: a new
+// attempt (kind reconciliation) linked to an already-uncertain operation,
+// which stays otherwise untouched -- no version bump, no state change --
+// exactly matching the real owner's documented behavior.
+func (f *fx) effectsReconciliationPrepare(ctx context.Context, u contract.Unit, input json.RawMessage) (any, error) {
+	var in effectsAdmitInput
+	if err := decode(input, &in); err != nil {
+		return nil, err
+	}
+	o, err := loadFxOperation(ctx, u, in.OperationID)
+	if err != nil {
+		return nil, err
+	}
+	if o.version != in.ExpectedVersion {
+		return nil, fxFault(contract.CodeStaleVersion, "operation version moved")
+	}
+	switch o.state {
+	case "outcome_unknown", "awaiting_confirmation":
+	default:
+		return nil, fxFault(contract.CodeConflict, "operation %s is not uncertain; nothing to reconcile")
+	}
+	_, err = u.ExecContext(ctx, `INSERT INTO effects_attempts (id, operation_id, generation, state, consumed, kind) VALUES (?, ?, ?, 'prepared', 0, 'reconciliation')`,
+		string(contract.NewID()), o.id, u.Generation())
+	if err != nil {
+		return nil, err
+	}
+	w, err := o.wire(ctx, u)
+	return map[string]any{"resource": w}, err
+}
+
+// effectsReconciliationRecord merges the qualified reconciliation
+// observation into the original operation's uncertainty: an authoritative
+// disposition (succeeded/failed) settles the operation, matching a
+// correction; unknown/not_sent is eventual-consistency evidence that
+// leaves the operation's own state untouched. A duplicate callback for the
+// same reconciliation attempt settles only once.
+func (f *fx) effectsReconciliationRecord(ctx context.Context, u contract.Unit, input json.RawMessage) (any, error) {
+	var in effectsRecordInput
+	if err := decode(input, &in); err != nil {
+		return nil, err
+	}
+	o, err := loadFxOperation(ctx, u, in.OperationID)
+	if err != nil {
+		return nil, err
+	}
+	a, err := loadFxAttempt(ctx, u, in.OperationID, in.AttemptID)
+	if err != nil {
+		return nil, err
+	}
+	if a.kind != "reconciliation" {
+		return nil, fxFault(contract.CodeConflict, "attempt %s is not a reconciliation read; use _effects.record")
+	}
+	if in.Generation != a.generation {
+		return nil, fxFault(contract.CodeConflict, "record generation does not match the attempt")
+	}
+	var prior string
+	err = u.QueryRowContext(ctx, `SELECT disposition FROM effects_observations WHERE attempt_id = ? ORDER BY seq LIMIT 1`, a.id).Scan(&prior)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, err
+	}
+	if prior != "" {
+		// Settles only once: the read already recorded its answer.
+		w, err := o.wire(ctx, u)
+		return map[string]any{"resource": w}, err
+	}
+	if _, err := u.ExecContext(ctx, `INSERT INTO effects_observations (operation_id, attempt_id, kind, disposition, evidence, usage) VALUES (?, ?, 'reconciliation', ?, ?, ?)`,
+		o.id, a.id, in.Observation.Disposition, string(in.Observation.Evidence), string(in.Observation.Usage)); err != nil {
+		return nil, err
+	}
+	next := map[string]string{
+		contract.DispositionSucceeded: "succeeded",
+		contract.DispositionFailed:    "failed",
+	}[in.Observation.Disposition]
+	if next != "" {
+		if err := o.transition(ctx, u, next); err != nil {
+			return nil, err
+		}
+	}
+	w, err := o.wire(ctx, u)
+	return map[string]any{"resource": w}, err
 }
 
 func (f *fx) effectsRecord(ctx context.Context, u contract.Unit, input json.RawMessage) (any, error) {
@@ -276,6 +380,9 @@ func (f *fx) effectsRecord(ctx context.Context, u contract.Unit, input json.RawM
 	a, err := loadFxAttempt(ctx, u, in.OperationID, in.AttemptID)
 	if err != nil {
 		return nil, err
+	}
+	if a.kind == "reconciliation" {
+		return nil, fxFault(contract.CodeConflict, "attempt %s is a reconciliation read; use _effects.reconciliation.record")
 	}
 	if in.Generation != a.generation {
 		return nil, fxFault(contract.CodeConflict, "record generation does not match the attempt")
@@ -779,6 +886,95 @@ func (f *fx) restoreRecord(ctx context.Context, u contract.Unit, input json.RawM
 	return map[string]any{"resource": f.jobResource(in.JobID, restoreOwner, restoreOperation, in.State)}, err
 }
 
+// configurationExportRecord durably links the artifact reference the
+// controller obtained (after configuration's own RunJob already staged and
+// published its bytes) to configuration's own local export-job row,
+// mirroring the real owner's exact generation-fenced, expected_version-
+// gated behavior (internal/configuration/jobs.go, handleExportRecord).
+func (f *fx) configurationExportRecord(ctx context.Context, u contract.Unit, input json.RawMessage) (any, error) {
+	var in configurationExportRecordInput
+	if err := decode(input, &in); err != nil {
+		return nil, err
+	}
+	if in.Generation != u.Generation() {
+		return nil, fxFault(contract.CodeStaleVersion, "export job was prepared under a different controller generation")
+	}
+	var version int64
+	var artifactID, artifactDigest string
+	err := u.QueryRowContext(ctx, `SELECT version, artifact_id, artifact_digest FROM configuration_export_jobs WHERE job_id = ?`, string(in.JobID)).
+		Scan(&version, &artifactID, &artifactDigest)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, fxFault(contract.CodeNotFound, "export job not found")
+	}
+	if err != nil {
+		return nil, err
+	}
+	if artifactID != "" {
+		if artifactID == string(in.Artifact.ID) && artifactDigest == string(in.Artifact.Digest) {
+			return map[string]any{"resource": f.jobResource(in.JobID, configurationOwner, "organization.export", "succeeded")}, nil
+		}
+		return nil, fxFault(contract.CodeStaleVersion, "export job already recorded a different artifact")
+	}
+	if version != in.ExpectedVersion {
+		return nil, fxFault(contract.CodeStaleVersion, "export job is at a different version")
+	}
+	if _, err := u.ExecContext(ctx, `UPDATE configuration_export_jobs SET version = version + 1, artifact_id = ?, artifact_digest = ? WHERE job_id = ?`,
+		string(in.Artifact.ID), string(in.Artifact.Digest), string(in.JobID)); err != nil {
+		return nil, err
+	}
+	return map[string]any{"resource": f.jobResource(in.JobID, configurationOwner, "organization.export", "succeeded")}, nil
+}
+
+// skillsEvaluationRecord records published verifier evidence against the
+// exact immutable skill version the evaluation names, mirroring the real
+// owner's own behavior (internal/skills/jobs.go): the caller's asserted
+// verifier identity must match what was sealed at admission, and a
+// mismatch invalidates the evaluation rather than recording it.
+func (f *fx) skillsEvaluationRecord(ctx context.Context, u contract.Unit, input json.RawMessage) (any, error) {
+	var in skillsEvaluationRecordInput
+	if err := decode(input, &in); err != nil {
+		return nil, err
+	}
+	var jobID, sealedVerifierID string
+	var version int64
+	var state string
+	err := u.QueryRowContext(ctx, `SELECT job_id, version, verifier_id, state FROM skills_evaluations WHERE evaluation_id = ?`, string(in.EvaluationID)).
+		Scan(&jobID, &version, &sealedVerifierID, &state)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, fxFault(contract.CodeNotFound, "evaluation not found")
+	}
+	if err != nil {
+		return nil, err
+	}
+	if jobID != string(in.JobID) {
+		return nil, fxFault(contract.CodeConflict, "evaluation is linked to a different job")
+	}
+	if state != "pending" {
+		return nil, fxFault(contract.CodeConflict, "evaluation already recorded a terminal disposition")
+	}
+	if version != in.ExpectedVersion {
+		return nil, fxFault(contract.CodeStaleVersion, "evaluation is at a different version")
+	}
+	if sealedVerifierID != "" && sealedVerifierID != in.VerifierID {
+		// A verifier identity that no longer matches what was admitted
+		// invalidates the evaluation instead of recording the mismatch.
+		if _, err := u.ExecContext(ctx, `UPDATE skills_evaluations SET version = version + 1, state = 'invalidated' WHERE evaluation_id = ?`,
+			string(in.EvaluationID)); err != nil {
+			return nil, err
+		}
+		return nil, fxFault(contract.CodeConflict, "verifier identity does not match what was admitted")
+	}
+	passed := 0
+	if in.Passed {
+		passed = 1
+	}
+	if _, err := u.ExecContext(ctx, `UPDATE skills_evaluations SET version = version + 1, verifier_id = ?, verifier_version = ?, passed = ?, state = 'recorded' WHERE evaluation_id = ?`,
+		in.VerifierID, in.VerifierVersion, passed, string(in.EvaluationID)); err != nil {
+		return nil, err
+	}
+	return map[string]any{"resource": f.jobResource(in.JobID, skillsOwner, skillEvaluateOp, "succeeded")}, nil
+}
+
 func (f *fx) tasksReady(_ context.Context, _ contract.Unit, input json.RawMessage) (any, error) {
 	var in limitInput
 	if err := decode(input, &in); err != nil {
@@ -801,11 +997,17 @@ type fakeAdapter struct {
 	name string
 	fx   *fx
 
-	mu         chan struct{}
-	invoked    []contract.Dispatch
-	reconciled int
+	mu             chan struct{}
+	invoked        []contract.Dispatch
+	reconciled     int
+	reconciledCall []contract.Dispatch
 	// reply, when set, produces the observation.
 	reply func(ctx context.Context, d contract.Dispatch) (contract.Observation, error)
+	// reconcileReply, when set, produces Reconcile's observation. When nil,
+	// Reconcile fails loudly: a test that expects reconciliation must set
+	// this explicitly, so an adapter that is never supposed to be
+	// reconciled still catches an accidental call.
+	reconcileReply func(ctx context.Context, d contract.Dispatch) (contract.Observation, error)
 }
 
 func (f *fx) adapter(name string) *fakeAdapter {
@@ -828,11 +1030,16 @@ func (a *fakeAdapter) Invoke(ctx context.Context, d contract.Dispatch) (contract
 	return succeeded(nil), nil
 }
 
-func (a *fakeAdapter) Reconcile(context.Context, contract.Dispatch) (contract.Observation, error) {
+func (a *fakeAdapter) Reconcile(ctx context.Context, d contract.Dispatch) (contract.Observation, error) {
 	a.mu <- struct{}{}
 	a.reconciled++
+	a.reconciledCall = append(a.reconciledCall, d)
+	reply := a.reconcileReply
 	<-a.mu
-	return contract.Observation{}, errors.New("reconcile is never called by the controller")
+	if reply != nil {
+		return reply(ctx, d)
+	}
+	return contract.Observation{}, errors.New("reconcile is not armed on this fake adapter for this test")
 }
 
 func (a *fakeAdapter) calls() int {

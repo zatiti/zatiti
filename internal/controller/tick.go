@@ -27,12 +27,14 @@ func (c *Controller) tick(ctx, workCtx context.Context, sess *session) error {
 		return unavailable("a newer controller generation owns this installation; generation %d stopped admitting", sess.generation)
 	}
 
+	c.resumeClaimedJobs(ctx, workCtx, sess)
 	c.settle(ctx, sess, false)
 	c.wakes(ctx, sess)
 	c.readyScan(ctx, sess)
 	c.executionTick(ctx, sess)
 	c.turnWork(ctx, workCtx, sess)
 	waiting := c.jobs(ctx, workCtx, sess)
+	c.driveReconciliation(ctx, workCtx, sess, waiting)
 	c.dispatch(ctx, workCtx, sess, waiting)
 
 	if err := sess.journal.compactIfDue(); err != nil {

@@ -72,6 +72,14 @@ const (
 	// kindTurn is one durable worker-turn work-item step: a claim of
 	// pending/waiting work, or the stage-then-commit of one context plan.
 	kindTurn = "turn"
+	// kindReconcile is one separately admitted, separately authorized and
+	// accounted bounded reconciliation read (_effects.reconciliation.
+	// prepare/.record) for an operation the effects owner already lists as
+	// outcome_unknown or awaiting_confirmation. It shares kindEffect's phase
+	// vocabulary but never its dispatch/record calls: reconciliation reaches
+	// Adapter.Reconcile, never Adapter.Invoke, and settles through
+	// _effects.reconciliation.record, never _effects.record (reconcile.go).
+	kindReconcile = "reconcile"
 )
 
 const (
@@ -152,7 +160,14 @@ type entry struct {
 	JobVersion int64       `json:"job_version,omitempty"`
 	JobOwner   string      `json:"job_owner,omitempty"`
 	JobOp      string      `json:"job_operation,omitempty"`
-	Outcome    *JobOutcome `json:"outcome,omitempty"`
+	// JobInput is the exact input _execution.job.claim returned once the
+	// claim itself is confirmed durable (phaseClaimed). It is journaled so a
+	// job resumed after a crash -- either this same process's interrupted
+	// goroutine or a later restart's durable claim lookup (settleJobClaim) --
+	// never needs to re-derive or re-fetch what a runner is allowed to act
+	// on; there is no owner call that would let it.
+	JobInput json.RawMessage `json:"job_input,omitempty"`
+	Outcome  *JobOutcome     `json:"outcome,omitempty"`
 
 	// Turn-work fields (kindTurn).
 	TurnID         contract.ID      `json:"turn_id,omitempty"`
@@ -284,6 +299,9 @@ func (j *journal) merge(e entry) {
 		e.Unacked = e.Unacked || prev.Unacked
 		if e.Outcome == nil {
 			e.Outcome = prev.Outcome
+		}
+		if len(e.JobInput) == 0 {
+			e.JobInput = prev.JobInput
 		}
 		if e.TurnID == "" {
 			e.TurnID = prev.TurnID

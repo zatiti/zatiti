@@ -105,6 +105,11 @@ func TestDispatchInvokesEachAttemptExactlyOnce(t *testing.T) {
 
 // Uncertain and unconfirmed operations are listed by the owner but are never
 // admitted, claimed, resent or reconciled by the dispatch loop.
+// TestDispatchNeverTouchesUncertainOperations proves dispatch's own
+// admit/Invoke path (tick.go) leaves an uncertain operation alone -- it
+// never re-admits it and never sends a second physical mutation for it.
+// Only a separately admitted reconciliation (reconcile.go) may reach it,
+// and only through Adapter.Reconcile, never Adapter.Invoke (P23 item 4).
 func TestDispatchNeverTouchesUncertainOperations(t *testing.T) {
 	f := newFx(t)
 	provider := f.adapter("synthetic")
@@ -118,14 +123,26 @@ func TestDispatchNeverTouchesUncertainOperations(t *testing.T) {
 			t.Fatalf("tick: %v", err)
 		}
 	}
-	if provider.calls() != 0 || provider.reconciles() != 0 {
-		t.Fatalf("provider saw %d invocations and %d reconciles", provider.calls(), provider.reconciles())
+	if provider.calls() != 0 {
+		t.Fatalf("dispatch's own admit/Invoke path physically invoked the provider %d times for an uncertain operation", provider.calls())
 	}
-	if f.called("_effects.admit") != 0 || f.called("_effects.claim") != 0 {
-		t.Fatal("uncertain operations must not be admitted or claimed")
+	if f.called("_effects.admit") != 0 {
+		t.Fatal("uncertain operations must never be re-admitted through the ordinary dispatch path")
+	}
+	// Reconciliation legitimately reaches both operations through the
+	// dedicated read pipeline: _effects.claim is reused for it (never
+	// _effects.admit), and Reconcile -- not armed here -- returns an error,
+	// so each read is non-authoritative and retains the uncertainty; backoff
+	// paces exactly how many times that repeats over 3 ticks, so this only
+	// asserts the lower/upper bound that holds regardless of exact timing.
+	if got := provider.reconciles(); got < 2 || got > 6 {
+		t.Fatalf("reconciliation reconciled %d times, want between 2 (one per operation) and 6 (at most once per operation per tick)", got)
+	}
+	if got := f.called("_effects.claim"); got != provider.reconciles() {
+		t.Fatalf("_effects.claim called %d times but Reconcile ran %d times; every reconciliation attempt must claim first", got, provider.reconciles())
 	}
 	if f.opState(unknown) != "outcome_unknown" || f.opState(accepted) != "awaiting_confirmation" {
-		t.Fatal("uncertainty must be retained")
+		t.Fatal("a non-authoritative reconciliation read must retain the original uncertainty")
 	}
 }
 
@@ -273,20 +290,36 @@ func TestUnregisteredAdapterIsNeverInvoked(t *testing.T) {
 			t.Fatalf("tick: %v", err)
 		}
 	}
-	if provider.calls() != 0 {
-		t.Fatal("no adapter may be invoked for an unregistered adapter name")
+	if provider.calls() != 0 || provider.reconciles() != 0 {
+		t.Fatalf("no adapter may be invoked for an unregistered adapter name (calls=%d reconciles=%d)", provider.calls(), provider.reconciles())
 	}
-	if got := f.observations(op); !reflect.DeepEqual(got, []string{"physical:not_sent"}) {
-		t.Fatalf("observations %v", got)
+	// The original dispatch attempt records "physical:not_sent" first. The
+	// operation is then left outcome_unknown, so a consumed claim that also
+	// names the same unregistered adapter is what a reconciliation attempt
+	// legitimately discovers next: unsentReconcile (reconcile.go) records
+	// its own "reconciliation:not_sent" rather than orphaning that claim
+	// unresolved -- never Adapter.Reconcile itself, since the adapter is
+	// never found. Backoff paces how many such reconciliation attempts
+	// happen over 3 ticks, so only the first, deterministic one is asserted.
+	got := f.observations(op)
+	if len(got) == 0 || got[0] != "physical:not_sent" {
+		t.Fatalf("observations %v, want the original dispatch's physical:not_sent first", got)
+	}
+	for _, o := range got[1:] {
+		if o != "reconciliation:not_sent" {
+			t.Fatalf("observations %v; every observation after the first must be a non-authoritative reconciliation read", got)
+		}
 	}
 	if got := f.opState(op); got != "outcome_unknown" {
 		t.Fatalf("operation is %s; a consumed claim cannot be proven unsent", got)
 	}
-	evidence := f.queryString(`SELECT evidence FROM effects_observations WHERE operation_id = ?`, string(op))
+	evidence := f.queryString(`SELECT evidence FROM effects_observations WHERE operation_id = ? ORDER BY seq LIMIT 1`, string(op))
 	if !containsAny(evidence, contract.CodeCapabilityUnsupported) || !containsAny(evidence, `"adapter_invoked":"no"`) {
 		t.Fatalf("evidence %s", evidence)
 	}
-	if f.attempts(op) != 1 {
-		t.Fatalf("attempts %d", f.attempts(op))
+	// One dispatch attempt, plus at most one reconciliation attempt per tick
+	// thereafter for the same unresolved uncertainty.
+	if attempts := f.attempts(op); attempts < 1 || attempts > 4 {
+		t.Fatalf("attempts %d, want between 1 (just the dispatch) and 4 (dispatch plus at most one reconciliation per remaining tick)", attempts)
 	}
 }

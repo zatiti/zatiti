@@ -576,8 +576,11 @@ func (c *Controller) driveLocalOperation(ctx context.Context, sess *session, inf
 }
 
 // driveVerification bounded-scans sealed VerificationRequest work
-// (_execution.verification.pending), claims and executes each through the
-// real contract.Verifier, and records the independently established result.
+// (_execution.verification.pending), claims each and starts its worker
+// outside any transaction and outside this tick's own goroutine, bounded by
+// the same concurrency slots every other outside-Unit call shares: this
+// package's own tick loop must never block waiting on the trusted verifier
+// runner's execution (P23 item 1).
 func (c *Controller) driveVerification(ctx, workCtx context.Context, sess *session) {
 	var out verificationItemsOutput
 	if err := c.call(ctx, sess, "_execution.verification.pending", limitInput{Limit: c.batch()}, &out); err != nil {
@@ -592,15 +595,21 @@ func (c *Controller) driveVerification(ctx, workCtx context.Context, sess *sessi
 		if json.Unmarshal(raw, &probe) != nil {
 			continue
 		}
-		c.claimAndVerify(ctx, workCtx, sess, probe)
+		if !c.acquire() {
+			return
+		}
+		if !c.claimVerification(ctx, workCtx, sess, probe) {
+			c.free()
+		}
 	}
 }
 
-// claimAndVerify claims one sealed request, then executes it outside any
-// transaction (the trusted verifier runner never runs inside a Unit) and
-// records the independently established result.
-func (c *Controller) claimAndVerify(ctx, workCtx context.Context, sess *session, probe verificationRequestProbe) {
-	attemptID := probe.AttemptID
+// claimVerification claims one sealed request under the trusted verifier
+// identity only -- _execution.verification.claim never gives a worker-
+// supplied runner a way to be substituted here -- and starts its worker.
+// The claim itself is a pure database transaction with no physical side
+// effect; only the verifier call and record that follow run outside it.
+func (c *Controller) claimVerification(ctx, workCtx context.Context, sess *session, probe verificationRequestProbe) bool {
 	var claimed verificationClaimOutput
 	err := c.write(func() error {
 		return c.call(ctx, sess, "_execution.verification.claim", verificationClaimInput{
@@ -609,8 +618,25 @@ func (c *Controller) claimAndVerify(ctx, workCtx context.Context, sess *session,
 	})
 	if err != nil {
 		c.note(err)
-		return
+		return false
 	}
+	c.workers.Add(1)
+	go c.runVerification(workCtx, sess, probe, claimed.Request)
+	return true
+}
+
+// runVerification executes one claimed verification outside any
+// transaction through the real, exclusively attached contract.Verifier --
+// c.deps.Verifier is never derived from Collaborators.Jobs or Operator, so
+// no worker-authored runner can stand in for it -- then publishes the
+// verifier's own staged request/verdict bytes as real artifacts BEFORE
+// recording: the verifier's own recorded evidence must exist durably
+// before anything downstream treats the task as verified.
+func (c *Controller) runVerification(workCtx context.Context, sess *session, probe verificationRequestProbe, request json.RawMessage) {
+	defer c.workers.Done()
+	defer c.free()
+
+	attemptID := probe.AttemptID
 	c.mu.Lock()
 	verifier := c.deps.Verifier
 	c.mu.Unlock()
@@ -619,16 +645,20 @@ func (c *Controller) claimAndVerify(ctx, workCtx context.Context, sess *session,
 		c.oblige(obligationVerification, attemptID, f)
 		return
 	}
-	result, err := verifier.Verify(workCtx, contract.Verification{Request: claimed.Request})
+	result, err := c.verify(workCtx, verifier, request)
 	if err != nil {
 		f := unavailable("the verifier returned an error instead of a result: %v", err)
 		c.note(f)
 		c.oblige(obligationVerification, attemptID, f)
 		return
 	}
+	published, ok := c.publishVerification(workCtx, sess, attemptID, probe.Scope, result.Document)
+	if !ok {
+		return
+	}
 	err = c.write(func() error {
-		return c.call(ctx, sess, "_execution.verification.record", verificationRecordInput{
-			AttemptID: attemptID, ExpectedVersion: 1, Result: result.Document,
+		return c.call(workCtx, sess, "_execution.verification.record", verificationRecordInput{
+			AttemptID: attemptID, ExpectedVersion: 1, Result: published,
 		}, nil)
 	})
 	if err != nil {
@@ -637,6 +667,85 @@ func (c *Controller) claimAndVerify(ctx, workCtx context.Context, sess *session,
 		return
 	}
 	c.resolve(obligationVerification, attemptID)
+}
+
+// verify calls the trusted verifier once, converting a panic into the same
+// unestablished-result treatment perform.go's observe already gives a
+// panicking adapter: a verifier that cannot say what it did never becomes a
+// fabricated pass.
+func (c *Controller) verify(ctx context.Context, verifier contract.Verifier, request json.RawMessage) (result contract.VerificationResult, err error) {
+	defer func() {
+		if recover() != nil {
+			err = unavailable("the verifier panicked during Verify")
+		}
+	}()
+	return verifier.Verify(ctx, contract.Verification{Request: request})
+}
+
+// publishVerification makes every staged output of a VerificationResult
+// document (its own request/verdict bytes among them) a real artifact and
+// returns the document with staged locators replaced by published
+// references -- reusing the exact same generic staged-output publish
+// discipline deliver.go's publish() already applies to an adapter
+// observation, since $defs/VerificationResult shares the identical
+// staged_outputs/output_artifacts shape. An unpublishable output blocks the
+// record call and stays a visible obligation, never a silently incomplete
+// verdict.
+func (c *Controller) publishVerification(ctx context.Context, sess *session, attemptID contract.ID, scope contract.Scope, document json.RawMessage) (json.RawMessage, bool) {
+	staged, err := stagedOutputs(document)
+	if err != nil {
+		c.oblige(obligationVerification, attemptID, invalidInput("verification result declares malformed staged outputs"))
+		return nil, false
+	}
+	if f := checkLocators(document, staged); f != nil {
+		c.oblige(obligationVerification, attemptID, f)
+		return nil, false
+	}
+	if len(staged) == 0 {
+		return document, true
+	}
+	c.mu.Lock()
+	blobs := c.deps.Blobs
+	c.mu.Unlock()
+	if blobs == nil {
+		f := prerequisiteMissing(
+			"no blob store is attached; %d staged output(s) of attempt %s's verification cannot be published", len(staged), attemptID)
+		c.note(f)
+		c.oblige(obligationVerification, attemptID, f)
+		return nil, false
+	}
+	if scope.InstallationID == "" {
+		scope = sess.scope
+	}
+	published := make([]publishedOutput, 0, len(staged))
+	for _, out := range staged {
+		var artifact artifactOutput
+		err := c.write(func() error {
+			if err := blobs.Publish(ctx, out.StagingRef, out.Digest); err != nil {
+				return err
+			}
+			return c.call(ctx, sess, "_artifacts.publish", artifactsPublishInput{
+				Scope: scope, Digest: out.Digest, Size: out.Size, MediaType: out.MediaType,
+				Classification: out.Classification, Encrypted: true,
+			}, &artifact)
+		})
+		if err == nil && (artifact.Resource.ID == "" || artifact.Resource.Digest != out.Digest) {
+			err = internalFault("artifacts owner published metadata that does not match the staged digest")
+		}
+		if err != nil {
+			c.note(err)
+			c.oblige(obligationVerification, attemptID, faultOf(err))
+			return nil, false
+		}
+		published = append(published, publishedOutput{StagingRef: out.StagingRef, Digest: out.Digest, ArtifactID: artifact.Resource.ID})
+	}
+	normalized, err := normalizeEvidence(document, published)
+	if err != nil {
+		c.oblige(obligationVerification, attemptID, internalFault("published verification result cannot be normalized"))
+		return nil, false
+	}
+	c.resolve(obligationVerification, attemptID)
+	return normalized, true
 }
 
 func nonNilArtifacts(in []wireArtifact) []wireArtifact {

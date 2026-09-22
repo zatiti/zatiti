@@ -311,8 +311,22 @@ func TestStopDrainsOrRetainsUnknown(t *testing.T) {
 		if err := f.pass(next, sess); err != nil {
 			t.Fatalf("tick: %v", err)
 		}
-		if got := f.observations(op); !reflect.DeepEqual(got, []string{"physical:unknown"}) {
-			t.Fatalf("observations %v", got)
+		// Startup recovery (f.started, before this tick) records the
+		// original claim as outcome_unknown, matching the frozen contract's
+		// own recovery rule. That makes the operation immediately eligible
+		// for a separately admitted reconciliation read on the very next
+		// tick this test runs -- unarmed here, so it too can only observe
+		// unknown (never a fabricated cancellation), recorded as a second,
+		// distinct "reconciliation:unknown" observation alongside the
+		// first, never a second Adapter.Invoke.
+		got := f.observations(op)
+		if len(got) == 0 || got[0] != "physical:unknown" {
+			t.Fatalf("observations %v, want physical:unknown first", got)
+		}
+		for _, o := range got[1:] {
+			if o != "reconciliation:unknown" {
+				t.Fatalf("observations %v; only a non-authoritative reconciliation read may follow", got)
+			}
 		}
 		if f.opState(op) != "outcome_unknown" || provider.calls() != 1 {
 			t.Fatalf("state %s calls %d", f.opState(op), provider.calls())

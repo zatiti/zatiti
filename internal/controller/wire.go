@@ -14,9 +14,11 @@ import (
 
 // Operation states the controller branches on.
 const (
-	opStatePrepared       = "prepared"
-	opStateAwaitingReview = "awaiting_review"
-	opStateReady          = "ready"
+	opStatePrepared             = "prepared"
+	opStateAwaitingReview       = "awaiting_review"
+	opStateReady                = "ready"
+	opStateAwaitingConfirmation = "awaiting_confirmation"
+	opStateOutcomeUnknown       = "outcome_unknown"
 )
 
 // Job states.

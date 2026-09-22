@@ -97,6 +97,12 @@ type Controller struct {
 	backoff  map[contract.ID]backoffState
 	reported map[string]struct{}
 
+	// reconcileBackoff paces repeated reconciliation of one persistently
+	// uncertain operation. Unlike backoff (touched only from the tick
+	// goroutine), a reconciliation read settles on its own worker goroutine,
+	// so this one is guarded by mu (reconcile.go).
+	reconcileBackoff map[contract.ID]backoffState
+
 	// turnsMu guards the turn-routing indexes the turn-work phase refreshes
 	// every tick from live state before dispatch runs: turnAttempts resolves
 	// a worker_turn callback route's turn_id to the attempt _execution.
@@ -218,23 +224,24 @@ func New(
 		concurrency = cfg.MaxDispatch
 	}
 	return &Controller{
-		cfg:           cfg,
-		app:           app,
-		db:            db,
-		own:           own,
-		adapters:      registered,
-		clock:         clock,
-		log:           slog.Default().With("component", "controller"),
-		stopCh:        make(chan struct{}),
-		done:          make(chan struct{}),
-		force:         make(chan struct{}),
-		slots:         make(chan struct{}, concurrency),
-		busy:          map[string]struct{}{},
-		backoff:       map[contract.ID]backoffState{},
-		reported:      map[string]struct{}{},
-		turnAttempts:  map[contract.ID]contract.ID{},
-		attemptTurns:  map[contract.ID]turnRouteInfo{},
-		turnProposals: map[contract.ID]turnProposalRef{},
+		cfg:              cfg,
+		app:              app,
+		db:               db,
+		own:              own,
+		adapters:         registered,
+		clock:            clock,
+		log:              slog.Default().With("component", "controller"),
+		stopCh:           make(chan struct{}),
+		done:             make(chan struct{}),
+		force:            make(chan struct{}),
+		slots:            make(chan struct{}, concurrency),
+		busy:             map[string]struct{}{},
+		backoff:          map[contract.ID]backoffState{},
+		reported:         map[string]struct{}{},
+		reconcileBackoff: map[contract.ID]backoffState{},
+		turnAttempts:     map[contract.ID]contract.ID{},
+		attemptTurns:     map[contract.ID]turnRouteInfo{},
+		turnProposals:    map[contract.ID]turnProposalRef{},
 	}, nil
 }
 
