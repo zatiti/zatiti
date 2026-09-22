@@ -3069,3 +3069,50 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   did not recur; the two resume lanes (connections, accounting) completed
   full cycles past the previous death window, and fresh dispatches
   (messaging) are running. No top-up needed unless a fresh 403 appears.
+- 2026-09-22 ~23:58 PT -- WAVE 13 ASSUMPTION CORRECTED. Re-verified against
+  plan.json rather than trusting the prior "P31+P43 next" note: P31 depends
+  on P25, P29, P30, P09, P02; P43 depends on P42, P17, P25, P35, P02. P29,
+  P30, P17, P35 are landed, but P02 and P09 are NOT -- so P31/P43 stay
+  blocked even after P25/P42 land. Ran a full dependency-closure check
+  against every landed card (P00, P34, P29, P30, P12, P27, P35, P38, P41,
+  P04, P14, P39, P40, P17, P15, P16, P28, P18, P22, P19, P36, P20, P21,
+  P23, P24 -- 25 landed) plus P25/P42 in flight: exactly one card, P01
+  (internal/contract), has every dependency already satisfied (P00 only).
+  Nothing else clears even once P25/P42 land. P01 itself is explicitly a
+  serialized shared/foundation assignment ("No child-package writers may
+  run while it changes shared files or generated prompts") -- with P25 and
+  P42 still open child-package writers, dispatching P01 now would violate
+  the plan's own discipline, not extend genuine parallelization. Holding
+  P01 unclaimed until both land, then dispatching it alone before any
+  further child-package work. This is the honest answer to "max
+  parallelization allowed by the plan" right now: two lanes (P25, P42) is
+  the actual ceiling until one of them closes out the foundation-tier gate.
+  Separately: P42's agent flagged a suspected double-dispatch after its own
+  unisolated research fork (zatiti_p42_recon) wrote directly into its
+  worktree and it misread an unrelated worktree path (P25's) as a second
+  P42 attempt. Confirmed as a false alarm from the lead's own dispatch
+  records (only one P42 claim, one P42 worktree) and corrected directly
+  with the agent; no actual duplicate work occurred.
+- 2026-09-22 ~00:40 PT -- NEW FINDING (not a plan card, unclaimed, out of
+  scope for the session in flight when found): P25's agent hit a genuine
+  90-second-plus hang in `tests/integration`'s
+  TestExpiredCursorDemandsSnapshotAndReplaysWithoutGap, isolated from load
+  contention and independently confirmed by the lead via the actual
+  goroutine dump (not just the agent's account): goroutine 37 is
+  [runnable], not blocked on any lock/mutex, deep in a recursive
+  encoding/json decode chain inside internal/contract.strictParse, called
+  from internal/contract.ValidateSchema, called from
+  internal/policy.(*Service).assemble's request path (policyGate ->
+  dispatchCall -> dispatchNested -> policy.Service.Handle), i.e. the
+  _policy.check authorization gate every dispatch passes through. Likely
+  cause per the agent's hypothesis (unverified): ValidateSchema/strictParse
+  resolves $defs $refs without memoization, so a moderately nested Action
+  payload's validation cost blows up combinatorially. Plausible explanation
+  for why this is surfacing only now: before P25's Status $defs fix,
+  internal/installation broke registry/catalog assembly outright, so this
+  test never got far enough to reach the slow code path. tests/integration
+  is already on expected-red.txt so this doesn't block any card's commit,
+  but if real, this sits on every request's authorization gate, not just
+  this one test -- worth a dedicated card (internal/contract, scope:
+  ValidateSchema/strictParse's $ref resolution) rather than folding into
+  an unrelated one. Not yet added to plan.json; flagging here first.
