@@ -3386,3 +3386,12 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   is covered by internal/storage's own pre-existing test, re-verified
   integration with the real (not fixture-mirrored) job.pending fix after
   rebase. Wave 14 (P32 + P44) fully landed -- 44/50 cards.
+- 2026-09-22 ~05:38 PT -- P33 DISPATCHED (cmd/zatiti, "wire restore
+  lifecycle and recovery startup"), single-lane -- the only card wave 15
+  makes dependency-ready (44/50 landed; P45 needs P33 too, everything
+  else needs P46/P47/P48/P49 downstream of that). Briefed in detail on
+  P32's exact RestoreLifecycle/ErrRestoreHandoff design since I reviewed
+  it myself in full, and pointed at the existing WithDatabaseBackup wiring
+  pattern already in cmd/zatiti as the convention to extend. Also flagged
+  the untriaged cmd/zatiti CI flake (TestServeCompletesBootstrapOverThe
+  Socket) as environmental noise, not something to chase or work around.
