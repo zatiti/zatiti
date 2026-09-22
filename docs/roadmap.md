@@ -3862,3 +3862,38 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   (as this card's dispatch mistakenly specified) is simply ignored/
   write-blocked. Stop naming a specific worktree path in future dispatch
   prompts; let the tool create its own.
+- 2026-09-22 ~20:20-21:37 PT -- R-verification-stall-fix IMPLEMENTED (PR
+  #61, not yet merged), founder-authorized approach ("widen
+  verification.claim's output"). internal/controller/turns.go's
+  runVerification hardcoded ExpectedVersion: 1 on the
+  _execution.verification.record call, fencing the ATTEMPT row (not the
+  job) -- an attempt's version is never 1 by the time verification runs
+  for any realistic journey, so record() refused with stale_version every
+  time, and the job stayed 'pending' forever, so the controller re-claimed
+  and re-invoked the real verifier every tick, indefinitely. Fixed by
+  widening _execution.verification.claim's output to return the attempt's
+  live version read in the same claim transaction, threaded into record();
+  also closed the infinite-reclaim by excluding already-claimed jobs from
+  listPendingVerificationJobs. Every load-bearing claim independently
+  verified against real source (execution_verification_claims table
+  schema, storage/session.go's exact scope check, emitTaskEvent's scope
+  stamping, controller's bare-installation-scope construction). Red-green
+  verified directly (reverted the fix, reproduced the exact captured
+  fault, restored, confirmed green). Full tests/integration suite green
+  post-rebase.
+
+  NEW SIGNIFICANT FINDING (found while fixing the above, NOT fixed,
+  out of this claim's scope): fixing the version-fence bug exposes a
+  SECOND, separate, previously-masked defect -- internal/tasks's
+  emitTaskEvent stamps a task-transition event with the task's own
+  (often worker-scoped) Scope, but every controller-internal call runs
+  under the controller's bare installation scope, and internal/storage's
+  Unit.Emit requires an event's explicit scope to equal the unit's own
+  scope exactly. This refuses with "event scope does not match the unit
+  scope" for virtually any real (non-bare-installation-scoped) task --
+  meaning even with today's fix, a cooperative worker's task STILL cannot
+  reach a terminal succeeded/failed state. tests/integration/
+  cooperative_journey_test.go now proves this exact ceiling with a
+  captured fault (self-checking: it fails loudly if this assumption ever
+  goes stale). This needs its own founder-authorized fix, same pattern as
+  every other defect this session -- not yet decided or dispatched.
