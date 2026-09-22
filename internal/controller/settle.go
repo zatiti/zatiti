@@ -55,9 +55,14 @@ func (c *Controller) settle(ctx context.Context, sess *session, recovering bool)
 			if pendingJobs == nil {
 				pendingJobs = c.pendingJobIndex(ctx, sess)
 			}
-			c.settleJobClaim(sess, e, pendingJobs)
+			c.settleJobClaim(ctx, sess, e, pendingJobs)
+		case e.Kind == kindJob && e.Phase == phaseClaimed && c.jobResumable(e):
+			// Never touched here: settle must never invoke a runner.
+			// resumeClaimedJobs (tick.go, ordinary flow) re-invokes it.
 		case e.Kind == kindJob:
 			c.settleJob(ctx, sess, e)
+		case e.Kind == kindReconcile:
+			c.settleReconcileEntry(ctx, sess, e)
 		}
 	}
 }

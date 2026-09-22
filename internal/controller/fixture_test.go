@@ -571,28 +571,32 @@ func (f *fx) catalog() *catalog {
 	ctl := []string{"controller"}
 	add("_identity.authority", "identity", contract.ModeQuery, []string{"application"}, f.identityAuthority)
 	for id, fn := range map[string]ownerFunc{
-		"_effects.admit":                 f.effectsAdmit,
-		"_effects.claim":                 f.effectsClaim,
-		"_effects.record":                f.effectsRecord,
-		"_execution.fence":               f.executionFence,
-		"_execution.tick":                f.executionTick,
-		"_execution.observation":         f.executionObservation,
-		"_execution.job.claim":           f.jobClaim,
-		"_execution.job.record":          f.jobRecord,
-		"_scheduling.wake.admit":         f.wakeAdmit,
-		"_memory.record":                 f.memoryRecord,
-		"_connections.validation.record": f.validationRecord,
-		"_artifacts.publish":             f.artifactsPublish,
-		"_installation.restore.record":   f.restoreRecord,
-		"_execution.turn.admit":          f.executionTurnAdmit,
-		"_execution.work.claim":          f.executionWorkClaim,
-		"_execution.context.prepare":     f.executionContextPrepare,
-		"_execution.context.commit":      f.executionContextCommit,
-		"_execution.proposal.prepare":    f.executionProposalPrepare,
-		"_execution.proposal.record":     f.executionProposalRecord,
-		"_execution.report":              f.executionReport,
-		"_execution.verification.claim":  f.executionVerificationClaim,
-		"_execution.verification.record": f.executionVerificationRecord,
+		"_effects.admit":                  f.effectsAdmit,
+		"_effects.claim":                  f.effectsClaim,
+		"_effects.record":                 f.effectsRecord,
+		"_execution.fence":                f.executionFence,
+		"_execution.tick":                 f.executionTick,
+		"_execution.observation":          f.executionObservation,
+		"_execution.job.claim":            f.jobClaim,
+		"_execution.job.record":           f.jobRecord,
+		"_scheduling.wake.admit":          f.wakeAdmit,
+		"_memory.record":                  f.memoryRecord,
+		"_connections.validation.record":  f.validationRecord,
+		"_artifacts.publish":              f.artifactsPublish,
+		"_installation.restore.record":    f.restoreRecord,
+		"_execution.turn.admit":           f.executionTurnAdmit,
+		"_execution.work.claim":           f.executionWorkClaim,
+		"_execution.context.prepare":      f.executionContextPrepare,
+		"_execution.context.commit":       f.executionContextCommit,
+		"_execution.proposal.prepare":     f.executionProposalPrepare,
+		"_execution.proposal.record":      f.executionProposalRecord,
+		"_execution.report":               f.executionReport,
+		"_execution.verification.claim":   f.executionVerificationClaim,
+		"_execution.verification.record":  f.executionVerificationRecord,
+		"_effects.reconciliation.prepare": f.effectsReconciliationPrepare,
+		"_effects.reconciliation.record":  f.effectsReconciliationRecord,
+		"_configuration.export.record":    f.configurationExportRecord,
+		"_skills.evaluation.record":       f.skillsEvaluationRecord,
 	} {
 		add(id, strings.SplitN(strings.TrimPrefix(id, "_"), ".", 2)[0], contract.ModeMutation, ctl, f.handler(id, true, fn))
 	}
@@ -629,6 +633,7 @@ CREATE TABLE effects_attempts (seq INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NO
 CREATE TABLE effects_observations (seq INTEGER PRIMARY KEY AUTOINCREMENT, operation_id TEXT NOT NULL, attempt_id TEXT NOT NULL,
 	kind TEXT NOT NULL, disposition TEXT NOT NULL, evidence TEXT NOT NULL, usage TEXT NOT NULL);`),
 		migV("effects", 2, `ALTER TABLE effects_operations ADD COLUMN callback_route TEXT NOT NULL DEFAULT '';`),
+		migV("effects", 3, `ALTER TABLE effects_attempts ADD COLUMN kind TEXT NOT NULL DEFAULT 'dispatch';`),
 		mig("execution", `
 CREATE TABLE execution_fences (seq INTEGER PRIMARY KEY AUTOINCREMENT, generation INTEGER NOT NULL, reason TEXT NOT NULL);
 CREATE TABLE execution_ticks (seq INTEGER PRIMARY KEY AUTOINCREMENT, now TEXT NOT NULL);
@@ -654,6 +659,11 @@ CREATE TABLE scheduling_cycles (occurrence_key TEXT PRIMARY KEY, wake_id TEXT NO
 	media_type TEXT NOT NULL, classification TEXT NOT NULL, scope TEXT NOT NULL);`),
 		mig("installation", `CREATE TABLE installation_restores (seq INTEGER PRIMARY KEY AUTOINCREMENT, job_id TEXT NOT NULL,
 	state TEXT NOT NULL, requirements TEXT NOT NULL);`),
+		mig("configuration", `CREATE TABLE configuration_export_jobs (job_id TEXT PRIMARY KEY, version INTEGER NOT NULL,
+	artifact_id TEXT NOT NULL DEFAULT '', artifact_digest TEXT NOT NULL DEFAULT '');`),
+		mig("skills", `CREATE TABLE skills_evaluations (evaluation_id TEXT PRIMARY KEY, job_id TEXT NOT NULL, version INTEGER NOT NULL,
+	verifier_id TEXT NOT NULL DEFAULT '', verifier_version TEXT NOT NULL DEFAULT '', passed INTEGER NOT NULL DEFAULT 0,
+	state TEXT NOT NULL DEFAULT 'pending');`),
 	}
 }
 

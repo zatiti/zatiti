@@ -127,14 +127,50 @@ func TestCrashAtEveryBoundaryNeverResends(t *testing.T) {
 			if got := provider.calls(); got != tc.calls {
 				t.Fatalf("provider calls after recovery: %d, want %d", got, tc.calls)
 			}
-			if got := f.attempts(op); got != tc.attempts {
-				t.Fatalf("attempt records: %d, want %d", got, tc.attempts)
-			}
 			if got := f.opState(op); got != tc.state {
 				t.Fatalf("operation is %s, want %s", got, tc.state)
 			}
-			if got := f.observations(op); !reflect.DeepEqual(got, tc.observations) {
-				t.Fatalf("observations %v, want %v", got, tc.observations)
+			// A case that settles at outcome_unknown leaves the operation
+			// eligible for a separately admitted reconciliation read on a
+			// later tick within this same 4-tick recovery window (P23):
+			// unarmed here, it can only observe unknown again (never a
+			// fabricated outcome), so exactly its own attempts/observations
+			// baseline plus zero or more matching "reconciliation:unknown"
+			// pairs is correct -- never a second Adapter.Invoke, which
+			// tc.calls above already pins exactly.
+			reconciling := tc.state == "outcome_unknown" || tc.state == "awaiting_confirmation"
+			if !reconciling {
+				if got := f.attempts(op); got != tc.attempts {
+					t.Fatalf("attempt records: %d, want %d", got, tc.attempts)
+				}
+				if got := f.observations(op); !reflect.DeepEqual(got, tc.observations) {
+					t.Fatalf("observations %v, want %v", got, tc.observations)
+				}
+				if provider.reconciles() != 0 {
+					t.Fatal("a resolved operation must never be reconciled")
+				}
+			} else {
+				extra := f.attempts(op) - tc.attempts
+				if extra < 0 {
+					t.Fatalf("attempt records: %d, want at least %d", f.attempts(op), tc.attempts)
+				}
+				if got := provider.reconciles(); int64(got) != extra {
+					t.Fatalf("reconciled %d times but gained %d extra attempt record(s); every reconciliation attempt must reach Reconcile exactly once", got, extra)
+				}
+				got := f.observations(op)
+				if len(got) < len(tc.observations) {
+					t.Fatalf("observations %v, want at least %v", got, tc.observations)
+				}
+				for i, want := range tc.observations {
+					if got[i] != want {
+						t.Fatalf("observations %v, want %v first", got, tc.observations)
+					}
+				}
+				for _, o := range got[len(tc.observations):] {
+					if o != "reconciliation:unknown" {
+						t.Fatalf("observations %v; only a non-authoritative reconciliation read may follow", got)
+					}
+				}
 			}
 			status := second.Status()
 			if got := obligationKinds(status); !reflect.DeepEqual(got, append([]string{}, tc.obligations...)) {
@@ -142,9 +178,6 @@ func TestCrashAtEveryBoundaryNeverResends(t *testing.T) {
 			}
 			if status.Ambiguous != tc.ambiguous {
 				t.Fatalf("ambiguous %d, want %d", status.Ambiguous, tc.ambiguous)
-			}
-			if provider.reconciles() != 0 {
-				t.Fatal("recovery must not reconcile on its own authority")
 			}
 		})
 	}
