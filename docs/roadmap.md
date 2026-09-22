@@ -3255,3 +3255,75 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   (see docs/lore.md) is to re-derive the landed set from source on every
   check going forward, never carry it forward across a compaction by
   memory alone.
+- 2026-09-22 ~03:00-03:50 PT -- WAVE 13 LANDED: P01 (PR #46), P31 (PR #47),
+  P43 (PR #48) all independently reviewed and merged; a same-day fix
+  (PR #49, "fix(server): serialize fakeDB.Write like production's single
+  ordered writer") landed alongside them. All 42 of 50 cards now landed.
+
+  P01: DTOs already existed (landed 2026-09-19, PR #4) -- confirmed no
+  redundant work went in. Real new content: a bounded (256-entry LRU)
+  cache for ValidateSchema's parsed schema document (~5.5ms/call x ~40
+  call sites, now largely avoided). The agent's first version had a real
+  safety bug -- claimed schema documents are never caller-controlled, which
+  is false for internal/execution/verifier.go and internal/skills/jobs.go
+  (both validate against a task's own caller-supplied Acceptance.
+  expected_observations[].schema) -- caught in review, the agent fixed it
+  properly with LRU bounding rather than dropping the optimization, and I
+  independently verified the bound holds (red->green: disabling eviction
+  reproduces unbounded growth) before landing.
+
+  P31: real gap was narrower than the card implied (P29/P30 already built
+  real backup/restore mechanics) -- retained_obligations was hardcoded
+  empty despite the data already flowing through Prepare; fixed, plus a
+  real classification bug (every pending effect was previously recorded as
+  claimed_effect, never distinguishing outcome_unknown). The agent also
+  caught and reverted its own mistake mid-development: an initial fail-
+  closed gate on unprotectable brain revisions would have made
+  installation.backup permanently unusable for every real installation,
+  caught by the pre-commit hook's own tests/integration run before it ever
+  reached me. FLAGGED, NOT DECIDED: Artifacts/Brains stay empty -- no owner
+  port supplies what BackupBrainEntry requires (digest/observed_at/
+  export_artifact/writer_owner/adapter_profile_digest) or enumerates
+  pinned artifacts at all. This needs a founder call: widen _memory.
+  manifest (+ add an artifact-enumeration port) so a complete backup is
+  actually buildable, or accept today's always-empty-but-reports-complete
+  state as the interim design. Not blocking anything currently dispatched;
+  surfacing at the next check-in rather than an immediate quiet-hours
+  delegation, since no remaining card's required behavior depends on the
+  answer.
+
+  P43: real content -- org/worker/group creation through actual draft/
+  plan/review/apply, task creation/start/delegation, setup/prerequisite
+  cards from real snapshot facts, human task review via task.accept,
+  unresolved external operations kept visible instead of discarded.
+  Genuine contract gap found and honestly worked around, not invented:
+  mode: "independent" acceptance needs operator-authored capability
+  evidence no operation returns machine-computable bytes for, so this
+  client only ever offers mode: "manual" -- documented in code and the
+  README, not silently defaulted without explanation. tool/live-proof.sh
+  against a real controller was not run this session (machine load
+  discipline); recommended before further apps/desktop work builds on
+  this.
+
+  Same-day fix: build-and-test's whole-module job finally running to
+  completion (registry-assembly + cursor-drain fixes) surfaced a NEW
+  flake for the first time -- TestDisconnectAfterTaskSubmissionNeither-
+  CancelsNorRepeatsDurableWork panicking "close of closed channel" under
+  -race. Investigated via a dedicated high-effort agent (quiet-hours
+  delegation) rather than assumed: root-caused to internal/server's test-
+  only fakeDB.Write taking no lock at all, unlike production's real
+  database.writeLocked (a process-wide mutex serializing every write
+  transaction) -- so a resubmission racing the first request's still-
+  uncommitted transaction could miss the replay check and re-invoke the
+  handler, purely a test-harness gap, zero production blast radius,
+  deterministically reproduced by the investigating agent via a temporary
+  test-side sleep injection. Fixed with a second mutex on fakeDB
+  (deliberately not the existing one, which would deadlock via fakeUnit.
+  Emit). Independently spot-verified the two core claims (production's
+  lock, the fake's absence of one) before landing.
+
+  All four branches/claims cleaned up. Machine notes: found and killed
+  two more leaked orphaned processes this stretch (a stale R-build-lease
+  from an interrupted kill, and an orphaned qualification-suite zatiti
+  serve process from the already-removed golden-count-fix worktree) --
+  both documented, see docs/lore.md.
