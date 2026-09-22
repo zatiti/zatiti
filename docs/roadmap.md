@@ -3784,3 +3784,37 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   P30-era platform regressions step 6 references. Not yet reviewed or
   landed. P49 (documentation, depends on P48+P02) is the final card in the
   plan, fully serial after this one.
+- 2026-09-22 ~19:50 PT -- FOUNDER BATCH DECISION (David, 2026-09-22):
+  presented four previously-flagged, not-yet-decided items as one bundled
+  AskUserQuestion; David approved the recommended option on all four.
+  Dispatched all four as background agents (P48 was already running from
+  the prior entry):
+  - R-worker-double-reservation-fix: fix the worker-level accounting
+    double-reservation (task.create's internal/tasks/admission.go AND
+    run.claim's internal/execution/handleClaim both charge worker-level
+    concurrency for the same attempt). Real cross-package fix, not test-
+    only; may surface a frozen-contract question, told to stop and report
+    rather than edit operations.json unilaterally if so.
+  - R-verification-dispatch-stall: READ-ONLY investigation (no fix, no
+    commits) into today's other new finding -- a cooperative attempt's
+    task reaches "verifying" but the real async verification dispatch
+    doesn't reach a terminal state within a bounded wait. Told to
+    reproduce and instrument directly, not theorize.
+  - R-restore-merge-scope: DESIGN/SCOPING only (no implementation) for a
+    new P50 card covering the restore-merge completeness gap (P31/P32/P33's
+    StageCandidate/MergeOverlay failing closed with prerequisite_missing).
+    Will propose plan.json + assignments/P50.md content for the lead to
+    review and apply directly.
+  - R-contracts-md-restore-fix: correct docs/implementation/contracts.md's
+    stale SnapshotInventory/RestoreCoordinator/six-step-protocol
+    description (still describes the pre-P32 installation-only design) to
+    match the real, shipped controller.RestoreLifecycle architecture.
+    Originally scoped as "one line" in the founder ask, but turned out to
+    be a real architectural rewrite of a ~100-line section once the actual
+    file content was read -- dispatched properly rather than rushed
+    inline, correcting the earlier scope estimate honestly.
+
+  Five agents now running in parallel: P48 (own worktree,
+  agent-a3bd4c9fd21431d37), the four above (each own worktree, all
+  claims held). None share a write root with another in-flight agent.
+  None yet reviewed or landed.
