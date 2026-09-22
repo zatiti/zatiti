@@ -81,6 +81,17 @@ type fakeDB struct {
 	mu         sync.Mutex
 	events     []contract.Event
 	generation int64
+
+	// wmu mirrors internal/storage.database's wmu: production serializes
+	// every write transaction on a single process-wide lock ("Writers
+	// serialize on a single in-process lock, so callbacks never overlap"),
+	// so a second, concurrently-arriving identical submission never begins
+	// until the first has fully committed and its command identity is
+	// recorded -- commandBegin's replay lookup always sees it. Write must
+	// hold this for fn's entire duration to preserve that guarantee; a
+	// deliberately separate mutex from mu, since fakeUnit.Emit takes mu and
+	// runs inside fn, so reusing mu here would deadlock.
+	wmu sync.Mutex
 }
 
 func (d *fakeDB) StartGeneration(context.Context) (int64, error) {
@@ -108,6 +119,8 @@ func (d *fakeDB) Write(ctx context.Context, actor contract.Actor, scope contract
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	d.wmu.Lock()
+	defer d.wmu.Unlock()
 	u := &fakeUnit{actor: actor, scope: scope, generation: d.generation, db: d}
 	return fn(u)
 }
