@@ -3164,3 +3164,48 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   as a low-priority out-of-scope note -- flagging for founder visibility
   rather than unilaterally spinning up a new card outside the current
   plan's numbering.
+- 2026-09-22 ~01:45-02:10 PT -- PR #45 LANDED (cursor-drain fix + golden
+  public-op count fix), rebase-merged, and expected-red.txt is now fully
+  EMPTY -- every package this rollout has touched is genuinely green on
+  real post-merge main. Sequence: dispatched a quiet-hours founder-delegate
+  decision (Agent, model opus, high effort, per hard rule 1's quiet-hours
+  carve-out at ~01:20 PT since AskUserQuestion is hook-blocked before 6am)
+  on whether to prioritize fixing my own (and P25's agent's) internal/
+  contract.ValidateSchema hang diagnosis. The delegate's investigation
+  DISPROVED that diagnosis: ValidateSchema measured flat ~5.5ms/call over
+  100 runs, no $ref blowup, internal/contract/json.go and schema.go
+  untouched since 2026-09-10. The real cause, found by reading
+  tests/integration/cursor_test.go and internal/evidence/handlers.go
+  directly: P34 (landed 2026-09-20, PR #16) intentionally made event.list
+  always mint a resumable cursor, even on a drained page -- its own
+  assignment text requires this. Two tests (TestExpiredCursorDemandsSnapshot-
+  AndReplaysWithoutGap, TestRestartInvalidatesCursors) still assumed a nil
+  cursor meant "no more data" and looped/asserted on that, so the first one
+  never terminated -- a tight infinite loop of real event.list calls each
+  paying real validation cost, which is exactly what the goroutine dump
+  showed and exactly why it was invisible before: internal/installation's
+  now-fixed Status $defs gap broke registry assembly outright, so this test
+  never ran far enough to reach the loop until P25 landed. Independently
+  verified the delegate's finding myself before acting (read the loop, read
+  the handler's unconditional NextCursor, confirmed P34's own assignment
+  text). Fixed both tests (break on a short page instead of nil cursor, plus
+  an iteration cap so any recurrence fails fast instead of hanging the
+  pre-commit hook's 30-minute test timeout). Re-running the full suite after
+  the fix surfaced two MORE instances of the golden-count staleness bug
+  (tests/integration/registry_seam_test.go's own 197/195, alongside the
+  197 already fixed in internal/application and cmd/zatiti) -- fixed those
+  too (all now 201/199, matching docs/implementation/operations.json).
+  Landed as two commits in one PR (imperfect split -- the first commit's
+  staged files bled into it from an earlier interrupted commit attempt;
+  documented plainly rather than silently reworked). CI's "build and test"
+  passed for the first time this entire session (previously always failed
+  on these same tracked, tolerated conditions) -- 22-29 minutes on GitHub's
+  runners, much slower than local, but genuinely green. Then, on real
+  post-merge main: removed the now-stale $ref-resolution theory from
+  expected-red.txt's own comments and emptied the file entirely -- every
+  package this rollout has touched (cmd/zatiti, internal/application,
+  internal/installation, tests/integration, tests/qualification) is
+  confirmed green. Separately recorded, not urgent, not yet a card: a real
+  but bounded ValidateSchema re-parse-per-call cost (~5.5ms x ~40 call
+  sites), flagged for P01 to pick up alongside its own scope. Worktree/
+  branch/claims cleaned up.
