@@ -164,15 +164,29 @@ func (s *Service) handleJobClaim(ctx context.Context, unit contract.Unit, in job
 	return completedOutcome(jobClaimBody{Job: jobOut(j), Input: j.Input})
 }
 
-// handleJobPending is the _execution.job.pending boundary: read pending or
-// recoverable local jobs with their original owner and input. This is a
-// bounded scan, never a second scheduler.
+// handleJobPending is the _execution.job.pending boundary: read pending,
+// recoverable or externally-actioned local jobs with their original owner
+// and input. This is a bounded scan, never a second scheduler.
+//
+// 'running' is included alongside 'pending'/'outcome_unknown' because a job
+// can reach 'running' through a path this operation's only ordinary
+// consumer (internal/controller's ResumableJobRunner claim loop) never
+// takes: installation.restore's Finish sets its own job to 'running' via
+// _execution.job.record directly, inside its own synchronous Prepare ->
+// Perform -> Finish call, to hand off the external database swap the
+// controller alone can perform. Without 'running' here that job becomes
+// permanently invisible to the only discovery call this package exposes.
+// This is safe for every other job kind: every consumer of this listing
+// that isn't specifically built to handle a 'running' row already ignores
+// anything but 'pending' itself (see internal/controller/jobs.go's ordinary
+// claim loop, which hard-filters job.State != "pending" before ever
+// reaching a 'running' row this call now also returns).
 func (s *Service) handleJobPending(ctx context.Context, unit contract.Unit, in jobPendingInput) (contract.Outcome[jobListBody], error) {
 	if in.Limit < 1 || in.Limit > 100 {
 		return contract.Outcome[jobListBody]{}, invalidInput("job.pending limit must be between 1 and 100")
 	}
 	rows, err := listJobs(ctx, unit,
-		[]string{"installation_id = ?", "state IN ('pending','outcome_unknown')"},
+		[]string{"installation_id = ?", "state IN ('pending','outcome_unknown','running')"},
 		[]any{installationOf(unit)}, in.Limit)
 	if err != nil {
 		return contract.Outcome[jobListBody]{}, err

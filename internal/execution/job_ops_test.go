@@ -271,6 +271,30 @@ func TestJobRecordUnclaimedBindsCurrentGeneration(t *testing.T) {
 	}, contract.CodeConflict)
 }
 
+// TestJobPendingIncludesRunningJobs proves a job claimed into 'running'
+// stays visible to job.pending -- the only discovery path installation.
+// restore's controller handoff has, since it sets its own job to 'running'
+// directly (via _execution.job.record, inside its own synchronous Prepare
+// -> Perform -> Finish call) rather than through the ordinary claim loop.
+func TestJobPendingIncludesRunningJobs(t *testing.T) {
+	e := newEnv(t)
+	jobID := mustJobCreate(e, e.ids.New())
+
+	claimPayload := e.mustOK(opJobClaim, jobClaimInput{JobID: jobID, ExpectedVersion: 1, Generation: 1})
+	var claim jobClaimBody
+	e.decode(claimPayload.Data, &claim)
+	if claim.Job.State != "running" {
+		t.Fatalf("claimed job state %q, want running", claim.Job.State)
+	}
+
+	payload := e.mustOK(opJobPending, jobPendingInput{Limit: 10})
+	var body jobListBody
+	e.decode(payload.Data, &body)
+	if len(body.Items) != 1 || body.Items[0].ID != jobID {
+		t.Fatalf("pending items %+v, want the running job %s still listed", body.Items, jobID)
+	}
+}
+
 func TestJobPendingScanBounds(t *testing.T) {
 	e := newEnv(t)
 	_ = e.expectFault(opJobPending, jobPendingInput{Limit: 0}, contract.CodeInvalidInput)
