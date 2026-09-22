@@ -2549,6 +2549,54 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   P20's repository_runner.go evidence-staging pattern first for
   consistency, and reminded that only whole-repo checks need the
   shared build lease.
+- 2026-09-21 23:59 PT -- P21 LANDED (PR #38, e9562127). Cooperative
+  claim context now publishes a real zatiti.claim-context/v1 document
+  (bindings, required capabilities, an explicit advisory disclaimer)
+  through a new durable document-publish job mechanism (job_runner.go)
+  instead of the old digest-only synthetic envelope referencing bytes
+  nobody staged. admitAttempt now refuses a replacement claim while an
+  unresolved provider-effect obligation is open (never a bare
+  lease_conflict, which routine fencing always records), refuses past
+  the task's root deadline, and refuses once the run's cumulative
+  model_steps_used (new, persists across replacement attempts unlike
+  the per-attempt counter) reaches the task's bound -- closing a real
+  budget-bypass path (a worker could previously accumulate unlimited
+  total model steps just by being replaced repeatedly). run.export now
+  assembles a genuine full canonical history (every attempt's effects/
+  outputs/observations/verifier evidence, plus the run's checkpoint
+  lineage) via the same job mechanism. checkWorkerCall now also
+  verifies the call's actual authenticated actor against the attempt's
+  bound worker -- a worker-kind principal impersonating a different
+  worker is refused regardless of a correct lease/generation. Additive
+  migration (schemaV6): execution_runs.model_steps_used.
+  Lead's own independent verification: read job_runner.go's new
+  document-publish mechanism in full, confirmed it follows the
+  established stageContext/stageRequest precedent (no blob IO inside a
+  Unit) rather than inventing a parallel one. Read the real
+  impersonation test (TestReportRefusedFromDifferentWorkerActor) --
+  uses a genuinely different PrincipalID via callAsActor, confirms
+  permission_denied, confirms the legitimate worker still succeeds
+  afterward with the same lease/generation. Ran go build/vet/gofmt
+  myself; ran the full package test twice fresh (350s, 329s, both ok).
+  Red->green verified the actor-identity check myself: temporarily
+  disabled it, confirmed the impersonation test fails (impostor report
+  silently accepted), restored, confirmed green.
+  PROCESS NOTE: mid-landing, this machine's SSH agent lost its GitHub
+  identity (apparent reboot -- "up 1 hr" where it had been up 22+ hours
+  before) and the account key required a passphrase only David has;
+  surfaced via AskUserQuestion rather than attempting to work around
+  it, David unlocked it directly. Also: post-reboot load spiked to 60+
+  on this machine's 2 physical cores with free memory as low as ~17MB
+  at one point -- held all new dispatch and heavy local test runs,
+  checking uptime/vm_stat directly on each wakeup rather than assuming
+  recovery, until load genuinely dropped under 15 and free memory
+  recovered to ~690MB before resuming.
+  CI: build-and-test failures confirmed zero "skill"/"execution"
+  mentions (grepped the actual failure log), matching the established
+  pattern. Rebase-merged. Re-ran go test ./internal/execution myself on
+  the real post-merge main (272s, ok). Worktree/branch cleaned up, P21
+  claim released.
+  WAVE 9 COMPLETE. 35 of 50 cards landed (70%, up from 68%).
 
 ## Planned
 
