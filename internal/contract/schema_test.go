@@ -3,6 +3,7 @@ package contract
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"testing"
 )
 
@@ -360,5 +361,59 @@ func TestValidateSchemaAdditionalPropertiesFalseDefault(t *testing.T) {
 	var se *SchemaError
 	if !errors.As(err, &se) || se.Keyword != "additionalProperties" {
 		t.Fatalf("strict object not enforced: %v", err)
+	}
+}
+
+// TestValidateSchemaMemoizesParsedSchemaDocument asserts ValidateSchema's
+// schema-side strictParse is actually cached across calls with a
+// byte-identical schema document, not merely correct: every call site
+// across the module reuses the same handler-registered schema on every
+// invocation (see schemaCache's doc comment in schema.go), so a regression
+// that silently drops the memoization -- e.g. a future edit that calls
+// strictParse(schema) directly again instead of cachedStrictParse -- would
+// reintroduce a real, previously-measured ~5.5ms-per-call cost across ~40
+// call sites without failing any purely-functional test. This test fails
+// on exactly that regression by counting schemaCache misses, and also
+// fails if the cache were ever made to ignore its key (e.g. a bug that
+// always hits), since a genuinely distinct schema document must still
+// register its own miss.
+//
+// Deliberately not t.Parallel(): it reads a package-global counter shared
+// by every schema-validating test, and Go only guarantees non-parallel
+// tests never run concurrently with each other or with a parallel batch.
+func TestValidateSchemaMemoizesParsedSchemaDocument(t *testing.T) {
+	nonce := t.Name()
+	schemaA := json.RawMessage(fmt.Sprintf(`{"type":"object","title":%q}`, nonce+"-a"))
+	schemaB := json.RawMessage(fmt.Sprintf(`{"type":"string","title":%q}`, nonce+"-b"))
+	instanceA := json.RawMessage(`{}`)
+	instanceB := json.RawMessage(`"x"`)
+
+	before := schemaCacheMisses.Load()
+	if err := ValidateSchema(schemaA, instanceA); err != nil {
+		t.Fatalf("ValidateSchema(schemaA): %v", err)
+	}
+	afterFirst := schemaCacheMisses.Load()
+	if afterFirst != before+1 {
+		t.Fatalf("first call to a never-seen schema: misses went %d -> %d, want exactly +1", before, afterFirst)
+	}
+
+	for i := 0; i < 5; i++ {
+		if err := ValidateSchema(schemaA, instanceA); err != nil {
+			t.Fatalf("repeat call %d to schemaA: %v", i, err)
+		}
+	}
+	afterRepeats := schemaCacheMisses.Load()
+	if afterRepeats != afterFirst {
+		t.Fatalf("5 repeat calls with an identical schema document caused %d more cache misses, want 0 (memoization regressed)", afterRepeats-afterFirst)
+	}
+
+	// A genuinely different schema document must still register its own
+	// miss: the cache must be keyed by content, never a constant hit.
+	if err := ValidateSchema(schemaB, instanceB); err != nil {
+		t.Fatalf("ValidateSchema(schemaB): %v", err)
+	}
+	afterDistinct := schemaCacheMisses.Load()
+	if afterDistinct != afterRepeats+1 {
+		t.Fatalf("a distinct schema document caused %d new misses, want exactly 1 (cache key too coarse)", afterDistinct-afterRepeats)
 	}
 }

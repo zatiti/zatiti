@@ -42,7 +42,7 @@ func canonicalizeSets(data, schema []byte) ([]byte, error) {
 	if derr != nil {
 		return nil, derr
 	}
-	sv, serr := strictParse(schema)
+	sv, serr := cachedStrictParse(schema)
 	if serr != nil {
 		return nil, decodeErrf("", ErrSchemaMalformed, "schema: %s", serr.Error())
 	}
