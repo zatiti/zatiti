@@ -3039,6 +3039,16 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
 
 ## Planned
 
+- For P01 (internal/contract) to pick up alongside its own scope, not
+  urgent: internal/contract.ValidateSchema/strictParse re-parses the full
+  merged $defs document (30-100 KB) from scratch on every single operation
+  invocation -- confirmed real (~5.5ms/call, flat, no combinatorial blowup,
+  so NOT the tests/integration hang, which was an unrelated infinite test
+  loop fixed by PR #45) but genuinely wasteful across ~40 call sites
+  repo-wide. A parsed-schema cache keyed on the schema bytes would remove
+  nearly all of it. Found 2026-09-22 during the tests/integration hang
+  investigation (see the ~00:40 and ~01:20 PT entries above); not on any
+  currently-landed card's required-behavior list.
 - Wave 3: controller, desktop, cmd/zatiti, cmd/zatiti-desktop.
 - Wave 4: tests/integration, tests/qualification, packaging,
   .github/workflows.
