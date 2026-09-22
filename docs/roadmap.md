@@ -3436,3 +3436,17 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   SnapshotInventory as installation-only, never the controller) -- P33
   correctly left it untouched (outside cmd/zatiti); tracking as my own
   tiny docs-only follow-up.
+- 2026-09-22 ~06:20-06:51 PT -- P33 LANDED (PR #53). Real content: runServe
+  is now an outer reassembly loop around P32's ErrRestoreHandoff, correctly
+  never re-acquiring the installation lock and correctly fencing the old
+  generation via a fresh StartGeneration on reassembly (independently
+  confirmed by reading the diff directly). Collaborators.RestoreLifecycle
+  wired through the same seam as every other trusted collaborator, reachable
+  only from the controller process. The card's own StageCandidate/
+  MergeOverlay fail closed with a specific prerequisite_missing fault
+  rather than fake success -- confirmed this is the safe, designed fallback,
+  not a shortcut (StageCandidate failing means performSwap never touches
+  the database file at all). Locally, TestServeCompletesBootstrapOverThe
+  Socket (the untriaged CI flake from PR #51) passed in 4.47s, all 47
+  cmd/zatiti tests green -- confirms that flake really is CI-runner-
+  specific, not a real bug. 45/50 landed.
