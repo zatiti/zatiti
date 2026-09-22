@@ -234,8 +234,9 @@ type verificationPendingBody struct {
 }
 
 type verificationClaimBody struct {
-	Request    wireVerificationRequest `json:"request"`
-	ClaimToken string                  `json:"claim_token"`
+	Request        wireVerificationRequest `json:"request"`
+	ClaimToken     string                  `json:"claim_token"`
+	AttemptVersion contract.Version        `json:"attempt_version"`
 }
 
 // Output bodies. Every output revalidates against its merged output schema,

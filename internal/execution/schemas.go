@@ -91,7 +91,7 @@ const (
 	schemaOutExecutionContextPlan         = `{"type":"object","additionalProperties":false,"properties":{"resource":{"$ref":"#/$defs/ContextPlan"}},"required":["resource"]}`
 	schemaOutExecutionProposal            = `{"type":"object","additionalProperties":false,"properties":{"resource":{"$ref":"#/$defs/ProposalRecord"}},"required":["resource"]}`
 	schemaOutExecutionVerificationPending = `{"type":"object","additionalProperties":false,"properties":{"items":{"type":"array","items":{"$ref":"#/$defs/Adapter_VerificationRequest"},"maxItems":100}},"required":["items"]}`
-	schemaOutExecutionVerificationClaim   = `{"type":"object","additionalProperties":false,"properties":{"request":{"$ref":"#/$defs/Adapter_VerificationRequest"},"claim_token":{"type":"string","maxLength":8192}},"required":["request","claim_token"]}`
+	schemaOutExecutionVerificationClaim   = `{"type":"object","additionalProperties":false,"properties":{"request":{"$ref":"#/$defs/Adapter_VerificationRequest"},"claim_token":{"type":"string","maxLength":8192},"attempt_version":{"type":"integer","minimum":1,"maximum":9223372036854775807}},"required":["request","claim_token","attempt_version"]}`
 )
 
 // schemaExportResult is the run.export eventual job result schema: the

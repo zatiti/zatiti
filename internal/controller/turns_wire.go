@@ -249,8 +249,9 @@ type verificationItemsOutput struct {
 }
 
 type verificationClaimOutput struct {
-	Request    json.RawMessage `json:"request"`
-	ClaimToken string          `json:"claim_token"`
+	Request        json.RawMessage `json:"request"`
+	ClaimToken     string          `json:"claim_token"`
+	AttemptVersion int64           `json:"attempt_version"`
 }
 
 // verificationRequestProbe reads only the fields the controller needs from

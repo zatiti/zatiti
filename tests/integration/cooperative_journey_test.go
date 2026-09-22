@@ -3,7 +3,9 @@ package integration_test
 import (
 	"encoding/base64"
 	"fmt"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/zatiti/zatiti/internal/contract"
 )
@@ -20,16 +22,19 @@ import (
 // hosted_turn_test.go proves runs into its own honest ceiling.
 //
 // This journey went further into real production code than any prior test
-// in this tree, and found three more genuine, independently confirmed
-// issues along the way (beyond the hosted-side gaps hosted_turn_test.go
-// documents). None were worked around with test-side production code. All
-// three are now fixed (findings 1-3 below); the primary test proves the
-// real success this unlocks -- task.create, task.start, run.claim,
-// attempt.checkpoint AND attempt.report all genuinely succeed, for the
-// first time in this tree's history -- and documents the next honest
-// ceiling this reveals (asynchronous verification dispatch not completing
-// within this test's own observation window, a separate, not-yet-
-// investigated question; see the primary test's own closing comment).
+// in this tree, and found genuine, independently confirmed issues along the
+// way (beyond the hosted-side gaps hosted_turn_test.go documents). None were
+// worked around with test-side production code. Findings 1-4 are now fixed;
+// the primary test proves the real success this unlocks -- task.create,
+// task.start, run.claim, attempt.checkpoint AND attempt.report all
+// genuinely succeed, for the first time in this tree's history -- and
+// documents the next honest ceiling this reveals: reaching finding 4's
+// fixed verification dispatch exposes finding 5, a genuinely separate,
+// previously-masked defect (a controller-internal-call scoping mismatch
+// during the task's own transition) that still keeps the task from a
+// terminal state. See the primary test's own closing comment for finding
+// 5's full detail; it is NOT fixed here, only characterized and proven with
+// a captured fault, matching finding 4's own root-causing rigor.
 //
 //  1. FIXED same-day on main, commit 95767cf "mint a real operation_id for
 //     run.claim's budget reservation": internal/execution/run_ops.go's
@@ -73,6 +78,49 @@ import (
 //     leaving the correct, already-existing _tasks.evidence.record path
 //     (which supplies a real artifact ID with a real digest) as the sole
 //     producer of evidence a success/failure transition ever needs.
+//  4. FIXED (founder-authorized, R-verification-stall-fix): internal/
+//     controller/turns.go's runVerification hardcoded ExpectedVersion: 1 on
+//     the _execution.verification.record call it makes after claiming a
+//     sealed verification request. That field fences the ATTEMPT row (not
+//     the verification job), and an attempt's version is never 1 by the
+//     time verification runs for any attempt that did more than a bare
+//     claim -- every realistic journey, this one included -- so record()
+//     refused with stale_version every single time, confirmed against a
+//     real DB with a captured fault ("attempt ... version 3 does not match
+//     expected version 1"). The verification job's own state stayed
+//     'pending' forever, so the controller re-claimed and re-invoked the
+//     real trusted verifier every tick, indefinitely: a real, ongoing
+//     resource cost on any live installation, not a one-time stall. Fixed
+//     by widening _execution.verification.claim's output
+//     (tools/specgen/model.py) to also return the claimed attempt's live
+//     version, read in the same claim transaction, and threading that real
+//     value into record() instead of the hardcoded 1. Also closed the
+//     re-claim/re-invoke cost directly: listPendingVerificationJobs
+//     (internal/execution/store.go) now excludes a job with an existing
+//     claim row from its listing, so a claim already in flight is not
+//     re-driven by the same live generation. See internal/execution/
+//     turn_ops_test.go's
+//     TestVerificationClaimReturnsCurrentAttemptVersionAndFencesRecord for
+//     the isolated red/green reproduction.
+//  5. FOUND, NOT fixed (out of R-verification-stall-fix's scope): fixing
+//     finding 4 lets verification.record reach internal/tasks's
+//     transitionTask for the first time on a real journey, which exposes a
+//     second, genuinely separate, previously-masked defect --
+//     internal/tasks's emitTaskEvent (internal/tasks/events.go) stamps a
+//     task-transition event with the task's OWN scope (this journey's task
+//     is worker-scoped, so that includes WorkerID), while every
+//     controller-internal call -- verification.record among them, via
+//     callPeer sharing the same unit/transaction -- runs under the
+//     controller's bare installation scope (internal/controller/start.go's
+//     call doc: "runs one internal operation under ... the installation
+//     scope"). internal/storage's Unit.Emit (internal/storage/session.go)
+//     requires an event's explicit scope to equal the unit's own scope
+//     exactly, so the task's transition inside verification.record refuses
+//     with invalid_input: "event scope does not match the unit scope" the
+//     instant it tries to emit -- for any task with more than a bare
+//     installation scope, i.e. virtually every real task. The primary test
+//     below proves this directly (polls for the controller to record this
+//     exact obligation) rather than guessing at a fix inside this change.
 
 // cooperativeWorkerDefinition declares a worker with an explicit
 // executor:"cooperative" profile (schema-valid: ExecutionProfile.executor
@@ -329,21 +377,98 @@ func TestCooperativeWorkerClaimsAndCheckpointsThenHitsTheArtifactResolutionCeili
 		} `json:"resource"`
 	}
 	decode(t, taskOut.Data, &taskState)
-	// The NEW honest ceiling: reportAttempt seals a real VerificationRequest
-	// job (internal/execution/attempt_ops.go) and the task correctly enters
-	// "verifying" -- but the real controller's own verification dispatch
-	// (driveVerification, internal/controller/turns.go) does not carry it
-	// to a terminal succeeded/failed state within this test's observation
-	// window. Not investigated further here -- this journey's own two
-	// authorized fixes (the evidence_ids wrong-ID bug and the
-	// _artifacts.metadata schema) are proven complete and correct by
-	// reaching this point at all; whether asynchronous verification
-	// dispatch for a cooperative (non-turn-driven) task is itself a further
-	// gap is a separate, not-yet-investigated question -- see
-	// docs/roadmap.md for the pointer to raise it, rather than guessing at
-	// a third fix inside this same change.
+	// reportAttempt (internal/execution/attempt_ops.go) seals a real
+	// VerificationRequest job and moves the task to "verifying" in the same
+	// call that recorded the report -- synchronous, before the controller's
+	// own async dispatch (driveVerification, internal/controller/turns.go)
+	// ever runs.
 	if taskState.Resource.State != "verifying" {
-		t.Fatalf("task state after a successful report = %q, want verifying (see this test's own comment on the further, not-yet-investigated verification-dispatch question)", taskState.Resource.State)
+		t.Fatalf("task state after a successful report = %q, want verifying", taskState.Resource.State)
+	}
+
+	// R-verification-stall-fix, root cause #1, now fixed (founder-
+	// authorized): internal/controller/turns.go's runVerification hardcoded
+	// ExpectedVersion: 1 on the _execution.verification.record call it
+	// makes after claiming a sealed verification request, but that field
+	// fences the ATTEMPT row, not the verification job -- an attempt's
+	// version advances by exactly 1 on every claim, checkpoint and report,
+	// so it is never 1 by the time verification runs for any attempt that
+	// did more than a bare claim (every realistic journey, this one
+	// included). record() therefore refused with stale_version every
+	// single time, confirmed against a real DB with a captured fault
+	// ("attempt ... version 3 does not match expected version 1"); the
+	// verification job's own state column never left 'pending', so the
+	// controller's next tick re-claimed and re-invoked the real trusted
+	// verifier again, indefinitely -- a real, ongoing resource cost on any
+	// live installation, not just a one-time stall. Fixed by widening
+	// _execution.verification.claim's output (tools/specgen/model.py) to
+	// also return the claimed attempt's live version, read in the same
+	// claim transaction, and threading that real value into the record
+	// call instead of the hardcoded 1. See
+	// internal/execution/turn_ops_test.go's
+	// TestVerificationClaimReturnsCurrentAttemptVersionAndFencesRecord for
+	// the isolated reproduction of the exact fault text this journey hit.
+	// listPendingVerificationJobs (internal/execution/store.go) also now
+	// excludes a job with an existing claim row from its listing, so a
+	// claim already in flight is not re-claimed and re-invoked by the same
+	// live generation while it is still being worked -- closing the
+	// resource cost independent of (and in addition to) the version fix.
+	//
+	// With root cause #1 fixed, claim and record now genuinely run (proven
+	// directly by internal/execution's own tests), but THIS journey still
+	// does not reach a terminal state -- fixing #1 exposes a second,
+	// genuinely separate, previously-masked defect that was simply
+	// unreachable before (record() never got this far for any task with
+	// more than a bare installation scope, i.e. virtually every real task):
+	// internal/tasks's emitTaskEvent (internal/tasks/events.go) stamps a
+	// task-transition event with the task's OWN scope -- this journey's
+	// task is worker-scoped, so that includes WorkerID -- while every
+	// controller-internal call, including the _execution.verification.
+	// record call that reaches transitionTask via callPeer, runs under the
+	// controller's bare installation scope (internal/controller/start.go's
+	// call: "runs one internal operation under ... the installation
+	// scope", the same unit/transaction is threaded through unchanged).
+	// internal/storage's Unit.Emit (internal/storage/session.go) requires
+	// an event's explicit scope to equal the unit's own scope exactly, so
+	// the task's transition inside verification.record refuses with
+	// invalid_input: "event scope does not match the unit scope" the
+	// instant it tries to emit. This is a real, separate, NOT-yet-fixed
+	// defect -- a controller-internal-call scoping/event-emission mismatch,
+	// out of R-verification-stall-fix's own scope (a version-fencing bug)
+	// -- flagged here for its own fix rather than guessed at in this
+	// change. The wait below proves that ceiling directly: it polls for
+	// either a terminal task state or the controller recording exactly
+	// this obligation against this attempt, and fails loudly if neither
+	// happens (which would mean a third, uncharacterized gap).
+	var finalState, obligation string
+	waitFor(t, 15*time.Second, "task to leave verifying for a terminal state, or the controller to record the known event-scope obligation", func() bool {
+		out := f.must(f.owner, "task.get", "", map[string]any{"scope": scope, "id": task.Resource.ID})
+		var s struct {
+			Resource struct {
+				State string `json:"state"`
+			} `json:"resource"`
+		}
+		decode(t, out.Data, &s)
+		finalState = s.Resource.State
+		if finalState == "succeeded" || finalState == "failed" {
+			return true
+		}
+		for _, o := range cf.ctl.Status().Obligations {
+			if o.ResourceID == claim.Attempt.ID {
+				obligation = o.Fault.Code + ": " + o.Fault.Message
+				return true
+			}
+		}
+		return false
+	})
+	if finalState == "succeeded" || finalState == "failed" {
+		t.Fatalf("task reached terminal state %q -- the event-scope defect this comment describes appears to be fixed; update this test to assert succeeded (or investigate the new failure) instead of the known-obligation path", finalState)
+	}
+	if finalState != "verifying" {
+		t.Fatalf("task state %q, want verifying (with the known event-scope obligation blocking further progress)", finalState)
+	}
+	if !strings.Contains(obligation, "event scope does not match the unit scope") {
+		t.Fatalf("controller obligation %q, want the known event-scope-mismatch defect (internal/tasks/events.go emitTaskEvent vs internal/storage's Unit.Emit) -- this may be a new, uncharacterized gap", obligation)
 	}
 }
 

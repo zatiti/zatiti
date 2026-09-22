@@ -621,7 +621,7 @@ func (c *Controller) claimVerification(ctx, workCtx context.Context, sess *sessi
 		return false
 	}
 	c.workers.Add(1)
-	go c.runVerification(workCtx, sess, probe, claimed.Request)
+	go c.runVerification(workCtx, sess, probe, claimed.Request, claimed.AttemptVersion)
 	return true
 }
 
@@ -632,7 +632,16 @@ func (c *Controller) claimVerification(ctx, workCtx context.Context, sess *sessi
 // verifier's own staged request/verdict bytes as real artifacts BEFORE
 // recording: the verifier's own recorded evidence must exist durably
 // before anything downstream treats the task as verified.
-func (c *Controller) runVerification(workCtx context.Context, sess *session, probe verificationRequestProbe, request json.RawMessage) {
+//
+// attemptVersion is the attempt's live version _execution.verification.
+// claim read in its own claim transaction (the freshest read available,
+// with the smallest staleness window before it is used below). It fences
+// the attempt row itself, not the verification job: an attempt's version
+// advances by exactly 1 on every claim/checkpoint/report, so it is never 1
+// by the time verification runs for any attempt that did more than a bare
+// claim -- a hardcoded ExpectedVersion: 1 here refused every realistic
+// journey with stale_version.
+func (c *Controller) runVerification(workCtx context.Context, sess *session, probe verificationRequestProbe, request json.RawMessage, attemptVersion int64) {
 	defer c.workers.Done()
 	defer c.free()
 
@@ -658,7 +667,7 @@ func (c *Controller) runVerification(workCtx context.Context, sess *session, pro
 	}
 	err = c.write(func() error {
 		return c.call(workCtx, sess, "_execution.verification.record", verificationRecordInput{
-			AttemptID: attemptID, ExpectedVersion: 1, Result: published,
+			AttemptID: attemptID, ExpectedVersion: attemptVersion, Result: published,
 		}, nil)
 	})
 	if err != nil {

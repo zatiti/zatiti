@@ -620,9 +620,9 @@ func (f *fx) executionVerificationClaim(ctx context.Context, u contract.Unit, in
 	if err := decode(input, &in); err != nil {
 		return nil, err
 	}
-	var state, req string
-	err := u.QueryRowContext(ctx, `SELECT state, request FROM execution_verification_requests WHERE job_id = ?`, string(in.RequestID)).
-		Scan(&state, &req)
+	var state, req, attemptID string
+	err := u.QueryRowContext(ctx, `SELECT state, request, attempt_id FROM execution_verification_requests WHERE job_id = ?`, string(in.RequestID)).
+		Scan(&state, &req, &attemptID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, fxFault(contract.CodeNotFound, "verification request not found")
 	}
@@ -635,7 +635,13 @@ func (f *fx) executionVerificationClaim(ctx context.Context, u contract.Unit, in
 	if _, err := u.ExecContext(ctx, `UPDATE execution_verification_requests SET state = 'claimed' WHERE job_id = ?`, string(in.RequestID)); err != nil {
 		return nil, err
 	}
-	return map[string]any{"request": json.RawMessage(req), "claim_token": "verify-lease-synthetic"}, nil
+	// Mirror the real handler's widened output: the claimed attempt's own
+	// current live version, read in this same transaction.
+	var attemptVersion int64
+	if err := u.QueryRowContext(ctx, `SELECT version FROM execution_turn_attempts WHERE id = ?`, attemptID).Scan(&attemptVersion); err != nil {
+		return nil, err
+	}
+	return map[string]any{"request": json.RawMessage(req), "claim_token": "verify-lease-synthetic", "attempt_version": attemptVersion}, nil
 }
 
 func (f *fx) executionVerificationRecord(ctx context.Context, u contract.Unit, input json.RawMessage) (any, error) {

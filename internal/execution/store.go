@@ -1001,10 +1001,27 @@ func loadVerificationJobByID(ctx context.Context, unit contract.Unit, id contrac
 // jobs oldest first, bounded: the fair scan _execution.verification.pending
 // serves. No worker can claim verifier authority through this read-only
 // scan; only the trusted verifier path claims and records a verdict.
+//
+// A job with an existing row in execution_verification_claims is already
+// claimed and its trusted-verifier run is either in flight or awaiting a
+// record call; it is excluded here so the same live generation does not
+// re-claim and re-invoke the real Verifier.Verify against it every tick
+// while that first claim is still being worked. This is a read-only
+// listing filter, not a state transition: a verification job's own state
+// column stays 'pending' until verification.record resolves it (matching
+// this table's frozen state values), and a claim that never resolves
+// because its owning generation died stays invisible here exactly as it
+// already stays unclaimable via verification.claim's own generation fence
+// -- this filter costs that abandoned case nothing it did not already
+// lack, and it stops the costly case (the same live generation re-driving
+// a real verifier call it already has outstanding).
 func listPendingVerificationJobs(ctx context.Context, unit contract.Unit, installation contract.ID, limit int64) ([]*verificationJobRow, error) {
 	rows, err := unit.QueryContext(ctx, `SELECT `+verificationJobColumns+`
 		FROM execution_verification_jobs
 		WHERE installation_id = ? AND state = 'pending'
+		  AND NOT EXISTS (
+		    SELECT 1 FROM execution_verification_claims c
+		    WHERE c.request_id = execution_verification_jobs.id)
 		ORDER BY created_at ASC LIMIT ?`, installation, limit)
 	if err != nil {
 		return nil, err

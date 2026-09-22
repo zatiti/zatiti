@@ -442,6 +442,12 @@ func TestVerifierIdentityCannotBeReplacedByWorkerRunner(t *testing.T) {
 	attemptID := contract.NewID()
 	jobID := contract.NewID()
 	req := verificationRequestDoc(jobID, attemptID, fxDigest)
+	// A sealed verification request always names a real reported attempt --
+	// _execution.verification.claim's widened output reads the attempt's
+	// own live version in the same claim transaction (R-verification-stall-
+	// fix), so this synthetic attempt id needs a backing row exactly as a
+	// real reportAttempt-sealed request always has one.
+	f.exec(`INSERT INTO execution_turn_attempts (id, turn_id, version, state) VALUES (?, '', 1, 'reported')`, string(attemptID))
 	f.exec(`INSERT INTO execution_verification_requests (job_id, attempt_id, task_id, state, request) VALUES (?, ?, ?, 'pending', ?)`,
 		string(jobID), string(attemptID), string(contract.NewID()), string(req))
 
@@ -476,6 +482,9 @@ func TestVerificationRunsOutsideTheTickLoop(t *testing.T) {
 	attemptID := contract.NewID()
 	jobID := contract.NewID()
 	req := verificationRequestDoc(jobID, attemptID, fxDigest)
+	// See TestVerifierIdentityCannotBeReplacedByWorkerRunner's identical
+	// comment: the claim's widened output needs a real backing attempt row.
+	f.exec(`INSERT INTO execution_turn_attempts (id, turn_id, version, state) VALUES (?, '', 1, 'reported')`, string(attemptID))
 	f.exec(`INSERT INTO execution_verification_requests (job_id, attempt_id, task_id, state, request) VALUES (?, ?, ?, 'pending', ?)`,
 		string(jobID), string(attemptID), string(contract.NewID()), string(req))
 

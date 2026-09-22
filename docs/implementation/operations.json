@@ -27001,14 +27001,20 @@
           "claim_token": {
             "type": "string",
             "maxLength": 8192
+          },
+          "attempt_version": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9223372036854775807
           }
         },
         "required": [
           "request",
-          "claim_token"
+          "claim_token",
+          "attempt_version"
         ]
       },
-      "behavior": "Exact version+generation claim of one sealed VerificationRequest for the trusted verifier identity only; lost claim acknowledgement resolves through this same generation-bound token, never by assuming unclaimed.",
+      "behavior": "Exact version+generation claim of one sealed VerificationRequest for the trusted verifier identity only; lost claim acknowledgement resolves through this same generation-bound token, never by assuming unclaimed. Also returns the claimed attempt's current live version, read in the same transaction, so the caller can fence its later verification.record call against a real value instead of a guess.",
       "cli": [],
       "mcp": null,
       "submission_key": false,
