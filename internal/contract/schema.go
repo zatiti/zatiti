@@ -7,6 +7,8 @@ import (
 	"math/big"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 )
 
 // maxSchemaDepth bounds schema traversal (including $ref recursion). Zatiti
@@ -41,7 +43,7 @@ const dialect2020_12 = "https://json-schema.org/draft/2020-12/schema"
 // JSON, or a $ref does not resolve) or ErrSchemaUnsupported (schema uses an
 // unsupported construct).
 func ValidateSchema(schema, instance json.RawMessage) error {
-	sv, derr := strictParse(schema)
+	sv, derr := cachedStrictParse(schema)
 	if derr != nil {
 		return &SchemaError{
 			Message: "schema is not valid strict JSON: " + derr.Error(),
@@ -54,6 +56,56 @@ func ValidateSchema(schema, instance json.RawMessage) error {
 	}
 	v := &schemaValidator{root: sv}
 	return v.validate(iv, sv, "", "#", 0)
+}
+
+// schemaCache memoizes strictParse's result for schema documents, keyed on
+// the exact input bytes. ValidateSchema runs on every request across
+// roughly 40 call sites repo-wide, and the overwhelming majority of callers
+// pass the same schema document on every call: a handler's InputSchema/
+// OutputSchema is captured once at registration time (see e.g. each
+// package's local bind helper) and closed over for the life of the
+// process, so re-parsing the same 30-100KB merged $defs document from
+// scratch on every single invocation is pure repeated work, not
+// combinatorial and not a correctness issue, but real and avoidable.
+//
+// The parsed value tree (map[string]any/[]any/json.Number/string/bool/nil)
+// is read-only once strictParse returns it: schemaValidator only reads it
+// and builds its own local per-call working state (e.g. checkObject's
+// compiled pattern map), it never writes into the schema's own maps or
+// slices. Sharing one parsed value across concurrent callers is therefore
+// safe. Schema documents are developer-authored, frozen catalog content
+// (docs/implementation/operations.json and friends), not unbounded
+// caller-controlled input, so an unbounded cache keyed on content is not a
+// memory-exhaustion vector in this codebase's actual usage.
+var schemaCache sync.Map // string(schema bytes) -> schemaCacheEntry
+
+type schemaCacheEntry struct {
+	value any
+	err   *DecodeError
+}
+
+// schemaCacheMisses counts schemaCache misses. It exists only so this
+// package's own tests can assert the cache is actually memoizing repeated,
+// byte-identical schema documents rather than silently reparsing on every
+// call; it carries no public behavior and is not exported.
+var schemaCacheMisses atomic.Int64
+
+// cachedStrictParse is strictParse for schema documents, memoized through
+// schemaCache. Callers that parse ordinary (non-schema) instance data must
+// keep calling strictParse directly: only schema documents repeat across
+// calls in the way that makes caching worthwhile, and instance payloads are
+// exactly the untrusted, high-cardinality input schemaCache's doc comment
+// says the cache must not be exposed to.
+func cachedStrictParse(data json.RawMessage) (any, *DecodeError) {
+	key := string(data)
+	if cached, ok := schemaCache.Load(key); ok {
+		entry := cached.(schemaCacheEntry)
+		return entry.value, entry.err
+	}
+	schemaCacheMisses.Add(1)
+	value, err := strictParse(data)
+	schemaCache.Store(key, schemaCacheEntry{value: value, err: err})
+	return value, err
 }
 
 type schemaValidator struct {
