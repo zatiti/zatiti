@@ -2699,6 +2699,49 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   end-to-end tests need the fix to go green, and it's writing every
   test that doesn't require the full registry in the meantime,
   disclosing the rest rather than working around it.
+- 2026-09-22 ~02:5x PT -- SCHEMA-DRIFT FIX SCOPE WIDENED to the full
+  extent of what blocks registry assembly, found by P24's own agent
+  continuing to dig (confirmed independently at each step, not taken
+  on trust) rather than stopping at the first wall:
+  - internal/registry's checkSchemaDocument walks the ENTIRE $defs map
+    of every registered operation, not just the fields an operation's
+    own body reaches -- so R-schema-drift-fix's original plan (add
+    only Operation.attempts/callback_route as bare fields) would have
+    left dangling $refs to OperationAttempt/CallbackRoute in
+    internal/policy and internal/installation, which registry
+    validation rejects outright (proven by internal/accounting's own
+    existing "dangling ref inside $defs" test case) -- a strictly
+    worse regression than the original bug. Independently confirmed
+    (grepped both files: zero occurrences of either def name) and
+    approved the correct, larger fix: add the 2 missing $defs
+    themselves (byte-identical to internal/scheduling's already-
+    correct copies) alongside the field additions.
+  - Two more stale-embedded-$defs instances, same root cause: Artifact
+    (missing purpose/source_operation_id) in BOTH internal/installation
+    AND internal/messaging; Conversation (missing
+    caller_unread_count/caller_last_read_marker) in internal/
+    installation only -- messaging's own Conversation def is already
+    correct. Independently confirmed via the same key-diff technique.
+  - A structurally different, non-$defs-sync bug: internal/registry/
+    catalog.json (the embedded frozen catalog) disagrees with docs/
+    implementation/operations.json on task.start's scope_required
+    (catalog.json: ["installation_id"], operations.json: null).
+    Independently confirmed by reading both JSON files directly. Found
+    the deciding precedent already in the codebase: internal/tasks/
+    service.go's own code comment (its noScopeRequired field) already
+    establishes operations.json as authoritative for this exact field,
+    already conforms task.start's own descriptor to it, and explicitly
+    flags this exact catalog.json/operations.json mismatch as "a
+    likely generator gap" for "the plan's integration owner" -- read
+    as addressed to whoever is driving integration now, i.e. this
+    session. This is a one-field fix with existing, on-record
+    justification, not a fresh architectural call requiring escalation.
+  Widened R-schema-drift-fix's write scope to internal/policy,
+  internal/accounting, internal/installation, internal/messaging,
+  internal/registry (catalog.json's one field only) -- fixing all 5
+  issues together in one PR, since they block each other in sequence
+  (fixing #1-2 alone just surfaces #3 next, confirmed by the P24
+  agent's own local revert-tested patch). Still in flight.
 
 ## Planned
 
