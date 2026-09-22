@@ -3628,3 +3628,98 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   already-tracked evidence-recording ceiling (artifacts.metadata /
   ID-confusion) if any journey reaches real task completion -- told to
   document that as known state, not re-report it as new.
+- 2026-09-22 ~10:15-18:14 PT -- COMBINED FIX LANDED (PR #57, commit
+  99fa699), claim R-evidence-ids-fix released. Founder authorized both
+  defects together ("Authorize both fixes now"). Fixed:
+  (a) internal/execution's two LIVE evidence_ids call sites
+  (attempt_ops.go:314, controller_ops.go:720) now pass []contract.ID{}
+  instead of an attempt/run/verification-job ID -- the other 7
+  transitionTask call sites were confirmed cosmetic (applyTransition
+  never reads evidence_ids outside the verifying/succeeded branches) and
+  cleaned up for consistency, not because they were bugs.
+  (b) _artifacts.metadata's frozen input schema (tools/specgen/model.py,
+  regenerated via render.py -- 40 files, only _artifacts.metadata's
+  input_schema and behavior text actually changed, verified by diff)
+  widened to a LOCAL, digest-optional artifacts[] shape for this one
+  operation only; the shared ArtifactRef $defs entry every other
+  operation relies on is untouched. internal/artifacts/schemas.go
+  hand-synced byte-for-byte. internal/tasks/dto.go's
+  wireArtifactRef.Digest got `omitempty` (recordEvidence is the one
+  caller that never has a digest; without omitempty an empty string
+  still hit the wire and still failed the pattern match).
+
+  Rewrote tests/integration/cooperative_journey_test.go end to end (both
+  tests, plus the top comment block's findings 2/3, which were stale and
+  under-attributed -- finding 3's real culprit was recordEvidence, not
+  resolveOutputArtifacts as P46 itself believed). attempt.report now
+  genuinely SUCCEEDS for a cooperative worker for the first time in this
+  tree's history, over both the in-process journey and CLI/MCP transport
+  parity; the task reaches "verifying". TestCooperativeClaimAndCheckpoint...
+  AreIdenticalOverCLIAndMCP's second attempt.report call (same attempt,
+  now already "reported") correctly refuses with CodeConflict --
+  verified this against checkWorkerCall's actual state gate
+  (internal/execution/scope.go:111) rather than assumed.
+
+  NEW, NOT YET INVESTIGATED FINDING (deliberately not chased further --
+  would be a third, unauthorized fix): the task now reaches "verifying"
+  but does not reach a terminal succeeded/failed state within a bounded
+  ~15s wait. driveVerification (internal/controller/turns.go) is called
+  unconditionally in turnWork as long as c.admitting(), so this may be
+  specific to a cooperative (non-turn-driven) attempt's verification
+  dispatch path, not a turn-driven one -- not root-caused. Flagging for a
+  future card/investigation, not guessing at a fix here.
+
+  Verification: build/vet/gofmt clean repo-wide; internal/artifacts,
+  internal/tasks, internal/execution, tools/specgen/test_render.py all
+  green (-count=1); full tests/integration suite green (37 tests); all 7
+  CI checks passed clean on the first run (no flakes this time); merged
+  --rebase onto real origin/main (99fa699), confirmed via
+  merge-base --is-ancestor.
+
+  STILL OPEN, NOT YET DECIDED (flagging again, unchanged from prior
+  entries): (1) the restore-protocol data-merge completeness gap
+  (P31/P32/P33's StageCandidate/MergeOverlay failing closed with
+  prerequisite_missing), (2) docs/implementation/contracts.md's stale
+  restore-protocol description (frozen file, needs a founder-batch
+  decision to touch), (3) the worker-level accounting double-reservation
+  (this file's own finding 2, routed around not fixed, task/worker both
+  declare concurrency 2 as a legitimate value not a bypass), (4) the new
+  verification-dispatch-stall finding just above.
+- 2026-09-22 ~11:00-15:30 PT -- P47 (tests/qualification) IMPLEMENTED,
+  not yet landed. Worktree agent-a2fa5a5177b15bd2e, branch
+  worktree-agent-a2fa5a5177b15bd2e, commit 3532568d. Not pushed, no PR --
+  awaiting my independent review before landing, per standard practice.
+
+  Reported real work across 4 of 5 items: (1) Responses adapter --
+  real controlled-TLS-simulator harness replacing a stale unconditional
+  skip, prepare_session/model_step split verified exactly-once-each,
+  outcome_unknown-no-retry on timeout. (2) Flutter desktop -- wired
+  apps/desktop/live_test as a real subprocess with JSON-reporter parsing;
+  found a REAL, PREVIOUSLY UNCAUGHT BUG in the process: 7 of 20 live_test
+  cases fail with "installation status carries unknown field(s):
+  runtime_ready" -- Status.runtime_ready is a real, landed, additive-
+  optional revision-3 field (P25/PR #43) that apps/desktop/lib's Dart
+  Status decoder rejects outright instead of tolerating, violating the
+  frozen contract's own additive-field rule. Confirmed reproducible 4x
+  isolated; the pre-commit hook's one full run showed it green, likely
+  because the flutter subprocess didn't complete cleanly under that run's
+  heavier parallel load and fell back to not_run rather than reaching the
+  assertion -- flagged as a CI-stability caveat, not dismissed. NOT fixed
+  by P47's own agent (apps/desktop is a sibling write root, out of this
+  card's scope) -- this is a new, real, actionable defect for whoever
+  owns apps/desktop next. (3) Packaging -- real zatiti-pack subprocess
+  driver exercising assemble/keygen/sign/verify/install/service/uninstall
+  against a temp-directory host with a recording launchctl/systemctl
+  stand-in; darwin path fully verified including the already-known
+  restore ceiling (P46/P33, prerequisite_missing, unchanged). (4) Named
+  agent clients -- already correct, reviewed, left unchanged. (5) Full
+  116-case mapping -- deliberately partial (23/116 now have an executable
+  identity), reasoned as not worth a decorative stub pass without real
+  fixture work.
+
+  NEXT: independently review this diff myself (read the full changes,
+  confirm the runtime_ready finding is real via direct grep/read, run the
+  qualification suite myself, check for vacuous predicates) before
+  rebasing and landing, exactly as done for every other card. The
+  runtime_ready bug is apps/desktop's, not mine to fix inline -- will
+  surface it to David as a new, separate finding once P47 itself lands.
