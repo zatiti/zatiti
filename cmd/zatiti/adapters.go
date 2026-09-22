@@ -13,6 +13,7 @@ import (
 
 	"github.com/zatiti/zatiti/internal/adapters/github"
 	"github.com/zatiti/zatiti/internal/adapters/httpread"
+	"github.com/zatiti/zatiti/internal/adapters/responses"
 	"github.com/zatiti/zatiti/internal/adapters/serenity"
 	"github.com/zatiti/zatiti/internal/contract"
 )
@@ -21,20 +22,25 @@ import (
 // secret-free JSON profile per adapter at <state-dir>/adapters/<name>.json.
 // An adapter with no profile is not registered and a dispatch naming it is
 // recorded not_sent with capability_unsupported by the controller; it is
-// never guessed at. The responses adapter has no landed implementation on
-// this tree (internal/adapters/responses holds only its brief), so it cannot
-// be constructed and every hosted-model dispatch stays unsent by that rule.
+// never guessed at. A profile is loaded only if it validates in full
+// against its adapter's frozen schema (responses: zatiti.responses/v1,
+// self-binding capability_evidence included); an invalid or partial
+// profile fails startup rather than silently constructing a degraded
+// adapter or falling back to any default provider/model/price (P24 item 1).
 
 // adapterConstructors maps the landed adapter names to their constructors.
 var adapterConstructors = map[string]func(contract.AdapterDependencies, json.RawMessage) (contract.Adapter, error){
-	"github":   github.New,
-	"httpread": httpread.New,
-	"serenity": serenity.New,
+	"github":    github.New,
+	"httpread":  httpread.New,
+	"responses": responses.New,
+	"serenity":  serenity.New,
 }
 
 // unimplementedAdapters names adapters the product wires by design whose
-// package has not landed. serve reports them at startup.
-var unimplementedAdapters = []string{"responses"}
+// package has not landed. serve reports them at startup. Empty on this
+// tree: every adapter the product names (github, httpread, responses,
+// serenity) has a landed constructor above.
+var unimplementedAdapters = []string{}
 
 // maxAdapterProfileBytes bounds one profile file.
 const maxAdapterProfileBytes = 1 << 20

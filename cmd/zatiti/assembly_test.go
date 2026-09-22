@@ -42,7 +42,7 @@ func TestBackupWrapperMethodSetIsExactlyBackup(t *testing.T) {
 func TestModulesFollowTheAssemblyOrder(t *testing.T) {
 	t.Parallel()
 	router := application.NewPorts()
-	mods, auth, err := modules(router, systemClock{}, randomIDs{}, nil, inertBlobs{}, databaseBackup{})
+	mods, auth, jobRunners, err := modules(router, systemClock{}, randomIDs{}, nil, inertBlobs{}, databaseBackup{})
 	if err != nil {
 		t.Fatalf("modules: %v", err)
 	}
@@ -56,6 +56,20 @@ func TestModulesFollowTheAssemblyOrder(t *testing.T) {
 	}
 	if auth == nil || mods[0].Name() != "identity" {
 		t.Fatal("identity is not the first module and the authenticator")
+	}
+	// Every landedJobKinds owner (execution, skills, configuration) must
+	// have been discovered generically as a contract.LocalJobRunner.
+	for _, owner := range []string{"execution", "skills", "configuration"} {
+		if _, ok := jobRunners[owner]; !ok {
+			t.Fatalf("modules() did not discover %s as a contract.LocalJobRunner", owner)
+		}
+	}
+	// artifacts is deliberately NOT a LocalJobRunner on this tree (P24's
+	// verified catalog gap, see jobs.go's catalogJobKinds doc comment); if
+	// this ever starts failing, catalogJobKinds/landedJobKinds must be
+	// updated in the same change that lands internal/artifacts' RunJob.
+	if _, ok := jobRunners["artifacts"]; ok {
+		t.Fatal("internal/artifacts now implements contract.LocalJobRunner; update jobs.go's landedJobKinds/catalogJobKinds to attach its runner instead of leaving artifact.export unattached")
 	}
 	// Ports are unbound before Bind: no module can call a peer during
 	// construction or before the application exists.
