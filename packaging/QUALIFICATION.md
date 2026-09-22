@@ -56,7 +56,14 @@ Qualification must prove the rest:
    every component in it. For the desktop, take the Flutter, Dart, and plugin
    versions from `apps/desktop/pubspec.lock` as recorded in the lock report.
 4. Stage each tree, call `Build`, write `manifest.json`, and sign it with a
-   qualification key generated for the run. Discard the key afterward.
+   qualification key generated for the run. Discard the key afterward. The
+   `zatiti-pack` executable (`go build ./packaging/cmd/zatiti-pack`; see the
+   README's "The packaging/install driver") wraps this exact sequence
+   (`assemble --write`, `keygen`, `sign`) and the install/upgrade/uninstall
+   steps below (`install`, `service`, `uninstall`, `audit`); qualification
+   may run it directly instead of writing an ad hoc program against the
+   library. It still signs with a qualification key discarded after the run,
+   never a real release identity, and performs no publication step.
 
 ## 1. Clean install and launch
 
