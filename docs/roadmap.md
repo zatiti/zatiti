@@ -3366,3 +3366,23 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   precedent. Flagging for whoever next sees this test fail on CI to check
   whether it recurs -- if it does, worth a real investigation the same way
   the fakeDB.Write flake got one.
+- 2026-09-22 ~05:33 PT -- P32 LANDED (PR #52). Real, architecturally
+  significant work: the controller's half of the six-step offline restore
+  protocol (P00-011) -- quiesce admission, drain in-flight work, atomic
+  file-level database swap via storage.Restorable, merge the RecoveryOverlay
+  through a new entrypoint-supplied RestoreLifecycle capability, lift the
+  write gate. Key design finding: a lifetime that performs its own swap
+  cannot continue (its Application is built over the now-closed pre-restore
+  handle, no seam to repoint it) -- ends via a new ErrRestoreHandoff
+  sentinel (not a fault), caller reassembles over the reopened database and
+  runs again, making crash recovery and normal post-swap continuation the
+  same code path. Also removed dead P23-era code in jobs.go that assumed
+  installation.restore reaches the ordinary claim loop, which the real
+  synchronous Prepare/Perform/Finish flow never exercises. Independently
+  reviewed: read the full 557-line implementation and all 3 required tests
+  in full, ran the whole internal/controller suite under -race myself (39
+  tests, zero regressions to pre-existing invariants like crash-boundary
+  resend prevention), confirmed the old-generation-handle-closing property
+  is covered by internal/storage's own pre-existing test, re-verified
+  integration with the real (not fixture-mirrored) job.pending fix after
+  rebase. Wave 14 (P32 + P44) fully landed -- 44/50 cards.
