@@ -214,3 +214,29 @@ remaining mechanical steps (push/PR) itself rather than re-explaining and
 hoping the next round doesn't repeat the pattern. Do not expect a
 stronger prose instruction to fix this on the next dispatch -- verify
 instead of asking nicely again.
+
+## Killing a pre-commit-hook subprocess leaks its R-build-lease
+
+The pre-commit hook wraps its `go test -p 2 -timeout 30m ./...` run with
+its own R-build-lease claim/release. If you `kill` the underlying `go
+test` process directly (e.g. to escape a genuinely wedged run rather than
+wait out its full timeout), the hook script itself gets interrupted mid-
+flight and never reaches its own release step -- the lease stays held by
+your session indefinitely, silently blocking every subsequent claimant
+(including your own later dispatches) until something notices.
+
+Found 2026-09-22: killed a hung integration-test process during a
+golden-count-fix investigation; ~2.5 hours later a freshly dispatched P01
+agent reported stuck "waiting for lease acquisition" with no explanation
+of why. `~/.claude/skills/claim/scripts/claim.sh release R-build-lease`
+immediately unblocked it. Diagnosed by checking `refs/claims/*` directly
+(`git fetch origin "+refs/claims/*:refs/remotes/origin-claims/*"` then
+`git for-each-ref`) rather than guessing -- the claim's own committer
+timestamp made the staleness obvious once looked at.
+
+Mitigation: after killing any hook-invoked subprocess, explicitly check
+for and release any lease that hook manages, in the same turn -- don't
+assume the hook's own cleanup ran just because the shell command
+returned. When an agent reports "waiting for lease/lock acquisition" and
+you don't have an immediate other explanation, check `refs/claims/*`
+directly before assuming it's a normal, temporary wait.
