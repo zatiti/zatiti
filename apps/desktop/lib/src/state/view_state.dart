@@ -196,6 +196,55 @@ class OutgoingMessage {
   };
 }
 
+/// What a conversation's status line shows about the turn in progress, all
+/// derived from real controller state (delivery phase, message timestamps,
+/// an open review, a workspace prerequisite) — never a fabricated local
+/// response. There is no controller-side "turn state" projection this
+/// client can read (the catalog exposes none), so this is assembled from
+/// what public operations actually return:
+///
+/// - A `clarify` or final `reply` decision carries no separate wire state
+///   of its own: both simply become an ordinary incoming message, and this
+///   client renders them exactly like any other message, not as a special
+///   card.
+/// - [reviewWaiting] and [blockedSetup] reuse the same review/prerequisite
+///   records the decision cards and Needs you list already read.
+enum TurnStatus {
+  /// This window's own message is being sent; not yet acknowledged.
+  acknowledging,
+
+  /// Bytes may have reached the controller; nobody knows yet.
+  acknowledgmentUnknown,
+
+  /// Kept locally, not delivered, because of a connection failure.
+  unsent,
+
+  /// The controller refused this window's own message.
+  refused,
+
+  /// Delivered, and nothing newer has arrived from the worker since. A
+  /// plain fact about timestamps, never a claim about what the worker is
+  /// doing internally.
+  waitingForReply,
+
+  /// A decision this worker (or a worker beneath it) proposed is open.
+  reviewWaiting,
+
+  /// A workspace-wide prerequisite (not initialized, paused, maintenance)
+  /// blocks new work everywhere, this conversation included.
+  blockedSetup;
+
+  String get label => switch (this) {
+    TurnStatus.acknowledging => 'Sending…',
+    TurnStatus.acknowledgmentUnknown => 'Checking whether this was received',
+    TurnStatus.unsent => 'Unsent · not delivered',
+    TurnStatus.refused => 'Not sent',
+    TurnStatus.waitingForReply => 'Waiting for a reply',
+    TurnStatus.reviewWaiting => 'A decision is open',
+    TurnStatus.blockedSetup => 'Setup is needed before this can continue',
+  };
+}
+
 enum RoutinePhase { active, submitting, acknowledgmentUnknown, paused }
 
 class RoutineView {

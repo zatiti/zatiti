@@ -11,9 +11,26 @@ abstract interface class CredentialStore {
   Future<void> write(String value);
 
   Future<void> delete();
+
+  /// Reads one named secure-storage entry: TLS PEM material or the drafts
+  /// blob. Never the Authorization value; use [read] for that.
+  Future<String?> readNamed(String key);
+
+  Future<void> writeNamed(String key, String value);
+
+  Future<void> deleteNamed(String key);
+
+  /// The key names this store's entries live under, for a caller (settings
+  /// UI, tests) that needs to name a specific entry such as the TLS client
+  /// certificate without constructing its own profile-keyed strings.
+  CredentialKeys get keys;
 }
 
-/// Names of the secure-storage entries for one profile.
+/// Names of the secure-storage entries for one profile. Offline drafts and
+/// TLS key material are frozen (AGENTS.md, "Local IO, authentication...")
+/// to live in secure storage exactly like the credential itself; only the
+/// selected conversation and the bounded authorized cache live in ordinary
+/// OS-protected local storage (see `local_store.dart`).
 class CredentialKeys {
   const CredentialKeys(this.profile);
   final String profile;
@@ -22,6 +39,9 @@ class CredentialKeys {
   String get clientCertificate => 'zatiti.$profile.tls.certificate';
   String get clientPrivateKey => 'zatiti.$profile.tls.private_key';
   String get trustedRoots => 'zatiti.$profile.tls.trusted_roots';
+
+  /// One JSON object of conversation id to unsent draft text.
+  String get drafts => 'zatiti.$profile.drafts';
 }
 
 /// Keychain on macOS, libsecret on Linux, Credential Manager on Windows.
@@ -41,6 +61,9 @@ class SecureCredentialStore implements CredentialStore {
   final FlutterSecureStorage _storage;
 
   @override
+  CredentialKeys get keys => _keys;
+
+  @override
   Future<String?> read() => _storage.read(key: _keys.authorization);
 
   @override
@@ -50,15 +73,32 @@ class SecureCredentialStore implements CredentialStore {
   @override
   Future<void> delete() => _storage.delete(key: _keys.authorization);
 
-  /// Reads one PEM entry for mutual TLS.
-  Future<String?> readPem(String key) => _storage.read(key: key);
+  @override
+  Future<String?> readNamed(String key) => _storage.read(key: key);
+
+  @override
+  Future<void> writeNamed(String key, String value) =>
+      _storage.write(key: key, value: value);
+
+  @override
+  Future<void> deleteNamed(String key) => _storage.delete(key: key);
+
+  /// Reads one PEM entry for mutual TLS. Kept for callers written against
+  /// the earlier name; identical to [readNamed].
+  Future<String?> readPem(String key) => readNamed(key);
 }
 
 /// Holds a credential for the life of the process only. Used by tests and by
 /// the demo, which has no credential at all.
 class MemoryCredentialStore implements CredentialStore {
-  MemoryCredentialStore([this._value]);
+  MemoryCredentialStore([this._value, CredentialKeys? keys])
+    : _keys = keys ?? const CredentialKeys('test');
   String? _value;
+  final Map<String, String> _named = {};
+  final CredentialKeys _keys;
+
+  @override
+  CredentialKeys get keys => _keys;
 
   @override
   Future<String?> read() async => _value;
@@ -68,4 +108,14 @@ class MemoryCredentialStore implements CredentialStore {
 
   @override
   Future<void> delete() async => _value = null;
+
+  @override
+  Future<String?> readNamed(String key) async => _named[key];
+
+  @override
+  Future<void> writeNamed(String key, String value) async =>
+      _named[key] = value;
+
+  @override
+  Future<void> deleteNamed(String key) async => _named.remove(key);
 }

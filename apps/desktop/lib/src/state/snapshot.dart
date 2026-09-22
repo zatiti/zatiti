@@ -72,6 +72,9 @@ class ConversationEntry {
     required this.messages,
     this.workerId,
     this.historyNotice,
+    this.unreadCount = 0,
+    this.lastReadMarker,
+    this.lastMeaningfulEvent,
   });
 
   final ConversationId id;
@@ -82,10 +85,46 @@ class ConversationEntry {
   /// outside the organization tree.
   final WorkerId? workerId;
 
+  /// The full authorized history known so far. For the live source this is
+  /// populated lazily (by `conversation.message.list`), not eagerly for
+  /// every conversation, so an entry the person has not opened yet may carry
+  /// none.
   final List<ChatMessage> messages;
 
   /// Set when the source cannot supply the full history, with the reason.
   final String? historyNotice;
+
+  /// The controller's own unread count for the calling principal. Never
+  /// computed locally from message timestamps: quiet internal coordination
+  /// must not manufacture an unread badge the controller itself would not
+  /// report.
+  final int unreadCount;
+
+  /// The controller's own read-marker timestamp for the calling principal,
+  /// when it has one.
+  final DateTime? lastReadMarker;
+
+  /// The controller's own ordering signal, excluding routine/quiet activity.
+  /// Never used to reorder the sidebar on its own: R16-008 keeps
+  /// organization order stable regardless of activity.
+  final DateTime? lastMeaningfulEvent;
+
+  /// A copy with [messages] and/or [historyNotice] replaced. Used to overlay
+  /// a fetched message cache onto an otherwise-unchanged snapshot entry.
+  ConversationEntry withMessages(
+    List<ChatMessage> messages, {
+    String? historyNotice,
+  }) => ConversationEntry(
+    id: id,
+    title: title,
+    kind: kind,
+    workerId: workerId,
+    messages: messages,
+    historyNotice: historyNotice,
+    unreadCount: unreadCount,
+    lastReadMarker: lastReadMarker,
+    lastMeaningfulEvent: lastMeaningfulEvent,
+  );
 }
 
 /// The controller's view of a review.

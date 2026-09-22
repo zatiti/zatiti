@@ -2,8 +2,11 @@
 // displayed fact comes from a source snapshot, and an approval, a pause or a
 // sent message shows as done only after the source acknowledges it.
 
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 
+import '../app/local_store.dart';
 import 'snapshot.dart';
 import 'view_state.dart';
 import 'workspace_source.dart';
@@ -22,11 +25,68 @@ class _RoutineOverlay {
 }
 
 class WorkspaceController extends ChangeNotifier {
-  WorkspaceController(this.source, {DateTime Function()? clock})
-    : _clock = clock ?? (() => DateTime.now().toUtc());
+  /// [localStore]/[installationId] persist the selected conversation and a
+  /// bounded authorized-identity cache to ordinary OS-protected local
+  /// storage (never secure storage — see `local_store.dart`'s header).
+  /// [initialLocal] is that state, already read once by the caller before
+  /// this controller exists (so construction stays synchronous); pass
+  /// [LocalState.empty] when there is nothing to restore, or none of
+  /// [localStore]/[installationId] were supplied.
+  ///
+  /// [initialDrafts]/[persistDrafts] are the frozen contract's own seam for
+  /// unsent drafts (AGENTS.md: "offline drafts... live in operating-system
+  /// secure storage", the same as the credential): this controller owns the
+  /// in-memory draft map either way, but never reads or writes secure
+  /// storage itself, so the caller supplies the already-read blob and a
+  /// write-back callback rather than a concrete `CredentialStore`.
+  WorkspaceController(
+    this.source, {
+    DateTime Function()? clock,
+    LocalStore? localStore,
+    String? installationId,
+    LocalState initialLocal = LocalState.empty,
+    Map<String, String> initialDrafts = const {},
+    Future<void> Function(Map<String, String> drafts)? persistDrafts,
+  }) : _clock = clock ?? (() => DateTime.now().toUtc()),
+       _localStore = localStore,
+       _installationId = installationId,
+       _local = initialLocal,
+       _restoreWorkerId = initialLocal.selectedWorkerId,
+       _restoreGroupId = initialLocal.selectedGroupId,
+       _persistDrafts = persistDrafts,
+       _drafts = {
+         for (final entry in initialDrafts.entries)
+           ConversationId(entry.key): entry.value,
+       };
 
   final WorkspaceSource source;
   final DateTime Function() _clock;
+  final LocalStore? _localStore;
+  final String? _installationId;
+  LocalState _local;
+  final Future<void> Function(Map<String, String> drafts)? _persistDrafts;
+
+  /// A selection to restore on the very first snapshot, consumed once.
+  /// Null immediately once that first snapshot has been adopted, whether or
+  /// not the id it named turned out to still exist.
+  String? _restoreWorkerId;
+  String? _restoreGroupId;
+
+  /// The full authorized history for a conversation the person has opened,
+  /// fetched lazily via `WorkspaceSource.loadMessages`. Never persisted:
+  /// re-fetched fresh from the controller every time it is needed, so it
+  /// cannot itself become the "leaked cached history" account/scope switch
+  /// must avoid.
+  final Map<ConversationId, List<ChatMessage>> _messageCache = {};
+  final Map<ConversationId, String> _messageNotice = {};
+  final Set<ConversationId> _loadingMessages = {};
+
+  /// The moment this window's own last message to a conversation was
+  /// acknowledged, kept only until a newer message (from either side)
+  /// arrives. Drives the "waiting for a reply" status line — literally true
+  /// from delivery and arrival timestamps, never a claim about what a
+  /// worker is doing internally.
+  final Map<ConversationId, DateTime> _awaitingReplySince = {};
 
   // ---- connection -------------------------------------------------------
 
@@ -53,7 +113,11 @@ class WorkspaceController extends ChangeNotifier {
   WorkerId? filterRoot;
   bool detailsOpen = false;
   DetailsTab detailsTab = DetailsTab.work;
-  final Map<ConversationId, String> _drafts = <ConversationId, String>{};
+
+  /// Unsent per-conversation draft text. Seeded from [initialDrafts] and
+  /// written back through [_persistDrafts] on every change; never persisted
+  /// by this controller directly (see the constructor doc).
+  final Map<ConversationId, String> _drafts;
 
   final List<OutgoingMessage> _outgoing = <OutgoingMessage>[];
   final Map<String, PendingSubmission> _outgoingSubmissions =
@@ -108,6 +172,9 @@ class WorkspaceController extends ChangeNotifier {
       _adopt(next);
       connection = ConnectionPhase.online;
       connectionMessage = null;
+      await _persistLocal();
+      final id = _rawSelectedConversation()?.id;
+      if (id != null) await _ensureMessages(id, refresh: true);
     } on SourceUnavailable catch (e) {
       _goOffline(e.message);
       return;
@@ -140,6 +207,21 @@ class WorkspaceController extends ChangeNotifier {
         if (w.parentId != null && next.childrenOf(w.id).isNotEmpty) {
           _collapsed.add(w.id);
         }
+      }
+      // A returning launch restores the conversation last open, not always
+      // the root chief (R16-003). Consumed once, whether or not the
+      // restored id still names something real.
+      final restoreGroup = _restoreGroupId;
+      final restoreWorker = _restoreWorkerId;
+      _restoreGroupId = null;
+      _restoreWorkerId = null;
+      if (restoreGroup != null &&
+          next.conversation(ConversationId(restoreGroup))?.kind ==
+              ConversationKind.group) {
+        selectedGroup = ConversationId(restoreGroup);
+      } else if (restoreWorker != null &&
+          next.worker(WorkerId(restoreWorker)) != null) {
+        selectedWorker = WorkerId(restoreWorker);
       }
     }
     if (selectedGroup == null &&
@@ -189,6 +271,9 @@ class WorkspaceController extends ChangeNotifier {
     selectedGroup = null;
     snapshot.ancestorsOf(id).forEach(_collapsed.remove);
     _changed();
+    unawaited(_persistLocal());
+    final conversationId = _rawSelectedConversation()?.id;
+    if (conversationId != null) unawaited(_ensureMessages(conversationId));
   }
 
   void selectGroup(ConversationId id) {
@@ -196,6 +281,8 @@ class WorkspaceController extends ChangeNotifier {
     selectedGroup = id;
     selectedWorker = null;
     _changed();
+    unawaited(_persistLocal());
+    unawaited(_ensureMessages(id));
   }
 
   /// Limits the tree to one organization chief's branch; null shows all.
@@ -494,6 +581,9 @@ class WorkspaceController extends ChangeNotifier {
     try {
       _adopt(await source.loadSnapshot());
       _changed();
+      await _persistLocal();
+      final id = _rawSelectedConversation()?.id;
+      if (id != null) await _ensureMessages(id, refresh: true);
     } on SourceUnavailable catch (e) {
       _goOffline(e.message);
     } on AcknowledgmentUnknown {
@@ -505,7 +595,10 @@ class WorkspaceController extends ChangeNotifier {
 
   // ---- conversation and composer --------------------------------------------
 
-  ConversationEntry? get selectedConversation {
+  /// The selected conversation's identity and shape from the current
+  /// snapshot, before any fetched-message overlay. Used to decide what to
+  /// load and persist without recursing into [selectedConversation] itself.
+  ConversationEntry? _rawSelectedConversation() {
     final group = selectedGroup;
     if (group != null) return snapshot.conversation(group);
     final worker = selectedWorker == null
@@ -515,14 +608,158 @@ class WorkspaceController extends ChangeNotifier {
     return id == null ? null : snapshot.conversation(id);
   }
 
+  /// The selected conversation as the person sees it: the snapshot entry
+  /// with its fetched message history (or load notice) overlaid. The
+  /// snapshot itself never carries every conversation's full history (see
+  /// `live_source.dart`'s `_conversation`); this is where it is joined back
+  /// in, only for the one conversation actually open.
+  ConversationEntry? get selectedConversation {
+    final base = _rawSelectedConversation();
+    if (base == null) return null;
+    final cached = _messageCache[base.id];
+    final notice = _messageNotice[base.id];
+    if (cached == null && notice == null) return base;
+    return base.withMessages(cached ?? base.messages, historyNotice: notice);
+  }
+
+  /// True while this window is waiting to hear back after its own last
+  /// message to [id] was delivered, with nothing newer from either side
+  /// since. A plain fact about timestamps, never a claim about what a
+  /// worker is doing.
+  bool isAwaitingReply(ConversationId id) =>
+      _awaitingReplySince.containsKey(id);
+
+  /// Fetches [id]'s full authorized history. Skips the fetch when already
+  /// cached and [refresh] is false. Failures are recorded as a per-
+  /// conversation notice rather than surfaced as a workspace-wide error:
+  /// this must cost the open conversation, not everything else on screen.
+  Future<void> _ensureMessages(
+    ConversationId id, {
+    bool refresh = false,
+  }) async {
+    if (!refresh &&
+        (_messageCache.containsKey(id) || _loadingMessages.contains(id))) {
+      return;
+    }
+    if (_loadingMessages.contains(id)) return;
+    _loadingMessages.add(id);
+    try {
+      final messages = await source.loadMessages(id);
+      final previousLatest = _messageCache[id]?.lastOrNull?.at;
+      _messageCache[id] = messages;
+      _messageNotice.remove(id);
+      final latest = messages.lastOrNull;
+      if (latest != null &&
+          (previousLatest == null || latest.at.isAfter(previousLatest))) {
+        // Something newer arrived. A reply from the worker settles "waiting
+        // for a reply"; a message this window itself just sent starts it.
+        if (latest.fromUser) {
+          _awaitingReplySince[id] = latest.at;
+        } else {
+          _awaitingReplySince.remove(id);
+        }
+      }
+    } on SourceUnavailable catch (e) {
+      _messageNotice[id] = e.message;
+    } on SourceRefusal catch (e) {
+      _messageNotice[id] = e.message;
+    } on AcknowledgmentUnknown {
+      // A lost answer to a query changes nothing; the next attempt asks
+      // again. The existing cache (if any) stands.
+    } finally {
+      _loadingMessages.remove(id);
+      _changed();
+    }
+  }
+
+  /// Writes the current selection and a bounded, non-secret cache of known
+  /// identities to ordinary local storage (never message content — see
+  /// `local_store.dart`). Read-modify-write against the same file
+  /// `LiveWorkspaceSource` persists its event cursor to.
+  Future<void> _persistLocal() async {
+    final store = _localStore;
+    final installationId = _installationId;
+    if (store == null || installationId == null) return;
+    try {
+      final current = await store.read(installationId);
+      // Organization names are not their own snapshot list; the tree
+      // already carries one (name, id) per organization on every worker
+      // that belongs to it, so the last segment of each worker's own path
+      // is that organization's real name, not a guess.
+      final organizations = <String, String>{};
+      for (final w in snapshot.workers) {
+        final name = w.organizationPath.lastOrNull;
+        if (name != null) organizations[w.organizationId.value] = name;
+      }
+      _local = current.copyWith(
+        installationId: installationId,
+        selectedWorkerId: selectedGroup != null ? null : selectedWorker?.value,
+        selectedGroupId: selectedGroup?.value,
+        workers: [
+          for (final w in snapshot.workers)
+            CachedIdentity(id: w.id.value, name: w.name),
+        ],
+        organizations: [
+          for (final e in organizations.entries)
+            CachedIdentity(id: e.key, name: e.value),
+        ],
+        principals: [
+          for (final p in snapshot.principals)
+            CachedIdentity(id: p.id, name: p.name),
+        ],
+      );
+      await store.write(_local);
+    } on Object {
+      // Best-effort: local UI persistence never becomes a workspace error.
+    }
+  }
+
+  /// Clears every locally held trace of the current account: the fetched-
+  /// message cache, the persisted selection, the bounded identity cache and
+  /// any unsent drafts. Called before any explicit credential change, since
+  /// this client has no `identity.current` operation to confirm whether
+  /// that change is still the same principal — the safe assumption is that
+  /// it might not be, and showing another account's cached workspace even
+  /// briefly is worse than an extra reload.
+  Future<void> resetForCredentialChange() async {
+    _messageCache.clear();
+    _messageNotice.clear();
+    _loadingMessages.clear();
+    _awaitingReplySince.clear();
+    _drafts.clear();
+    selectedWorker = null;
+    selectedGroup = null;
+    snapshot = WorkspaceSnapshot.empty;
+    _local = LocalState.empty;
+    await _localStore?.clear();
+    await _persistDraftsNow();
+    _changed();
+  }
+
   String draftFor(ConversationId id) => _drafts[id] ?? '';
 
   /// Keeps a per-conversation draft. Drafts are local text, never sent.
+  /// Written back to secure storage (see the constructor doc) so an unsent
+  /// draft survives close/reopen exactly like a delivered message does.
   void setDraft(ConversationId id, String text) {
     if (text.isEmpty) {
       _drafts.remove(id);
     } else {
       _drafts[id] = text;
+    }
+    unawaited(_persistDraftsNow());
+  }
+
+  /// Best-effort write-back of every current draft. A failure here costs
+  /// only "the draft might not survive a restart", never the in-memory
+  /// state this session already shows.
+  Future<void> _persistDraftsNow() async {
+    final persist = _persistDrafts;
+    if (persist == null) return;
+    try {
+      await persist({for (final e in _drafts.entries) e.key.value: e.value});
+    } on Object {
+      // Best-effort, as documented above.
     }
   }
 
@@ -531,12 +768,39 @@ class WorkspaceController extends ChangeNotifier {
       if (m.conversationId == id) m,
   ];
 
+  /// The status line for [conversation]'s turn in progress, or null when
+  /// there is nothing to say. Checked in the order a person would actually
+  /// notice them: this window's own unsettled message first (acknowledged
+  /// takes priority over stale "waiting" from an earlier message), then
+  /// whatever would stop a reply from ever arriving (an open decision or a
+  /// workspace-wide prerequisite), then simply "delivered, nothing back
+  /// yet". [worker] is null for a group conversation, which has no single
+  /// proposer to check reviews against.
+  TurnStatus? turnStatusFor(ConversationId conversation, {WorkerId? worker}) {
+    final outgoing = outgoingFor(conversation);
+    if (outgoing.isNotEmpty) {
+      return switch (outgoing.first.phase) {
+        OutgoingPhase.sending => TurnStatus.acknowledging,
+        OutgoingPhase.acknowledgmentUnknown => TurnStatus.acknowledgmentUnknown,
+        OutgoingPhase.unsentDraft => TurnStatus.unsent,
+        OutgoingPhase.refused => TurnStatus.refused,
+      };
+    }
+    if (worker != null && decisionsFor(worker).any((d) => d.phase.needsYou)) {
+      return TurnStatus.reviewWaiting;
+    }
+    if (prerequisitesFor(null).isNotEmpty) return TurnStatus.blockedSetup;
+    if (isAwaitingReply(conversation)) return TurnStatus.waitingForReply;
+    return null;
+  }
+
   /// Sends the conversation's draft. Offline, the message is kept and shown
   /// as unsent; it is never queued for automatic delivery.
   Future<void> sendDraft(ConversationId id) async {
     final body = draftFor(id).trim();
     if (body.isEmpty) return;
     _drafts.remove(id);
+    unawaited(_persistDraftsNow());
     final message = OutgoingMessage(
       localId: 'local-${++_localIds}',
       conversationId: id,

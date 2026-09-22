@@ -82,6 +82,22 @@ class ControllerApi {
     return out;
   }
 
+  /// Reads a conversation's authorized message history, oldest first. Only
+  /// participant-disclosed history is returned; a newly joined participant
+  /// sees no retroactive restricted history (the controller enforces this,
+  /// not this client).
+  Future<List<Message>> listMessages(
+    String conversationId, {
+    String? startCursor,
+    void Function(String cursor)? onCursor,
+  }) => listAll(
+    Operations.conversationMessageList,
+    Message.fromJson,
+    extra: {'conversation_id': conversationId},
+    startCursor: startCursor,
+    onCursor: onCursor,
+  );
+
   Future<Review> reviewGet(String id) async {
     final r = await client.query(Operations.reviewGet, {
       'scope': client.scope(),

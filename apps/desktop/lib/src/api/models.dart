@@ -277,6 +277,8 @@ class Conversation {
     required this.title,
     required this.pinned,
     this.lastMeaningfulEvent,
+    this.callerUnreadCount,
+    this.callerLastReadMarker,
   });
 
   factory Conversation.fromJson(Object? json) {
@@ -297,6 +299,10 @@ class Conversation {
       title: o.string('title'),
       pinned: o.boolean('pinned'),
       lastMeaningfulEvent: o.optionalDateTime('last_meaningful_event'),
+      // Revision 3 additions. Optional on the wire: an older controller may
+      // omit them, and this client must still parse its response.
+      callerUnreadCount: o.optionalInteger('caller_unread_count'),
+      callerLastReadMarker: o.optionalDateTime('caller_last_read_marker'),
     );
     o.finish();
     return c;
@@ -310,6 +316,11 @@ class Conversation {
   final String title;
   final bool pinned;
   final DateTime? lastMeaningfulEvent;
+
+  /// The calling principal's own unread count, when the controller reports
+  /// one. Absent (not zero) on a controller that does not yet compute it.
+  final int? callerUnreadCount;
+  final DateTime? callerLastReadMarker;
 }
 
 enum MessageState { submitted, admitted, acknowledged }

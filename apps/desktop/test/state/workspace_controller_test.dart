@@ -232,6 +232,27 @@ void main() {
       },
     );
 
+    test('a sent message with an unknown acknowledgment is resolved, never '
+        'resent, and creates no duplicate turn', () async {
+      final chat = DemoWorkspaceSource.conversationOf(_wren);
+      source.nextFault = DemoFault.unknownThenFound;
+      c.setDraft(chat, 'Reconcile this week’s expenses.');
+      await c.sendDraft(chat);
+
+      // The controller resolved the unknown acknowledgment on its own
+      // (checkMessage runs automatically from _submitMessage's catch), so
+      // the message is delivered, not stuck as unsent or duplicated.
+      expect(c.outgoingFor(chat), isEmpty);
+      expect(source.committed, ['message to ${chat.value}']);
+      expect(
+        c.selectedConversation!.messages.where(
+          (m) => m.body == 'Reconcile this week’s expenses.',
+        ),
+        hasLength(1),
+        reason: 'exactly one turn, not a duplicate from the retry path',
+      );
+    });
+
     test('while the lookup cannot answer, decisions stay locked', () async {
       final unknown = _AlwaysUnknownSource(source);
       final locked = WorkspaceController(unknown, clock: () => now);
@@ -507,6 +528,9 @@ class _Delegating implements WorkspaceSource {
   Future<bool> hasChanges() => inner.hasChanges();
   @override
   Future<ReviewEntry> refreshReview(ReviewId id) => inner.refreshReview(id);
+  @override
+  Future<List<ChatMessage>> loadMessages(ConversationId conversation) =>
+      inner.loadMessages(conversation);
   @override
   PendingSubmission prepareDecision(ReviewEntry r, DecisionChoice c) =>
       inner.prepareDecision(r, c);

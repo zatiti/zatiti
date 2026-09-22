@@ -97,6 +97,27 @@ class DemoWorkspaceSource implements WorkspaceSource {
   }
 
   @override
+  Future<List<ChatMessage>> loadMessages(ConversationId conversation) async {
+    _requireOnline();
+    // The demo builds every conversation's full message list fresh inside
+    // loadSnapshot (fixed sample text plus anything since sent) and caches
+    // it here so this read does not re-run loadSnapshot's own side effects
+    // (it clears the dirty flag other callers rely on).
+    return _lastMessages[conversation] ?? const [];
+  }
+
+  final Map<ConversationId, List<ChatMessage>> _lastMessages = {};
+
+  /// Records each conversation's messages for [loadMessages] to return,
+  /// without re-running loadSnapshot's own side effects.
+  List<ConversationEntry> _cacheMessages(List<ConversationEntry> entries) {
+    for (final c in entries) {
+      _lastMessages[c.id] = c.messages;
+    }
+    return entries;
+  }
+
+  @override
   PendingSubmission prepareDecision(ReviewEntry review, DecisionChoice choice) {
     final version = review.version;
     return _DemoSubmission('decide ${review.id.value} ${choice.name}', () {
@@ -383,7 +404,7 @@ class DemoWorkspaceSource implements WorkspaceSource {
           preview: 'Reconciling this week’s expenses.',
         ),
       ],
-      conversations: [
+      conversations: _cacheMessages([
         direct(
           wren,
           'Wren',
@@ -461,7 +482,7 @@ class DemoWorkspaceSource implements WorkspaceSource {
             ...?_sent[planningGroup],
           ],
         ),
-      ],
+      ]),
       reviews: [_review()],
       proposals: const [
         ProposalEntry(

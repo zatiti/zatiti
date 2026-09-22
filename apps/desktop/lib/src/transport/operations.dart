@@ -48,6 +48,9 @@ abstract final class Operations {
   static const conversationList = OperationDescriptor.query(
     'conversation.list',
   );
+  static const conversationMessageList = OperationDescriptor.query(
+    'conversation.message.list',
+  );
   static const conversationMessageSend = OperationDescriptor.mutation(
     'conversation.message.send',
   );
@@ -73,7 +76,6 @@ abstract final class Operations {
   static const operationList = OperationDescriptor.query('operation.list');
   static const toolGet = OperationDescriptor.query('tool.get');
   static const usageGet = OperationDescriptor.query('usage.get');
-  static const mailboxList = OperationDescriptor.query('mailbox.list');
 
   /// Every operation the client may call.
   static const List<OperationDescriptor> all = [
@@ -85,6 +87,7 @@ abstract final class Operations {
     organizationList,
     workerList,
     conversationList,
+    conversationMessageList,
     conversationMessageSend,
     reviewList,
     reviewGet,
@@ -98,6 +101,5 @@ abstract final class Operations {
     operationList,
     toolGet,
     usageGet,
-    mailboxList,
   ];
 }
