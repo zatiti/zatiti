@@ -27044,7 +27044,10 @@
       "mcp": "zatiti_task_start",
       "submission_key": true,
       "expected_version": true,
-      "callers": []
+      "callers": [],
+      "scope_required": [
+        "installation_id"
+      ]
     },
     {
       "id": "_tasks.evidence.record",
@@ -27356,7 +27359,10 @@
       "mcp": "zatiti_conversation_message_list",
       "submission_key": false,
       "expected_version": false,
-      "callers": []
+      "callers": [],
+      "scope_required": [
+        "installation_id"
+      ]
     },
     {
       "id": "_effects.reconciliation.prepare",
@@ -27706,7 +27712,10 @@
       "mcp": "zatiti_memory_list",
       "submission_key": false,
       "expected_version": false,
-      "callers": []
+      "callers": [],
+      "scope_required": [
+        "installation_id"
+      ]
     },
     {
       "id": "installation.verifier.list",
@@ -27761,7 +27770,10 @@
       "mcp": "zatiti_installation_verifier_list",
       "submission_key": false,
       "expected_version": false,
-      "callers": []
+      "callers": [],
+      "scope_required": [
+        "installation_id"
+      ]
     }
   ]
 }
