@@ -52,6 +52,15 @@ type wireArtifactRef struct {
 
 // wireStatus is the Status resource shape returned by init, doctor and
 // status, and by maintenance.enter/pause/resume.
+//
+// RuntimeReady is the revision-3 addition: whether the installation's own
+// lifecycle state currently permits ordinary admission at all (initialized,
+// not paused, not in maintenance). It answers only what this package can
+// prove from installation_state -- not whether a paid model step or a
+// durable task can run, which depends on process-assembly facts (adapter
+// profiles, job runners, the trusted verifier) that only cmd/zatiti's own
+// startup readiness classification observes (see cmd/zatiti/readiness.go);
+// this package never fabricates that broader signal.
 type wireStatus struct {
 	InstallationID contract.ID       `json:"installation_id"`
 	Generation     int64             `json:"generation"`
@@ -60,6 +69,7 @@ type wireStatus struct {
 	Initialized    bool              `json:"initialized"`
 	Requirements   []wireRequirement `json:"requirements"`
 	Version        contract.Version  `json:"version"`
+	RuntimeReady   *bool             `json:"runtime_ready,omitempty"`
 }
 
 // wireJob is the Job resource shape.
@@ -130,4 +140,29 @@ type restoreRecordInput struct {
 	JobID        contract.ID       `json:"job_id"`
 	State        string            `json:"state"`
 	Requirements []wireRequirement `json:"requirements"`
+}
+
+// wireVerifierDescriptor is the VerifierDescriptor resource shape:
+// installation.verifier.list's secret-free catalog entry naming one
+// installed, trusted verifier identity a task's acceptance contract can
+// name. It carries no code_digest, capability_evidence or executable path --
+// just enough to reference the identity by verifier_id/verifier_version.
+type wireVerifierDescriptor struct {
+	ID             string           `json:"id"`
+	Version        contract.Version `json:"version"`
+	Kind           string           `json:"kind"`
+	Classification string           `json:"classification"`
+}
+
+// verifierListInput is the installation.verifier.list input.
+type verifierListInput struct {
+	Scope  wireScope `json:"scope"`
+	Cursor *string   `json:"cursor,omitempty"`
+	Limit  *int64    `json:"limit,omitempty"`
+}
+
+// verifierListOutput is the installation.verifier.list output: a literal
+// "items" array, not a "resource" wrapper.
+type verifierListOutput struct {
+	Items []wireVerifierDescriptor `json:"items"`
 }

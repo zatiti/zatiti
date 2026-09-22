@@ -143,3 +143,58 @@ func TestDescriptorsMatchFrozenCatalog(t *testing.T) {
 		}
 	}
 }
+
+// TestEmbeddedDefsMatchFrozenCatalogDefs guards the exact class of bug this
+// card fixed once already (Status's embedded $def missing revision-3's
+// runtime_ready field): schemaBody strips "$defs" before comparing input/
+// output schemas, so TestDescriptorsMatchFrozenCatalog above never actually
+// checks that this package's embedded wireDefs document agrees with the
+// frozen catalog's own $defs. This test reads both and requires every
+// definition this package embeds to be identical, field for field, to the
+// frozen catalog's copy -- a stale or incomplete embedded $def drifts
+// silently otherwise, passing schema validation locally while disagreeing
+// with every other owner about what the same named type means.
+func TestEmbeddedDefsMatchFrozenCatalogDefs(t *testing.T) {
+	raw, err := os.ReadFile("../../docs/implementation/operations.json")
+	if err != nil {
+		t.Fatalf("read the frozen operation catalog: %v", err)
+	}
+	var doc struct {
+		Defs map[string]json.RawMessage `json:"$defs"`
+	}
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatalf("decode the frozen operation catalog: %v", err)
+	}
+	if len(doc.Defs) == 0 {
+		t.Fatalf("the frozen catalog carries no top-level $defs")
+	}
+
+	var embedded struct {
+		Defs map[string]json.RawMessage `json:"$defs"`
+	}
+	if err := json.Unmarshal([]byte(wireDefs), &embedded); err != nil {
+		t.Fatalf("decode this package's embedded wireDefs: %v", err)
+	}
+	if len(embedded.Defs) == 0 {
+		t.Fatalf("this package's embedded wireDefs carries no definitions")
+	}
+
+	for name, embeddedRaw := range embedded.Defs {
+		frozenRaw, ok := doc.Defs[name]
+		if !ok {
+			t.Errorf("%s: embedded in wireDefs but absent from the frozen catalog's $defs", name)
+			continue
+		}
+		var embeddedVal, frozenVal any
+		if err := json.Unmarshal(embeddedRaw, &embeddedVal); err != nil {
+			t.Fatalf("%s: decode embedded def: %v", name, err)
+		}
+		if err := json.Unmarshal(frozenRaw, &frozenVal); err != nil {
+			t.Fatalf("%s: decode frozen def: %v", name, err)
+		}
+		if !reflect.DeepEqual(embeddedVal, frozenVal) {
+			t.Errorf("%s: embedded $def differs from the frozen catalog's copy\nembedded: %s\nfrozen:   %s",
+				name, embeddedRaw, frozenRaw)
+		}
+	}
+}

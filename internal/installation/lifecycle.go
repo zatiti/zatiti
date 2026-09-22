@@ -2,20 +2,62 @@ package installation
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/zatiti/zatiti/internal/contract"
 )
 
+// Requirement codes this package names in doctor/status beyond the
+// pre-existing effects_unavailable/accounting_unavailable/
+// prerequisite_missing set. Each is a distinct, inspectable category (P25
+// item 4) rather than one generic "something is pending" signal:
+//   - workerTurnStalledCode: a durable worker turn's Operation is still
+//     outstanding (CallbackRoute.Kind "worker_turn") -- the turn cannot
+//     progress until this effect resolves.
+//   - jobUnclaimedCode: an Operation routes back to a job
+//     (CallbackRoute.Kind "job") that is waiting on it -- the job cannot be
+//     claimed complete until this effect resolves.
+//   - effectPendingCode: every other outstanding Operation (memory/skill/
+//     connection routing, or no callback route at all) -- unchanged from
+//     the prior single-bucket behavior.
+//   - memoryUnavailableCode: _memory.manifest could not be reached.
+//   - liabilityUnknownCode: accounting carries an unconfirmed
+//     (Usage.Unknown) amount -- a charge that may or may not have
+//     happened and cannot yet be released or billed.
+const (
+	workerTurnStalledCode = "worker_turn_stalled"
+	jobUnclaimedCode      = "job_unclaimed"
+	effectPendingCode     = "effect_pending"
+	memoryUnavailableCode = "memory_unavailable"
+	liabilityUnknownCode  = "liability_unknown"
+)
+
 // requirementsFromPending turns _effects.pending's operations into visible
 // Status/Job requirements naming what remains unresolved, without leaking
-// their action payloads.
+// their action payloads. An operation whose callback_route identifies it as
+// a worker turn or a job gets its own named category so an operator (or a
+// worker reading its own doctor output) can tell "a turn is stalled" apart
+// from "a job is unclaimed" apart from every other outstanding effect,
+// instead of one undifferentiated bucket.
 func requirementsFromPending(ops []peerOperation) []wireRequirement {
 	out := make([]wireRequirement, 0, len(ops))
 	for _, op := range ops {
 		id := op.ID
+		code := effectPendingCode
+		noun := "operation"
+		if op.CallbackRoute != nil {
+			switch op.CallbackRoute.Kind {
+			case "worker_turn":
+				code = workerTurnStalledCode
+				noun = "worker turn"
+			case "job":
+				code = jobUnclaimedCode
+				noun = "job"
+			}
+		}
 		out = append(out, wireRequirement{
-			Code:       "effect_pending",
-			Message:    "operation " + string(op.ID) + " is " + op.State,
+			Code:       code,
+			Message:    noun + " " + string(op.ID) + " is " + op.State,
 			ResourceID: &id,
 		})
 	}
@@ -36,20 +78,40 @@ func (s *Service) gatherRequirements(ctx context.Context, unit contract.Unit, sc
 	}
 	if acc, err := s.accountingInspect(ctx, unit, scope); err != nil {
 		reqs = append(reqs, wireRequirement{Code: "accounting_unavailable", Message: err.Error()})
-	} else if acc.Limits.Currency == "" || acc.Limits.SpendMicroUnits == 0 {
-		reqs = append(reqs, wireRequirement{
-			Code:    "prerequisite_missing",
-			Message: "currency and spend limits are not configured; paid execution remains unavailable",
-		})
-		// Until a budget is configured, the only admissible task is a
-		// zero-spend one, and it needs the verifier's capability evidence
-		// published first. The sequence is printed in full: an operator
-		// copies it rather than discovering it refusal by refusal.
-		reqs = append(reqs, wireRequirement{
-			Code: firstTaskRequirementCode,
-			Message: "a first task is possible now as a zero-spend draft; run, in order:\n" +
-				FirstTaskSequence,
-		})
+	} else {
+		if acc.Limits.Currency == "" || acc.Limits.SpendMicroUnits == 0 {
+			reqs = append(reqs, wireRequirement{
+				Code:    "prerequisite_missing",
+				Message: "currency and spend limits are not configured; paid execution remains unavailable",
+			})
+			// Until a budget is configured, the only admissible task is a
+			// zero-spend one, and it names the installed verifier to
+			// reference rather than one the operator must invent. The
+			// sequence is printed in full: an operator copies it rather
+			// than discovering it refusal by refusal.
+			reqs = append(reqs, wireRequirement{
+				Code: firstTaskRequirementCode,
+				Message: "a first task is possible now as a zero-spend draft; run, in order:\n" +
+					FirstTaskSequence,
+			})
+		}
+		// An unconfirmed amount is an outstanding liability: it may or may
+		// not have been charged by the provider, so it cannot be released
+		// as unused or billed as spent until authoritative evidence
+		// arrives (contract: "Preserve outcome_unknown and its reservation
+		// until authoritative evidence").
+		if acc.Usage.Unknown > 0 {
+			reqs = append(reqs, wireRequirement{
+				Code: liabilityUnknownCode,
+				Message: fmt.Sprintf("%d %s of usage is unconfirmed and held as an outstanding liability pending authoritative evidence",
+					acc.Usage.Unknown, acc.Usage.Currency),
+			})
+		}
+	}
+	if manifest, err := s.memoryManifest(ctx, unit, scope); err != nil {
+		reqs = append(reqs, wireRequirement{Code: memoryUnavailableCode, Message: err.Error()})
+	} else {
+		reqs = append(reqs, manifest.Obligations...)
 	}
 	if s.backup == nil {
 		reqs = append(reqs, wireRequirement{
@@ -61,6 +123,20 @@ func (s *Service) gatherRequirements(ctx context.Context, unit contract.Unit, sc
 		reqs = []wireRequirement{}
 	}
 	return reqs
+}
+
+// runtimeReady reports whether this installation's own lifecycle state
+// currently permits ordinary admission: initialized, not paused, not in
+// maintenance. It deliberately stops there -- whether a paid model step or
+// a durable task can actually run depends on process-assembly facts
+// (adapter profiles, attached job runners, the trusted verifier) that only
+// cmd/zatiti's own startup readiness classification observes (see
+// cmd/zatiti/readiness.go's storage_only/chat_ready/task_ready levels,
+// explicitly scoped apart from this package's doctor/status); installation
+// never fabricates that broader signal from data it cannot see.
+func runtimeReady(initialized, paused, maintenance bool) *bool {
+	ready := initialized && !paused && !maintenance
+	return &ready
 }
 
 // handleStatus serves both installation.status and installation.doctor: the
@@ -90,6 +166,7 @@ func handleStatus(ctx context.Context, s *Service, unit contract.Unit, inv contr
 		Initialized:    true,
 		Requirements:   reqs,
 		Version:        contract.Version(st.Version),
+		RuntimeReady:   runtimeReady(true, st.Paused, st.Maintenance),
 	}})
 }
 
@@ -185,6 +262,7 @@ func handleMaintenanceEnter(ctx context.Context, s *Service, unit contract.Unit,
 	return completed(resourceOut[wireStatus]{Resource: wireStatus{
 		InstallationID: st.ID, Generation: unit.Generation(), Paused: st.Paused,
 		Maintenance: st.Maintenance, Initialized: true, Requirements: reqs, Version: contract.Version(st.Version),
+		RuntimeReady: runtimeReady(true, st.Paused, st.Maintenance),
 	}})
 }
 
@@ -217,6 +295,7 @@ func handlePause(ctx context.Context, s *Service, unit contract.Unit, inv contra
 	return completed(resourceOut[wireStatus]{Resource: wireStatus{
 		InstallationID: st.ID, Generation: unit.Generation(), Paused: st.Paused,
 		Maintenance: st.Maintenance, Initialized: true, Requirements: reqs, Version: contract.Version(st.Version),
+		RuntimeReady: runtimeReady(true, st.Paused, st.Maintenance),
 	}})
 }
 
@@ -260,6 +339,7 @@ func handleResume(ctx context.Context, s *Service, unit contract.Unit, inv contr
 	return completed(resourceOut[wireStatus]{Resource: wireStatus{
 		InstallationID: st.ID, Generation: unit.Generation(), Paused: st.Paused,
 		Maintenance: st.Maintenance, Initialized: true, Requirements: reqs, Version: contract.Version(st.Version),
+		RuntimeReady: runtimeReady(true, st.Paused, st.Maintenance),
 	}})
 }
 

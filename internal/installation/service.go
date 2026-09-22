@@ -20,6 +20,7 @@ const (
 	opRestore           = "installation.restore"
 	opResume            = "installation.resume"
 	opStatus            = "installation.status"
+	opVerifierList      = "installation.verifier.list"
 	opRestoreRecordName = "_installation.restore.record"
 )
 
@@ -69,6 +70,8 @@ var opMetas = []opMeta{
 		submission: true, expected: true, cli: []string{"installation", "resume"}},
 	{id: opStatus, visibility: contract.VisibilityPublic, mode: contract.ModeQuery,
 		cli: []string{"installation", "status"}},
+	{id: opVerifierList, visibility: contract.VisibilityPublic, mode: contract.ModeQuery,
+		cli: []string{"installation", "verifier", "list"}},
 }
 
 // Service is the installation domain owner: bootstrap, restriction and
@@ -224,6 +227,7 @@ var handlers = map[string]handlerFunc{
 	opMaintenanceEnter:  handleMaintenanceEnter,
 	opPause:             handlePause,
 	opResume:            handleResume,
+	opVerifierList:      handleVerifierList,
 }
 
 // Handle implements contract.Module with strict dispatch: the operation must
