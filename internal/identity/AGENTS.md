@@ -1,6 +1,6 @@
 # Implementation assignment: `internal/identity`
 
-Generated specification revision 3; source digest `699397bd82e8dc5145849c385b02103be70ff8493e938d273d9b6e61313d78c7`. This file is committed implementation context. Do not independently edit it. Everything required from the product specification and adjacent interfaces is embedded below; no RFC copy is required.
+Generated specification revision 3; source digest `67ab25bc368b7818e80307a39aa404c12edb5fd35d3ee695380609e37a1d2718`. This file is committed implementation context. Do not independently edit it. Everything required from the product specification and adjacent interfaces is embedded below; no RFC copy is required.
 
 ## Mission and scope
 

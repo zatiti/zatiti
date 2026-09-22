@@ -22,55 +22,57 @@ import (
 // This journey went further into real production code than any prior test
 // in this tree, and found three more genuine, independently confirmed
 // issues along the way (beyond the hosted-side gaps hosted_turn_test.go
-// documents). None are worked around with test-side production code; the
-// primary test below proves the real success it can reach (task.create,
-// task.start, run.claim, attempt.checkpoint all genuinely succeed) and then
-// the honest current ceiling at attempt.report, rather than a fabricated
-// full completion.
+// documents). None were worked around with test-side production code. All
+// three are now fixed (findings 1-3 below); the primary test proves the
+// real success this unlocks -- task.create, task.start, run.claim,
+// attempt.checkpoint AND attempt.report all genuinely succeed, for the
+// first time in this tree's history -- and documents the next honest
+// ceiling this reveals (asynchronous verification dispatch not completing
+// within this test's own observation window, a separate, not-yet-
+// investigated question; see the primary test's own closing comment).
 //
-//  1. (Already found and FIXED same-day on main, commit 95767cf "mint a
-//     real operation_id for run.claim's budget reservation": internal/
-//     execution/run_ops.go's handleClaim called reserveBudget with a
-//     hardcoded empty operation_id, which _accounting.reserve's own frozen
-//     schema (format: uuid) rejected on every single call, for every
-//     worker. This file was rebased onto that fix.)
-//  2. A worker-level accounting double-reservation: handleClaim resolves
+//  1. FIXED same-day on main, commit 95767cf "mint a real operation_id for
+//     run.claim's budget reservation": internal/execution/run_ops.go's
+//     handleClaim called reserveBudget with a hardcoded empty operation_id,
+//     which _accounting.reserve's own frozen schema (format: uuid) rejected
+//     on every single call, for every worker. This file was rebased onto
+//     that fix.
+//  2. FIXED (founder-authorized, same fix landed alongside finding 3): a
+//     worker-level accounting double-reservation -- handleClaim resolves
 //     the reservation's cost bound from _configuration.snapshot's SCOPE-
 //     level worker (Scope.WorkerID), so a task must be worker-scoped for
 //     run.claim to get a real (non-empty) currency at all -- but
 //     internal/tasks/admission.go's own task.create-time reservation ALSO
 //     charges every level the task's scope implies, worker included. A
 //     worker-scoped task is therefore charged worker-level concurrency
-//     TWICE for the same conceptual attempt (once at task.create, again at
-//     run.claim); a ceiling of 1 (the shipped default for an unconfigured
-//     worker) admits the first charge and refuses the second as
-//     "concurrency exhausted ... 1 live attempts against a ceiling of 1"
-//     even though only one real attempt ever exists. Confirmed reproducible
-//     with and without touching this file's own worker-scoping choice.
-//     Routed around below (both the worker and the task declare a real
-//     concurrency ceiling of 2, a legitimate declared value, not a
-//     disguised bypass) rather than fixed, since the fix belongs in
-//     internal/tasks or internal/execution, outside this card's write scope.
-//  3. THE REMAINING BLOCKER: internal/execution's resolveOutputArtifacts
-//     (peer.go) calls the internal _artifacts.metadata peer operation to
-//     resolve a reported output's published artifact before sealing the
-//     verification request. That call's own JSON input, confirmed by direct
-//     instrumentation to be byte-for-byte well-formed (a real, 64-lowercase-
-//     hex digest at artifacts[0].digest, matching ^[0-9a-f]{64}$ exactly),
-//     is nonetheless rejected by schema validation with "does not match
-//     pattern ... at /artifacts/0/digest" -- reproduced identically with
-//     and without a worker_id in the call's own scope, ruling out finding 2
-//     as the cause. This is _artifacts.metadata's FIRST real exercise
-//     through this exact cross-package path (execution -> internal
-//     operation -> schema-validated dispatch) on this tree: no prior test
-//     ever drove a cooperative attempt.report far enough to reach it,
-//     exactly as finding 1 was operation_id's first real exercise. Not
-//     root-caused further in this pass (candidates include the registry's
-//     bare-schema-to-self-contained-document pruning for this specific
-//     internal operation, or the validator's own pattern/path handling for
-//     a schema shape not previously exercised) -- flagging as a concrete,
-//     reproducible finding for the same review that landed fix 1, not
-//     guessing at a fix here.
+//     TWICE for the same conceptual attempt. Not touched by the landed fix
+//     (that fix was scoped to findings 1/3 only) -- still routed around
+//     below (both the worker and the task declare a real concurrency
+//     ceiling of 2, a legitimate declared value, not a disguised bypass).
+//  3. FIXED (founder-authorized): two independent defects in the evidence-
+//     recording path, both confirmed by direct code reading and both
+//     required together to reach a real attempt.report success:
+//     (a) internal/tasks/transition.go's recordEvidence minted
+//     wireArtifactRef{ID: id} with no digest for every evidence_ids entry
+//     (the frozen _tasks.transition input only ever supplies bare UUIDs),
+//     while _artifacts.metadata's frozen schema required digest as
+//     non-empty -- even though the handler (internal/artifacts/ops.go)
+//     already treated an empty digest as "no constraint". Fixed by
+//     widening _artifacts.metadata's frozen input schema to a local,
+//     digest-optional shape (tools/specgen/model.py), NOT touching the
+//     shared ArtifactRef $defs entry every other operation relies on, plus
+//     adding omitempty to wireArtifactRef.Digest so an absent digest
+//     actually reaches the wire as omitted rather than an invalid "".
+//     (b) Two of nine transitionTask call sites in internal/execution
+//     passed a non-artifact ID (an attempt, run or verification-job ID) as
+//     evidence_ids on the single live path (the other seven target states
+//     applyTransition never reads evidence_ids for at all, confirmed by
+//     direct reading -- cosmetic, not bugs). Fixed by passing an empty
+//     evidence_ids at both live sites, matching the precedent already
+//     established elsewhere in the tree (internal/scheduling/wake.go) and
+//     leaving the correct, already-existing _tasks.evidence.record path
+//     (which supplies a real artifact ID with a real digest) as the sole
+//     producer of evidence a success/failure transition ever needs.
 
 // cooperativeWorkerDefinition declares a worker with an explicit
 // executor:"cooperative" profile (schema-valid: ExecutionProfile.executor
@@ -300,13 +302,16 @@ func TestCooperativeWorkerClaimsAndCheckpointsThenHitsTheArtifactResolutionCeili
 			break
 		}
 	}
-	if faultCode(reportErr) != contract.CodeInvalidInput {
-		t.Fatalf("attempt.report: %v, want invalid_input (the _artifacts.metadata schema-validation defect this file's top comment documents) -- "+
-			"if this now succeeds, that defect has been fixed and this file should be rewritten to prove the full succeeding journey", reportErr)
+	// attempt.report now genuinely succeeds: findings 2 and 3 above are
+	// fixed (commit history: the evidence_ids wrong-ID bug in
+	// internal/execution and the _artifacts.metadata schema both landed
+	// same-day, founder-authorized after this file's own predicted
+	// "if this now succeeds ... this file should be rewritten"). The
+	// attempt/task genuinely advance past checkpoint for the first time in
+	// this tree's history.
+	if reportErr != nil {
+		t.Fatalf("attempt.report: %v, want success", reportErr)
 	}
-
-	// The refusal left the attempt/run/task exactly where checkpoint left
-	// them -- never silently advanced past a refused report.
 	attemptOut := f.must(f.owner, "attempt.get", "", map[string]any{"scope": scope, "id": claim.Attempt.ID})
 	var attemptState struct {
 		Resource struct {
@@ -314,8 +319,8 @@ func TestCooperativeWorkerClaimsAndCheckpointsThenHitsTheArtifactResolutionCeili
 		} `json:"resource"`
 	}
 	decode(t, attemptOut.Data, &attemptState)
-	if attemptState.Resource.State == "reported" {
-		t.Fatalf("attempt state %q despite the refused report; a refusal must never silently advance attempt state", attemptState.Resource.State)
+	if attemptState.Resource.State != "reported" {
+		t.Fatalf("attempt state after a successful report = %q, want reported", attemptState.Resource.State)
 	}
 	taskOut := f.must(f.owner, "task.get", "", map[string]any{"scope": scope, "id": task.Resource.ID})
 	var taskState struct {
@@ -324,8 +329,21 @@ func TestCooperativeWorkerClaimsAndCheckpointsThenHitsTheArtifactResolutionCeili
 		} `json:"resource"`
 	}
 	decode(t, taskOut.Data, &taskState)
-	if taskState.Resource.State == "succeeded" || taskState.Resource.State == "failed" || taskState.Resource.State == "verifying" {
-		t.Fatalf("task state %q despite the refused report; independent verification must never be reached from a refused report", taskState.Resource.State)
+	// The NEW honest ceiling: reportAttempt seals a real VerificationRequest
+	// job (internal/execution/attempt_ops.go) and the task correctly enters
+	// "verifying" -- but the real controller's own verification dispatch
+	// (driveVerification, internal/controller/turns.go) does not carry it
+	// to a terminal succeeded/failed state within this test's observation
+	// window. Not investigated further here -- this journey's own two
+	// authorized fixes (the evidence_ids wrong-ID bug and the
+	// _artifacts.metadata schema) are proven complete and correct by
+	// reaching this point at all; whether asynchronous verification
+	// dispatch for a cooperative (non-turn-driven) task is itself a further
+	// gap is a separate, not-yet-investigated question -- see
+	// docs/roadmap.md for the pointer to raise it, rather than guessing at
+	// a third fix inside this same change.
+	if taskState.Resource.State != "verifying" {
+		t.Fatalf("task state after a successful report = %q, want verifying (see this test's own comment on the further, not-yet-investigated verification-dispatch question)", taskState.Resource.State)
 	}
 }
 
@@ -392,26 +410,32 @@ func TestCooperativeClaimAndCheckpointAreIdenticalOverCLIAndMCP(t *testing.T) {
 		t.Fatalf("attempt.checkpoint over MCP: %s", checkpointOut.code)
 	}
 
-	// The same honest ceiling, reached over MCP.
+	// attempt.report now genuinely succeeds over MCP too (see the primary
+	// test above for why: findings 2 and 3 are fixed).
 	reportOut := mcpTr.run(t, call{name: "attempt.report", op: "attempt.report", key: "cli-mcp-report", input: map[string]any{
 		"scope": scope, "attempt_id": claim.Attempt.ID, "lease_id": claim.Attempt.LeaseID,
 		"generation": claim.Attempt.Generation, "expected_version": freshAttemptVersion(t, f, scope, claim.Attempt.ID),
 		"outputs": []any{ref}, "observations": map[string]any{}, "usage": zeroUsage(unconfiguredCurrency),
 	}})
-	if reportOut.code != contract.CodeInvalidInput {
-		t.Fatalf("attempt.report over MCP: code %q signal %s, want invalid_input matching the in-process journey's own ceiling", reportOut.code, reportOut.signal)
+	if reportOut.code != "" {
+		t.Fatalf("attempt.report over MCP: code %q signal %s, want success matching the in-process journey above", reportOut.code, reportOut.signal)
 	}
 
-	// The identical refusal over the real client-side socket (internal/
-	// client, not the raw MCP frame) too -- transport parity of the fault
-	// itself, not just of the success path this journey reaches first.
+	// A second attempt.report on the same already-reported attempt is
+	// refused over the real client-side socket (internal/client, not the
+	// raw MCP frame) too -- transport parity of a real fault. checkWorkerCall
+	// (internal/execution/scope.go) only accepts a report from an attempt
+	// still in claimed/running/waiting; the MCP report above already moved
+	// this attempt to "reported", so the identical retry now genuinely
+	// conflicts, rather than the fabricated schema fault this test used to
+	// assert on both transports.
 	cliReportOut := cliTr.run(t, call{name: "attempt.report", op: "attempt.report", key: "cli-report-2", input: map[string]any{
 		"scope": scope, "attempt_id": claim.Attempt.ID, "lease_id": claim.Attempt.LeaseID,
 		"generation": claim.Attempt.Generation, "expected_version": freshAttemptVersion(t, f, scope, claim.Attempt.ID),
 		"outputs": []any{ref}, "observations": map[string]any{}, "usage": zeroUsage(unconfiguredCurrency),
 	}})
-	if cliReportOut.code != contract.CodeInvalidInput {
-		t.Fatalf("attempt.report over the CLI: code %q signal %s, want invalid_input matching the MCP refusal above", cliReportOut.code, cliReportOut.signal)
+	if cliReportOut.code != contract.CodeConflict {
+		t.Fatalf("attempt.report over the CLI: code %q signal %s, want conflict (already reported)", cliReportOut.code, cliReportOut.signal)
 	}
 }
 

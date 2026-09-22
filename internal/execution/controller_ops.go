@@ -485,7 +485,7 @@ func (s *Service) fenceAttempt(ctx context.Context, unit contract.Unit, a *attem
 		return nil
 	}
 	_, err = s.transitionTask(ctx, unit, task.ID, task.Version, "waiting",
-		[]contract.ID{a.ID}, reason, false)
+		[]contract.ID{}, reason, false)
 	return err
 }
 
@@ -712,13 +712,13 @@ func (s *Service) handleVerificationRecord(ctx context.Context, unit contract.Un
 		}
 		if task.Acceptance.Mode == "manual" {
 			if _, err := s.transitionTask(ctx, unit, updatedTask.ID, updatedTask.Version, "waiting",
-				[]contract.ID{v.ID}, "manual_acceptance", true); err != nil {
+				[]contract.ID{}, "manual_acceptance", true); err != nil {
 				return contract.Outcome[attemptBody]{}, err
 			}
 			r.State = "waiting"
 		} else {
 			if _, err := s.transitionTask(ctx, unit, updatedTask.ID, updatedTask.Version, "succeeded",
-				[]contract.ID{v.ID}, "", false); err != nil {
+				[]contract.ID{}, "", false); err != nil {
 				return contract.Outcome[attemptBody]{}, err
 			}
 			r.State = "succeeded"
@@ -740,7 +740,7 @@ func (s *Service) handleVerificationRecord(ctx context.Context, unit contract.Un
 			return contract.Outcome[attemptBody]{}, err
 		}
 		if _, err := s.transitionTask(ctx, unit, updatedTask.ID, updatedTask.Version, "failed",
-			[]contract.ID{v.ID}, "", false); err != nil {
+			[]contract.ID{}, "", false); err != nil {
 			return contract.Outcome[attemptBody]{}, err
 		}
 		r.State = "failed"
@@ -760,7 +760,7 @@ func (s *Service) handleVerificationRecord(ctx context.Context, unit contract.Un
 			return contract.Outcome[attemptBody]{}, err
 		}
 		if _, err := s.transitionTask(ctx, unit, task.ID, task.Version, "failed",
-			[]contract.ID{v.ID}, "", false); err != nil {
+			[]contract.ID{}, "", false); err != nil {
 			return contract.Outcome[attemptBody]{}, err
 		}
 		r.State = "failed"

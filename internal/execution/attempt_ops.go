@@ -311,7 +311,7 @@ func (s *Service) reportAttempt(ctx context.Context, unit contract.Unit, a *atte
 			return contract.Outcome[attemptBody]{}, err
 		}
 	}
-	if _, err := s.transitionTask(ctx, unit, task.ID, task.Version, "verifying", []contract.ID{a.ID}, "", false); err != nil {
+	if _, err := s.transitionTask(ctx, unit, task.ID, task.Version, "verifying", []contract.ID{}, "", false); err != nil {
 		return contract.Outcome[attemptBody]{}, err
 	}
 	r.State = "verifying"
@@ -390,7 +390,7 @@ func (s *Service) handleAttemptCancel(ctx context.Context, unit contract.Unit, i
 	}
 	task, err := s.callTaskSnapshot(ctx, unit, r.Scope, r.TaskID)
 	if err == nil && task.State != "cancelled" {
-		if _, err := s.transitionTask(ctx, unit, task.ID, task.Version, "cancelled", []contract.ID{a.ID}, "", false); err != nil {
+		if _, err := s.transitionTask(ctx, unit, task.ID, task.Version, "cancelled", []contract.ID{}, "", false); err != nil {
 			return contract.Outcome[dispositionBody]{}, err
 		}
 	}
