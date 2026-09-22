@@ -343,3 +343,56 @@ func TestAdmissionRevalidatesAcceptanceArtifacts(t *testing.T) {
 		_ = env.createTask(def)
 	})
 }
+
+// TestAdmissionReservationExcludesWorkerLevel is the regression test for the
+// worker-level double-reservation bug: run.claim's own attempt reservation
+// (internal/execution/run_ops.go's admitAttempt) is the sole charge point
+// for worker-level concurrency, so task.create's admission-time reservation
+// must not additionally consume it. Before the fix, admission.go forwarded
+// the task's own Scope (worker_id included for a worker-scoped task) to
+// _accounting.reserve unchanged, so a worker-scoped task.create charged the
+// worker position exactly like run.claim's later attempt reservation would
+// -- two charges for one conceptual attempt, permanently exhausting a
+// freshly configured worker's shipped default concurrency of one on the
+// very first task ever created for it. This test fails on the pre-fix code
+// (the reservation the fake accounting peer recorded named the worker) and
+// passes after (it does not), proving the fix without needing the real
+// accounting package's own position bookkeeping.
+func TestAdmissionReservationExcludesWorkerLevel(t *testing.T) {
+	env := newEnv(t)
+	workerScope := env.scope
+	workerScope.WorkerID = env.worker
+	def := env.taskDef()
+	def.Scope = workerScope
+
+	payload, err := env.callAs(workerScope, "task.create", struct {
+		Scope      wireScope    `json:"scope"`
+		Definition taskDefInput `json:"definition"`
+	}{Scope: workerScope, Definition: def})
+	if err != nil {
+		t.Fatalf("task.create failed: %v", err)
+	}
+	if payload.Status != contract.StatusCompleted {
+		t.Fatalf("task.create status %q, want completed (error %v)", payload.Status, payload.Error)
+	}
+	var out struct {
+		Resource wireTask `json:"resource"`
+	}
+	env.decode(payload.Data, &out)
+	if out.Resource.State != stateDraft {
+		t.Fatalf("new task state %q, want draft", out.Resource.State)
+	}
+
+	reserves := env.ports.reservesOf()
+	if len(reserves) != 1 {
+		t.Fatalf("reserve calls %d, want exactly 1", len(reserves))
+	}
+	if got := reserves[0].Scope.WorkerID; got != "" {
+		t.Fatalf("task.create's own reservation charged worker %q; worker-level concurrency belongs solely to run.claim's per-attempt reservation", got)
+	}
+	// Every other scope dimension the task carries still reaches the
+	// reservation unchanged -- only the worker level is stripped.
+	if reserves[0].Scope.InstallationID != env.install {
+		t.Fatalf("reservation installation %q, want %q", reserves[0].Scope.InstallationID, env.install)
+	}
+}
