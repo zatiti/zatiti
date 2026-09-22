@@ -3450,3 +3450,20 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   Socket (the untriaged CI flake from PR #51) passed in 4.47s, all 47
   cmd/zatiti tests green -- confirms that flake really is CI-runner-
   specific, not a real bug. 45/50 landed.
+- 2026-09-22 ~06:55 PT -- SELF-CORRECTION: I told P33's agent I'd fix
+  docs/implementation/contracts.md's stale RestoreCoordinator/
+  SnapshotInventory section myself as a "tiny docs-only follow-up." Wrong
+  -- that file's own header is "Frozen implementation contract, revision
+  3... do not change another owner's interface locally," the same class
+  of file as operations.json. This is a real, confirmed inconsistency
+  (contracts.md line 312-335 says RestoreCoordinator is "supplied by
+  entrypoint assembly to internal/installation only, never to the
+  controller or any other module"; P32 actually built and I reviewed/
+  landed controller.RestoreLifecycle, supplied directly to the
+  controller) -- but it's a documentation-accuracy gap against an
+  already-reviewed, deliberate engineering decision, not a behavior bug,
+  and not something to hand-edit without the same founder sign-off every
+  other frozen-contract touch has required this session. Not fixing it
+  myself. Flagging for the same founder decision batch as the restore-
+  protocol-completeness finding above (~05:45 PT entry) -- both concern
+  the same six-step restore protocol and are naturally one conversation.
