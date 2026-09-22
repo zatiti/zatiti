@@ -1,6 +1,7 @@
 package contract
 
 import (
+	"container/list"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -60,28 +61,110 @@ func ValidateSchema(schema, instance json.RawMessage) error {
 
 // schemaCache memoizes strictParse's result for schema documents, keyed on
 // the exact input bytes. ValidateSchema runs on every request across
-// roughly 40 call sites repo-wide, and the overwhelming majority of callers
-// pass the same schema document on every call: a handler's InputSchema/
-// OutputSchema is captured once at registration time (see e.g. each
-// package's local bind helper) and closed over for the life of the
-// process, so re-parsing the same 30-100KB merged $defs document from
-// scratch on every single invocation is pure repeated work, not
-// combinatorial and not a correctness issue, but real and avoidable.
+// roughly 40 call sites repo-wide, and most callers pass the same schema
+// document on every call: a handler's InputSchema/OutputSchema is captured
+// once at registration time (see e.g. each package's local bind helper) and
+// closed over for the life of the process, so re-parsing the same 30-100KB
+// merged $defs document from scratch on every single invocation is pure
+// repeated work, not combinatorial and not a correctness issue, but real
+// and avoidable.
 //
 // The parsed value tree (map[string]any/[]any/json.Number/string/bool/nil)
 // is read-only once strictParse returns it: schemaValidator only reads it
 // and builds its own local per-call working state (e.g. checkObject's
 // compiled pattern map), it never writes into the schema's own maps or
 // slices. Sharing one parsed value across concurrent callers is therefore
-// safe. Schema documents are developer-authored, frozen catalog content
-// (docs/implementation/operations.json and friends), not unbounded
-// caller-controlled input, so an unbounded cache keyed on content is not a
-// memory-exhaustion vector in this codebase's actual usage.
-var schemaCache sync.Map // string(schema bytes) -> schemaCacheEntry
+// safe.
+//
+// NOT every ValidateSchema caller passes fixed, developer-authored content,
+// though: internal/execution's and internal/skills's verification paths
+// both call ValidateSchema(want.Schema, data) where want.Schema is
+// Adapter_InertSchema, a field on a task's Acceptance.expected_observations
+// that any task creator supplies at task-creation time (Adapter_InertSchema's
+// own frozen doc comment: "this is schema data, not authority" -- it is
+// explicitly designed to carry arbitrary caller content, not one of a fixed
+// set of catalog documents). A cache keyed on unbounded content with no
+// eviction would let such a caller grow it without limit by submitting many
+// distinct expected_observations[].schema values across tasks. schemaCache
+// is therefore a bounded LRU (schemaCacheCapacity entries, evict-oldest):
+// its size can never exceed that bound regardless of caller behavior. Every
+// legitimate registration-time schema document across the module's current
+// call sites is far fewer than schemaCacheCapacity, so ordinary traffic
+// does not meaningfully evict them; an adversarial caller can at worst push
+// the cache into a churn state where its own distinct schemas keep missing
+// (i.e. degrade to the pre-cache reparse-every-call cost for that traffic),
+// never grow memory past the bound.
+const schemaCacheCapacity = 256
+
+var schemaCache = newSchemaLRU(schemaCacheCapacity)
 
 type schemaCacheEntry struct {
 	value any
 	err   *DecodeError
+}
+
+// schemaLRU is a fixed-capacity, thread-safe, least-recently-used cache.
+// container/list's Element values are not safe for concurrent use on their
+// own, so every operation holds mu for its full duration; ValidateSchema is
+// not on a path hot enough (a handful of map/list operations, no I/O) for
+// that single lock to be a meaningful bottleneck relative to the reparse it
+// replaces.
+type schemaLRU struct {
+	mu       sync.Mutex
+	capacity int
+	items    map[string]*list.Element
+	order    *list.List // front = most recently used, back = eviction candidate
+}
+
+type schemaLRUElem struct {
+	key   string
+	value schemaCacheEntry
+}
+
+func newSchemaLRU(capacity int) *schemaLRU {
+	return &schemaLRU{
+		capacity: capacity,
+		items:    make(map[string]*list.Element, capacity),
+		order:    list.New(),
+	}
+}
+
+func (c *schemaLRU) get(key string) (schemaCacheEntry, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	el, ok := c.items[key]
+	if !ok {
+		return schemaCacheEntry{}, false
+	}
+	c.order.MoveToFront(el)
+	return el.Value.(*schemaLRUElem).value, true
+}
+
+func (c *schemaLRU) put(key string, value schemaCacheEntry) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if el, ok := c.items[key]; ok {
+		el.Value.(*schemaLRUElem).value = value
+		c.order.MoveToFront(el)
+		return
+	}
+	el := c.order.PushFront(&schemaLRUElem{key: key, value: value})
+	c.items[key] = el
+	if c.order.Len() > c.capacity {
+		oldest := c.order.Back()
+		if oldest != nil {
+			c.order.Remove(oldest)
+			delete(c.items, oldest.Value.(*schemaLRUElem).key)
+		}
+	}
+}
+
+// len reports the cache's current entry count. Test-only (asserts the
+// capacity bound holds); production code never needs it.
+func (c *schemaLRU) len() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.order.Len()
 }
 
 // schemaCacheMisses counts schemaCache misses. It exists only so this
@@ -94,17 +177,16 @@ var schemaCacheMisses atomic.Int64
 // schemaCache. Callers that parse ordinary (non-schema) instance data must
 // keep calling strictParse directly: only schema documents repeat across
 // calls in the way that makes caching worthwhile, and instance payloads are
-// exactly the untrusted, high-cardinality input schemaCache's doc comment
-// says the cache must not be exposed to.
+// exactly the untrusted, high-cardinality input schemaCache is bounded
+// against even on the schema side (see schemaCache's doc comment).
 func cachedStrictParse(data json.RawMessage) (any, *DecodeError) {
 	key := string(data)
-	if cached, ok := schemaCache.Load(key); ok {
-		entry := cached.(schemaCacheEntry)
+	if entry, ok := schemaCache.get(key); ok {
 		return entry.value, entry.err
 	}
 	schemaCacheMisses.Add(1)
 	value, err := strictParse(data)
-	schemaCache.Store(key, schemaCacheEntry{value: value, err: err})
+	schemaCache.put(key, schemaCacheEntry{value: value, err: err})
 	return value, err
 }
 
