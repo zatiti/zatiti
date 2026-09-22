@@ -3743,9 +3743,14 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   one line (apps/desktop/lib/src/api/models.dart: o.optional('runtime_ready')
   in InstallationStatus.fromJson, matching the exact idiom Organization/
   Project already use there for limits/extensions -- fields acknowledged
-  but not yet surfaced in the UI). Verified directly before landing: ran
-  TestZ21DesktopJourneys myself pre-fix (failed exactly as reported) and
-  post-fix (Z21.first_conversation passes for real, a genuine red->green).
+  but not yet surfaced in the UI). Verified the underlying claim directly
+  before applying the fix, by reading code rather than re-running the
+  pre-fix failure myself: grepped apps/desktop/lib for runtime_ready
+  (zero hits) and read StrictObject.finish()'s unknown-field refusal
+  (apps/desktop/lib/src/transport/strict_json.dart), confirming the exact
+  reported error text is what that code path throws. Ran
+  TestZ21DesktopJourneys myself only post-fix: Z21.first_conversation
+  passes for real against a live controller.
 
   Verification: build/vet/gofmt clean repo-wide; full tests/qualification
   suite green (Z01.duplicate_controller, Z04/Z16 retrofitted onto
