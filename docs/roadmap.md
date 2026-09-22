@@ -2988,6 +2988,31 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   decision, executed completely rather than partially; not treated as
   requiring a fresh escalation, unlike the earlier scope_required
   discovery itself which did get escalated. CI running again.
+- 2026-09-22 06:44 PT -- SCOPE_REQUIRED FIX LANDED (PR #42, d9fdbce0).
+  CI: "specification drift" passed this time (the generator's own
+  --check, which correctly failed the first version), and build-and-
+  test's failures confirmed via the actual log to be exactly 16
+  mentions of "redefines the shared definition Status" and ZERO
+  scope_required mismatches anywhere. Rebase-merged. Re-verified
+  everything myself on the real post-merge main, not just CI: go test
+  clean on internal/tasks, internal/messaging, internal/memory,
+  internal/configuration, internal/registry, and the full internal/
+  execution suite; internal/application's TestLandedDriftIsDomainSide
+  reaches only the distinct, already-tracked internal/installation
+  Status issue. Worktree/branch cleaned up, R-scope-required-fix claim
+  released.
+  This closes the registry-assembly incident that ran through this
+  entire 24h-parallelization stretch: PR #40 (stale $defs across
+  policy/accounting/installation/messaging) plus PR #42 (the actual
+  specgen generator bug behind scope_required, not just its symptom)
+  together mean every module's own descriptor now genuinely agrees
+  with the frozen catalog on every operation this repo has landed.
+  What's left blocking cmd/zatiti/internal/application/tests/
+  integration/tests/qualification from fully going green is narrowly
+  internal/installation's own remaining gaps (Status.runtime_ready
+  missing from its embedded $defs copy, and installation.verifier.list
+  having zero Go implementation) -- both already tracked, both squarely
+  inside P25's own write scope, about to be dispatched next.
 
 ## Planned
 
