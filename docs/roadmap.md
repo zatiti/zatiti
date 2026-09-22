@@ -2845,6 +2845,54 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   the timeout margin was sized for normal load, not 100x+ oversubscription.
   Not yet confirmed flake vs. real; will re-run in isolation once load
   settles before deciding.
+- 2026-09-22 ~22:47 PT -- P24 independently reviewed and opened as PR
+  #41 (branch P24-wire-runtime, rebased onto post-#40 main, whole-repo
+  build/vet clean). The card that assembles every prior card's work
+  into an actually-runnable production binary: registers responses.New,
+  attaches the real trusted verifier/job-runners/worker-operator in
+  superviseController (was Identity/Blobs only), implements `zatiti
+  connection helper` (the trusted local credential-import CLI process).
+  Lead's own independent verification, not trusted from the report:
+  read helper.go in full -- confirmed the disclosed internal/
+  connections HMAC-key gap is real by reading keychainSecrets.Put/Get/
+  parseKeychainRef directly (Put returns "kc1:"+base64(key), Get
+  requires that exact wrapped format via parseKeychainRef, so a raw-
+  literal Get can never succeed against a real keychain-backed
+  installation -- a genuine, previously undiscovered bug in already-
+  landed internal/connections code, correctly left unfixed as outside
+  this card's write scope). Confirmed via grep that internal/artifacts
+  and internal/policy genuinely have zero RunJob implementations,
+  matching the card's own claims (including correctly catching that
+  P24's own dispatch briefing wrongly assumed policy had one). Read
+  TestRunConnectionHelperNeverPrintsTheCredential in full -- confirmed
+  it greps every observable surface for a unique marker secret AND
+  separately confirms the secret really landed in the real secret
+  store, not just a superficial "looks clean" check. Ran go build/vet/
+  gofmt/test myself; rebased onto post-PR-#40 main and confirmed the
+  _policy.activate error is gone, all 11 remaining failures (both new
+  and pre-existing tests) trace to exactly the known scope_required
+  issue, nothing new. Red->green verified myself: removed the known
+  artifact.export gap entry from catalogJobKinds, confirmed
+  TestMissingJobRunnersDetectsTheKnownCatalogGap fails, restored,
+  confirmed green. CI pending.
+- 2026-09-22 ~22:50 PT -- SCOPE_REQUIRED FIX DISPATCHED (not a plan
+  P-number, claimed as R-scope-required-fix). David's founder
+  authorization from earlier acted on now. Write scope: docs/
+  implementation/operations.json (the first and only frozen-contract
+  file edit this whole session -- explicit, narrow authorization, nothing
+  else in that file to be touched), internal/tasks, internal/messaging,
+  internal/memory, internal/installation. Independently re-confirmed
+  before dispatch (not assumed from memory): read operations.json
+  directly for all 4 operations (task.start, conversation.message.list,
+  memory.list, installation.verifier.list) and confirmed each one's own
+  input schema genuinely lists "scope" in its required array while its
+  recorded scope_required is null -- an internal self-contradiction in
+  the frozen file itself. Briefed with the full precedent chain
+  (internal/tasks/service.go's existing diagnostic comment, catalog.json
+  already being correct and must stay untouched, each module's own
+  override to find and remove) and instructed to prove success via
+  TestLandedDriftIsDomainSide reaching zero remaining scope_required
+  failures, not just task.start's.
 
 ## Planned
 
