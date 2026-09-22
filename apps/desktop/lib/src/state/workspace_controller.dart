@@ -24,6 +24,39 @@ class _RoutineOverlay {
   String? note;
 }
 
+/// One draft/plan/review/apply flow in progress: organization, worker or
+/// responsibility creation. Exactly one of [stagePending]/[planPending]/
+/// [applyPending] is ever set at a time, and it is the same object across a
+/// retry — never re-prepared, so a retry never mints a second submission
+/// key for the same intended mutation.
+class _DraftFlowOverlay {
+  DraftFlowPhase phase = DraftFlowPhase.composing;
+  ResourceSubmission<DraftedResource>? stagePending;
+  ResourceSubmission<PlanOutcome>? planPending;
+  ResourceSubmission<PlanOutcome>? applyPending;
+  DraftedResource? draft;
+  PlanOutcome? plan;
+  String? note;
+}
+
+/// One task creation flow in progress: `task.create` then `task.start`.
+class _TaskFlowOverlay {
+  TaskFlowPhase phase = TaskFlowPhase.composing;
+  ResourceSubmission<TaskOutcome>? createPending;
+  ResourceSubmission<TaskOutcome>? startPending;
+  TaskOutcome? created;
+  String? note;
+}
+
+/// One single-step mutation in progress: a new group chat, or a membership
+/// change to an existing one. Mirrors [_RoutineOverlay]'s shape.
+class _GroupFlowOverlay {
+  bool submitting = false;
+  bool unknown = false;
+  ResourceSubmission<ConversationOutcome>? pending;
+  String? note;
+}
+
 class WorkspaceController extends ChangeNotifier {
   /// [localStore]/[installationId] persist the selected conversation and a
   /// bounded authorized-identity cache to ordinary OS-protected local
@@ -126,6 +159,10 @@ class WorkspaceController extends ChangeNotifier {
       <ReviewId, _ReviewOverlay>{};
   final Map<RoutineId, _RoutineOverlay> _routineOverlays =
       <RoutineId, _RoutineOverlay>{};
+  final Map<DraftFlowKind, _DraftFlowOverlay> _draftFlows =
+      <DraftFlowKind, _DraftFlowOverlay>{};
+  _TaskFlowOverlay? _taskFlow;
+  _GroupFlowOverlay? _groupFlow;
   int _localIds = 0;
   bool _disposed = false;
 
@@ -573,7 +610,9 @@ class WorkspaceController extends ChangeNotifier {
     memory: snapshot.memory,
     access: snapshot.access,
     spending: snapshot.spending,
+    principals: snapshot.principals,
     prerequisites: snapshot.prerequisites,
+    unresolvedOperations: snapshot.unresolvedOperations,
     workspaceName: snapshot.workspaceName,
   );
 
@@ -1056,4 +1095,729 @@ class WorkspaceController extends ChangeNotifier {
       _changed();
     }
   }
+
+  // ---- organization/worker/group/task/responsibility creation -----------
+
+  /// The signed-in human's own principal id, derived from an existing
+  /// direct conversation's real participants — this client has no
+  /// `identity.current` operation (see `live_source.dart`'s class doc), so
+  /// it never guesses which principal is "me"; it reads which participant
+  /// of an already-known direct chat is not a worker. Null only before the
+  /// first snapshot has loaded.
+  String? get humanPrincipalId {
+    final workerIds = {for (final w in snapshot.workers) w.id.value};
+    for (final c in snapshot.conversations) {
+      if (c.kind != ConversationKind.direct) continue;
+      for (final id in c.participantIds) {
+        if (!workerIds.contains(id)) return id;
+      }
+    }
+    return null;
+  }
+
+  /// Setup/prerequisite cards specific to one worker: no execution profile,
+  /// no configured budget, a credential that needs action.
+  List<PrerequisiteNotice> prerequisitesForWorker(WorkerId id) => [
+    for (final p in snapshot.prerequisites)
+      if (p.workerId == id) p,
+  ];
+
+  /// Real external operations no review names, kept visible rather than
+  /// dropped while their disposition is unresolved.
+  List<UnresolvedOperationEntry> unresolvedOperationsFor(WorkerId worker) {
+    final scope = snapshot.subtree(worker);
+    return [
+      for (final op in snapshot.unresolvedOperations)
+        if (op.workerId != null && scope.contains(op.workerId)) op,
+    ];
+  }
+
+  // -- draft/plan/review/apply: new organization, new worker, new
+  // responsibility --
+
+  DraftFlowView draftFlow(DraftFlowKind kind) {
+    final o = _draftFlows[kind];
+    if (o == null) return const DraftFlowView();
+    return DraftFlowView(
+      phase: o.phase,
+      plan: o.plan,
+      note: o.note,
+      createdId: o.draft?.resourceId,
+    );
+  }
+
+  void cancelDraftFlow(DraftFlowKind kind) {
+    _draftFlows.remove(kind);
+    _changed();
+  }
+
+  Future<void> createOrganization({
+    required String key,
+    required String name,
+    String? parentOrganizationId,
+    required String chiefKey,
+    required String chiefName,
+    required String chiefPurpose,
+    required String chiefInstructions,
+  }) => _startDraftFlow(
+    DraftFlowKind.organization,
+    () => source.prepareCreateOrganization(
+      key: key,
+      name: name,
+      parentOrganizationId: parentOrganizationId,
+      chiefKey: chiefKey,
+      chiefName: chiefName,
+      chiefPurpose: chiefPurpose,
+      chiefInstructions: chiefInstructions,
+    ),
+  );
+
+  Future<void> createWorker({
+    required String organizationId,
+    required String key,
+    required String name,
+    required String purpose,
+    required String instructions,
+  }) => _startDraftFlow(
+    DraftFlowKind.worker,
+    () => source.prepareCreateWorker(
+      organizationId: organizationId,
+      key: key,
+      name: name,
+      purpose: purpose,
+      instructions: instructions,
+    ),
+  );
+
+  Future<void> createResponsibility({
+    required String workerId,
+    required String outcome,
+    required List<String> triggers,
+    required int minIntervalSeconds,
+    required VerifierIdentity verifier,
+    String currency = 'XXX',
+  }) => _startDraftFlow(
+    DraftFlowKind.responsibility,
+    () => source.prepareCreateResponsibility(
+      workerId: workerId,
+      outcome: outcome,
+      triggers: triggers,
+      minIntervalSeconds: minIntervalSeconds,
+      verifier: verifier,
+      rootDeadline: _clock().add(const Duration(hours: 24)),
+      currency: currency,
+    ),
+  );
+
+  Future<void> _startDraftFlow(
+    DraftFlowKind kind,
+    ResourceSubmission<DraftedResource> Function() prepare,
+  ) async {
+    final flow = _DraftFlowOverlay()
+      ..stagePending = prepare()
+      ..phase = DraftFlowPhase.staging;
+    _draftFlows[kind] = flow;
+    _changed();
+    await _submitStage(kind, flow);
+  }
+
+  Future<void> _submitStage(DraftFlowKind kind, _DraftFlowOverlay flow) async {
+    try {
+      await source.submit(flow.stagePending!);
+      flow
+        ..draft = flow.stagePending!.result
+        ..stagePending = null;
+      await _startPlan(kind, flow);
+    } on SourceUnavailable catch (e) {
+      flow
+        ..phase = DraftFlowPhase.failed
+        ..note = 'Not sent. ${e.message}';
+      _changed();
+    } on AcknowledgmentUnknown {
+      flow.phase = DraftFlowPhase.stagingUnknown;
+      _changed();
+    } on SourceRefusal catch (e) {
+      flow
+        ..phase = DraftFlowPhase.failed
+        ..note = e.message
+        ..stagePending = null;
+      _changed();
+    }
+  }
+
+  Future<void> _startPlan(DraftFlowKind kind, _DraftFlowOverlay flow) async {
+    final draft = flow.draft!;
+    flow
+      ..planPending = source.preparePlan(
+        draftId: draft.draftId,
+        expectedVersion: draft.draftVersion,
+      )
+      ..phase = DraftFlowPhase.planning
+      ..note = null;
+    _changed();
+    await _submitPlan(kind, flow);
+  }
+
+  Future<void> _submitPlan(DraftFlowKind kind, _DraftFlowOverlay flow) async {
+    try {
+      await source.submit(flow.planPending!);
+      final plan = flow.planPending!.result!;
+      flow
+        ..plan = plan
+        ..planPending = null
+        ..phase = plan.isClean ? DraftFlowPhase.ready : DraftFlowPhase.blocked;
+      _changed();
+    } on SourceUnavailable catch (e) {
+      flow
+        ..phase = DraftFlowPhase.failed
+        ..note = 'Not sent. ${e.message}';
+      _changed();
+    } on AcknowledgmentUnknown {
+      flow.phase = DraftFlowPhase.planningUnknown;
+      _changed();
+    } on SourceRefusal catch (e) {
+      flow
+        ..phase = DraftFlowPhase.failed
+        ..note = e.message
+        ..planPending = null;
+      _changed();
+    }
+  }
+
+  /// The person's explicit apply, after reviewing the plan. Only allowed
+  /// once the plan is [DraftFlowPhase.ready]: clean, nothing outstanding.
+  Future<void> applyDraftFlow(DraftFlowKind kind) async {
+    final flow = _draftFlows[kind];
+    if (flow == null || flow.phase != DraftFlowPhase.ready) return;
+    flow
+      ..applyPending = source.prepareApplyPlan(flow.plan!)
+      ..phase = DraftFlowPhase.applying
+      ..note = null;
+    _changed();
+    await _submitApply(kind, flow);
+  }
+
+  Future<void> _submitApply(DraftFlowKind kind, _DraftFlowOverlay flow) async {
+    try {
+      await source.submit(flow.applyPending!);
+      flow
+        ..applyPending = null
+        ..phase = DraftFlowPhase.applied;
+      _changed();
+      await _afterDraftApplied(kind, flow);
+    } on SourceUnavailable catch (e) {
+      flow
+        ..phase = DraftFlowPhase.failed
+        ..note = 'Not sent. ${e.message}';
+      _changed();
+    } on AcknowledgmentUnknown {
+      flow.phase = DraftFlowPhase.applyingUnknown;
+      _changed();
+    } on SourceRefusal catch (e) {
+      flow
+        ..phase = DraftFlowPhase.failed
+        ..note = e.message
+        ..applyPending = null;
+      _changed();
+    }
+  }
+
+  /// Reloads the snapshot now that a draft is active, and — for a new
+  /// organization or worker — opens the direct conversation the design of
+  /// record expects. The new chief/worker is otherwise unreachable from
+  /// this app: the compiler never stages a conversation (it is not one of
+  /// the `Change` kinds), so this flow drives the real membership operation
+  /// itself once the worker actually exists.
+  Future<void> _afterDraftApplied(
+    DraftFlowKind kind,
+    _DraftFlowOverlay flow,
+  ) async {
+    await _reloadQuietly();
+    final targetWorkerId = flow.draft?.conversationTargetId;
+    final human = humanPrincipalId;
+    if (targetWorkerId == null || human == null) return;
+    final worker = snapshot.worker(WorkerId(targetWorkerId));
+    if (worker == null || worker.conversationId != null) return;
+    try {
+      final submission = source.prepareOpenDirectConversation(
+        humanPrincipalId: human,
+        workerId: targetWorkerId,
+        title: worker.name,
+      );
+      await source.submit(submission);
+      await _reloadQuietly();
+      selectWorker(worker.id);
+    } on SourceUnavailable {
+      // Best-effort: the organization/worker is real either way. The
+      // conversation can be opened again from the tree once reachable.
+    } on AcknowledgmentUnknown {
+      // Same: a later poll/snapshot shows the conversation if it landed.
+    } on SourceRefusal {
+      // Same.
+    }
+  }
+
+  /// Looks up whichever step's acknowledgment is unknown. Never resends.
+  Future<void> checkDraftFlow(DraftFlowKind kind) async {
+    final flow = _draftFlows[kind];
+    if (flow == null) return;
+    try {
+      switch (flow.phase) {
+        case DraftFlowPhase.stagingUnknown:
+          await _resolveStage(kind, flow);
+        case DraftFlowPhase.planningUnknown:
+          await _resolvePlan(kind, flow);
+        case DraftFlowPhase.applyingUnknown:
+          await _resolveApply(kind, flow);
+        default:
+          return;
+      }
+    } on SourceUnavailable catch (e) {
+      _goOffline(e.message);
+    }
+  }
+
+  Future<void> _resolveStage(DraftFlowKind kind, _DraftFlowOverlay flow) async {
+    try {
+      switch (await source.resolve(flow.stagePending!)) {
+        case ResolvedAcknowledged():
+          flow
+            ..draft = flow.stagePending!.result
+            ..stagePending = null;
+          await _startPlan(kind, flow);
+        case ResolvedRefused(:final refusal):
+          flow
+            ..phase = DraftFlowPhase.failed
+            ..note = refusal.message
+            ..stagePending = null;
+          _changed();
+        case ResolvedNotReceived():
+          flow
+            ..phase = DraftFlowPhase.failed
+            ..note = 'Not received. Nothing was created; try again.';
+          _changed();
+      }
+    } on AcknowledgmentUnknown {
+      flow.note = 'Still checking.';
+      _changed();
+    }
+  }
+
+  Future<void> _resolvePlan(DraftFlowKind kind, _DraftFlowOverlay flow) async {
+    try {
+      switch (await source.resolve(flow.planPending!)) {
+        case ResolvedAcknowledged():
+          final plan = flow.planPending!.result!;
+          flow
+            ..plan = plan
+            ..planPending = null
+            ..phase = plan.isClean
+                ? DraftFlowPhase.ready
+                : DraftFlowPhase.blocked;
+          _changed();
+        case ResolvedRefused(:final refusal):
+          flow
+            ..phase = DraftFlowPhase.failed
+            ..note = refusal.message
+            ..planPending = null;
+          _changed();
+        case ResolvedNotReceived():
+          flow
+            ..phase = DraftFlowPhase.failed
+            ..note = 'Not received. The draft was not planned; try again.';
+          _changed();
+      }
+    } on AcknowledgmentUnknown {
+      flow.note = 'Still checking.';
+      _changed();
+    }
+  }
+
+  Future<void> _resolveApply(DraftFlowKind kind, _DraftFlowOverlay flow) async {
+    try {
+      switch (await source.resolve(flow.applyPending!)) {
+        case ResolvedAcknowledged():
+          flow
+            ..applyPending = null
+            ..phase = DraftFlowPhase.applied;
+          _changed();
+          await _afterDraftApplied(kind, flow);
+        case ResolvedRefused(:final refusal):
+          flow
+            ..phase = DraftFlowPhase.failed
+            ..note = refusal.message
+            ..applyPending = null;
+          _changed();
+        case ResolvedNotReceived():
+          flow
+            ..phase = DraftFlowPhase.failed
+            ..note = 'Not received. Nothing was activated; try again.';
+          _changed();
+      }
+    } on AcknowledgmentUnknown {
+      flow.note = 'Still checking.';
+      _changed();
+    }
+  }
+
+  /// Resends whichever step provably sent nothing (or was proven not
+  /// received). The same frozen submission is reused; nothing is
+  /// re-prepared.
+  Future<void> retryDraftFlow(DraftFlowKind kind) async {
+    final flow = _draftFlows[kind];
+    if (flow == null) return;
+    if (flow.applyPending != null) {
+      flow
+        ..phase = DraftFlowPhase.applying
+        ..note = null;
+      _changed();
+      await _submitApply(kind, flow);
+    } else if (flow.planPending != null) {
+      flow
+        ..phase = DraftFlowPhase.planning
+        ..note = null;
+      _changed();
+      await _submitPlan(kind, flow);
+    } else if (flow.stagePending != null) {
+      flow
+        ..phase = DraftFlowPhase.staging
+        ..note = null;
+      _changed();
+      await _submitStage(kind, flow);
+    }
+  }
+
+  // -- group chats: an immediate conversation.create/update, no compiler --
+
+  bool get groupFlowBusy => _groupFlow?.submitting ?? false;
+  bool get groupFlowUnknown => _groupFlow?.unknown ?? false;
+  String? get groupFlowNote => _groupFlow?.note;
+
+  void cancelGroupFlow() {
+    _groupFlow = null;
+    _changed();
+  }
+
+  /// Creates a group chat with the given participants (the signed-in human
+  /// is added automatically). Immediate: group chats carry no org/grant/
+  /// memory permission, so nothing is staged through the compiler.
+  Future<void> createGroup({
+    required String title,
+    required List<String> workerParticipantIds,
+  }) async {
+    final human = humanPrincipalId;
+    if (human == null) return;
+    final overlay = _groupFlow = _GroupFlowOverlay()
+      ..pending = source.prepareCreateGroup(
+        title: title,
+        participantIds: {human, ...workerParticipantIds}.toList(),
+      )
+      ..submitting = true;
+    _changed();
+    await _submitGroup(overlay, onDone: selectGroup);
+  }
+
+  /// Adds an existing worker to a group conversation: a real membership
+  /// operation (`conversation.update`), never a locally invented list.
+  Future<void> addParticipantToGroup(
+    ConversationId group,
+    String workerId,
+  ) async {
+    final conversation = snapshot.conversation(group);
+    if (conversation == null) return;
+    final overlay = _groupFlow = _GroupFlowOverlay()
+      ..pending = source.prepareAddParticipant(
+        conversation: conversation,
+        expectedVersion: conversation.version,
+        newParticipantId: workerId,
+      )
+      ..submitting = true;
+    _changed();
+    await _submitGroup(overlay, onDone: (_) {});
+  }
+
+  Future<void> _submitGroup(
+    _GroupFlowOverlay overlay, {
+    required void Function(ConversationId) onDone,
+  }) async {
+    try {
+      await source.submit(overlay.pending!);
+      final outcome = overlay.pending!.result;
+      overlay
+        ..submitting = false
+        ..pending = null;
+      _changed();
+      await _reloadQuietly();
+      if (outcome != null) onDone(ConversationId(outcome.id));
+    } on SourceUnavailable catch (e) {
+      overlay
+        ..submitting = false
+        ..note = 'Not sent. ${e.message}';
+      _goOffline(e.message);
+    } on AcknowledgmentUnknown {
+      overlay
+        ..submitting = false
+        ..unknown = true;
+      _changed();
+    } on SourceRefusal catch (e) {
+      overlay
+        ..submitting = false
+        ..pending = null
+        ..note = e.message;
+      _changed();
+    }
+  }
+
+  /// Looks up an unknown acknowledgment. Never resends.
+  Future<void> checkGroupFlow() async {
+    final overlay = _groupFlow;
+    final pending = overlay?.pending;
+    if (overlay == null || pending == null || !overlay.unknown) return;
+    try {
+      switch (await source.resolve(pending)) {
+        case ResolvedAcknowledged():
+          final outcome = pending.result;
+          overlay
+            ..unknown = false
+            ..pending = null;
+          _changed();
+          await _reloadQuietly();
+          if (outcome != null) selectGroup(ConversationId(outcome.id));
+        case ResolvedRefused(:final refusal):
+          overlay
+            ..unknown = false
+            ..pending = null
+            ..note = refusal.message;
+          _changed();
+        case ResolvedNotReceived():
+          overlay
+            ..unknown = false
+            ..note = 'Not received. Try again.';
+          _changed();
+      }
+    } on SourceUnavailable catch (e) {
+      _goOffline(e.message);
+    } on AcknowledgmentUnknown {
+      overlay.note = 'Still checking.';
+      _changed();
+    }
+  }
+
+  // -- bounded tasks: create, then start; or delegate a child task --
+
+  TaskFlowView get taskFlow {
+    final o = _taskFlow;
+    if (o == null) return const TaskFlowView();
+    return TaskFlowView(phase: o.phase, note: o.note);
+  }
+
+  void cancelTaskFlow() {
+    _taskFlow = null;
+    _changed();
+  }
+
+  Future<void> createTask({
+    required String workerId,
+    required String outcome,
+    required List<String> requiredOutputs,
+    required VerifierIdentity verifier,
+    String currency = 'XXX',
+  }) async {
+    final owner = humanPrincipalId;
+    if (owner == null) return;
+    await _startTaskFlow(
+      () => source.prepareCreateTask(
+        ownerId: owner,
+        workerId: workerId,
+        outcome: outcome,
+        requiredOutputs: requiredOutputs,
+        verifier: verifier,
+        rootDeadline: _clock().add(const Duration(hours: 24)),
+        currency: currency,
+      ),
+    );
+  }
+
+  Future<void> delegateTask({
+    required TaskEntry parent,
+    required String childWorkerId,
+    required String outcome,
+    required List<String> requiredOutputs,
+    required VerifierIdentity verifier,
+    String currency = 'XXX',
+  }) => _startTaskFlow(
+    () => source.prepareDelegateTask(
+      parentId: parent.id,
+      parentExpectedVersion: parent.version,
+      ownerId: parent.ownerId,
+      childWorkerId: childWorkerId,
+      outcome: outcome,
+      requiredOutputs: requiredOutputs,
+      verifier: verifier,
+      rootDeadline: _clock().add(const Duration(hours: 24)),
+      currency: currency,
+    ),
+  );
+
+  Future<void> _startTaskFlow(
+    ResourceSubmission<TaskOutcome> Function() prepare,
+  ) async {
+    final flow = _TaskFlowOverlay()
+      ..createPending = prepare()
+      ..phase = TaskFlowPhase.creating;
+    _taskFlow = flow;
+    _changed();
+    await _submitTaskCreate(flow);
+  }
+
+  Future<void> _submitTaskCreate(_TaskFlowOverlay flow) async {
+    try {
+      await source.submit(flow.createPending!);
+      flow
+        ..created = flow.createPending!.result
+        ..createPending = null
+        ..phase = TaskFlowPhase.created;
+      _changed();
+      await _startTaskStart(flow);
+    } on SourceUnavailable catch (e) {
+      flow
+        ..phase = TaskFlowPhase.failed
+        ..note = 'Not sent. ${e.message}';
+      _changed();
+    } on AcknowledgmentUnknown {
+      flow.phase = TaskFlowPhase.creatingUnknown;
+      _changed();
+    } on SourceRefusal catch (e) {
+      flow
+        ..phase = TaskFlowPhase.failed
+        ..note = e.message
+        ..createPending = null;
+      _changed();
+    }
+  }
+
+  Future<void> _startTaskStart(_TaskFlowOverlay flow) async {
+    final created = flow.created!;
+    flow
+      ..startPending = source.prepareStartTask(
+        id: created.id,
+        expectedVersion: created.version,
+      )
+      ..phase = TaskFlowPhase.starting
+      ..note = null;
+    _changed();
+    await _submitTaskStart(flow);
+  }
+
+  Future<void> _submitTaskStart(_TaskFlowOverlay flow) async {
+    try {
+      await source.submit(flow.startPending!);
+      flow
+        ..startPending = null
+        ..phase = TaskFlowPhase.started;
+      _changed();
+      await _reloadQuietly();
+    } on SourceUnavailable catch (e) {
+      flow
+        ..phase = TaskFlowPhase.failed
+        ..note = 'Not sent. ${e.message}';
+      _changed();
+    } on AcknowledgmentUnknown {
+      flow.phase = TaskFlowPhase.startingUnknown;
+      _changed();
+    } on SourceRefusal catch (e) {
+      flow
+        ..phase = TaskFlowPhase.failed
+        ..note = e.message
+        ..startPending = null;
+      _changed();
+    }
+  }
+
+  /// Looks up whichever step's acknowledgment is unknown. Never resends.
+  Future<void> checkTaskFlow() async {
+    final flow = _taskFlow;
+    if (flow == null) return;
+    try {
+      if (flow.phase == TaskFlowPhase.creatingUnknown) {
+        switch (await source.resolve(flow.createPending!)) {
+          case ResolvedAcknowledged():
+            flow
+              ..created = flow.createPending!.result
+              ..createPending = null
+              ..phase = TaskFlowPhase.created;
+            _changed();
+            await _startTaskStart(flow);
+          case ResolvedRefused(:final refusal):
+            flow
+              ..phase = TaskFlowPhase.failed
+              ..note = refusal.message
+              ..createPending = null;
+            _changed();
+          case ResolvedNotReceived():
+            flow
+              ..phase = TaskFlowPhase.failed
+              ..note = 'Not received. Nothing was created; try again.';
+            _changed();
+        }
+      } else if (flow.phase == TaskFlowPhase.startingUnknown) {
+        switch (await source.resolve(flow.startPending!)) {
+          case ResolvedAcknowledged():
+            flow
+              ..startPending = null
+              ..phase = TaskFlowPhase.started;
+            _changed();
+            await _reloadQuietly();
+          case ResolvedRefused(:final refusal):
+            flow
+              ..phase = TaskFlowPhase.failed
+              ..note = refusal.message
+              ..startPending = null;
+            _changed();
+          case ResolvedNotReceived():
+            flow
+              ..phase = TaskFlowPhase.failed
+              ..note = 'Not received. The task was not started; try again.';
+            _changed();
+        }
+      }
+    } on SourceUnavailable catch (e) {
+      _goOffline(e.message);
+    } on AcknowledgmentUnknown {
+      flow.note = 'Still checking.';
+      _changed();
+    }
+  }
+
+  /// A manually-decided task's own human review: the same "eligible human
+  /// review" the acceptance contract requires (`api/acceptance.dart`).
+  Future<void> decideTask(TaskEntry task, {required bool accept}) async {
+    try {
+      final submission = source.prepareAcceptTask(
+        id: task.id,
+        expectedVersion: task.version,
+        accept: accept,
+      );
+      await source.submit(submission);
+      await _reloadQuietly();
+    } on SourceUnavailable catch (e) {
+      _goOffline(e.message);
+    } on AcknowledgmentUnknown {
+      // A later snapshot shows the decision if it landed; the person can
+      // look again rather than risk a duplicate decision.
+    } on SourceRefusal {
+      // The task's own state (re-read on the next snapshot) is the record.
+    }
+  }
+
+  // -- task result artifacts: eligible human review of exact content -----
+
+  Future<List<TaskArtifactEntry>> loadTaskArtifacts(String taskId) =>
+      source.loadTaskArtifacts(taskId);
+
+  Future<ReviewContentPart> readTaskArtifact(TaskArtifactEntry artifact) =>
+      source.readTaskArtifact(artifact);
+
+  Future<List<VerifierIdentity>> loadTrustedVerifiers() =>
+      source.loadTrustedVerifiers();
 }

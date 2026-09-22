@@ -75,11 +75,22 @@ class ConversationEntry {
     this.unreadCount = 0,
     this.lastReadMarker,
     this.lastMeaningfulEvent,
+    this.participantIds = const [],
+    this.version = 1,
   });
 
   final ConversationId id;
   final String title;
   final ConversationKind kind;
+
+  /// Every principal id the controller lists as a participant. Real
+  /// membership, read for `conversation.update`'s replacement list — never
+  /// inferred from who has spoken.
+  final List<String> participantIds;
+
+  /// The controller's own resource version: what `conversation.update`
+  /// binds as `expected_version`.
+  final int version;
 
   /// The worker a direct conversation belongs to. Groups have none and sit
   /// outside the organization tree.
@@ -124,6 +135,8 @@ class ConversationEntry {
     unreadCount: unreadCount,
     lastReadMarker: lastReadMarker,
     lastMeaningfulEvent: lastMeaningfulEvent,
+    participantIds: participantIds,
+    version: version,
   );
 }
 
@@ -247,6 +260,9 @@ class TaskEntry {
     required this.title,
     required this.state,
     this.detail = '',
+    this.version = 1,
+    this.ownerId = '',
+    this.manualAcceptance = false,
   });
 
   final String id;
@@ -257,6 +273,44 @@ class TaskEntry {
   /// Observed detail, for example failed checks or a waiting reason. A
   /// worker's own success statement never appears here.
   final String detail;
+
+  /// The controller's own resource version: what `task.start`/`.delegate`/
+  /// `.accept` bind as `expected_version`.
+  final int version;
+
+  /// The principal this task's outcome is reported to; reused unchanged
+  /// when delegating a child task.
+  final String ownerId;
+
+  /// True when this task's success can only be established by an eligible
+  /// human calling `task.accept` — see `api/acceptance.dart`.
+  final bool manualAcceptance;
+}
+
+/// One real result artifact a task has produced, named so it can be
+/// individually read.
+class TaskArtifactEntry {
+  const TaskArtifactEntry({
+    required this.id,
+    required this.digest,
+    required this.mediaType,
+    required this.sizeBytes,
+    required this.createdAt,
+  });
+
+  final String id;
+  final String digest;
+  final String mediaType;
+  final int sizeBytes;
+  final DateTime createdAt;
+}
+
+/// One verifier identity this installation actually has, exactly as
+/// `installation.verifier.list` reports it — never one this client invents.
+class VerifierIdentity {
+  const VerifierIdentity({required this.id, required this.version});
+  final String id;
+  final int version;
 }
 
 class RoutineEntry {
@@ -399,6 +453,7 @@ class PrerequisiteNotice {
     required this.message,
     this.tab,
     this.setupPath,
+    this.workerId,
   });
 
   final String title;
@@ -409,6 +464,39 @@ class PrerequisiteNotice {
 
   /// Where the person goes to fix it.
   final String? setupPath;
+
+  /// The worker this prerequisite blocks, for example a missing provider or
+  /// budget; null for a workspace-wide notice (not initialized, paused).
+  final WorkerId? workerId;
+}
+
+/// An external operation an authorized worker started on its own — no human
+/// review required — whose disposition is not yet settled. Never dropped
+/// silently: an accepted-but-unconfirmed or outcome-unknown effect stays
+/// visible until it resolves, even though nobody needs to decide it.
+class UnresolvedOperationEntry {
+  const UnresolvedOperationEntry({
+    required this.id,
+    required this.workerId,
+    required this.title,
+    required this.state,
+    required this.destination,
+  });
+
+  final String id;
+  final WorkerId? workerId;
+  final String title;
+  final EffectState state;
+  final String destination;
+
+  String get label => switch (state) {
+    EffectState.executing => 'Running',
+    EffectState.deliveryAccepted => 'Accepted · outcome not confirmed',
+    EffectState.outcomeUnknown => 'Outcome unknown · reservation kept',
+    EffectState.succeeded => 'Done · outcome confirmed',
+    EffectState.failed => 'Failed',
+    EffectState.notStarted => 'Not started',
+  };
 }
 
 class WorkspaceSnapshot {
@@ -426,6 +514,7 @@ class WorkspaceSnapshot {
     this.spending = const [],
     this.principals = const [],
     this.prerequisites = const [],
+    this.unresolvedOperations = const [],
     this.workspaceName = '',
   });
 
@@ -455,6 +544,7 @@ class WorkspaceSnapshot {
   final List<PrincipalEntry> principals;
 
   final List<PrerequisiteNotice> prerequisites;
+  final List<UnresolvedOperationEntry> unresolvedOperations;
   final String workspaceName;
 
   WorkerEntry? worker(WorkerId id) {

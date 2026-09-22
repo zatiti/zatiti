@@ -5,6 +5,7 @@ import '../transport/controller_client.dart';
 import '../transport/operations.dart';
 import '../transport/strict_json.dart';
 import '../transport/submission.dart';
+import 'acceptance.dart';
 import 'models.dart';
 
 /// Pages a list operation reads at most, so one snapshot stays bounded.
@@ -178,6 +179,245 @@ class ControllerApi {
     'scope': client.scope(),
     'id': id,
     'expected_version': expectedVersion,
+  });
+
+  // ---- organization/worker/group/task/responsibility creation -----------
+
+  Future<List<VerifierDescriptor>> trustedVerifiers() =>
+      listAll(Operations.installationVerifierList, VerifierDescriptor.fromJson);
+
+  Future<List<Connection>> connections() =>
+      listAll(Operations.connectionList, Connection.fromJson);
+
+  Future<List<Artifact>> taskArtifacts(String taskId) => listAll(
+    Operations.artifactList,
+    Artifact.fromJson,
+    filter: {'task_id': taskId},
+  );
+
+  /// Stages an organization and its chief in one draft (see
+  /// `handleOrganizationCreate` in `internal/configuration/handlers.go`:
+  /// both changes land in the same bundle, so the atomic chief-creation
+  /// invariant holds at apply).
+  Submission prepareOrganizationCreate({
+    required String key,
+    required String name,
+    String? parentOrganizationId,
+    required String chiefKey,
+    required String chiefName,
+    required String chiefPurpose,
+    required String chiefInstructions,
+  }) => client.prepare(Operations.organizationCreate, {
+    'scope': client.scope(),
+    'definition': {
+      'key': key,
+      'name': name,
+      'parent_id': ?parentOrganizationId,
+    },
+    'chief': {
+      'key': chiefKey,
+      'name': chiefName,
+      'purpose': chiefPurpose,
+      'instructions': chiefInstructions,
+      'skill_versions': const <Object?>[],
+      'bindings': const <Object?>[],
+      'profile': null,
+      'limits': null,
+    },
+  });
+
+  Submission prepareWorkerCreate({
+    required String organizationId,
+    required String key,
+    required String name,
+    required String purpose,
+    required String instructions,
+  }) => client.prepare(Operations.workerCreate, {
+    'scope': client.scope(organizationId: organizationId),
+    'definition': {
+      'organization_id': organizationId,
+      'key': key,
+      'name': name,
+      'purpose': purpose,
+      'instructions': instructions,
+      'skill_versions': const <Object?>[],
+      'bindings': const <Object?>[],
+      'profile': null,
+      'limits': null,
+    },
+  });
+
+  Submission prepareResponsibilityCreate({
+    required String workerId,
+    required String outcome,
+    required List<String> triggers,
+    required int minIntervalSeconds,
+    required VerifierDescriptor verifier,
+    required DateTime rootDeadline,
+    String currency = 'XXX',
+  }) {
+    final scope = client.scope(workerId: workerId);
+    return client.prepare(Operations.responsibilityCreate, {
+      'scope': scope,
+      'definition': {
+        'scope': scope,
+        'worker_id': workerId,
+        'outcome': outcome,
+        'signals': const <Object?>[],
+        'triggers': triggers,
+        'reasoning_policy':
+            'Decide only when a listed signal or trigger actually changed.',
+        'min_interval_seconds': minIntervalSeconds,
+        'cycle_limits': zeroSpendLimits(
+          rootDeadline: rootDeadline,
+          currency: currency,
+        ),
+        'aggregate_limits': zeroSpendLimits(
+          rootDeadline: rootDeadline,
+          currency: currency,
+        ),
+        'pause_conditions': const <Object?>[],
+        'escalation_conditions': const <Object?>[],
+        'acceptance': manualAcceptance(verifier),
+        'paused': false,
+      },
+    });
+  }
+
+  Submission preparePlan({
+    required String draftId,
+    required int expectedVersion,
+  }) => client.prepare(Operations.configurationPlan, {
+    'scope': client.scope(),
+    'draft_id': draftId,
+    'expected_version': expectedVersion,
+  });
+
+  Submission prepareApplyPlan({
+    required String planId,
+    required int baseRevision,
+    required String candidateDigest,
+  }) => client.prepare(Operations.configurationApply, {
+    'scope': client.scope(),
+    'plan_id': planId,
+    'base_revision': baseRevision,
+    'candidate_digest': candidateDigest,
+  });
+
+  Submission prepareConversationCreate({
+    required String kind,
+    required List<String> participantIds,
+    required String title,
+  }) => client.prepare(Operations.conversationCreate, {
+    'scope': client.scope(),
+    'kind': kind,
+    'participant_ids': participantIds,
+    'title': title,
+  });
+
+  Submission prepareConversationUpdate({
+    required String id,
+    required int expectedVersion,
+    List<String>? participantIds,
+    String? title,
+  }) => client.prepare(Operations.conversationUpdate, {
+    'scope': client.scope(),
+    'id': id,
+    'expected_version': expectedVersion,
+    'participant_ids': ?participantIds,
+    'title': ?title,
+  });
+
+  Map<String, Object?> _taskDefinition({
+    required String workerId,
+    required String ownerId,
+    required String outcome,
+    required List<String> requiredOutputs,
+    required VerifierDescriptor verifier,
+    required DateTime rootDeadline,
+    String currency = 'XXX',
+  }) {
+    final scope = client.scope(workerId: workerId);
+    return {
+      'scope': scope,
+      'owner_id': ownerId,
+      'worker_id': workerId,
+      'outcome': outcome,
+      'inputs': const <Object?>[],
+      'required_outputs': requiredOutputs,
+      'acceptance': manualAcceptance(verifier),
+      'limits': zeroSpendLimits(rootDeadline: rootDeadline, currency: currency),
+      'dependencies': const <Object?>[],
+    };
+  }
+
+  Submission prepareTaskCreate({
+    required String ownerId,
+    required String workerId,
+    required String outcome,
+    required List<String> requiredOutputs,
+    required VerifierDescriptor verifier,
+    required DateTime rootDeadline,
+    String currency = 'XXX',
+  }) => client.prepare(Operations.taskCreate, {
+    'scope': client.scope(workerId: workerId),
+    'definition': _taskDefinition(
+      workerId: workerId,
+      ownerId: ownerId,
+      outcome: outcome,
+      requiredOutputs: requiredOutputs,
+      verifier: verifier,
+      rootDeadline: rootDeadline,
+      currency: currency,
+    ),
+  });
+
+  Submission prepareTaskStart({
+    required String id,
+    required int expectedVersion,
+  }) => client.prepare(Operations.taskStart, {
+    'scope': client.scope(),
+    'id': id,
+    'expected_version': expectedVersion,
+  });
+
+  Submission prepareTaskDelegate({
+    required String id,
+    required int expectedVersion,
+    required String ownerId,
+    required String childWorkerId,
+    required String outcome,
+    required List<String> requiredOutputs,
+    required VerifierDescriptor verifier,
+    required DateTime rootDeadline,
+    String currency = 'XXX',
+  }) => client.prepare(Operations.taskDelegate, {
+    'scope': client.scope(),
+    'id': id,
+    'expected_version': expectedVersion,
+    'child': _taskDefinition(
+      workerId: childWorkerId,
+      ownerId: ownerId,
+      outcome: outcome,
+      requiredOutputs: requiredOutputs,
+      verifier: verifier,
+      rootDeadline: rootDeadline,
+      currency: currency,
+    ),
+  });
+
+  Submission prepareTaskAccept({
+    required String id,
+    required int expectedVersion,
+    required bool accept,
+    String reason = '',
+  }) => client.prepare(Operations.taskAccept, {
+    'scope': client.scope(),
+    'id': id,
+    'expected_version': expectedVersion,
+    'decision': accept ? 'accept' : 'reject',
+    'evidence_ids': const <Object?>[],
+    'reason': reason,
   });
 
   Object? _resource(Map<String, Object?>? data, String operation) {

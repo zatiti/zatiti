@@ -11,6 +11,7 @@ import '../state/workspace_source.dart';
 import 'action_review_dialog.dart';
 import 'conversation_tree.dart';
 import 'conversation_view.dart';
+import 'creation_dialogs.dart';
 import 'theme.dart';
 import 'widgets.dart';
 import 'worker_details_panel.dart';
@@ -231,12 +232,41 @@ class _Sidebar extends StatelessWidget {
                 Space.lg,
                 Space.lg,
               ),
-              child: Semantics(
-                header: true,
-                child: Text(
-                  'Zatiti',
-                  style: text.titleLarge!.copyWith(fontSize: 19),
-                ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Semantics(
+                      header: true,
+                      child: Text(
+                        'Zatiti',
+                        style: text.titleLarge!.copyWith(fontSize: 19),
+                      ),
+                    ),
+                  ),
+                  PopupMenuButton<String>(
+                    key: const ValueKey('new-menu'),
+                    tooltip: 'New',
+                    icon: const Icon(Icons.add, size: 20),
+                    onSelected: (choice) {
+                      switch (choice) {
+                        case 'organization':
+                          showNewOrganizationDialog(context, controller);
+                        case 'worker':
+                          showNewWorkerDialog(context, controller);
+                        case 'group':
+                          showNewGroupDialog(context, controller);
+                      }
+                    },
+                    itemBuilder: (_) => const [
+                      PopupMenuItem(
+                        value: 'organization',
+                        child: Text('New organization'),
+                      ),
+                      PopupMenuItem(value: 'worker', child: Text('New worker')),
+                      PopupMenuItem(value: 'group', child: Text('New group')),
+                    ],
+                  ),
+                ],
               ),
             ),
             Padding(

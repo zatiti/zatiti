@@ -2,6 +2,7 @@
 // value here, with its presentation rules in one place.
 
 import 'snapshot.dart';
+import 'workspace_source.dart' show PlanOutcome;
 
 /// The connection to the controller.
 enum ConnectionPhase {
@@ -246,6 +247,96 @@ enum TurnStatus {
 }
 
 enum RoutinePhase { active, submitting, acknowledgmentUnknown, paused }
+
+/// Which draft/plan/review/apply flow a dialog is driving. Each kind has at
+/// most one flow in progress at a time (one modal dialog at a time).
+enum DraftFlowKind { organization, worker, responsibility }
+
+/// Where a draft/plan/review/apply flow (new organization, new worker, new
+/// responsibility) stands. Nothing named by [DraftFlowView.createdId] is
+/// real until [applied].
+enum DraftFlowPhase {
+  /// The dialog is open; nothing has been sent.
+  composing,
+
+  /// Staging the draft (the `organization.create`/`worker.create`/
+  /// `responsibility.create` call).
+  staging,
+  stagingUnknown,
+
+  /// Sealing the candidate (`configuration.plan`).
+  planning,
+  planningUnknown,
+
+  /// Planned and clean: a person can review and apply it.
+  ready,
+
+  /// Planned, but the compiler found something that must be resolved
+  /// elsewhere first (an authority or decision requirement, a diagnostic).
+  blocked,
+
+  /// Activating the plan (`configuration.apply`).
+  applying,
+  applyingUnknown,
+
+  /// Active. [DraftFlowView.createdId] now names a real resource.
+  applied,
+
+  /// A step was refused. [DraftFlowView.note] explains.
+  failed;
+
+  bool get isBusy => switch (this) {
+    staging || planning || applying => true,
+    _ => false,
+  };
+
+  bool get needsCheck => switch (this) {
+    stagingUnknown || planningUnknown || applyingUnknown => true,
+    _ => false,
+  };
+}
+
+/// The draft/plan/review/apply flow as a dialog renders it: one object, one
+/// place, so the "New organization"/"New worker"/"New responsibility"
+/// dialogs share the same review step.
+class DraftFlowView {
+  const DraftFlowView({
+    this.phase = DraftFlowPhase.composing,
+    this.plan,
+    this.note,
+    this.createdId,
+  });
+
+  final DraftFlowPhase phase;
+  final PlanOutcome? plan;
+  final String? note;
+
+  /// The organization/worker/responsibility id, once [phase] is [applied].
+  final String? createdId;
+}
+
+/// Where a bounded task's own creation/start/delegation stands.
+enum TaskFlowPhase {
+  composing,
+  creating,
+  creatingUnknown,
+  created,
+  starting,
+  startingUnknown,
+  started,
+  failed,
+}
+
+class TaskFlowView {
+  const TaskFlowView({this.phase = TaskFlowPhase.composing, this.note});
+  final TaskFlowPhase phase;
+  final String? note;
+
+  bool get isBusy => switch (phase) {
+    TaskFlowPhase.creating || TaskFlowPhase.starting => true,
+    _ => false,
+  };
+}
 
 class RoutineView {
   const RoutineView({

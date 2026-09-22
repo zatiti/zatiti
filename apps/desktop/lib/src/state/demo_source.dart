@@ -30,6 +30,22 @@ class _DemoSubmission implements PendingSubmission {
   int sends = 0;
 }
 
+/// The demo's [ResourceSubmission]: [_produce] both mutates the in-memory
+/// demo state and returns the decoded result, mirroring how the live
+/// source's decode callback runs only once the controller acknowledges.
+class _DemoResourceSubmission<T> implements ResourceSubmission<T> {
+  _DemoResourceSubmission(this.description, this._produce);
+
+  @override
+  final String description;
+  final T Function() _produce;
+  bool committed = false;
+  int sends = 0;
+
+  @override
+  T? result;
+}
+
 class DemoWorkspaceSource implements WorkspaceSource {
   DemoWorkspaceSource({DateTime Function()? clock})
     : _clock = clock ?? (() => DateTime.now().toUtc());
@@ -63,6 +79,43 @@ class DemoWorkspaceSource implements WorkspaceSource {
   bool _dirty = false;
   final Map<ConversationId, List<ChatMessage>> _sent = {};
   int _messageIds = 0;
+
+  // ---- organization/worker/group/task/responsibility creation, in memory
+
+  int _createdIds = 0;
+  String _newId(String prefix) => 'demo-$prefix-${++_createdIds}';
+
+  final List<WorkerEntry> _extraWorkers = [];
+
+  /// [w] with its real conversation id attached, found the same way the
+  /// live source's `_tree` does: the direct conversation scoped to it.
+  /// [_extraWorkers] entries never bake this in at creation, since the
+  /// conversation is opened by a separate call after the worker exists.
+  WorkerEntry _attachConversation(WorkerEntry w) {
+    if (w.conversationId != null) return w;
+    for (final c in _extraConversations) {
+      if (c.kind == ConversationKind.direct && c.workerId == w.id) {
+        return WorkerEntry(
+          id: w.id,
+          name: w.name,
+          role: w.role,
+          organizationId: w.organizationId,
+          organizationPath: w.organizationPath,
+          parentId: w.parentId,
+          conversationId: c.id,
+          isOrganizationChief: w.isOrganizationChief,
+          preview: w.preview,
+        );
+      }
+    }
+    return w;
+  }
+
+  final List<ConversationEntry> _extraConversations = [];
+  final List<TaskEntry> _extraTasks = [];
+  final List<RoutineEntry> _extraRoutines = [];
+  static const humanPrincipal = 'demo-principal-owner';
+  static const _verifier = VerifierIdentity(id: 'demo-verifier', version: 1);
 
   /// Every submission that reached the pretend controller, for tests.
   final List<String> committed = [];
@@ -168,44 +221,385 @@ class DemoWorkspaceSource implements WorkspaceSource {
   PendingSubmission preparePause(RoutineEntry routine) =>
       _DemoSubmission('pause ${routine.id.value}', () => _routinePaused = true);
 
+  // ---- organization/worker/group/task/responsibility creation -----------
+  //
+  // The demo has no compiler: creation happens on the "create" step's own
+  // commit, and `preparePlan`/`prepareApplyPlan` are trivial pass-throughs
+  // so the same dialog flow the live source drives (stage → plan → review →
+  // apply) still exercises every step and every acknowledgment path here.
+
+  @override
+  ResourceSubmission<DraftedResource> prepareCreateOrganization({
+    required String key,
+    required String name,
+    String? parentOrganizationId,
+    required String chiefKey,
+    required String chiefName,
+    required String chiefPurpose,
+    required String chiefInstructions,
+  }) => _DemoResourceSubmission('create organization $key', () {
+    final orgId = _newId('org');
+    final chiefId = WorkerId(_newId('worker'));
+    final parent = parentOrganizationId == null
+        ? null
+        : WorkerId(parentOrganizationId);
+    _extraWorkers.add(
+      WorkerEntry(
+        id: chiefId,
+        name: chiefName,
+        role: 'Organization chief',
+        organizationId: OrganizationId(orgId),
+        organizationPath: const ['Personal', 'New organization'],
+        parentId: parent ?? wren,
+        isOrganizationChief: true,
+      ),
+    );
+    return DraftedResource(
+      draftId: _newId('draft'),
+      draftVersion: 1,
+      resourceId: orgId,
+      conversationTargetId: chiefId.value,
+    );
+  });
+
+  @override
+  ResourceSubmission<DraftedResource> prepareCreateWorker({
+    required String organizationId,
+    required String key,
+    required String name,
+    required String purpose,
+    required String instructions,
+  }) => _DemoResourceSubmission('create worker $key', () {
+    final id = WorkerId(_newId('worker'));
+    final parent = WorkerId(organizationId);
+    _extraWorkers.add(
+      WorkerEntry(
+        id: id,
+        name: name,
+        role: purpose,
+        organizationId: OrganizationId(organizationId),
+        organizationPath: const ['Personal'],
+        parentId: parent,
+      ),
+    );
+    return DraftedResource(
+      draftId: _newId('draft'),
+      draftVersion: 1,
+      resourceId: id.value,
+      conversationTargetId: id.value,
+    );
+  });
+
+  @override
+  ResourceSubmission<DraftedResource> prepareCreateResponsibility({
+    required String workerId,
+    required String outcome,
+    required List<String> triggers,
+    required int minIntervalSeconds,
+    required VerifierIdentity verifier,
+    required DateTime rootDeadline,
+    String currency = 'XXX',
+  }) => _DemoResourceSubmission('create responsibility for $workerId', () {
+    final id = RoutineId(_newId('routine'));
+    _extraRoutines.add(
+      RoutineEntry(
+        id: id,
+        version: 1,
+        workerId: WorkerId(workerId),
+        title: outcome,
+        schedule: triggers.isEmpty
+            ? 'Runs when its signals change'
+            : triggers.join(' · '),
+        paused: false,
+      ),
+    );
+    return DraftedResource(
+      draftId: _newId('draft'),
+      draftVersion: 1,
+      resourceId: id.value,
+    );
+  });
+
+  @override
+  ResourceSubmission<PlanOutcome> preparePlan({
+    required String draftId,
+    required int expectedVersion,
+  }) => _DemoResourceSubmission(
+    'plan $draftId',
+    () => PlanOutcome(
+      planId: _newId('plan'),
+      baseRevision: 1,
+      candidateDigest: _newId('digest'),
+      diagnostics: const [],
+      pendingRequirements: const [],
+    ),
+  );
+
+  @override
+  ResourceSubmission<PlanOutcome> prepareApplyPlan(PlanOutcome plan) =>
+      _DemoResourceSubmission('apply plan ${plan.planId}', () => plan);
+
+  @override
+  ResourceSubmission<ConversationOutcome> prepareOpenDirectConversation({
+    required String humanPrincipalId,
+    required String workerId,
+    required String title,
+  }) => _DemoResourceSubmission('open a conversation with $workerId', () {
+    final id = ConversationId(_newId('conversation'));
+    _extraConversations.add(
+      ConversationEntry(
+        id: id,
+        title: title,
+        kind: ConversationKind.direct,
+        workerId: WorkerId(workerId),
+        messages: const [],
+        participantIds: [humanPrincipalId, workerId],
+      ),
+    );
+    return ConversationOutcome(id: id.value, version: 1);
+  });
+
+  @override
+  ResourceSubmission<ConversationOutcome> prepareCreateGroup({
+    required String title,
+    required List<String> participantIds,
+  }) => _DemoResourceSubmission('create group $title', () {
+    final id = ConversationId(_newId('conversation'));
+    _extraConversations.add(
+      ConversationEntry(
+        id: id,
+        title: title,
+        kind: ConversationKind.group,
+        messages: const [],
+        participantIds: participantIds,
+      ),
+    );
+    return ConversationOutcome(id: id.value, version: 1);
+  });
+
+  @override
+  ResourceSubmission<ConversationOutcome> prepareAddParticipant({
+    required ConversationEntry conversation,
+    required int expectedVersion,
+    required String newParticipantId,
+  }) => _DemoResourceSubmission(
+    'add a participant to ${conversation.id.value}',
+    () {
+      final updated = ConversationEntry(
+        id: conversation.id,
+        title: conversation.title,
+        kind: conversation.kind,
+        workerId: conversation.workerId,
+        messages: conversation.messages,
+        participantIds: {
+          ...conversation.participantIds,
+          newParticipantId,
+        }.toList(),
+        version: conversation.version + 1,
+      );
+      _extraConversations
+        ..removeWhere((c) => c.id == conversation.id)
+        ..add(updated);
+      return ConversationOutcome(
+        id: updated.id.value,
+        version: updated.version,
+      );
+    },
+  );
+
+  @override
+  ResourceSubmission<TaskOutcome> prepareCreateTask({
+    required String ownerId,
+    required String workerId,
+    required String outcome,
+    required List<String> requiredOutputs,
+    required VerifierIdentity verifier,
+    required DateTime rootDeadline,
+    String currency = 'XXX',
+  }) => _DemoResourceSubmission('create task for $workerId', () {
+    final id = _newId('task');
+    _extraTasks.add(
+      TaskEntry(
+        id: id,
+        workerId: WorkerId(workerId),
+        title: outcome,
+        state: TaskEntryState.waiting,
+        detail: 'Not started yet',
+        version: 1,
+        ownerId: ownerId,
+        manualAcceptance: true,
+      ),
+    );
+    return TaskOutcome(id: id, version: 1, state: 'draft');
+  });
+
+  @override
+  ResourceSubmission<TaskOutcome> prepareStartTask({
+    required String id,
+    required int expectedVersion,
+  }) => _DemoResourceSubmission('start task $id', () {
+    final existing = _extraTasks.firstWhere((t) => t.id == id);
+    final started = TaskEntry(
+      id: existing.id,
+      workerId: existing.workerId,
+      title: existing.title,
+      state: TaskEntryState.inProgress,
+      detail: 'Running (demo)',
+      version: existing.version + 1,
+      ownerId: existing.ownerId,
+      manualAcceptance: existing.manualAcceptance,
+    );
+    _extraTasks
+      ..removeWhere((t) => t.id == id)
+      ..add(started);
+    return TaskOutcome(
+      id: started.id,
+      version: started.version,
+      state: 'ready',
+    );
+  });
+
+  @override
+  ResourceSubmission<TaskOutcome> prepareDelegateTask({
+    required String parentId,
+    required int parentExpectedVersion,
+    required String ownerId,
+    required String childWorkerId,
+    required String outcome,
+    required List<String> requiredOutputs,
+    required VerifierIdentity verifier,
+    required DateTime rootDeadline,
+    String currency = 'XXX',
+  }) => _DemoResourceSubmission('delegate $parentId to $childWorkerId', () {
+    final id = _newId('task');
+    _extraTasks.add(
+      TaskEntry(
+        id: id,
+        workerId: WorkerId(childWorkerId),
+        title: outcome,
+        state: TaskEntryState.waiting,
+        detail: 'Delegated (demo) · not started yet',
+        version: 1,
+        ownerId: ownerId,
+        manualAcceptance: true,
+      ),
+    );
+    return TaskOutcome(id: id, version: 1, state: 'draft');
+  });
+
+  @override
+  ResourceSubmission<TaskOutcome> prepareAcceptTask({
+    required String id,
+    required int expectedVersion,
+    required bool accept,
+    String reason = '',
+  }) => _DemoResourceSubmission('${accept ? 'accept' : 'reject'} task $id', () {
+    final existing = _extraTasks.firstWhere((t) => t.id == id);
+    final decided = TaskEntry(
+      id: existing.id,
+      workerId: existing.workerId,
+      title: existing.title,
+      state: accept ? TaskEntryState.completed : TaskEntryState.needsChanges,
+      detail: accept ? 'Accepted (demo)' : 'Rejected (demo)',
+      version: existing.version + 1,
+      ownerId: existing.ownerId,
+      manualAcceptance: existing.manualAcceptance,
+    );
+    _extraTasks
+      ..removeWhere((t) => t.id == id)
+      ..add(decided);
+    return TaskOutcome(
+      id: decided.id,
+      version: decided.version,
+      state: accept ? 'succeeded' : 'failed',
+    );
+  });
+
+  @override
+  Future<List<VerifierIdentity>> loadTrustedVerifiers() async {
+    _requireOnline();
+    return const [_verifier];
+  }
+
+  @override
+  Future<List<TaskArtifactEntry>> loadTaskArtifacts(String taskId) async {
+    _requireOnline();
+    return const [];
+  }
+
+  @override
+  Future<ReviewContentPart> readTaskArtifact(TaskArtifactEntry artifact) async {
+    _requireOnline();
+    return ReviewContentPart(
+      label: artifact.mediaType,
+      digest: artifact.digest,
+      unavailableReason: 'The demo has no artifact bytes to show.',
+    );
+  }
+
   @override
   Future<void> submit(PendingSubmission submission) async {
-    final s = submission as _DemoSubmission;
     _requireOnline();
     await beforeSubmit?.call();
     final fault = nextFault;
     nextFault = DemoFault.none;
-    s.sends++;
+    _sends(submission, 1);
     switch (fault) {
       case DemoFault.none:
-        _commit(s);
+        _commit(submission);
       case DemoFault.unavailable:
-        s.sends--;
+        _sends(submission, -1);
         throw const SourceUnavailable('The demo refused the connection.');
       case DemoFault.unknownThenFound:
-        _commit(s);
+        _commit(submission);
         throw const AcknowledgmentUnknown('The demo dropped the answer.');
       case DemoFault.unknownThenNotReceived:
         throw const AcknowledgmentUnknown('The demo dropped the request.');
       case DemoFault.stale:
         _reviewVersion++;
         _dirty = true;
-        _commit(s);
+        _commit(submission);
     }
   }
 
-  void _commit(_DemoSubmission s) {
-    if (s.committed) return; // Same identity: the original result stands.
-    s.apply();
-    s.committed = true;
-    committed.add(s.description);
+  void _sends(PendingSubmission submission, int delta) {
+    switch (submission) {
+      case _DemoSubmission s:
+        s.sends += delta;
+      case _DemoResourceSubmission s:
+        s.sends += delta;
+      default:
+        throw StateError('unknown demo submission ${submission.runtimeType}');
+    }
+  }
+
+  bool _committedOf(PendingSubmission submission) => switch (submission) {
+    _DemoSubmission s => s.committed,
+    _DemoResourceSubmission s => s.committed,
+    _ => throw StateError('unknown demo submission ${submission.runtimeType}'),
+  };
+
+  void _commit(PendingSubmission submission) {
+    // Same identity: the original result stands.
+    if (_committedOf(submission)) return;
+    switch (submission) {
+      case _DemoSubmission s:
+        s.apply();
+        s.committed = true;
+      case _DemoResourceSubmission s:
+        s.result = s._produce();
+        s.committed = true;
+      default:
+        throw StateError('unknown demo submission ${submission.runtimeType}');
+    }
+    committed.add(submission.description);
     _dirty = true;
   }
 
   @override
   Future<Resolution> resolve(PendingSubmission submission) async {
     _requireOnline();
-    return (submission as _DemoSubmission).committed
+    return _committedOf(submission)
         ? const ResolvedAcknowledged()
         : const ResolvedNotReceived();
   }
@@ -292,6 +686,7 @@ class DemoWorkspaceSource implements WorkspaceSource {
         title: title,
         kind: ConversationKind.direct,
         workerId: w,
+        participantIds: [humanPrincipal, w.value],
         messages: [
           if (ask.isNotEmpty)
             ChatMessage(
@@ -403,6 +798,7 @@ class DemoWorkspaceSource implements WorkspaceSource {
           chief: true,
           preview: 'Reconciling this week’s expenses.',
         ),
+        for (final w in _extraWorkers) _attachConversation(w),
       ],
       conversations: _cacheMessages([
         direct(
@@ -469,6 +865,7 @@ class DemoWorkspaceSource implements WorkspaceSource {
           id: planningGroup,
           title: 'Workshop planning',
           kind: ConversationKind.group,
+          participantIds: [humanPrincipal, marketing.value],
           messages: [
             ChatMessage(
               id: 'demo-group-1',
@@ -482,6 +879,7 @@ class DemoWorkspaceSource implements WorkspaceSource {
             ...?_sent[planningGroup],
           ],
         ),
+        ..._extraConversations,
       ]),
       reviews: [_review()],
       proposals: const [
@@ -494,28 +892,29 @@ class DemoWorkspaceSource implements WorkspaceSource {
               'conversation, access or schedule until the plan is applied.',
         ),
       ],
-      tasks: const [
-        TaskEntry(
+      tasks: [
+        const TaskEntry(
           id: 'demo-task-reconcile',
           workerId: ledger,
           title: 'Weekly reconciliation',
           state: TaskEntryState.inProgress,
           detail: '18 of 24 receipts matched',
         ),
-        TaskEntry(
+        const TaskEntry(
           id: 'demo-task-shortlist',
           workerId: research,
           title: 'Partnership shortlist',
           state: TaskEntryState.completed,
           detail: 'Acceptance checks passed · sample evidence',
         ),
-        TaskEntry(
+        const TaskEntry(
           id: 'demo-task-website',
           workerId: quality,
           title: 'Review the first-time website experience',
           state: TaskEntryState.needsChanges,
           detail: 'Observed: 1 of 3 checks failed · setup steps unclear',
         ),
+        ..._extraTasks,
       ],
       routines: [
         RoutineEntry(
@@ -527,6 +926,7 @@ class DemoWorkspaceSource implements WorkspaceSource {
           boundary: 'Reads receipts and prepares a report. Cannot move money.',
           paused: _routinePaused,
         ),
+        ..._extraRoutines,
       ],
       files: const [
         FileEntry(

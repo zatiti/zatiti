@@ -58,9 +58,9 @@ demo's pending decision is a repository action.
 | Path | Contents |
 | --- | --- |
 | `lib/src/transport/` | Pure Dart. Strict JSON, envelopes, fault codes, endpoints, the controller client and submission identity. No Flutter imports. |
-| `lib/src/api/` | Pure Dart. Typed wire resources and typed operation calls. |
+| `lib/src/api/` | Pure Dart. Typed wire resources, typed operation calls, and `acceptance.dart` (the manual-acceptance contract a "New task"/"New responsibility" dialog can honestly build — see "Organization, worker, group and task creation" below). |
 | `lib/src/state/` | The workspace source interface, the snapshot, the view-state controller, the live source and the demo source. |
-| `lib/src/ui/` | `WorkspaceShell`, `OrganizationConversationTree`, `ConversationView`, `MessageComposer`, `ActionReviewDialog`, `WorkerDetailsPanel`, `WorkspaceSettings` and the theme tokens. |
+| `lib/src/ui/` | `WorkspaceShell`, `OrganizationConversationTree`, `ConversationView`, `MessageComposer`, `ActionReviewDialog`, `WorkerDetailsPanel`, `WorkspaceSettings`, `creation_dialogs.dart` (new organization/worker/group), `task_dialogs.dart` (new task/delegate, task results) and the theme tokens. |
 | `lib/src/app/` | Startup plan, credential store and the application widget. |
 | `live_test/` | The end-to-end proof against a real controller. Not part of `flutter test`; run it with `tool/live-proof.sh`. |
 | `tool/` | `live-proof.sh`, which builds the controller and runs `live_test/`. |
@@ -90,6 +90,46 @@ demo's pending decision is a repository action.
 - Review content is read through `artifact.read`. Content that is not text, is
   larger than 1 MiB, or does not match the digest the review binds to cannot
   be approved from this client.
+
+## Organization, worker, group and task creation
+
+New organization, new worker and new responsibility each drive the real
+`configuration` compiler: `organization.create`/`worker.create`/
+`responsibility.create` stage a draft (no `draft_id` given, so the controller
+opens one against the current head itself), `configuration.plan` seals a
+candidate, the dialog shows the plan's diagnostics as the review step, and
+only an explicit "Create" calls `configuration.apply`. Nothing is active
+before that. Applying an organization or worker also opens a real direct
+conversation with the new chief/worker (`conversation.create`) using the
+signed-in human's principal id, derived from an existing direct
+conversation's own participants — never guessed, for the same reason
+`live_source.dart`'s class doc gives for message attribution: the catalog has
+no `identity.current`. New group is immediate (`conversation.create`
+directly): group chats carry no org/grant/memory permission, so nothing is
+staged through the compiler.
+
+Bounded tasks and responsibilities this client creates are always decided
+**manually**: `acceptance.mode: "manual"`, so success or failure is
+established only by an eligible human calling `task.accept`, never an
+automated verifier. This is a deliberate scope line, not an oversight:
+automated (`mode: "independent"`) verification needs a capability-evidence
+artifact whose bytes (a real SHA-256 digest and base64 payload) an operator
+computes and uploads by hand — `internal/installation/firsttask.go`'s own
+`FirstTaskSequence` spells this out as a multi-step CLI sequence with
+placeholders a person fills in. A thin client with no business logic, no
+filesystem access and no cryptographic-evidence-authoring role (this root's
+AGENTS.md) has no honest way to do that, so `api/acceptance.dart` builds a
+schema-valid but functionally inert `profile` for manual-mode tasks only
+(confirmed by reading `internal/tasks/acceptance.go`'s `evaluateSuccess`:
+manual-mode success never dereferences it) and this client never offers
+`mode: "independent"`. Reported as a gap in the P43 handoff rather than
+silently worked around further.
+
+`installation.verifier.list` still names the real installed verifier
+identity these forms reference (never invented), and `task.create`'s
+`limits` defaults to zero-spend `XXX` — the wire's explicit "no currency
+configured" sentinel — unless the worker already has a configured currency,
+so a task or responsibility is always creatable even before a budget exists.
 
 ## Third-party packages
 
@@ -224,6 +264,13 @@ Not verified:
 - Every surface that needs populated state: reviews, tasks, responsibilities,
   artifacts and spending are all empty on a fresh installation, so the live run
   proves they are honestly empty, not that they render real records.
+- P43's organization/worker/group/task/responsibility creation flows: proven
+  by `test/state/creation_flow_test.dart` and `test/state/
+  prerequisites_and_unresolved_ops_test.dart` against the controlled fake
+  (the real draft/plan/apply staging, the manual `task.accept` decision, and
+  per-worker setup cards), but not yet run against a real controller through
+  `tool/live-proof.sh`. That real-controller pass is explicit follow-up work
+  for whoever lands this card next.
 - Linux, where the live proof has not been run.
 - Windows. Dart supports `AF_UNIX` addresses, but the transport choice for
   Windows is qualification work per ADR 002.
@@ -256,18 +303,21 @@ Observed against the real controller, and not a gap:
   it displays, so a copy delivered back through a mailbox is recognized and
   not shown twice.
 
-One controller defect, observed from this root and reproduced, for the owning
-lane:
+One controller defect, observed from this root, reproduced, and since fixed
+by another lane (verified by reading `internal/tasks/ports.go`'s current
+`callPeer`, which now passes a peer's named fault through unchanged instead
+of stamping `internal_error` over it, and by `cmd/zatiti/firsttask_test.go`'s
+`TestFirstTaskSequenceRunsAsPrinted`, which runs `task.create` with zero-spend
+`XXX` on a fresh installation end to end and asserts it completes) — kept here
+for history, not as a current gap:
 
-- `task.create` on a freshly initialized installation fails
-  `internal_error` "peer call `_accounting.reserve` failed" at HTTP 500. Getting
-  that far needs `limits.currency` to equal the installation's accounting
-  currency, which is `XXX` on a fresh installation; any other currency is
-  refused `budget_unavailable` first. So no task can be created on a new
-  installation through the public catalog, and the failure is an unnamed
-  internal error rather than a named fault. The desktop does not call
-  `task.create`, so nothing here depends on it, but the Work tab has no way to
-  hold real records until this works.
+- `task.create` on a freshly initialized installation used to fail
+  `internal_error` "peer call `_accounting.reserve` failed" at HTTP 500 even
+  at zero spend in the installation's own `XXX` currency, because a peer
+  refusal that arrived as a Go error rather than inside the payload was
+  overwritten with an unnamed internal error. P43 now calls `task.create`
+  directly (see "Organization, worker, group and task creation" above); this
+  note is why that call was safe to add.
 
 Two contract observations for other lanes:
 
