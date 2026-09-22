@@ -3327,3 +3327,15 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   from an interrupted kill, and an orphaned qualification-suite zatiti
   serve process from the already-removed golden-count-fix worktree) --
   both documented, see docs/lore.md.
+- 2026-09-22 ~03:52 PT -- WAVE 14 DISPATCHED (P32 internal/controller +
+  P44 apps/desktop), true 2-way parallel. Re-derived the landed set from
+  source per the lore.md lesson from this same stretch (regex + manual
+  verification for known phrasing exceptions), confirmed 42/50 landed,
+  both cards' full dependency lists satisfied, disjoint write roots, no
+  same-owner conflicts (P32's owner internal/controller untouched by
+  anything in flight; P44's owner apps/desktop is P43's, just closed).
+  P32 briefed on P31's restore-handoff design (_installation.restore.record
+  as the controller-callback split). P44 briefed on P43's two documented
+  contract gaps (no identity.current, manual-only acceptance) to avoid
+  rediscovering them, and warned against redoing already-landed work
+  given this stretch's two earlier scope-tracking mistakes.
