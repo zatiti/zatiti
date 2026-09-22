@@ -22,14 +22,23 @@
 # $defs (Operation/Artifact/Responsibility/Conversation), which is P37's own
 # job and is correct -- but every module still shipping the old shape now
 # fails registry assembly ("operation schema redefines the shared
-# definition X"), which is the entries below. P09 (internal/artifacts) is
-# structurally blocked from landing until this entry set is added, since it
-# embeds Artifact/Operation directly -- there is no order that avoids this.
-# Remove each line the moment P06/P07/P09/P10 land and the assembly-wide
-# check passes clean again; see docs/roadmap.md's 2026-09-20 entry.
+# definition X"), which was the entries below. That class of drift is now
+# fully closed: PR #40 fixed the stale $defs across policy/accounting/
+# installation/messaging, PR #42 fixed the specgen generator bug behind
+# scope_required drift, and P25 (PR #43, 2026-09-22) fixed internal/
+# installation's remaining Status.runtime_ready gap and implemented
+# installation.verifier.list -- the last thing keeping registry assembly
+# from succeeding module-wide. cmd/zatiti, internal/application,
+# internal/installation and tests/qualification are confirmed green again
+# on real post-merge main and removed from this list.
+#
+# tests/integration stays listed for a DIFFERENT, newly-tracked reason:
+# TestExpiredCursorDemandsSnapshotAndReplaysWithoutGap hangs on a genuine
+# CPU-bound performance bug in internal/contract.ValidateSchema/strictParse
+# (likely non-memoized $ref resolution on the _policy.check authorization
+# gate's Action schema validation), only reachable now that registry
+# assembly succeeds -- see docs/roadmap.md's 2026-09-22 ~00:40 PT entry for
+# the full goroutine-dump diagnosis. Remove this line once that bug has its
+# own fix landed.
 
-cmd/zatiti
-internal/application
-internal/installation
 tests/integration
-tests/qualification
