@@ -107,11 +107,7 @@ func TestDescriptorsExactness(t *testing.T) {
 		if d.Owner != "messaging" || d.Version != 1 {
 			t.Fatalf("%s owner/version %s/%d, want messaging/1", d.ID, d.Owner, d.Version)
 		}
-		// conversation.message.list is the one confirmed exception: its
-		// frozen catalog entry omits scope_required despite requiring scope
-		// in its input schema (see opMeta.noScopeRequired), so this package
-		// matches that frozen entry instead of the general rule.
-		if d.Visibility == "public" && d.ID != "conversation.message.list" &&
+		if d.Visibility == "public" &&
 			(len(d.ScopeRequired) != 1 || d.ScopeRequired[0] != "installation_id") {
 			t.Fatalf("%s scope_required %v, want [installation_id]", d.ID, d.ScopeRequired)
 		}

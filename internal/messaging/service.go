@@ -19,20 +19,6 @@ type opMeta struct {
 	expectedVersion bool
 	callers         []string
 	cli             string // CLI tokens below the root command, space separated; empty for internal operations
-
-	// noScopeRequired overrides the derived scope_required for one operation
-	// to empty even though its input schema requires "scope". It exists for
-	// exactly one confirmed drift in the frozen catalog of record
-	// (docs/implementation/operations.json): conversation.message.list
-	// requires scope in its input schema like every sibling conversation.*/
-	// mailbox.* operation, but its frozen descriptor entry omits
-	// scope_required, unlike every one of them. TestDescriptorsMatchFrozenCatalog
-	// pins this package to that frozen entry byte for byte, and the shared
-	// registry refuses to assemble a module whose descriptor surface drifts
-	// from it, so this package matches the frozen (apparently mistaken)
-	// entry rather than the general rule. Reported upstream at landing
-	// rather than silently invented around; see the P10 PR/handoff.
-	noScopeRequired bool
 }
 
 // opMetas lists every owned operation: the three internal peer operations
@@ -58,7 +44,7 @@ var opMetas = []opMeta{
 	{id: "conversation.list", visibility: "public", mode: "query", effect: "local",
 		cli: "conversation list"},
 	{id: "conversation.message.list", visibility: "public", mode: "query", effect: "local",
-		cli: "conversation message list", noScopeRequired: true},
+		cli: "conversation message list"},
 	{id: "conversation.message.send", visibility: "public", mode: "mutation", effect: "disclosure",
 		submission: true, cli: "conversation message send"},
 	{id: "conversation.update", visibility: "public", mode: "mutation", effect: "local",
@@ -128,9 +114,6 @@ func buildDescriptors(catalog map[string]contract.Descriptor) []contract.Descrip
 	out := make([]contract.Descriptor, 0, len(opMetas))
 	for _, m := range opMetas {
 		scopeRequired := scopeRequirement(inputSchema(m.id))
-		if m.noScopeRequired {
-			scopeRequired = nil
-		}
 		d := contract.Descriptor{
 			ID:              m.id,
 			Version:         1,
