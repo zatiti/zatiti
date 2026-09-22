@@ -12,6 +12,7 @@ import (
 	"github.com/zatiti/zatiti/internal/controller"
 	"github.com/zatiti/zatiti/internal/execution"
 	"github.com/zatiti/zatiti/internal/server"
+	"github.com/zatiti/zatiti/internal/storage"
 )
 
 // defaultPollInterval is how often serve looks for the bootstrap commit
@@ -33,6 +34,19 @@ type serveOptions struct {
 	// Verifier is the real, non-stub internal/execution.NewVerifier
 	// construction, not merely that Attach returned nil).
 	afterAttach func(controller.Collaborators)
+	// restoreLifecycle overrides the production restoreLifecycle{} value
+	// (restore.go) Collaborators.RestoreLifecycle is attached with.
+	// Production never sets it: restoreLifecycle{} always fails closed with
+	// a specific prerequisite_missing fault, because the candidate-lookup
+	// and owner-merge operations it would need do not exist anywhere in
+	// this tree yet (see restore.go's package doc and P33's handoff). A
+	// test sets it to a double that drives a real swap through the actual
+	// storage.Restorable/Controller machinery end to end, so
+	// TestRestoreHandoffReassemblesOverTheFreshlyReopenedDatabase proves
+	// this package's own new code (the ErrRestoreHandoff reassembly loop)
+	// against a genuine handoff instead of one this package cannot yet
+	// produce through the real public restore flow.
+	restoreLifecycle controller.RestoreLifecycle
 }
 
 // runServe is `zatiti serve`: the startup holder, the private socket and
@@ -40,6 +54,19 @@ type serveOptions struct {
 // cancelled (orderly, nil), when the installation lock is lost or the
 // generation is superseded (controller_unavailable), or when a startup
 // prerequisite is missing (the named fault).
+//
+// It is an outer loop, not a one-shot sequence (P33 item 2): runServeOnce
+// assembles and runs one controller/server lifetime, and a lifetime that
+// itself performed a restore's atomic database swap ends by design with
+// controller.ErrRestoreHandoff (internal/controller/restore.go), not a
+// fault -- that lifetime's own Application is permanently stale (built over
+// the database handle the swap closed), but the swap, overlay merge and
+// storage resume it already completed are durable. On that signal this
+// loop reassembles Application/Controller/server exactly as at first
+// startup (reassembleAfterRestoreHandoff, assembly.go) over the freshly
+// reopened database and runs again, under the SAME held installation lock
+// -- never re-acquiring it -- so a restart mid-protocol always resumes
+// forward instead of leaving the installation permanently unservable.
 func runServe(ctx context.Context, cfg config, log *slog.Logger, opts serveOptions) error {
 	if err := cfg.validateServe(); err != nil {
 		return &contract.Fault{Code: contract.CodeInvalidInput, Message: err.Error()}
@@ -54,7 +81,57 @@ func runServe(ctx context.Context, cfg config, log *slog.Logger, opts serveOptio
 	}
 	defer h.close()
 	log.Info("installation opened", "generation", h.generation)
+	logPendingRestoreMarker(ctx, h, log)
 
+	for {
+		err := runServeOnce(ctx, cfg, h, log, opts)
+		if !errors.Is(err, controller.ErrRestoreHandoff) {
+			return err
+		}
+		log.Info("restore handoff durable; this lifetime's own application is now stale, reassembling over the freshly reopened database", "previous_generation", h.generation)
+		if rerr := h.reassembleAfterRestoreHandoff(ctx); rerr != nil {
+			return fmt.Errorf("reassemble after restore handoff: %w", rerr)
+		}
+		log.Info("reassembled after restore handoff", "generation", h.generation)
+		logPendingRestoreMarker(ctx, h, log)
+	}
+}
+
+// logPendingRestoreMarker is P33 item 1's startup detection: read whether
+// storage reports paused for restore right after the database is (re)opened
+// -- before any adapter loads, before the listener binds, before this
+// process admits a single request -- so a pending restore left by a dead
+// process is visible in the log at the earliest possible point, not
+// discovered only when a write later fails. It never drives the restore
+// forward itself: that remains Controller.start's own
+// recoverRestoreBeforeFence (internal/controller/restore.go), run from
+// inside runServeOnce below via ctl.Run, before the ordinary generation
+// fence and therefore before any ordinary admission. The actual
+// write-safety guarantee (P33's required "restart never serves a partially
+// restored writable installation" behavior) does not depend on this log
+// line: storage.Write refuses outright while RestorePaused is true, checked
+// fresh on every call, independent of whether this line ever runs.
+func logPendingRestoreMarker(ctx context.Context, h *installationHandle, log *slog.Logger) {
+	restorable, ok := h.db.(storage.Restorable)
+	if !ok {
+		return
+	}
+	paused, err := restorable.RestorePaused(ctx)
+	if err != nil {
+		log.Warn("could not read the restore-pause marker at startup", "error", err.Error())
+		return
+	}
+	if paused {
+		log.Warn("database reports paused for restore at startup; ordinary writes are refused until the pending restore is driven to resumed or explicitly failed")
+	}
+}
+
+// runServeOnce assembles adapters, the private socket and one controller
+// lifetime over h's already-open installation, and runs until ctx ends, the
+// controller reports a fault, or the controller reports
+// controller.ErrRestoreHandoff. h is never opened or closed here: runServe
+// owns h's lifetime across every call this loop makes.
+func runServeOnce(ctx context.Context, cfg config, h *installationHandle, log *slog.Logger, opts serveOptions) error {
 	adapters, missing, err := loadAdapters(cfg.adaptersDir(), adapterDependencies(h))
 	if err != nil {
 		return err
@@ -95,7 +172,7 @@ func runServe(ctx context.Context, cfg config, log *slog.Logger, opts serveOptio
 	controllerDone := make(chan error, 1)
 	running := make(chan *controller.Controller, 1)
 	go func() {
-		controllerDone <- superviseController(serveCtx, h, adapters, unregistered, log, opts.pollInterval, opts.afterAttach, running)
+		controllerDone <- superviseController(serveCtx, h, adapters, unregistered, log, opts.pollInterval, opts.afterAttach, opts.restoreLifecycle, running)
 	}()
 
 	var cause error
@@ -146,10 +223,13 @@ func runServe(ctx context.Context, cfg config, log *slog.Logger, opts serveOptio
 // bootstrap in the process that served it, attaches the service identity
 // and every supported collaborator (P24 item 2: the real trusted verifier,
 // every landed local job adapter and the real worker operator, not only
-// Identity/Blobs) and runs the scheduler until ctx ends or admission stops.
-// The controller is published on running right before Run so shutdown can
-// Stop it; the return value is Run's verdict or the startup failure.
-func superviseController(ctx context.Context, h *installationHandle, adapters map[string]contract.Adapter, unregisteredAdapters []string, log *slog.Logger, poll time.Duration, afterAttach func(controller.Collaborators), running chan<- *controller.Controller) error {
+// Identity/Blobs; P33 item 3: the restore lifecycle capability, through the
+// same explicit Collaborators seam as every other trusted dependency) and
+// runs the scheduler until ctx ends or admission stops. The controller is
+// published on running right before Run so shutdown can Stop it; the
+// return value is Run's verdict (including controller.ErrRestoreHandoff) or
+// the startup failure.
+func superviseController(ctx context.Context, h *installationHandle, adapters map[string]contract.Adapter, unregisteredAdapters []string, log *slog.Logger, poll time.Duration, afterAttach func(controller.Collaborators), restoreLifecycleOverride controller.RestoreLifecycle, running chan<- *controller.Controller) error {
 	installationID, err := h.initialized(ctx)
 	if err != nil {
 		return err
@@ -181,6 +261,19 @@ func superviseController(ctx context.Context, h *installationHandle, adapters ma
 	}
 	jobs := buildJobRunners(h.jobRunners)
 
+	// restoreLifecycle is the production value (restore.go) unless a test
+	// overrides it (serveOptions.restoreLifecycle; see runServeOnce). This
+	// is the explicit lifecycle seam P33 item 3 requires: it is attached
+	// here, alongside every other trusted collaborator, and nowhere else --
+	// the CLI/MCP client processes (run.go, mcp.go) never construct a
+	// Controller at all, so they never see it. Keeping work/secret access
+	// out of ordinary client processes falls out of that structure rather
+	// than a separate check.
+	restoreLifecycleValue := restoreLifecycleOverride
+	if restoreLifecycleValue == nil {
+		restoreLifecycleValue = restoreLifecycle{}
+	}
+
 	ctl, err := controller.New(controller.Config{StateDir: h.cfg.StateDir, TickInterval: h.cfg.TickInterval}, h.app, h.db, h.own, adapters, h.clock)
 	if err != nil {
 		return err
@@ -192,8 +285,9 @@ func superviseController(ctx context.Context, h *installationHandle, adapters ma
 		// h.app (*application.Application) implements contract.WorkerOperator
 		// directly (internal/application/worker.go); no separate
 		// construction step exists.
-		Operator: h.app,
-		Verifier: verifier,
+		Operator:         h.app,
+		Verifier:         verifier,
+		RestoreLifecycle: restoreLifecycleValue,
 	}
 	if err := ctl.Attach(collab); err != nil {
 		return err
