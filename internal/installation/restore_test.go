@@ -3,10 +3,13 @@ package installation
 import (
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/zatiti/zatiti/internal/contract"
+	"github.com/zatiti/zatiti/internal/storage"
 )
 
 // fixtureImage is the database image the synthetic fixture frames: any
@@ -146,8 +149,12 @@ func TestRestoreVerifiesArtifactThenFailsWithoutBackupCapability(t *testing.T) {
 			string(e.install)).Scan(&obligationCount); err != nil {
 			return err
 		}
+		// The pending operation this test injects carries state
+		// outcome_unknown, so it is classified kind unknown_effect, not the
+		// generic claimed_effect an ordinary in-flight claim would get (see
+		// snapshotObligations in restore.go).
 		return unit.QueryRowContext(e.ctx,
-			`SELECT resource_id FROM installation_recovery_obligations WHERE kind = 'claimed_effect'`).Scan(&obligationResource)
+			`SELECT resource_id FROM installation_recovery_obligations WHERE kind = 'unknown_effect'`).Scan(&obligationResource)
 	}); err != nil {
 		t.Fatalf("read recovery obligations: %v", err)
 	}
@@ -370,6 +377,168 @@ func TestRestorePublishesRecoveryOverlayAndAwaitsTheController(t *testing.T) {
 	e.decode(status.Data, &st)
 	if !st.Resource.Paused || !st.Resource.Maintenance {
 		t.Fatalf("installation must stay paused/maintenance while the restore awaits the controller: %+v", st.Resource)
+	}
+}
+
+// TestRestoreOverlayPreservesPostBackupUnknownEffectAcrossRewind: required
+// behavioral test "a post-backup revocation and unknown write remain
+// effective after restore" (the unknown-write half of that requirement; a
+// credential/grant revocation cannot be exercised here because no owner
+// port installation may call enumerates current revocations -- see the P31
+// handoff). An effect that went outcome_unknown after the backup was taken
+// is captured into the monotonic recovery overlay, classified distinctly
+// (kind unknown_effect, not the generic claimed_effect an ordinary
+// in-flight claim gets), and durably preserved -- both in the published
+// overlay artifact and in this package's own obligations table,
+// independent of that artifact -- before any rewind occurs, so the merge
+// after rewind has enough to know this write must survive it.
+func TestRestoreOverlayPreservesPostBackupUnknownEffectAcrossRewind(t *testing.T) {
+	e := newEnv(t)
+	e.mustBootstrap()
+	e.startGeneration()
+	capability := &recordingBackup{inner: backupOnly{db: e.db}}
+	e.bindBackup(capability)
+	e.mustOK(opMaintenanceEnter, versionedScopeInput{Scope: e.scope, ExpectedVersion: 1})
+
+	ref, size := sealFixtureBackup(t, e, nil)
+	setArtifactMetadata(e, ref, size, "available")
+	unknownOpID := e.ids.New()
+	e.ports.set(peerEffectsPending, func(contract.Invocation) (contract.Payload, error) {
+		return okPayload(effectsPendingOutput{Operations: []peerOperation{
+			{ID: unknownOpID, Version: 1, Action: json.RawMessage(`{}`), ActionDigest: "abc", State: "outcome_unknown", AttemptIDs: []contract.ID{}},
+		}})
+	})
+
+	payload, err := e.driveLocalIO(opRestore, restoreInput{Scope: e.scope, BackupArtifact: ref, ExpectedVersion: 2}, true)
+	if err != nil {
+		t.Fatalf("driveLocalIO(restore): %v", err)
+	}
+	if payload.Status != contract.StatusAccepted {
+		t.Fatalf("restore status = %q (%v), want accepted", payload.Status, payload.Error)
+	}
+	var out resourceOut[wireJob]
+	e.decode(payload.Data, &out)
+	var overlayID contract.ID
+	for _, r := range out.Resource.Requirements {
+		if r.Code == "recovery_overlay_published" && r.ResourceID != nil {
+			overlayID = *r.ResourceID
+		}
+	}
+	if overlayID == "" {
+		t.Fatalf("restore did not report the published recovery overlay: %+v", out.Resource.Requirements)
+	}
+
+	publishes := e.ports.callsOf(peerArtifactsPublish)
+	if len(publishes) == 0 {
+		t.Fatalf("restore published no artifacts")
+	}
+	var published artifactsPublishInput
+	if err := json.Unmarshal(publishes[len(publishes)-1].Input, &published); err != nil {
+		t.Fatalf("decode publish input: %v", err)
+	}
+	sealed, ok := e.blobs.published[published.Digest]
+	if !ok || published.MediaType != overlayMediaType {
+		t.Fatalf("overlay %s (%s) was not published", published.Digest, published.MediaType)
+	}
+	_, overlayKey, overlayFrame := e.openArtifact(sealed)
+	overlay, err := openRecoveryOverlay(overlayKey, overlayFrame, e.install)
+	if err != nil {
+		t.Fatalf("published overlay does not open: %v", err)
+	}
+	if len(overlay.Obligations) != 1 || overlay.Obligations[0].ResourceID != unknownOpID || overlay.Obligations[0].Kind != "unknown_effect" {
+		t.Fatalf("overlay obligations = %+v, want the post-backup unknown write preserved as unknown_effect", overlay.Obligations)
+	}
+
+	// Durable independent of the overlay artifact: a merge performed after
+	// the controller's rewind can read this table even if the encrypted
+	// overlay bytes were never needed again.
+	var kind string
+	if err := e.db.Read(e.ctx, e.actor, e.scope.toContract(), func(unit contract.Unit) error {
+		return unit.QueryRowContext(e.ctx,
+			`SELECT kind FROM installation_recovery_obligations WHERE resource_id = ?`, string(unknownOpID)).Scan(&kind)
+	}); err != nil {
+		t.Fatalf("read recovery obligation: %v", err)
+	}
+	if kind != "unknown_effect" {
+		t.Fatalf("durable obligation kind = %q, want unknown_effect", kind)
+	}
+}
+
+// TestBackupRestoredElsewhereReadsIdenticalJobHistory: required behavioral
+// test "back up real artifact and domain state, restore elsewhere, read
+// identical bytes and find the same accepted task/history." This package's
+// own accepted/durable history is its job records. A backup's own image
+// cannot contain proof of that same backup's success -- Perform streams the
+// image before Finish ever commits the job succeeded -- so this backs up
+// twice: the second backup's framed image, written to a path with no
+// relation to the original database file and opened there as a fresh
+// database, must read back the exact same accepted first backup job --
+// same id, state, result -- that the original database recorded, not a
+// copy that merely looks similar.
+func TestBackupRestoredElsewhereReadsIdenticalJobHistory(t *testing.T) {
+	e := newEnv(t)
+	e.mustBootstrap()
+	e.startGeneration()
+	e.bindBackup(backupOnly{db: e.db})
+	e.mustOK(opPause, versionedScopeInput{Scope: e.scope, ExpectedVersion: 1})
+
+	first := e.backupNow("first")
+	second := e.backupNow("second")
+
+	var wantJob *jobRow
+	if err := e.db.Read(e.ctx, e.actor, e.scope.toContract(), func(unit contract.Unit) error {
+		var err error
+		wantJob, err = loadJob(e.ctx, unit, first.ID)
+		return err
+	}); err != nil {
+		t.Fatalf("read the first backup job from the original database: %v", err)
+	}
+	if wantJob == nil || wantJob.State != "succeeded" {
+		t.Fatalf("original database's first backup job = %+v, want succeeded", wantJob)
+	}
+
+	sealed, ok := e.blobs.published[second.Artifact.Digest]
+	if !ok {
+		t.Fatalf("bundle %s was not published", second.Artifact.Digest)
+	}
+	_, key, frame := e.openArtifact(sealed)
+	_, image, err := openBackupBundle(key, frame, e.install)
+	if err != nil {
+		t.Fatalf("open backup bundle: %v", err)
+	}
+
+	// "Elsewhere": a directory with no relation to the original database
+	// file's own temp directory.
+	elsewhere := filepath.Join(t.TempDir(), "elsewhere", "restored.db")
+	if err := os.MkdirAll(filepath.Dir(elsewhere), 0o700); err != nil {
+		t.Fatalf("mkdir elsewhere: %v", err)
+	}
+	if err := os.WriteFile(elsewhere, image, 0o600); err != nil {
+		t.Fatalf("write image elsewhere: %v", err)
+	}
+	restored, err := storage.Open(e.ctx, storage.Config{Path: elsewhere})
+	if err != nil {
+		t.Fatalf("the backup image does not open elsewhere: %v", err)
+	}
+	defer func() { _ = restored.Close() }()
+
+	var gotJob *jobRow
+	if err := restored.Read(e.ctx, e.actor, e.scope.toContract(), func(unit contract.Unit) error {
+		var err error
+		gotJob, err = loadJob(e.ctx, unit, first.ID)
+		return err
+	}); err != nil {
+		t.Fatalf("read the first backup job from the database restored elsewhere: %v", err)
+	}
+	if gotJob == nil || gotJob.State != wantJob.State || gotJob.Kind != wantJob.Kind || string(gotJob.Result) != string(wantJob.Result) {
+		t.Fatalf("job history restored elsewhere = %+v, want the identical original %+v", gotJob, wantJob)
+	}
+	var restoredResult resourceOut[wireBackup]
+	if err := json.Unmarshal(gotJob.Result, &restoredResult); err != nil {
+		t.Fatalf("decode restored job result: %v", err)
+	}
+	if restoredResult.Resource.Artifact.Digest != first.Artifact.Digest || restoredResult.Resource.ID != first.ID {
+		t.Fatalf("job history restored elsewhere = %+v, want the same accepted first backup %+v", restoredResult.Resource, first)
 	}
 }
 

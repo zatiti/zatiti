@@ -25,9 +25,10 @@ const owner = "installation"
 // execution's tables.
 //
 // installation_recovery_obligations stores the RecoveryObligation rows
-// captured into a restore's recovery overlay, so they remain durably
-// inspectable (and mergeable) independent of the overlay artifact's own
-// encrypted bytes.
+// captured into a backup's paused/quiesced snapshot or a restore's recovery
+// overlay (restore_job_id names either job), so they remain durably
+// inspectable (and mergeable) independent of the manifest/overlay
+// artifact's own encrypted bytes.
 const schemaV1 = `
 CREATE TABLE installation_state (
 	id            TEXT PRIMARY KEY,

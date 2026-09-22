@@ -2,6 +2,7 @@ package installation
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"os"
@@ -230,6 +231,155 @@ func TestDoctorReportsMissingBackupCapability(t *testing.T) {
 	e.bindBackup(backupOnly{db: e.db})
 	if names() {
 		t.Fatal("doctor still reports a bound backup capability as missing")
+	}
+}
+
+// TestBackupRecordsRetainedObligationsFromPendingEffectsAndMemory: item 1's
+// retained_obligations, populated from _effects.pending and
+// _memory.manifest at the paused/quiesced boundary rather than left
+// hardcoded empty, with enough per-record detail to merge later (not a
+// summary digest): a pending effect whose state is outcome_unknown is
+// sealed into the manifest as kind unknown_effect, distinct from an
+// ordinary in-flight claimed_effect, and both are durably recorded
+// independent of the sealed bundle's own encrypted bytes.
+func TestBackupRecordsRetainedObligationsFromPendingEffectsAndMemory(t *testing.T) {
+	e := newEnv(t)
+	e.mustBootstrap()
+	e.startGeneration()
+	e.bindBackup(backupOnly{db: e.db})
+	e.mustOK(opPause, versionedScopeInput{Scope: e.scope, ExpectedVersion: 1})
+
+	unknownOpID := e.ids.New()
+	claimedOpID := e.ids.New()
+	e.ports.set(peerEffectsPending, func(contract.Invocation) (contract.Payload, error) {
+		return okPayload(effectsPendingOutput{Operations: []peerOperation{
+			{ID: unknownOpID, Version: 1, Action: json.RawMessage(`{}`), ActionDigest: "a", State: "outcome_unknown", AttemptIDs: []contract.ID{}},
+			{ID: claimedOpID, Version: 1, Action: json.RawMessage(`{}`), ActionDigest: "b", State: "executing", AttemptIDs: []contract.ID{}},
+		}})
+	})
+
+	payload, err := e.driveLocalIO(opBackup, scopeInput{Scope: e.scope}, true)
+	if err != nil {
+		t.Fatalf("driveLocalIO(backup): %v", err)
+	}
+	if payload.Status != contract.StatusAccepted {
+		t.Fatalf("backup status = %q (%v), want accepted", payload.Status, payload.Error)
+	}
+	var out resourceOut[wireJob]
+	e.decode(payload.Data, &out)
+	var result resourceOut[wireBackup]
+	e.decode(out.Resource.Result, &result)
+
+	sealed, ok := e.blobs.published[result.Resource.Artifact.Digest]
+	if !ok {
+		t.Fatalf("bundle %s was not published", result.Resource.Artifact.Digest)
+	}
+	_, key, frame := e.openArtifact(sealed)
+	manifest, _, err := openBackupBundle(key, frame, e.install)
+	if err != nil {
+		t.Fatalf("open backup bundle: %v", err)
+	}
+	if len(manifest.RetainedObligations) != 2 {
+		t.Fatalf("manifest retained_obligations = %+v, want 2 records (not a summary digest)", manifest.RetainedObligations)
+	}
+	kinds := map[contract.ID]string{}
+	for _, ob := range manifest.RetainedObligations {
+		kinds[ob.ResourceID] = ob.Kind
+	}
+	if kinds[unknownOpID] != "unknown_effect" {
+		t.Fatalf("obligation kind for the outcome_unknown effect = %q, want unknown_effect", kinds[unknownOpID])
+	}
+	if kinds[claimedOpID] != "claimed_effect" {
+		t.Fatalf("obligation kind for the executing effect = %q, want claimed_effect", kinds[claimedOpID])
+	}
+
+	// Durable independent of the bundle: installation_recovery_obligations
+	// records both, tied to this backup job, and job.get surfaces them.
+	var count int64
+	if err := e.db.Read(e.ctx, e.actor, e.scope.toContract(), func(unit contract.Unit) error {
+		return unit.QueryRowContext(e.ctx,
+			`SELECT COUNT(*) FROM installation_recovery_obligations WHERE installation_id = ?`,
+			string(e.install)).Scan(&count)
+	}); err != nil {
+		t.Fatalf("read recovery obligations: %v", err)
+	}
+	if count != 2 {
+		t.Fatalf("recovery obligations recorded = %d, want 2", count)
+	}
+	jobPayload := mustQueryOK(t, e, opJobGet, jobGetInput{Scope: e.scope, ID: out.Resource.ID})
+	var jobOut resourceOut[wireJob]
+	e.decode(jobPayload.Data, &jobOut)
+	preserved := 0
+	for _, r := range jobOut.Resource.Requirements {
+		if r.Code == "recovery_obligation_preserved" {
+			preserved++
+		}
+	}
+	if preserved != 2 {
+		t.Fatalf("job.get surfaced %d preserved obligations, want 2: %+v", preserved, jobOut.Resource.Requirements)
+	}
+}
+
+// TestBackupSucceedsWithBrainRevisionsButCannotYetProtectThem documents a
+// known, currently-accepted gap rather than papering over it: a real
+// bootstrapped installation always names at least one brain revision (see
+// tests/integration's TestBackupRestoresActualBytes, which backs up a
+// freshly bootstrapped installation with three), and backup must still
+// succeed for that installation today. This package tried, in an earlier
+// revision, to fail-closed whenever _memory.manifest named a brain it
+// could not build a compliant BackupBrainEntry for (P00-011: "an empty
+// Brains array is never reported complete") -- but no real installation
+// could ever complete a backup under that rule, since _memory.manifest,
+// the only memory-owner port this package may call, never supplies the
+// digest/observed_at/export_artifact/writer_owner/adapter_profile_digest a
+// BackupBrainEntry requires, for any installation. That is the P31 handoff's
+// reported contract gap: until a coordinated change supplies that data,
+// Brains stays empty regardless of how many brain revisions exist, and this
+// test pins that as the current, intentional (not silently regressed)
+// behavior rather than leaving it unasserted.
+func TestBackupSucceedsWithBrainRevisionsButCannotYetProtectThem(t *testing.T) {
+	e := newEnv(t)
+	e.mustBootstrap()
+	e.startGeneration()
+	e.bindBackup(backupOnly{db: e.db})
+	e.mustOK(opPause, versionedScopeInput{Scope: e.scope, ExpectedVersion: 1})
+
+	brainID := e.ids.New()
+	e.ports.set(peerMemoryManifest, func(contract.Invocation) (contract.Payload, error) {
+		return okPayload(memoryManifestOutput{
+			BrainRevisions: []wireRef{{ID: brainID, Version: 3}},
+			Obligations:    []wireRequirement{},
+		})
+	})
+
+	payload, err := e.driveLocalIO(opBackup, scopeInput{Scope: e.scope}, true)
+	if err != nil {
+		t.Fatalf("driveLocalIO(backup): %v", err)
+	}
+	if payload.Status != contract.StatusAccepted {
+		t.Fatalf("backup status = %q (%v), want accepted (a real installation always names brain revisions)", payload.Status, payload.Error)
+	}
+	var out resourceOut[wireJob]
+	e.decode(payload.Data, &out)
+	var result resourceOut[wireBackup]
+	e.decode(out.Resource.Result, &result)
+	if !result.Resource.Verified {
+		t.Fatalf("backup result = %+v, want verified", result.Resource)
+	}
+	sealed, ok := e.blobs.published[result.Resource.Artifact.Digest]
+	if !ok {
+		t.Fatalf("bundle %s was not published", result.Resource.Artifact.Digest)
+	}
+	_, key, frame := e.openArtifact(sealed)
+	manifest, _, err := openBackupBundle(key, frame, e.install)
+	if err != nil {
+		t.Fatalf("open backup bundle: %v", err)
+	}
+	if len(manifest.Brains) != 0 {
+		t.Fatalf("manifest.brains = %+v, want empty until the P31 handoff's contract gap is resolved", manifest.Brains)
+	}
+	if state := e.jobState("backup"); state != "succeeded" {
+		t.Fatalf("backup job state = %q, want succeeded", state)
 	}
 }
 
