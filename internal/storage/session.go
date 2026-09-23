@@ -201,18 +201,57 @@ func (u *unit) ReadOnly() bool { return u.readOnly }
 
 // Emit appends event to the storage event outbox inside the same
 // transaction as the state change it correlates to. Storage assigns the
-// event identity, sequence and timestamp and stamps the transaction scope;
-// caller-supplied values for those fields are ignored. An event carrying an
-// explicit scope other than this unit's is rejected.
+// event identity, sequence and timestamp. An event with no explicit scope is
+// stamped with the unit's own scope, as before. An event may instead carry
+// an explicit scope that narrows the unit's own -- more specific along any
+// dimension the unit itself left unset -- and that narrower scope is what
+// gets persisted, not the unit's coarser one: a bare-installation-scoped
+// unit can emit (and have stored) a precisely worker- or task-scoped event.
+// The unit's installation must always match, and any dimension the unit's
+// own scope HAS set must equal the event's same dimension exactly; the unit
+// may be coarser than the event but never contradict it. An event whose
+// scope names a different installation, or contradicts a dimension the unit
+// itself has set, is rejected.
 func (u *unit) Emit(ctx context.Context, event contract.Event) error {
 	if u.readOnly {
 		return readOnlyFault("emit")
 	}
-	if event.Scope != (contract.Scope{}) && event.Scope != u.scope {
-		return invalidInputFault("event scope does not match the unit scope")
+	scope := u.scope
+	if event.Scope != (contract.Scope{}) {
+		if !scopeNarrows(u.scope, event.Scope) {
+			return invalidInputFault("event scope does not match the unit scope")
+		}
+		scope = event.Scope
 	}
-	event.Scope = u.scope
-	return appendEvent(ctx, u.conn, u.scope, event)
+	event.Scope = scope
+	return appendEvent(ctx, u.conn, scope, event)
+}
+
+// scopeNarrows reports whether eventScope is a legitimate narrower-or-equal
+// projection of unitScope: the installation must always match, and every
+// other dimension unitScope has set must equal eventScope's same dimension.
+// unitScope may leave a dimension unset that eventScope sets (the unit is
+// coarser than the event), but it may never disagree with a dimension it
+// does set. Mirrors evidence.scopeVisible (internal/evidence/store.go) and
+// execution.narrowScope (internal/execution/scope.go), which apply this
+// same relation in their own directions.
+func scopeNarrows(unitScope, eventScope contract.Scope) bool {
+	if unitScope.InstallationID != eventScope.InstallationID {
+		return false
+	}
+	if unitScope.OrganizationID != "" && unitScope.OrganizationID != eventScope.OrganizationID {
+		return false
+	}
+	if unitScope.ProjectID != "" && unitScope.ProjectID != eventScope.ProjectID {
+		return false
+	}
+	if unitScope.WorkerID != "" && unitScope.WorkerID != eventScope.WorkerID {
+		return false
+	}
+	if unitScope.TaskID != "" && unitScope.TaskID != eventScope.TaskID {
+		return false
+	}
+	return true
 }
 
 // validateCaller checks the application-supplied authority before any
