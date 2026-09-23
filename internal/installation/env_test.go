@@ -53,15 +53,25 @@ func (s *seqIDs) New() contract.ID {
 // would hide exactly the defect that once made every real backup
 // unrestorable.
 type fakeSecrets struct {
-	mu   sync.Mutex
-	m    map[string][]byte // reference -> secret
-	next int
-	err  error // when set, every call fails
+	mu    sync.Mutex
+	m     map[string][]byte // reference -> secret
+	names map[string]string // stable name -> current opaque reference
+	next  int
+	err   error // when set, every call fails
 }
 
 const fakeRefPrefix = "fake1:"
 
-func newFakeSecrets() *fakeSecrets { return &fakeSecrets{m: map[string][]byte{}} }
+func newFakeSecrets() *fakeSecrets {
+	return &fakeSecrets{m: map[string][]byte{}, names: map[string]string{}}
+}
+
+func fakeSecretNameError(name string) error {
+	if name == "" || len(name) > 256 || strings.ContainsRune(name, 0) || strings.HasPrefix(name, fakeRefPrefix) {
+		return &contract.Fault{Code: contract.CodeInvalidInput, Message: "credential key is invalid"}
+	}
+	return nil
+}
 
 func (f *fakeSecrets) Put(_ context.Context, name string, secret []byte) (string, error) {
 	f.mu.Lock()
@@ -69,12 +79,29 @@ func (f *fakeSecrets) Put(_ context.Context, name string, secret []byte) (string
 	if f.err != nil {
 		return "", f.err
 	}
-	if name == "" || strings.HasPrefix(name, fakeRefPrefix) {
-		return "", fmt.Errorf("fake secrets: Put takes a name, got %q", name)
+	if err := fakeSecretNameError(name); err != nil {
+		return "", err
 	}
 	f.next++
 	ref := fmt.Sprintf("%s%032x", fakeRefPrefix, f.next)
 	f.m[ref] = append([]byte(nil), secret...)
+	f.names[name] = ref
+	return ref, nil
+}
+
+func (f *fakeSecrets) Lookup(_ context.Context, name string) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.err != nil {
+		return "", f.err
+	}
+	if err := fakeSecretNameError(name); err != nil {
+		return "", err
+	}
+	ref := f.names[name]
+	if ref == "" {
+		return "", &contract.Fault{Code: contract.CodeNotFound, Message: "credential name is unknown"}
+	}
 	return ref, nil
 }
 
@@ -98,7 +125,43 @@ func (f *fakeSecrets) Delete(_ context.Context, ref string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	delete(f.m, ref)
+	for name, current := range f.names {
+		if current == ref {
+			delete(f.names, name)
+		}
+	}
 	return nil
+}
+
+func TestFakeSecretsLookupKeepsNamesSeparateFromReferences(t *testing.T) {
+	store := newFakeSecrets()
+	ctx := context.Background()
+	if _, err := store.Lookup(ctx, "backup/key"); err == nil || faultCode(err) != contract.CodeNotFound {
+		t.Fatalf("missing name Lookup = %v, want not_found", err)
+	}
+	first, err := store.Put(ctx, "backup/key", []byte("one"))
+	if err != nil || first == "backup/key" {
+		t.Fatalf("Put returned reference %q, error %v", first, err)
+	}
+	if _, err := store.Get(ctx, "backup/key"); err == nil {
+		t.Fatal("Get accepted a name in place of an opaque reference")
+	}
+	second, err := store.Put(ctx, "backup/key", []byte("two"))
+	if err != nil || second == first {
+		t.Fatalf("replaced key reference = %q, error %v", second, err)
+	}
+	if got, err := store.Lookup(ctx, "backup/key"); err != nil || got != second {
+		t.Fatalf("Lookup = %q, %v, want latest reference %q", got, err, second)
+	}
+	if value, err := store.Get(ctx, second); err != nil || string(value) != "two" {
+		t.Fatalf("Get latest reference = %q, %v", value, err)
+	}
+	if err := store.Delete(ctx, second); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Lookup(ctx, "backup/key"); err == nil || faultCode(err) != contract.CodeNotFound {
+		t.Fatalf("deleted name Lookup = %v, want not_found", err)
+	}
 }
 
 // fakeBlobs is an in-memory content-addressed blob store.
