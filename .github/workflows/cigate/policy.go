@@ -19,10 +19,11 @@ type pin struct {
 }
 
 var verifiedPins = map[string]pin{
-	"actions/checkout":        {SHA: "3d3c42e5aac5ba805825da76410c181273ba90b1", Version: "v7.0.1"},
-	"actions/setup-go":        {SHA: "b7ad1dad31e06c5925ef5d2fc7ad053ef454303e", Version: "v7.0.0"},
-	"actions/cache":           {SHA: "55cc8345863c7cc4c66a329aec7e433d2d1c52a9", Version: "v6.1.0"},
-	"actions/upload-artifact": {SHA: "043fb46d1a93c77aae656e7c1c64a875d1fc6a0a", Version: "v7.0.1"},
+	"actions/checkout":          {SHA: "3d3c42e5aac5ba805825da76410c181273ba90b1", Version: "v7.0.1"},
+	"actions/setup-go":          {SHA: "b7ad1dad31e06c5925ef5d2fc7ad053ef454303e", Version: "v7.0.0"},
+	"actions/cache":             {SHA: "55cc8345863c7cc4c66a329aec7e433d2d1c52a9", Version: "v6.1.0"},
+	"actions/upload-artifact":   {SHA: "043fb46d1a93c77aae656e7c1c64a875d1fc6a0a", Version: "v7.0.1"},
+	"actions/download-artifact": {SHA: "70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3", Version: "v8.0.0"},
 }
 
 // profile selects the workflow-specific rules applied on top of the rules
@@ -48,7 +49,7 @@ var registeredWorkflows = map[string]profile{
 // weakening it.
 var requiredReleaseGates = []string{
 	"inputs", "spec", "workflows", "static", "test",
-	"flutter", "qualification", "build",
+	"flutter", "qualification", "build", "candidate_matrix",
 }
 
 // platformReleaseGates must run on every supported release platform.

@@ -538,6 +538,65 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+  candidate_matrix:
+    name: unsigned native Mac candidate matrix
+    needs:
+      - spec
+      - build
+      - flutter
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out the source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install the pinned Go toolchain
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Verify the toolchain and dependency lock
+        env:
+          GOTOOLCHAIN: local
+        run: |
+          evidence="$RUNNER_TEMP/evidence"
+          echo "EVIDENCE=$evidence" >> "$GITHUB_ENV"
+          echo "GOTOOLCHAIN=local" >> "$GITHUB_ENV"
+          go run ./.github/workflows/cigate lock -go-version "$(go env GOVERSION)"
+          go run ./.github/workflows/cigate environ -go-version "$(go env GOVERSION)" -out "$evidence/environment.json"
+      - name: Download native Intel controller candidate
+        uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3 # v8.0.0
+        with:
+          name: release-evidence-build-macos-15-intel
+          path: ${{ runner.temp }}/matrix/controller-amd64
+      - name: Download native Intel desktop candidate
+        uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3 # v8.0.0
+        with:
+          name: release-evidence-flutter-macos-15-intel
+          path: ${{ runner.temp }}/matrix/desktop-amd64
+      - name: Download native Apple Silicon controller candidate
+        uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3 # v8.0.0
+        with:
+          name: release-evidence-build-macos-15
+          path: ${{ runner.temp }}/matrix/controller-arm64
+      - name: Download native Apple Silicon desktop candidate
+        uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3 # v8.0.0
+        with:
+          name: release-evidence-flutter-macos-15
+          path: ${{ runner.temp }}/matrix/desktop-arm64
+      - name: Verify the four unsigned native candidates
+        run: |
+          go run ./.github/workflows/cigate candidate-matrix -root "$RUNNER_TEMP/matrix" -revision "$GITHUB_SHA" -license "$GITHUB_WORKSPACE/LICENSE" -dependency-lock "$GITHUB_WORKSPACE/docs/implementation/dependencies.lock.json" -pubspec-lock "$GITHUB_WORKSPACE/apps/desktop/pubspec.lock" -out "$EVIDENCE/unsigned-candidate-matrix.json"
+      - name: Retain evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-evidence-candidate-matrix
+          path: ${{ runner.temp }}/evidence/
+          if-no-files-found: error
+          retention-days: 30
+
   verdict:
     name: release qualification verdict
     if: always()
@@ -550,6 +609,7 @@ jobs:
       - flutter
       - qualification
       - build
+      - candidate_matrix
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:

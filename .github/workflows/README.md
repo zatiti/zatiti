@@ -113,7 +113,7 @@ The workflow fails closed when its inputs are absent:
   `verification_failed`.
 
 Required gates: `inputs`, `spec`, `workflows`, `static`, `test`, `flutter`,
-`qualification`, `build`. The list is compiled into
+`qualification`, `build`, `candidate_matrix`. The list is compiled into
 `cigate gate`, so removing a job from the workflow produces a `missing` gate
 and blocks the verdict. Only `success` passes; `failure`, `cancelled`,
 `skipped`, and unrecognized results block. The platform gates run on both
@@ -254,15 +254,21 @@ so it cannot dirty the tree that drift and provenance checks inspect.
 | `qualification-cases/release-report.json`, `qualification-cases/<case>.json` | `tests/qualification`'s own per-case evidence and gate rollup (see "Qualification evidence enumeration and freshness"). |
 | `qualification-verdict.json` | `cigate qualevidence`'s enumeration-and-freshness verdict against the required gate list. |
 
-Console output is a bounded summary. Candidate binaries are not uploaded;
-`provenance.json` records the `zatiti` binary's digest, toolchain,
-dependencies, and commit.
+Console output is a bounded summary. The release workflow retains unsigned
+native candidate binaries and complete desktop archives alongside their
+provenance. Its `candidate_matrix` gate downloads the four fixed artifact
+names from the same workflow run, checks them against the checked-out commit
+and lock files, parses each archive without extraction, and writes a bounded
+`unsigned-candidate-matrix.json`. This index is neither a signed release
+descriptor nor an installer or publication artifact.
 
 ## Verified pins
 
-Each commit was resolved with `git ls-remote` against the upstream repository
-on 2026-09-18, and the inputs used here were read from `action.yml` at that
-commit. All four tags are lightweight tags, so the tag object is the commit.
+The original four commits were resolved with `git ls-remote` against their
+upstream repositories on 2026-09-18. The download action v8.0.0 tag was
+resolved from its upstream repository on 2026-09-23. Actions use immutable
+commit pins; the workflow linter checks the version annotation against the
+table.
 
 | Action | Version | Commit |
 |---|---|---|
@@ -270,6 +276,7 @@ commit. All four tags are lightweight tags, so the tag object is the commit.
 | `actions/setup-go` | v7.0.0 | `b7ad1dad31e06c5925ef5d2fc7ad053ef454303e` |
 | `actions/cache` | v6.1.0 | `55cc8345863c7cc4c66a329aec7e433d2d1c52a9` |
 | `actions/upload-artifact` | v7.0.1 | `043fb46d1a93c77aae656e7c1c64a875d1fc6a0a` |
+| `actions/download-artifact` | v8.0.0 | `70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3` |
 
 To change a pin:
 
