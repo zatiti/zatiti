@@ -418,15 +418,16 @@ class _MessageBubble extends StatelessWidget {
               vertical: Space.md,
             ),
             decoration: BoxDecoration(
-              color: p.card,
-              borderRadius: BorderRadius.circular(14),
+              color: Theme.of(context).brightness == Brightness.dark
+                  ? const Color(0xFF5A5A5A)
+                  : p.card,
+              borderRadius: BorderRadius.circular(22),
             ),
-            child: SelectableText(message.body, style: text.bodyMedium),
+            child: SelectableText(message.body, style: text.bodyLarge),
           ),
         ),
       );
     }
-    final paragraphs = message.body.split('\n\n');
     return Padding(
       padding: const EdgeInsets.only(bottom: Space.xl),
       child: Column(
@@ -437,13 +438,17 @@ class _MessageBubble extends StatelessWidget {
             style: text.bodySmall,
           ),
           const SizedBox(height: Space.sm),
-          // The first line carries the conversational emphasis.
-          SelectableText(paragraphs.first, style: text.headlineSmall),
-          for (final para in paragraphs.skip(1))
-            Padding(
-              padding: const EdgeInsets.only(top: Space.md),
-              child: SelectableText(para, style: text.bodyLarge),
+          Container(
+            padding: const EdgeInsets.symmetric(
+              horizontal: 18,
+              vertical: Space.md,
             ),
+            decoration: BoxDecoration(
+              color: p.card,
+              borderRadius: BorderRadius.circular(22),
+            ),
+            child: SelectableText(message.body, style: text.bodyLarge),
+          ),
         ],
       ),
     );
@@ -481,7 +486,7 @@ class _OutgoingBubble extends StatelessWidget {
               ),
               decoration: BoxDecoration(
                 border: Border.all(color: p.decisionLine),
-                borderRadius: BorderRadius.circular(14),
+                borderRadius: BorderRadius.circular(22),
               ),
               child: Text(message.body, style: text.bodyMedium),
             ),

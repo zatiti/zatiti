@@ -1,5 +1,5 @@
-// Theme tokens from the design of record
-// (internal/desktop/design/README.md, "Visual direction").
+// Theme tokens based on the design of record, with neutral dark surfaces
+// refined from the supplied desktop chat reference.
 
 import 'package:flutter/material.dart';
 
@@ -27,8 +27,8 @@ abstract final class Measure {
   /// Below this width the sidebar becomes a dismissible overlay.
   static const double sidebarInline = 820;
 
-  static const double controlRadius = 8;
-  static const double cardRadius = 13;
+  static const double controlRadius = 12;
+  static const double cardRadius = 18;
   static const double dialogRadius = 18;
 }
 
@@ -62,7 +62,7 @@ class ZatitiPalette extends ThemeExtension<ZatitiPalette> {
   final Color muted;
   final Color subtle;
 
-  /// Restrained mint: primary actions only.
+  /// High-contrast primary actions; neutral white in dark mode.
   final Color accent;
   final Color accentInk;
 
@@ -75,16 +75,16 @@ class ZatitiPalette extends ThemeExtension<ZatitiPalette> {
   final Map<AvatarTone, (Color, Color)> avatars;
 
   static const dark = ZatitiPalette(
-    canvas: Color(0xFF141515),
-    sidebar: Color(0xFF1A1B1B),
-    card: Color(0xFF202222),
-    hover: Color(0xFF292B2B),
-    line: Color(0xFF2C2E2E),
-    text: Color(0xFFEEEFEB),
-    muted: Color(0xFFA1A7A4),
-    subtle: Color(0xFF858D89),
-    accent: Color(0xFFB8D8C8),
-    accentInk: Color(0xFF182B21),
+    canvas: Color(0xFF070707),
+    sidebar: Color(0xFF111111),
+    card: Color(0xFF262626),
+    hover: Color(0xFF323232),
+    line: Color(0xFF232323),
+    text: Color(0xFFE7E7E7),
+    muted: Color(0xFFA0A0A0),
+    subtle: Color(0xFF929292),
+    accent: Color(0xFFFCFCFC),
+    accentInk: Color(0xFF111111),
     amber: Color(0xFFE4C391),
     amberWash: Color(0x20B88C44),
     decisionLine: Color(0xFF4A4334),
@@ -156,7 +156,12 @@ ThemeData buildZatitiTheme(Brightness brightness) {
         onSurfaceVariant: p.muted,
         outline: p.line,
         outlineVariant: p.line,
-        surfaceContainerHighest: p.card,
+        surfaceContainerLowest: p.canvas,
+        surfaceContainerLow: p.sidebar,
+        surfaceContainer: p.card,
+        surfaceContainerHigh: p.hover,
+        surfaceContainerHighest: p.hover,
+        surfaceTint: Colors.transparent,
         error: brightness == Brightness.dark
             ? const Color(0xFFE8A598)
             : const Color(0xFF9B3B2C),
@@ -193,12 +198,12 @@ ThemeData buildZatitiTheme(Brightness brightness) {
         ),
         titleMedium: TextStyle(
           fontSize: 15,
-          fontWeight: FontWeight.w600,
+          fontWeight: FontWeight.w500,
           color: p.text,
         ),
         titleSmall: TextStyle(
           fontSize: 13,
-          fontWeight: FontWeight.w600,
+          fontWeight: FontWeight.w500,
           color: p.text,
         ),
         bodyLarge: TextStyle(fontSize: 15, height: 1.6, color: p.text),
@@ -206,14 +211,14 @@ ThemeData buildZatitiTheme(Brightness brightness) {
         bodySmall: TextStyle(fontSize: 12, height: 1.45, color: p.muted),
         labelLarge: TextStyle(
           fontSize: 13,
-          fontWeight: FontWeight.w600,
+          fontWeight: FontWeight.w500,
           color: p.text,
         ),
         labelMedium: TextStyle(fontSize: 12, color: p.muted),
         labelSmall: TextStyle(
           fontSize: 11,
           letterSpacing: 0.6,
-          fontWeight: FontWeight.w600,
+          fontWeight: FontWeight.w500,
           color: p.muted,
         ),
       );
