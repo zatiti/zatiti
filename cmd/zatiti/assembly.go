@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"sync"
 	"time"
 
 	"github.com/zatiti/zatiti/internal/accounting"
@@ -57,7 +56,7 @@ var _ contract.DatabaseBackup = databaseBackup{}
 // bindInstallationBackup constructs the installation module with the
 // consistent-backup capability bound. It is the single place the seam is
 // wired; the wrapper, never the Database value, crosses it.
-func bindInstallationBackup(deps contract.Dependencies, backup contract.DatabaseBackup) (contract.Module, error) {
+func bindInstallationBackup(deps contract.Dependencies, backup contract.DatabaseBackup) (*installation.Service, error) {
 	if backup == nil {
 		return nil, errors.New("installation backup capability wrapper is nil")
 	}
@@ -171,56 +170,20 @@ func catalog() ([]contract.Descriptor, error) {
 	return reg.Public(), nil
 }
 
-// custodySecrets decorates the platform secret store so assembly learns the
-// opaque reference bootstrap custodied the owner credential under. It is
-// the only way the entrypoint ever sees that reference: installation returns
-// metadata, identity stores a digest, and the reference itself is opaque.
-type custodySecrets struct {
-	contract.SecretStore
-	mu   sync.Mutex
-	puts []custodyPut
-}
-
-type custodyPut struct {
-	key string
-	ref string
-}
-
-func (s *custodySecrets) Put(ctx context.Context, key string, secret []byte) (string, error) {
-	ref, err := s.SecretStore.Put(ctx, key, secret)
-	if err == nil {
-		s.mu.Lock()
-		s.puts = append(s.puts, custodyPut{key: key, ref: ref})
-		s.mu.Unlock()
-	}
-	return ref, err
-}
-
-// latest returns the most recent custodied reference, if any. Before the
-// installation exists only bootstrap can custody anything, so the latest
-// reference is the live owner credential of the bootstrap that committed.
-func (s *custodySecrets) latest() (custodyPut, bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if len(s.puts) == 0 {
-		return custodyPut{}, false
-	}
-	return s.puts[len(s.puts)-1], true
-}
-
 // installationHandle is one opened installation: the startup holder's
 // platform, held ownership, database and assembled application.
 type installationHandle struct {
-	cfg        config
-	plat       *platform.Platform
-	own        contract.Ownership
-	db         contract.Database
-	app        *application.Application
-	reg        *registry.Registry
-	identity   *identity.Service
-	secrets    *custodySecrets
-	clock      contract.Clock
-	generation int64
+	cfg          config
+	plat         *platform.Platform
+	own          contract.Ownership
+	db           contract.Database
+	app          *application.Application
+	reg          *registry.Registry
+	identity     *identity.Service
+	installation *installation.Service
+	secrets      contract.SecretStore
+	clock        contract.Clock
+	generation   int64
 	// jobRunners is every constructed module that implements
 	// contract.LocalJobRunner, keyed by owner/module name (modules()'s
 	// third return value). superviseController turns it into the
@@ -256,7 +219,7 @@ func openInstallation(ctx context.Context, cfg config) (_ *installationHandle, e
 	if h.own, err = plat.Acquire(ctx); err != nil {
 		return nil, fmt.Errorf("installation lock: %w", err)
 	}
-	h.secrets = &custodySecrets{SecretStore: plat.Secrets()}
+	h.secrets = plat.Secrets()
 	if err = h.assemble(ctx); err != nil {
 		return nil, err
 	}
@@ -294,6 +257,11 @@ func (h *installationHandle) assemble(ctx context.Context) error {
 	for _, m := range mods {
 		h.owners[m.Name()] = m
 	}
+	installed, ok := h.owners["installation"].(*installation.Service)
+	if !ok {
+		return errors.New("installation module does not expose owner credential metadata")
+	}
+	h.installation = installed
 	var migrations []contract.Migration
 	for _, m := range mods {
 		migrations = append(migrations, m.Migrations()...)

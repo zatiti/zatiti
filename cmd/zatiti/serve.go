@@ -153,6 +153,20 @@ func runServeOnce(ctx context.Context, cfg config, h *installationHandle, log *s
 	if err != nil {
 		return err
 	}
+	// server.New has bound the private listener. An already initialized
+	// installation keeps its previous locator until the committed owner
+	// credential is verified and the new locator is atomically published.
+	// Clearing it here would misrepresent a failed recovery as first setup.
+	installedID, discoveryErr := h.initialized(ctx)
+	if discoveryErr == nil && installedID == "" {
+		discoveryErr = h.publishPrebootstrapDiscovery(ctx)
+	}
+	if discoveryErr != nil {
+		grace, cancel := context.WithTimeout(context.Background(), shutdownGrace)
+		defer cancel()
+		_ = srv.Close(grace)
+		return fmt.Errorf("preparing desktop discovery: %w", discoveryErr)
+	}
 	log.Info("listening", "socket", cfg.SocketPath, "remote", cfg.RemoteAddress != "")
 	if opts.listening != nil {
 		opts.listening()
@@ -228,15 +242,21 @@ func superviseController(ctx context.Context, h *installationHandle, adapters ma
 	if err != nil {
 		return err
 	}
+	newBootstrap := installationID == ""
 	if installationID == "" {
 		log.Info("installation is not initialized; serving bootstrap only until `zatiti init` completes")
 		if installationID, err = awaitInitialized(ctx, h, poll); err != nil {
 			return err
 		}
-		profile, err := handOverOwnerCredential(ctx, h)
-		if err != nil {
-			return fmt.Errorf("completing bootstrap: %w", err)
-		}
+	}
+	profile, owner, err := recoverOwnerCredential(ctx, h, installationID)
+	if err != nil {
+		return fmt.Errorf("recovering committed owner credential: %w", err)
+	}
+	if err := h.publishInitializedDiscovery(ctx, installationID, owner); err != nil {
+		return fmt.Errorf("publishing initialized desktop discovery: %w", err)
+	}
+	if newBootstrap {
 		log.Info("bootstrap completed", "installation_id", installationID, "owner_profile", profile)
 	}
 
