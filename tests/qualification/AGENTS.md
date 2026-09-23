@@ -1,6 +1,6 @@
 # Implementation assignment: `tests/qualification`
 
-Generated specification revision 3; source digest `67df9a879f78889c02ec1bc881174e631572c6d00a300a611f6d3e23ebd2aff0`. This file is committed implementation context. Do not independently edit it. Everything required from the product specification and adjacent interfaces is embedded below; no RFC copy is required.
+Generated specification revision 4; source digest `98edd4eed3e162eac62daa876329774462865ea6566be32ad02a86ee7f43cc6e`. This file is committed implementation context. Do not independently edit it. Everything required from the product specification and adjacent interfaces is embedded below; no RFC copy is required.
 
 ## Mission and scope
 
@@ -12,7 +12,7 @@ Allowed production imports from this repository: `github.com/zatiti/zatiti/inter
 
 ## Implementation decisions and acceptance focus
 
-Implement package qualification_test and controlled subprocess/GUI drivers in this root. Qualifications bind exact source/config/dependency/tool/profile/client/platform versions and expected/observed evidence. The desktop is the Flutter application at apps/desktop, not an importable Go package: qualify it by building the real application from a recorded source revision with the pinned Flutter toolchain and driving that built application (Flutter integration_test and/or OS accessibility automation launched as a controlled subprocess from this root) against an actual controller over the real Unix socket, plus the explicit mutual-TLS remote path. Never substitute a Go stand-in, a widget test, the design study's browser rendering or a WebView for the built client. Run first-release desktop onboarding/daily result/decision paths; verify UI against committed controller state read back through the Go client, not narration or screenshots alone. Record Flutter/Dart/plugin versions, build mode and platform with each result. A missing Flutter toolchain or display prerequisite reports not-run and blocks desktop release claims. Qualify macOS and Linux packaging (controller always-on, desktop closing, Serenity one writer/brain/key setup, secure helper, backup restore). Test actual named agent-client versions before advertising compatibility; MCP baseline with optional features disabled. Adapters qualify public APIs with explicit test accounts/operator-controlled safe destinations; scripts must not embed credentials or silently perform irreversible real publication. Unit fakes cannot stand in for real protocol capabilities. Missing credentials/platform prerequisites report not-run and block relevant release claims. Additional remote MCP, contained executor, Windows and providers are outside v1 scope.
+Implement package qualification_test and controlled subprocess/GUI drivers in this root. Qualifications bind exact source/config/dependency/tool/profile/client/platform versions and expected/observed evidence. The desktop is the Flutter application at apps/desktop, not an importable Go package: qualify it by building the real application from a recorded source revision with the pinned Flutter toolchain and driving that built application (Flutter integration_test and/or OS accessibility automation launched as a controlled subprocess from this root) against an actual controller over the real Unix socket, plus the explicit mutual-TLS remote path. Never substitute a Go stand-in, a widget test, the design study's browser rendering or a WebView for the built client. Run first-release desktop onboarding/daily result/decision paths; verify UI against committed controller state read back through the Go client, not narration or screenshots alone. Record Flutter/Dart/plugin versions, build mode and platform with each result. A missing Flutter toolchain or display prerequisite reports not-run and blocks desktop release claims. Qualify the first Mac release on clean native arm64 and amd64 hosts (controller always-on, desktop closing, Serenity one writer/brain/key setup, secure helper, backup restore, first real chief reply); qualify Linux later before advertising Linux support. Test actual named agent-client versions before advertising compatibility; MCP baseline with optional features disabled. Adapters qualify public APIs with explicit test accounts/operator-controlled safe destinations; scripts must not embed credentials or silently perform irreversible real publication. Unit fakes cannot stand in for real protocol capabilities. Missing credentials/platform prerequisites report not-run and block relevant release claims. Additional remote MCP, contained executor, Windows and providers are outside v1 scope.
 
 Local proving focus: Real versioned platform/client/GUI/provider evidence and Z01-Z21 release report; never compile-only compatibility.
 
@@ -48,9 +48,11 @@ Adapter name serenity; profile schema zatiti.serenity/v1 has exact version/commi
 
 ## Shared foundation contract
 
-# Frozen implementation contract, revision 3
+# Frozen implementation contract, revision 4
 
 These decisions complete the product specification and bind every scope. Report contradictions with an affected-dependency list and proposed coordinated revision; do not change another owner's interface locally.
+
+Revision 4 stages the first distribution on macOS for both native arm64 and amd64. Linux remains the next supported target after its own qualification; Windows and mobile remain later. A Mac release cannot claim Intel or Apple Silicon support from compilation alone: each requires an installed, signed, notarized artifact and clean-host qualification. The product and operation contracts of revision 3 remain in force; this revision changes release dispatch order and platform evidence, not the wire schemas or persisted rows. Required provider, Serenity, backup/restore and other first-release guarantees are not waived by phasing Linux later. Setup must let an installed Mac app reach the pinned personal-chief conversation without environment variables, manual socket paths or manual controller startup; any new helper/discovery or secret-custody interface requires its own coordinated contract before dependent implementation.
 
 Revision 3 changes, each a coordinated revision that code written against revision 2 must follow. Every new field named below is additive and optional on an existing type: no existing required field changed type, name or was removed, so old persisted rows validate unchanged and remain inspectable with the new field simply absent. New tables (`WorkerTurn`, proposal records) and new operations have no prior callers to break.
 
@@ -271,7 +273,7 @@ CLI completed/accepted => exit 0; invalid_input 2; permission_denied/review_requ
 
 ## Completion policy
 
-Write only within the assigned root. Do not edit this prompt, siblings, shared contracts, root dependencies or external acceptance inputs. Implement exact fake dependencies locally; do not return invented production success for unavailable prerequisites. Use controlled providers, deterministic clocks and synthetic fixtures. Preserve expected/observed results and failure evidence. Package tests prove local properties; actual subprocess parity, crash recovery, desktop and adapter qualification prove integration. Z01-Z21 and first-release journeys on macOS/Linux must pass before a release is claimed.
+Write only within the assigned root. Do not edit this prompt, siblings, shared contracts, root dependencies or external acceptance inputs. Implement exact fake dependencies locally; do not return invented production success for unavailable prerequisites. Use controlled providers, deterministic clocks and synthetic fixtures. Preserve expected/observed results and failure evidence. Package tests prove local properties; actual subprocess parity, crash recovery, desktop and adapter qualification prove integration. Z01-Z21 and first-release journeys must pass on both Intel and Apple Silicon macOS before the Mac release is claimed; Linux requires its own later qualification before Linux support is advertised.
 
 ## Local IO, authentication, jobs and verification seams
 
@@ -434,7 +436,7 @@ The first release includes the chat-first desktop application, CLI and local std
 
 ### R2.3-004 (source section 2.3; primary owner integration)
 
-Initial distribution targets macOS and Linux. Windows is a later qualification target. No advertised platform or agent-client compatibility is established solely by code compiling.
+Distribution is phased: the first release targets macOS on both native Apple Silicon (arm64) and Intel (amd64). Both architectures must pass installed-artifact qualification before the Mac release is claimed. Linux follows after its own qualification; Windows is later. No advertised platform or agent-client compatibility is established solely by code compiling.
 
 ### R2.4-002 (source section 2.4; primary owner controller)
 
@@ -4964,19 +4966,19 @@ Expected:
 
 ### QUALIFICATION.macos_distribution — QUALIFICATION
 
-Setup: Build the documented macOS release artifacts with pinned Go/dependency/protocol/service versions and licenses.
+Setup: Build signed and notarized macOS release artifacts for native arm64 and amd64 with pinned Go/dependency/protocol/service versions and licenses.
 
-Action: Install on a clean supported macOS host, bootstrap, run CLI/MCP/desktop journeys, stop/restart controller, back up/restore and uninstall according to documentation.
+Action: Install on clean native Apple Silicon and Intel macOS hosts without developer tools; bootstrap, complete provider and limits setup in the desktop, receive a real first reply, run CLI/MCP/desktop journeys, stop/restart controller, back up/restore and uninstall according to documentation.
 
 Expected:
 
 - Documented installation commands work from actual artifacts; private socket, secure-store and local-lock behavior are exercised.
 - Serenity process packaging and one-writer lifecycle work with the controller/desktop.
-- Release evidence identifies exact OS/architecture/artifact/source/tool versions and observed results; compile success is not platform qualification.
+- Both native architectures pass with signed/notarized installed artifacts; release evidence identifies exact OS/architecture/artifact/source/tool versions and observed results. One architecture or compile success alone is not Mac release qualification.
 
 ### QUALIFICATION.linux_distribution — QUALIFICATION
 
-Setup: Build the documented Linux release artifacts with pinned dependencies and an explicitly provisioned supported secret source.
+Setup: After the Mac release, build the documented Linux release artifacts with pinned dependencies and an explicitly provisioned supported secret source. Linux support remains unadvertised until this separate qualification passes.
 
 Action: Install on a clean supported Linux host and run the same controller, CLI/MCP, desktop, restart and backup/restore journeys.
 

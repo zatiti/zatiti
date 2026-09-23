@@ -1817,12 +1817,12 @@
       "controller",
       "serenity"
     ],
-    "setup": "Build the documented macOS release artifacts with pinned Go/dependency/protocol/service versions and licenses.",
-    "action": "Install on a clean supported macOS host, bootstrap, run CLI/MCP/desktop journeys, stop/restart controller, back up/restore and uninstall according to documentation.",
+    "setup": "Build signed and notarized macOS release artifacts for native arm64 and amd64 with pinned Go/dependency/protocol/service versions and licenses.",
+    "action": "Install on clean native Apple Silicon and Intel macOS hosts without developer tools; bootstrap, complete provider and limits setup in the desktop, receive a real first reply, run CLI/MCP/desktop journeys, stop/restart controller, back up/restore and uninstall according to documentation.",
     "expected": [
       "Documented installation commands work from actual artifacts; private socket, secure-store and local-lock behavior are exercised.",
       "Serenity process packaging and one-writer lifecycle work with the controller/desktop.",
-      "Release evidence identifies exact OS/architecture/artifact/source/tool versions and observed results; compile success is not platform qualification."
+      "Both native architectures pass with signed/notarized installed artifacts; release evidence identifies exact OS/architecture/artifact/source/tool versions and observed results. One architecture or compile success alone is not Mac release qualification."
     ]
   },
   {
@@ -1836,7 +1836,7 @@
       "controller",
       "serenity"
     ],
-    "setup": "Build the documented Linux release artifacts with pinned dependencies and an explicitly provisioned supported secret source.",
+    "setup": "After the Mac release, build the documented Linux release artifacts with pinned dependencies and an explicitly provisioned supported secret source. Linux support remains unadvertised until this separate qualification passes.",
     "action": "Install on a clean supported Linux host and run the same controller, CLI/MCP, desktop, restart and backup/restore journeys.",
     "expected": [
       "Documented artifact installation and headless/desktop credential prerequisites work without secret exposure.",

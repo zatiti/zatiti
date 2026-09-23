@@ -215,7 +215,7 @@
       "installation"
     ],
     "kind": "requirement",
-    "text": "Initial distribution targets macOS and Linux. Windows is a later qualification target. No advertised platform or agent-client compatibility is established solely by code compiling."
+    "text": "Distribution is phased: the first release targets macOS on both native Apple Silicon (arm64) and Intel (amd64). Both architectures must pass installed-artifact qualification before the Mac release is claimed. Linux follows after its own qualification; Windows is later. No advertised platform or agent-client compatibility is established solely by code compiling."
   },
   {
     "id": "R2.4-002",
