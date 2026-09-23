@@ -31,6 +31,7 @@ keychain is qualification work. See [QUALIFICATION.md](QUALIFICATION.md).
 | `licenses.go` | License notice audit: the license entries and the SBOM must describe the same components |
 | `signature.go` | Detached Ed25519 manifest signature, verified against caller-supplied trusted keys |
 | `mac_release.go` | Matched Intel/Apple Silicon Mac descriptor, component and bundle verification, and a separate detached metadata signature |
+| `templates/macos/select_arch.sh` | Sourceable native Mac CPU selector using `hw.optional.arm64`, including a translated shell; no download or install command |
 | `service.go`, `templates/` | The macOS LaunchAgent and the Linux user `systemd` unit |
 | `layout.go`, `plan.go`, `apply.go` | Install, upgrade, and uninstall planning and execution |
 | `servicemanager.go` | `launchctl` and `systemctl --user` drivers behind the `ServiceManager` interface |
@@ -180,6 +181,15 @@ under a distinct schema; a consumer must verify the descriptor signature
 **and** call `VerifyMacRelease` with the four downloaded trees. These functions
 use caller-supplied trust keys and make no claim about code signing,
 notarization or a qualified downloadable release.
+
+The Mac architecture selector consults `/usr/sbin/sysctl -n hw.optional.arm64`
+before `uname`. A value of `1` selects `arm64` even when a translated shell
+reports `x86_64`; an Intel host can report an unknown OID and selects `amd64`
+only when that exact error and `x86_64` agree. Other probe failures stop.
+The descriptor currently has no artifact URLs, maximum download sizes,
+hosting layout or trust-key rotation path, so it cannot generate a secure
+bootstrap downloader yet. Those fields need a coordinated release descriptor
+revision before a public install command exists.
 
 ## Service launchers
 
