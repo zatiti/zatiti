@@ -52,6 +52,13 @@ func (m memorySecrets) Put(_ context.Context, ref string, secret []byte) (string
 	return ref, nil
 }
 
+func (m memorySecrets) Lookup(_ context.Context, name string) (string, error) {
+	if _, ok := m.refs[name]; !ok {
+		return "", &contract.Fault{Code: contract.CodeNotFound, Message: "secret name is unknown"}
+	}
+	return name, nil
+}
+
 func (m memorySecrets) Get(_ context.Context, ref string) ([]byte, error) {
 	s, ok := m.refs[ref]
 	if !ok {
