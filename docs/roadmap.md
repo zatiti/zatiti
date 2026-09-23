@@ -3932,3 +3932,39 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
 - 2026-09-23 ~01:05 PT -- PR #62 LANDED (worker double-reservation fix,
   commit 6629533). All 7 CI checks passed clean. Confirmed on real
   post-merge main via merge-base --is-ancestor.
+- 2026-09-22 ~22:25-01:45 PT -- R-event-scope-fix IMPLEMENTED (PR #63, not
+  yet merged), founder-authorized approach ("relax Unit.Emit's check").
+  internal/storage's Unit.Emit required an event's explicit scope to equal
+  the unit's own scope exactly; internal/tasks's emitTaskEvent stamps a
+  task-transition event with the task's own (worker/task-scoped) row
+  scope, so any coarser-scoped caller (every controller-internal call,
+  and any minimally-scoped public client) refused the instant
+  transitionTask tried to emit. Fixed by relaxing the check to a narrows
+  relation (unit may be coarser than the event, never contradict it) --
+  the same relation already independently implemented, in each direction,
+  by internal/evidence's scopeVisible and internal/execution's
+  narrowScope. Also fixed appendEvent to persist the actual (possibly
+  narrower) scope rather than always the unit's coarser one, which the
+  fix's own validation alone would not have caught.
+  tests/integration's TestLateEventFailureRollsBackStateAndEvents
+  rewritten to trigger on a genuine contradiction instead of mere
+  narrowing (which now legitimately succeeds).
+
+  *** MILESTONE: with this fix, tests/integration/cooperative_journey_test.go
+  reaches a genuine terminal "succeeded" state for the first time in this
+  tree's history -- task.create, task.start, run.claim, attempt.checkpoint,
+  attempt.report, the real trusted verifier's claim and record, and the
+  task's own success transition all complete through real production
+  code. This closes a chain of FIVE masked bugs found and fixed this
+  session, each surfacing only once the layer below it started working:
+  run.claim's empty operation_id -> evidence_ids wrong-ID + artifacts.
+  metadata schema -> verification.record stale_version -> this
+  event-scope mismatch. ***
+
+  Independently re-verified everything myself before landing: read the
+  diff, confirmed appendEvent's scope-persistence fix by reading its real
+  signature/SQL, ran my own red-green (reverted the fix, reproduced the
+  exact pre-fix fault, restored, confirmed green), ran the full
+  tests/integration suite myself (192s, all green) including watching
+  the cooperative journey test assert real "succeeded". Rebased cleanly
+  onto PR #62 (no conflict despite both touching cooperative_journey_test.go).
