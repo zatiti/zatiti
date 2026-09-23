@@ -124,6 +124,7 @@ class InstallationStatus {
     required this.initialized,
     required this.requirements,
     required this.version,
+    this.runtimeReady,
   });
 
   factory InstallationStatus.fromJson(Object? json) {
@@ -138,12 +139,8 @@ class InstallationStatus {
         for (final r in o.list('requirements')) Requirement.fromJson(r),
       ],
       version: o.integer('version'),
+      runtimeReady: o.optionalBoolean('runtime_ready'),
     );
-    // runtime_ready is a real, additive-optional revision-3 field this
-    // client does not yet surface; read and discard, matching Organization/
-    // Project's own limits/extensions pattern for fields not yet modeled,
-    // per the frozen contract's additive-field rule.
-    o.optional('runtime_ready');
     o.finish();
     return s;
   }
@@ -155,6 +152,7 @@ class InstallationStatus {
   final bool initialized;
   final List<Requirement> requirements;
   final int version;
+  final bool? runtimeReady;
 }
 
 /// An identity the controller authenticates. The client never creates one in

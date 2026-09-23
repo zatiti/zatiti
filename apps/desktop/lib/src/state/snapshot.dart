@@ -663,6 +663,10 @@ class WorkspaceSnapshot {
     this.prerequisites = const [],
     this.unresolvedOperations = const [],
     this.workspaceName = '',
+    this.installedMac = false,
+    this.installedChiefWorkerId,
+    this.installedChiefConversationId,
+    this.installedChiefIssue,
   });
 
   static final WorkspaceSnapshot empty = WorkspaceSnapshot(
@@ -695,6 +699,15 @@ class WorkspaceSnapshot {
   final List<PrerequisiteNotice> prerequisites;
   final List<UnresolvedOperationEntry> unresolvedOperations;
   final String workspaceName;
+  final bool installedMac;
+  final String? installedChiefWorkerId;
+  final String? installedChiefConversationId;
+  final String? installedChiefIssue;
+  bool get installedChiefReady =>
+      installedMac &&
+      installedChiefWorkerId != null &&
+      installedChiefConversationId != null &&
+      installedChiefIssue == null;
 
   WorkerEntry? worker(WorkerId id) {
     for (final w in workers) {

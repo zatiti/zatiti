@@ -64,7 +64,9 @@ class ConversationView extends StatelessWidget {
                 Space.xl,
                 Space.xl,
               ),
-              child: conversation == null
+              child: controller.installedReadinessIssue != null
+                  ? Notice(controller.installedReadinessIssue!)
+                  : conversation == null
                   ? Notice(
                       worker == null
                           ? 'Choose a conversation to begin.'

@@ -225,6 +225,7 @@ class _RootState extends State<_Root> {
         try {
           source = LiveWorkspaceSource(
             client,
+            installedMac: profile.installed,
             endpointLabel: profile.socketPath != null
                 ? 'Your controller on this computer'
                 : 'Your controller at ${profile.remoteUrl!.host}',

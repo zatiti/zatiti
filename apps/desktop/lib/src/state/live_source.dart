@@ -14,6 +14,7 @@ import '../transport/errors.dart';
 import '../transport/operations.dart';
 import '../transport/strict_json.dart';
 import '../transport/submission.dart';
+import 'installed_chief.dart';
 import 'snapshot.dart';
 import 'workspace_source.dart';
 
@@ -68,6 +69,7 @@ class LiveWorkspaceSource implements WorkspaceSource {
     String? initialEventCursor,
     int initialLastSequence = 0,
     LocalStore? localStore,
+    this.installedMac = false,
   }) : api = ControllerApi(client),
        _clock = clock ?? (() => DateTime.now().toUtc()),
        label = endpointLabel ?? 'Controller',
@@ -77,6 +79,7 @@ class LiveWorkspaceSource implements WorkspaceSource {
        _installationId = client.installationId;
 
   final ControllerApi api;
+  final bool installedMac;
 
   final DateTime Function() _clock;
   final Map<String, String> _toolNames = {};
@@ -751,6 +754,12 @@ class LiveWorkspaceSource implements WorkspaceSource {
   Future<WorkspaceSnapshot> loadSnapshot() => _guard(() async {
     await _confirmCapabilities();
     final status = await api.installationStatus();
+    if (installedMac && status.installationId != _installationId) {
+      throw const SourceRefusal(
+        RefusalKind.other,
+        'The local service belongs to a different installation.',
+      );
+    }
     final organizations = await api.listAll(
       Operations.organizationList,
       wire.Organization.fromJson,
@@ -805,7 +814,46 @@ class LiveWorkspaceSource implements WorkspaceSource {
     }
     await _baselineEvents();
 
-    final workerEntries = _tree(organizations, workers, conversations);
+    final budgets = <String, wire.Limits?>{};
+    final rootOrganizations = organizations
+        .where((o) => o.parentId == null)
+        .toList();
+    final rootChiefId = rootOrganizations.length == 1
+        ? rootOrganizations.single.chiefId
+        : null;
+    if (installedMac) {
+      if (rootChiefId != null) {
+        try {
+          budgets[rootChiefId] = await api.budget(workerId: rootChiefId);
+        } on OperationFailedException {
+          budgets[rootChiefId] = null;
+        }
+      }
+    }
+    final installedChief = installedMac
+        ? installedChiefFromRecords(
+            installationId: status.installationId,
+            initialized: status.initialized,
+            runtimeReady: status.runtimeReady,
+            paused: status.paused,
+            maintenance: status.maintenance,
+            requirements: status.requirements,
+            organizations: organizations,
+            workers: workers,
+            conversations: conversations,
+            connections: connections,
+            effectiveBudget: budgets[rootChiefId],
+            now: _clock(),
+          )
+        : null;
+    final workerEntries = _tree(
+      organizations,
+      workers,
+      conversations,
+      installedChiefWorkerId: installedChief?.workerId,
+      installedChiefConversationId: installedChief?.conversationId,
+      strictInstalledChief: installedMac,
+    );
     final workerIds = {for (final w in workerEntries) w.id.value};
     _principalNames
       ..clear()
@@ -838,7 +886,9 @@ class LiveWorkspaceSource implements WorkspaceSource {
       }
       wire.Limits? budget;
       try {
-        budget = await api.budget(workerId: w.id);
+        budget = budgets.containsKey(w.id)
+            ? budgets[w.id]
+            : await api.budget(workerId: w.id);
       } on OperationFailedException {
         // No effective ceiling visible for this worker.
       }
@@ -1016,6 +1066,10 @@ class LiveWorkspaceSource implements WorkspaceSource {
     return WorkspaceSnapshot(
       takenAt: _clock(),
       workspaceName: 'Installation ${_short(status.installationId)}',
+      installedChiefWorkerId: installedChief?.workerId,
+      installedChiefConversationId: installedChief?.conversationId,
+      installedChiefIssue: installedChief?.issue,
+      installedMac: installedMac,
       workers: workerEntries,
       conversations: [
         for (final c in conversations) _conversation(c, workerIds),
@@ -1257,8 +1311,11 @@ class LiveWorkspaceSource implements WorkspaceSource {
   List<WorkerEntry> _tree(
     List<wire.Organization> organizations,
     List<wire.Worker> workers,
-    List<wire.Conversation> conversations,
-  ) {
+    List<wire.Conversation> conversations, {
+    String? installedChiefWorkerId,
+    String? installedChiefConversationId,
+    bool strictInstalledChief = false,
+  }) {
     final orgById = {for (final o in organizations) o.id: o};
     final workerById = {for (final w in workers) w.id: w};
     final sortedOrgs = [...organizations]
@@ -1288,6 +1345,9 @@ class LiveWorkspaceSource implements WorkspaceSource {
     }
 
     String? conversationOf(String workerId) {
+      if (strictInstalledChief && workerId == installedChiefWorkerId) {
+        return installedChiefConversationId;
+      }
       for (final c in conversations) {
         if (c.kind != wire.ConversationKind.direct) continue;
         if (c.scope.workerId == workerId ||
