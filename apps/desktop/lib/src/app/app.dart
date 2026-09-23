@@ -99,11 +99,18 @@ class ConfigurationNeededApp extends StatelessWidget {
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('Connect to your controller', style: text.titleLarge),
+                    Text(
+                      plan.issue == null
+                          ? 'Connect to your controller'
+                          : 'Zatiti needs attention',
+                      style: text.titleLarge,
+                    ),
                     const SizedBox(height: Space.md),
                     Text(
-                      'Zatiti runs on your own controller. This app needs to '
-                      'know where it is. Set these before starting the app:',
+                      plan.issue == null
+                          ? 'Zatiti runs on your own controller. This app needs to '
+                                'know where it is. Set these before starting the app:'
+                          : 'Check the local Zatiti service or Keychain, then reopen the app.',
                       style: text.bodyMedium,
                     ),
                     const SizedBox(height: Space.lg),
@@ -113,12 +120,13 @@ class ConfigurationNeededApp extends StatelessWidget {
                         child: Text('• $m', style: text.bodyMedium),
                       ),
                     const SizedBox(height: Space.md),
-                    Text(
-                      'The credential is not an environment variable. Add it '
-                      'in the app’s settings; it is kept in your operating '
-                      'system’s secure storage.',
-                      style: text.bodySmall,
-                    ),
+                    if (plan.issue == null)
+                      Text(
+                        'The credential is not an environment variable. Add it '
+                        'in the app’s settings; it is kept in your operating '
+                        'system’s secure storage.',
+                        style: text.bodySmall,
+                      ),
                     if (plan.demoOffered) ...[
                       const SizedBox(height: Space.xl),
                       OutlinedButton(

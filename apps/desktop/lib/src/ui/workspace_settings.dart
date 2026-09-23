@@ -185,7 +185,12 @@ class _WorkspaceSettingsState extends State<WorkspaceSettings> {
                   'Demo data has no controller and no credential.',
                   style: text.bodySmall,
                 )
-              else ...[
+              else if (widget.credentials!.authorizationManaged) ...[
+                const Text(
+                  'This Mac keeps the owner credential in Keychain. Zatiti '
+                  'reads it when connecting to the local service.',
+                ),
+              ] else ...[
                 Text(_credentialStatus ?? 'Checking…', style: text.bodySmall),
                 const SizedBox(height: Space.md),
                 Semantics(
