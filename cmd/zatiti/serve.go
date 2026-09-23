@@ -34,18 +34,12 @@ type serveOptions struct {
 	// Verifier is the real, non-stub internal/execution.NewVerifier
 	// construction, not merely that Attach returned nil).
 	afterAttach func(controller.Collaborators)
-	// restoreLifecycle overrides the production restoreLifecycle{} value
+	// restoreLifecycle overrides the production restoreLifecycle value
 	// (restore.go) Collaborators.RestoreLifecycle is attached with.
-	// Production never sets it: restoreLifecycle{} always fails closed with
-	// a specific prerequisite_missing fault, because the candidate-lookup
-	// and owner-merge operations it would need do not exist anywhere in
-	// this tree yet (see restore.go's package doc and P33's handoff). A
-	// test sets it to a double that drives a real swap through the actual
-	// storage.Restorable/Controller machinery end to end, so
-	// TestRestoreHandoffReassemblesOverTheFreshlyReopenedDatabase proves
-	// this package's own new code (the ErrRestoreHandoff reassembly loop)
-	// against a genuine handoff instead of one this package cannot yet
-	// produce through the real public restore flow.
+	// Production never sets it. A test sets it to isolate this package's
+	// own reassembly loop from the owner-merge machinery -- for example to
+	// drive a swap whose merge is a no-op -- when the behavior under test
+	// is the ErrRestoreHandoff handling rather than the merge itself.
 	restoreLifecycle controller.RestoreLifecycle
 }
 
@@ -271,7 +265,7 @@ func superviseController(ctx context.Context, h *installationHandle, adapters ma
 	// than a separate check.
 	restoreLifecycleValue := restoreLifecycleOverride
 	if restoreLifecycleValue == nil {
-		restoreLifecycleValue = restoreLifecycle{}
+		restoreLifecycleValue = newRestoreLifecycle(h, installationID)
 	}
 
 	ctl, err := controller.New(controller.Config{StateDir: h.cfg.StateDir, TickInterval: h.cfg.TickInterval}, h.app, h.db, h.own, adapters, h.clock)

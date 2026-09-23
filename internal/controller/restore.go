@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -94,7 +95,15 @@ type RestoreLifecycle interface {
 	// candidate database file under dir, ready for
 	// storage.Restorable.PrepareRestore. The caller owns dir and removes
 	// the staged file once PrepareRestore has made its own copy.
-	StageCandidate(ctx context.Context, restoreJobID contract.ID, dir string) (RestoreCandidate, error)
+	//
+	// jobInput is the restore job's own original input, exactly as
+	// _execution.job.claim returned it and as this package journals it: the
+	// only place the verified backup artifact reference survives. No public
+	// or internal operation projects it anywhere else (job.get's wire
+	// projection deliberately omits Input), so passing it here is what lets
+	// the capability resolve an artifact at all instead of failing closed.
+	// It is opaque to this package, which neither decodes nor validates it.
+	StageCandidate(ctx context.Context, restoreJobID contract.ID, jobInput json.RawMessage, dir string) (RestoreCandidate, error)
 
 	// MergeOverlay folds restoreJobID's already-captured RecoveryOverlay
 	// into every owner's own tables monotonically -- never resurrecting a
@@ -105,7 +114,26 @@ type RestoreLifecycle interface {
 	// attempt inside that one transaction; a recovered retry after a crash
 	// between WriteRestoreOverlay and ResumeAfterRestore calls it again
 	// with the same restoreJobID, so it must be safe to repeat.
-	MergeOverlay(ctx context.Context, u contract.Unit, restoreJobID contract.ID) error
+	//
+	// overlay names the published, sealed recovery-overlay artifact
+	// installation.restore already registered against this job. The
+	// controller resolves it through _installation.restore.overlay BEFORE
+	// the swap -- while its own Application is still valid -- and journals
+	// it, because after the swap there is no valid Application left to ask.
+	MergeOverlay(ctx context.Context, u contract.Unit, restoreJobID contract.ID, overlay RestoreOverlayRef) error
+}
+
+// RestoreOverlayRef names one published, sealed recovery-overlay artifact:
+// the reference installation.restore registered against a restore job, and
+// the exact byte size a caller needs to read those bytes back in full.
+type RestoreOverlayRef struct {
+	Artifact contract.ArtifactRef `json:"artifact"`
+	Size     int64                `json:"size"`
+}
+
+// resolved reports whether this reference actually names an artifact.
+func (r RestoreOverlayRef) resolved() bool {
+	return r.Artifact.ID != "" && r.Artifact.Digest != "" && r.Size > 0
 }
 
 // RestoreCandidate is what StageCandidate resolved: a locally staged,
@@ -142,10 +170,30 @@ func (c *Controller) database() contract.Database {
 	return c.db
 }
 
+// setDatabase adopts the freshly reopened database CommitRestore returned.
+// This controller now owns it: CommitRestore closed the pre-restore handle
+// as part of the swap, and entrypoint assembly's own field still names that
+// dead one, so nothing outside this package can close the live one. Run
+// closes it when the lifetime ends (see releaseAdopted).
 func (c *Controller) setDatabase(db contract.Database) {
 	c.mu.Lock()
 	c.db = db
+	c.adopted = db
 	c.mu.Unlock()
+}
+
+// releaseAdopted closes the database this controller adopted from
+// CommitRestore, once the loop has ended and every worker has drained. It is
+// never called for the handle New was constructed with: that one belongs to
+// entrypoint assembly, which closes it itself.
+func (c *Controller) releaseAdopted() {
+	c.mu.Lock()
+	db := c.adopted
+	c.adopted = nil
+	c.mu.Unlock()
+	if db != nil {
+		_ = db.Close()
+	}
 }
 
 func (c *Controller) restoreLifecycle() RestoreLifecycle {
@@ -297,7 +345,7 @@ func (c *Controller) runRestore(ctx context.Context, sess *session, e entry) {
 	}
 
 	if e.Phase == phaseRestoreSwapped {
-		if !c.mergeAndResume(ctx, sess, restorable, e.JobID) {
+		if !c.mergeAndResume(ctx, sess, restorable, e) {
 			return
 		}
 		e.Phase = phaseRestoreResumed
@@ -314,11 +362,21 @@ func (c *Controller) runRestore(ctx context.Context, sess *session, e entry) {
 	// pass, or on a resumed lifetime that never itself touched the swap.
 }
 
-// restoreClaim resolves the job's original input (naming the verified
-// backup artifact) through a safe replay claim: installation's own Finish
-// already transitioned this job to "running" under the current generation,
-// so this call never contests an actual claim, it only reads back what was
-// already committed.
+// restoreClaim resolves, in one pre-swap window while this lifetime's own
+// Application is still valid, the two references the rest of the protocol
+// needs and can never fetch again afterwards:
+//
+//   - the job's original input, naming the verified backup artifact, through
+//     a safe replay claim (installation's own Finish already transitioned
+//     this job to "running" under the current generation, so this call never
+//     contests an actual claim; it only reads back what was already
+//     committed), and
+//   - the published recovery-overlay artifact installation.restore
+//     registered against the same job, through _installation.restore.overlay.
+//
+// Both are journaled here, before the swap, so a crash anywhere later
+// resumes with them intact -- after CommitRestore there is no valid
+// Application left to ask either question through.
 func (c *Controller) restoreClaim(ctx context.Context, sess *session, e *entry) bool {
 	var claimed jobClaimOutput
 	err := c.write(func() error {
@@ -335,6 +393,24 @@ func (c *Controller) restoreClaim(ctx context.Context, sess *session, e *entry) 
 	}
 	e.JobInput = claimed.Input
 	e.JobVersion = claimed.Job.Version
+
+	var overlay restoreOverlayOutput
+	if err := c.call(ctx, sess, "_installation.restore.overlay",
+		restoreOverlayInput{JobID: e.JobID}, &overlay); err != nil {
+		c.note(err)
+		if !transient(err) {
+			// A restore job whose own owner registered no overlay cannot be
+			// merged safely, and merging is not optional: refusing here
+			// leaves the database file untouched, because performSwap has
+			// not run yet.
+			c.failRestore(ctx, sess, e, faultOf(err))
+		}
+		return false
+	}
+	e.OverlayArtifact = &RestoreOverlayRef{
+		Artifact: contract.ArtifactRef{ID: overlay.Artifact.ID, Digest: overlay.Artifact.Digest},
+		Size:     overlay.Size,
+	}
 	return c.journal(sess, *e)
 }
 
@@ -381,7 +457,7 @@ func (c *Controller) performSwap(ctx context.Context, sess *session, e *entry, r
 		c.failRestore(ctx, sess, e, unavailable("restore staging directory cannot be created"))
 		return nil, false
 	}
-	candidate, err := lifecycle.StageCandidate(ctx, e.JobID, dir)
+	candidate, err := lifecycle.StageCandidate(ctx, e.JobID, e.JobInput, dir)
 	if err != nil {
 		c.failRestore(ctx, sess, e, faultOf(err))
 		return nil, false
@@ -423,14 +499,25 @@ func (c *Controller) performSwap(ctx context.Context, sess *session, e *entry, r
 // gate. Both steps are safe to repeat: WriteRestoreOverlay's own callback
 // (MergeOverlay) must itself be monotonic/idempotent, and ResumeAfterRestore
 // is skipped once RestorePaused already reports false.
-func (c *Controller) mergeAndResume(ctx context.Context, sess *session, restorable storage.Restorable, jobID contract.ID) bool {
+func (c *Controller) mergeAndResume(ctx context.Context, sess *session, restorable storage.Restorable, e entry) bool {
 	lifecycle := c.restoreLifecycle()
 	if lifecycle == nil {
 		c.note(prerequisiteMissing("no restore lifecycle capability is attached; the recovery overlay cannot be merged"))
 		return false
 	}
+	if e.OverlayArtifact == nil || !e.OverlayArtifact.resolved() {
+		// The reference is journaled before the swap precisely so it is
+		// available here. Its absence means this entry was written by a
+		// build that never resolved one; merging cannot be guessed at, and
+		// resuming storage without merging would silently drop every
+		// obligation the overlay retained.
+		c.note(prerequisiteMissing(
+			"restore job %s has no journaled recovery overlay reference; the overlay cannot be merged", e.JobID))
+		return false
+	}
+	overlay := *e.OverlayArtifact
 	err := restorable.WriteRestoreOverlay(ctx, sess.actor, sess.scope, func(u contract.Unit) error {
-		return lifecycle.MergeOverlay(ctx, u, jobID)
+		return lifecycle.MergeOverlay(ctx, u, e.JobID, overlay)
 	})
 	if err != nil {
 		c.note(faultOf(err))

@@ -248,6 +248,11 @@ func (p *fakePorts) Call(_ context.Context, _ contract.Unit, inv contract.Invoca
 		}})
 	case peerEffectsPending:
 		return okPayload(effectsPendingOutput{Operations: []peerOperation{}})
+	case peerIdentityRevocations:
+		// The default is the real answer for an installation that was
+		// bootstrapped and never restricted: no credential or grant is
+		// revoked. A test that needs revocations installs its own handler.
+		return okPayload(identityRevocationsOutput{Revocations: []peerRevocation{}})
 	case peerMemoryManifest:
 		return okPayload(memoryManifestOutput{BrainRevisions: []wireRef{}, Obligations: []wireRequirement{}})
 	case peerAccountingInspect:

@@ -249,6 +249,39 @@ func (s *Service) effectsPending(ctx context.Context, unit contract.Unit, limit 
 	return out.Operations, nil
 }
 
+// ---------- _identity.revocations ----------
+
+const peerIdentityRevocations = "_identity.revocations"
+
+// peerRevocation is the exact Revocation $def shape: one credential or
+// grant this installation currently holds revoked. Listing it IS the
+// assertion that it is revoked; this package never lifts one and never
+// learns any secret material from it.
+type peerRevocation struct {
+	Kind        string           `json:"kind"`
+	ID          contract.ID      `json:"id"`
+	Version     contract.Version `json:"version"`
+	PrincipalID contract.ID      `json:"principal_id"`
+}
+
+type identityRevocationsOutput struct {
+	Revocations []peerRevocation `json:"revocations"`
+}
+
+// identityRevocations reads this installation's current credential and grant
+// revocations, so a paused backup's manifest and a restore's recovery
+// overlay can carry them across a rewind. Before this peer operation
+// existed, revocations were simply absent from both -- the gap
+// restore_test.go's TestRestoreOverlayPreservesPostBackupUnknownEffectAcrossRewind
+// doc comment named.
+func (s *Service) identityRevocations(ctx context.Context, unit contract.Unit, scope wireScope) ([]peerRevocation, error) {
+	var out identityRevocationsOutput
+	if err := callPeer(ctx, s, unit, peerIdentityRevocations, scopeInput{Scope: scope}, &out); err != nil {
+		return nil, err
+	}
+	return out.Revocations, nil
+}
+
 // ---------- _accounting.inspect ----------
 
 const peerAccountingInspect = "_accounting.inspect"

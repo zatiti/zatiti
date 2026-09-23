@@ -104,6 +104,16 @@ type Controller struct {
 	// itself performed a swap, to end Run without treating it as a fault or
 	// a displacement.
 	restoreHandoff chan struct{}
+	// adopted is the freshly reopened database CommitRestore handed this
+	// controller in exchange for closing the pre-restore one. It is the only
+	// database handle this controller ever owns: the one Config/New was
+	// constructed with belongs to entrypoint assembly and is never closed
+	// here. Run closes this one when it ends, because nothing else can --
+	// entrypoint's own handle field still names the pre-swap database, so
+	// reassembly closes that and opens a third. Without this the process
+	// keeps one extra live SQLite connection pool on the live file for
+	// every restore it performs.
+	adopted contract.Database
 	// gate serializes the force-stop against write steps in flight, so no
 	// worker writes after Stop has returned at its deadline.
 	gate sync.RWMutex
@@ -377,6 +387,17 @@ loop:
 	case <-drained:
 	case <-c.force:
 	}
+	// This lifetime is over, so the database it adopted from CommitRestore
+	// has no further reader: the loop has ended and nothing reaches
+	// c.database() again. Closing unconditionally (rather than only on the
+	// drained branch) is deliberate, because abandon() above already closed
+	// c.force for every non-nil cause -- including ErrRestoreHandoff -- so a
+	// drained-only close would never run on exactly the path that adopts a
+	// handle. It is also safe under a forced stop: database/sql's Close
+	// closes idle connections immediately and closes an in-use one only when
+	// its transaction returns it, so a worker still inside a transaction is
+	// never torn mid-statement.
+	c.releaseAdopted()
 	c.markStopped()
 	return cause
 }

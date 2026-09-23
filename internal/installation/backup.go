@@ -173,7 +173,7 @@ func (s *Service) prepareBackup(ctx context.Context, unit contract.Unit, inv con
 	if err != nil {
 		return contract.IOPlan{}, err
 	}
-	obligations, err := s.snapshotObligations(ctx, unit, in.Scope.InstallationID, job.ID, pending, manifest.Obligations)
+	obligations, err := s.snapshotObligations(ctx, unit, in.Scope, job.ID, pending, manifest.Obligations)
 	if err != nil {
 		return contract.IOPlan{}, err
 	}

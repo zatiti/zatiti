@@ -518,14 +518,29 @@ func qualifyDistribution(t *testing.T, caseID, goos string) {
 	}
 	c.observe("a CLI query (`installation status`) against the private socket of the installed, produced binary returned a completed result")
 
-	// Backup/restore journey, carried to its current, already-documented
-	// honest ceiling: installation.backup succeeds; installation.restore
-	// (after the required pause/maintenance sequence) is accepted, and the
-	// real cmd/zatiti restoreLifecycle{} (restore.go) fails it closed with
-	// prerequisite_missing at StageCandidate -- the identical result
-	// tests/integration/restore_controller_test.go proves against a
-	// directly-attached controller (P46/P33's already-known, already-
-	// tracked restore ceiling; not a new finding, not routed around here).
+	// Backup/restore journey, carried all the way through. Until P50 this
+	// stopped at a documented ceiling -- installation.restore was accepted
+	// and then failed closed with prerequisite_missing at StageCandidate,
+	// because nothing could resolve the backup artifact or merge the
+	// recovery overlay. P50 closed that: the real cmd/zatiti
+	// restoreLifecycle (restore.go) now resolves the published encrypted
+	// bundle, the controller performs the atomic database swap, and each
+	// owner's own restore.merge folds the recovery overlay back.
+	//
+	// That makes this the one place in the tree where a genuine restore
+	// handoff is exercised inside a real, separately spawned `zatiti serve`
+	// OS process rather than in-process, and it is worth stating what that
+	// costs: a restore ends the serving lifetime by design (P32/P33's
+	// ErrRestoreHandoff -- this lifetime's Application was built over the
+	// database handle CommitRestore closed), so runServe tears the listener
+	// down, reassembles over the freshly reopened database and binds a new
+	// one. The private socket therefore genuinely disappears for the length
+	// of that reassembly (measured at roughly five seconds on this host,
+	// almost all of it the same module/registry assembly that startup
+	// already spends) and a client must poll through the gap rather than
+	// treat the first connection error as the answer. The journey below
+	// does exactly that, and that restart-and-recover is itself the
+	// property being qualified.
 	pauseOut, pauseRaw, err := runCLI("installation", "pause", "--json", "--submission-key", "qual-dist-pause-1",
 		"--input", fmt.Sprintf(`{"scope":{"installation_id":%q},"expected_version":1}`, installationID))
 	if err != nil || pauseOut["status"] != "completed" {
@@ -555,33 +570,64 @@ func qualifyDistribution(t *testing.T, caseID, goos string) {
 		c.fail("installation restore: %v\n%s", err, restoreRaw)
 	}
 	restoreJobID, _ := digString(restoreOut, "data", "resource", "id")
-	var restoreState, restoreCode string
-	deadline := time.Now().Add(30 * time.Second)
+
+	// Poll the installed binary's own CLI across the restart window until
+	// the process is serving again. A connection error here is the expected
+	// shape of the handoff, not a verdict: the server is rebuilding itself.
+	// The deadline is what distinguishes a restart from a hang.
+	var statusAfter map[string]any
+	deadline := time.Now().Add(3 * time.Minute)
+	var lastErr error
 	for time.Now().Before(deadline) {
-		jobOut, jobRaw, err := runCLI("installation", "job", "get", "--json",
-			"--input", fmt.Sprintf(`{"scope":{"installation_id":%q},"id":%q}`, installationID, restoreJobID))
-		if err != nil {
-			c.fail("installation job get: %v\n%s", err, jobRaw)
-		}
-		restoreState, _ = digString(jobOut, "data", "resource", "state")
-		if restoreState == "succeeded" || restoreState == "failed" {
-			restoreCode, _ = digString(jobOut, "data", "resource", "requirements", "0", "code")
+		out, _, err := runCLI("installation", "status", "--json",
+			"--input", fmt.Sprintf(`{"scope":{"installation_id":%q}}`, installationID))
+		if err == nil && out["status"] == "completed" {
+			statusAfter = out
 			break
 		}
-		time.Sleep(200 * time.Millisecond)
+		lastErr = err
+		time.Sleep(250 * time.Millisecond)
 	}
-	if restoreState != "failed" || restoreCode != "prerequisite_missing" {
-		c.fail("restore job settled state=%q code=%q, want the documented honest ceiling failed/prerequisite_missing (P46/P33, cmd/zatiti/restore.go)", restoreState, restoreCode)
+	if statusAfter == nil {
+		c.fail("the controller never served again after the restore handoff (last error: %v)\n%s", lastErr, serveLog.String())
 	}
+
+	// It is the SAME installation, restored rather than re-created, and the
+	// generation advanced: CommitRestore reopened the swapped file under a
+	// strictly newer generation, which is what fences every pre-restore
+	// lease and claim out.
+	restoredID, _ := digString(statusAfter, "data", "resource", "installation_id")
+	if restoredID != installationID {
+		c.fail("after the restore the controller serves installation %q, want the same installation %q", restoredID, installationID)
+	}
+	restoredGeneration, _ := digFloat(statusAfter, "data", "resource", "generation")
+	if restoredGeneration <= 1 {
+		c.fail("generation after the restore is %v, want it strictly advanced past the pre-restore generation", restoredGeneration)
+	}
+
+	// The restore job itself is gone, and that is the correct outcome, not a
+	// missing record: installation.restore's job ledger lives in the very
+	// database the restore replaces, and the backup necessarily predates the
+	// restore that selected it. Everything created after the backup -- the
+	// restore job included -- is rewound away with it.
+	jobOut, jobRaw, err := runCLI("installation", "job", "get", "--json",
+		"--input", fmt.Sprintf(`{"scope":{"installation_id":%q},"id":%q}`, installationID, restoreJobID))
+	if err == nil {
+		state, _ := digString(jobOut, "data", "resource", "state")
+		c.fail("restore job %s still exists after its own restore (state=%q); the rewind did not take effect\n%s", restoreJobID, state, jobRaw)
+	}
+
+	// The installation stays paused: a restore restores the backed-up
+	// lifecycle state and never silently resumes admissions on its own.
 	doctorOut, doctorRaw, err := runCLI("installation", "doctor", "--json", "--input", fmt.Sprintf(`{"scope":{"installation_id":%q}}`, installationID))
 	if err != nil || doctorOut["status"] != "completed" {
 		c.fail("installation doctor: %v\n%s", err, doctorRaw)
 	}
 	paused, _ := digBool(doctorOut, "data", "resource", "paused")
 	if !paused {
-		c.fail("the installation did not stay paused after the restore ceiling failure")
+		c.fail("the installation did not stay paused after the restore")
 	}
-	c.observe("backup/restore journey reached its current, already-documented honest ceiling: restore job %s failed closed with prerequisite_missing at StageCandidate (P46/P33), and the installation stayed safely paused -- never silently resumed", restoreJobID)
+	c.observe("backup/restore journey completed end to end against the installed binary in a real spawned process: restore job %s drove an actual database swap, the controller ended its lifetime with the restore handoff, reassembled over the freshly reopened database and served again on its private socket as the same installation %s under generation %v, still paused -- never silently resumed", restoreJobID, installationID, restoredGeneration)
 
 	// Stop the directly-run process before the recording restart/uninstall
 	// steps, which never touch it (they exercise the driver against the
@@ -682,4 +728,19 @@ func digBool(v any, path ...string) (bool, bool) {
 	}
 	b, ok := cur.(bool)
 	return b, ok
+}
+
+// digFloat resolves a numeric leaf. JSON numbers decode as float64 through
+// the generic map used here, so a version or generation arrives as one.
+func digFloat(v any, path ...string) (float64, bool) {
+	cur := any(v)
+	for _, k := range path {
+		m, ok := cur.(map[string]any)
+		if !ok {
+			return 0, false
+		}
+		cur = m[k]
+	}
+	f, ok := cur.(float64)
+	return f, ok
 }
