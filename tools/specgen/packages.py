@@ -125,3 +125,14 @@ pkg('distribution','packaging','support','','Own release manifests, service laun
 pkg('ci','.github/workflows','support','','Own CI workflow validation and release qualification orchestration.',
 '''Build pinned Go toolchain and dependency lock on native Intel and Apple Silicon macOS for the first release, run spec renderer --check first, unit/integration/race tests appropriate to supported package/platform capabilities, controlled provider/subprocess parity and artifact retention. Separate native arm64 and amd64 macOS Flutter jobs install the pinned Flutter SDK (version bound to apps/desktop pubspec.lock and the dependency lock report), run flutter pub get with the lock enforced, dart format --set-exit-if-changed, flutter analyze, flutter test, the operation-catalog digest drift check and a release-mode flutter build for each Mac architecture; later Linux runner prerequisites (GTK development packages, Secret Service library, a virtual display for integration_test) are explicit workflow steps. The Flutter job never needs the Go toolchain cache and the Go jobs never need Flutter; cache keys bind pubspec.lock and the Flutter version. Required release jobs cannot silently skip mandatory platform/GUI/provider qualifications. Dependency/cache keys bind lock and toolchain. Never publish automatically from unreviewed branch or infer release permission from this prompt. Use read-only defaults, no secrets in PR logs/artifacts. Preserve Apache notices and build provenance. Linux is not advertised until its later qualification; Windows/remote MCP/contained runner are not first-Mac-release targets.''',
 'Workflow syntax, clean checkout generation drift check, failed/omitted required gate blocks release, bounded logs and evidence artifacts.',4)
+
+# Revision 6's Mac startup seam is additive to the existing owner briefs.
+# The shared contract above defines its exact bytes and fail-closed behavior;
+# these notes keep each implementation assignment scoped to its own root.
+for package in P:
+    if package['name'] == 'platform':
+        package['design'] += ' Revision 6: own protected atomic desktop.json publication and the nonsecret KeychainLocator for a verified opaque owner StoreRef; never expose owner bytes through metadata.'
+    elif package['name'] == 'zatiti':
+        package['design'] += ' Revision 6: on every serve startup recover the committed OwnerCredential StoreRef, verify its custody, and publish pre/post-bootstrap desktop discovery without rerunning init or minting authority; preserve CLI profile compatibility from that same ref.'
+    elif package['name'] == 'desktop':
+        package['design'] += ' Revision 6: installed Mac startup reads strict protected desktop.json, obtains the existing owner header from the named login-Keychain item, and authenticates installation.status before opening chat; distinguish repair states and reconcile ambiguous init.'
