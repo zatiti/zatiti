@@ -56,6 +56,21 @@ func (s *fakeSecrets) Put(_ context.Context, ref string, secret []byte) (string,
 	return ref, nil
 }
 
+func (s *fakeSecrets) Lookup(_ context.Context, key string) (string, error) {
+	if key == "" || len(key) > 256 || strings.ContainsRune(key, 0) {
+		return "", &contract.Fault{Code: contract.CodeInvalidInput, Message: "invalid credential name"}
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.getErr != nil {
+		return "", s.getErr
+	}
+	if _, ok := s.values[key]; !ok {
+		return "", &contract.Fault{Code: contract.CodeNotFound, Message: "credential not found"}
+	}
+	return key, nil
+}
+
 func (s *fakeSecrets) Get(_ context.Context, ref string) ([]byte, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -81,6 +96,21 @@ func (s *fakeSecrets) getCount() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.gets
+}
+
+func TestFakeSecretsLookup(t *testing.T) {
+	s := newFakeSecrets("present", []byte("value"))
+	if ref, err := s.Lookup(context.Background(), "present"); err != nil || ref != "present" {
+		t.Fatalf("Lookup present = %q, %v", ref, err)
+	}
+	if ref, err := s.Lookup(context.Background(), "missing"); ref != "" {
+		t.Fatalf("Lookup missing returned %q, %v", ref, err)
+	} else {
+		var fault *contract.Fault
+		if !errors.As(err, &fault) || fault.Code != contract.CodeNotFound {
+			t.Fatalf("Lookup missing = %v, want not_found", err)
+		}
+	}
 }
 
 // fakeBlobStore is a minimal in-memory contract.BlobStore. failStageAt
