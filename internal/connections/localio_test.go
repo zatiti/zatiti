@@ -291,7 +291,7 @@ func TestCancelCompletedRefusesConflict(t *testing.T) {
 	env := newEnv(t)
 	conn := env.seedConnection(nil)
 	env.seedBrowserCredential(conn.CredentialRef)
-	env.secrets.seed(t, helperReceiptKeyRef, helperReceiptKeyMaterial)
+	env.secrets.seedNamed(t, helperReceiptKeyName, helperReceiptKeyMaterial)
 	ch := env.challengeOf(env.beginChallenge(conn, methodBrowser).Payload)
 	receipt := mintReceipt(helperReceiptKeyMaterial, helperPayload{
 		ChallengeID: ch.ID, CredentialRef: conn.CredentialRef, AccountIdentity: conn.AccountIdentity,
@@ -309,7 +309,10 @@ func TestCompleteHappyPathRecordsOpaqueReceipt(t *testing.T) {
 	env := newEnv(t)
 	conn := env.seedConnection(nil)
 	env.seedBrowserCredential(conn.CredentialRef)
-	env.secrets.seed(t, helperReceiptKeyRef, helperReceiptKeyMaterial)
+	keyRef := env.secrets.seedNamed(t, helperReceiptKeyName, helperReceiptKeyMaterial)
+	if keyRef == helperReceiptKeyName {
+		t.Fatal("fixture returned the name as the opaque reference")
+	}
 	ch := env.challengeOf(env.beginChallenge(conn, methodBrowser).Payload)
 	receipt := mintReceipt(helperReceiptKeyMaterial, helperPayload{
 		ChallengeID: ch.ID, CredentialRef: conn.CredentialRef, AccountIdentity: conn.AccountIdentity,
@@ -325,6 +328,18 @@ func TestCompleteHappyPathRecordsOpaqueReceipt(t *testing.T) {
 	}
 	if done.HelperRef != receipt {
 		t.Fatalf("helper reference %q does not equal the opaque receipt", done.HelperRef)
+	}
+	var readKey bool
+	for _, ref := range env.secrets.getsOf() {
+		if ref == helperReceiptKeyName {
+			t.Fatal("completion passed the stable name directly to Get")
+		}
+		if ref == keyRef {
+			readKey = true
+		}
+	}
+	if !readKey {
+		t.Fatal("completion did not Get the opaque key reference")
 	}
 	assertNoSecretBytes(t, run.Payload.Data, string(helperReceiptKeyMaterial))
 	var completedEmitted bool
@@ -344,6 +359,38 @@ func TestCompleteHappyPathRecordsOpaqueReceipt(t *testing.T) {
 	env.decode(payload.Data, &out)
 	if out.Resource.ValidationState != connStateUnverified {
 		t.Fatalf("completion moved validation state to %q", out.Resource.ValidationState)
+	}
+}
+
+func TestCompleteRefusesMissingOrWrongNamedReceiptKey(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		material []byte
+		wantCode string
+	}{
+		{name: "missing", wantCode: contract.CodePrerequisiteMissing},
+		{name: "wrong", material: []byte("incorrect-test-signing-key"), wantCode: contract.CodeVerificationFailed},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			env := newEnv(t)
+			conn := env.seedConnection(nil)
+			env.seedBrowserCredential(conn.CredentialRef)
+			if tc.material != nil {
+				env.secrets.seedNamed(t, helperReceiptKeyName, tc.material)
+			}
+			ch := env.challengeOf(env.beginChallenge(conn, methodBrowser).Payload)
+			receipt := mintReceipt(helperReceiptKeyMaterial, helperPayload{
+				ChallengeID: ch.ID, CredentialRef: conn.CredentialRef,
+				AccountIdentity: conn.AccountIdentity, ExpiresAt: ch.ExpiresAt,
+			})
+			env.expectIOFault("connection.setup.complete", completeInput{
+				Scope: env.scope, ChallengeID: ch.ID,
+				ExpectedVersion: ch.Version, HelperRef: receipt,
+			}, tc.wantCode)
+			if got := env.statusOf(ch.ID); got.State == challengeCompleted {
+				t.Fatal("failed receipt verification completed the challenge")
+			}
+		})
 	}
 }
 

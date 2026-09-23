@@ -33,9 +33,9 @@ const challengeExpiry = 30 * time.Minute
 // as verification_failed before any account check runs.
 const helperReceiptPrefix = "zatiti-helper/v1."
 
-// helperReceiptKeyRef is the secret-store reference holding the HMAC key
-// shared with the trusted local helper.
-const helperReceiptKeyRef = "connections/helper/receipt-key"
+// helperReceiptKeyName is the installation-local name of the HMAC key shared
+// with the trusted local helper. SecretStore.Lookup resolves its opaque ref.
+const helperReceiptKeyName = "connections/helper/receipt-key"
 
 // ioPrivate is the namespaced owner-local metadata channel inside Prepared
 // and IOResult.Data. No other package reads it.
@@ -492,11 +492,17 @@ func (s *Service) performComplete(ctx context.Context, plan contract.IOPlan) (co
 		return contract.IOResult{Fault: prerequisiteMissing(
 			"no secret store is configured; helper receipts cannot be verified")}, nil
 	}
-	key, err := s.secrets.Get(ctx, helperReceiptKeyRef)
+	keyRef, err := s.secrets.Lookup(ctx, helperReceiptKeyName)
 	if err != nil {
 		return contract.IOResult{Fault: prerequisiteMissing(
 			"the helper receipt key is not provisioned; helper receipts cannot be verified")}, nil
 	}
+	key, err := s.secrets.Get(ctx, keyRef)
+	if err != nil {
+		return contract.IOResult{Fault: prerequisiteMissing(
+			"the helper receipt key is not provisioned; helper receipts cannot be verified")}, nil
+	}
+	defer clear(key)
 	payload, verr := verifyReceipt(in.HelperRef, key)
 	if verr != nil {
 		return contract.IOResult{Fault: verr}, nil
