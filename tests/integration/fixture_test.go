@@ -94,6 +94,12 @@ func (r *recordingSecrets) Put(ctx context.Context, key string, secret []byte) (
 	return ref, err
 }
 
+func (r *recordingSecrets) Lookup(ctx context.Context, key string) (string, error) {
+	// Resolve through the real store. The fixture's record only tracks its own
+	// writes and must not turn an absent or deleted name into a valid reference.
+	return r.inner.Lookup(ctx, key)
+}
+
 func (r *recordingSecrets) Get(ctx context.Context, ref string) ([]byte, error) {
 	return r.inner.Get(ctx, ref)
 }
@@ -107,6 +113,37 @@ func (r *recordingSecrets) refFor(key string) (string, bool) {
 	defer r.mu.Unlock()
 	ref, ok := r.refs[key]
 	return ref, ok
+}
+
+func TestRecordingSecretsLookupUsesRealOpaqueReference(t *testing.T) {
+	ctx := context.Background()
+	store, err := platform.Open(platform.Config{
+		StateDir:          filepath.Join(t.TempDir(), "state"),
+		CredentialBackend: "headless",
+		MasterKeyRef:      writeMasterKey(t),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = store.Close() }()
+	recording := newRecordingSecrets(store.Secrets())
+	const name = "integration/lookup-test"
+	if _, err := recording.Lookup(ctx, name); platform.Code(err) != contract.CodeNotFound {
+		t.Fatalf("missing Lookup = %v, want not_found", err)
+	}
+	ref, err := recording.Put(ctx, name, []byte("synthetic secret"))
+	if err != nil || ref == name {
+		t.Fatalf("Put returned reference %q, error %v", ref, err)
+	}
+	if found, err := recording.Lookup(ctx, name); err != nil || found != ref {
+		t.Fatalf("Lookup = %q, %v, want %q", found, err, ref)
+	}
+	if err := recording.Delete(ctx, ref); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := recording.Lookup(ctx, name); platform.Code(err) != contract.CodeNotFound {
+		t.Fatalf("deleted Lookup = %v, want not_found", err)
+	}
 }
 
 // moduleOrder is the explicit assembly and migration order.
