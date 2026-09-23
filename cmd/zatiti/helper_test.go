@@ -93,12 +93,8 @@ func TestMintHelperReceiptVerifiesAgainstConnectionsAlgorithm(t *testing.T) {
 	}
 }
 
-// TestEnsureHelperReceiptKeyMintsAndReusesWithinOneInvocation proves
-// ensureHelperReceiptKey returns a stored key when one already resolves,
-// and otherwise mints a fresh 32-byte key usable for signing within this
-// same invocation (see the KNOWN GAP documented in helper.go: a *later*,
-// separate Get(helperReceiptKeyRef) is not guaranteed to find what Put
-// stored, so this test pins only what this package can actually promise).
+// TestEnsureHelperReceiptKeyMintsAndReusesWithinOneInvocation proves the
+// signer reuses a durable key even when its name differs from its opaque ref.
 func TestEnsureHelperReceiptKeyMintsAndReusesWithinOneInvocation(t *testing.T) {
 	secrets := newFakeSecretStore()
 	key1, err := ensureHelperReceiptKey(context.Background(), secrets)
@@ -108,16 +104,26 @@ func TestEnsureHelperReceiptKeyMintsAndReusesWithinOneInvocation(t *testing.T) {
 	if len(key1) != helperReceiptKeyBytes {
 		t.Fatalf("minted key is %d bytes, want %d", len(key1), helperReceiptKeyBytes)
 	}
-	// fakeSecretStore.Put is identity-preserving (like internal/connections'
-	// own test fake), so a second call against the SAME fake finds it again
-	// -- confirming ensureHelperReceiptKey's "read first" branch works when
-	// the backend's reference semantics cooperate.
+	if ref, err := secrets.Lookup(context.Background(), helperReceiptKeyRef); err != nil || ref == helperReceiptKeyRef {
+		t.Fatalf("expected an opaque receipt key reference, got %q, %v", ref, err)
+	}
 	key2, err := ensureHelperReceiptKey(context.Background(), secrets)
 	if err != nil {
 		t.Fatalf("ensureHelperReceiptKey (second call): %v", err)
 	}
 	if string(key1) != string(key2) {
 		t.Fatal("ensureHelperReceiptKey minted a second key instead of reusing the stored one")
+	}
+}
+
+func TestEnsureHelperReceiptKeyFailsClosedWhenStoreUnavailable(t *testing.T) {
+	secrets := newFakeSecretStore()
+	secrets.lookupErr = &contract.Fault{Code: contract.CodeControllerUnavailable}
+	if _, err := ensureHelperReceiptKey(context.Background(), secrets); err == nil {
+		t.Fatal("unavailable store must not mint an unpersisted signing key")
+	}
+	if len(secrets.store) != 0 {
+		t.Fatal("unavailable store must not write a replacement signing key")
 	}
 }
 
@@ -237,21 +243,33 @@ func TestRunConnectionHelperNeverPrintsTheCredential(t *testing.T) {
 	}
 }
 
-// fakeSecretStore is a minimal in-memory contract.SecretStore whose Put is
-// identity-preserving (returns its own reference argument unchanged) --
-// the same convention internal/connections/helpers_test.go's own fake
-// uses, and the one internal/connections' production code actually
-// assumes (see helper.go's KNOWN GAP doc comment: the real platform
-// backends do NOT preserve identity, which is exactly the gap).
+// fakeSecretStore models the real distinction between trusted name and
+// opaque reference.
 type fakeSecretStore struct {
-	store map[string][]byte
+	store     map[string][]byte
+	names     map[string]string
+	lookupErr error
 }
 
-func newFakeSecretStore() *fakeSecretStore { return &fakeSecretStore{store: map[string][]byte{}} }
+func newFakeSecretStore() *fakeSecretStore {
+	return &fakeSecretStore{store: map[string][]byte{}, names: map[string]string{}}
+}
 
-func (s *fakeSecretStore) Put(_ context.Context, reference string, secret []byte) (string, error) {
-	s.store[reference] = append([]byte(nil), secret...)
-	return reference, nil
+func (s *fakeSecretStore) Put(_ context.Context, name string, secret []byte) (string, error) {
+	ref := "fake:" + name
+	s.names[name] = ref
+	s.store[ref] = append([]byte(nil), secret...)
+	return ref, nil
+}
+func (s *fakeSecretStore) Lookup(_ context.Context, name string) (string, error) {
+	if s.lookupErr != nil {
+		return "", s.lookupErr
+	}
+	ref, ok := s.names[name]
+	if !ok {
+		return "", &contract.Fault{Code: contract.CodeNotFound}
+	}
+	return ref, nil
 }
 func (s *fakeSecretStore) Get(_ context.Context, reference string) ([]byte, error) {
 	v, ok := s.store[reference]

@@ -73,34 +73,9 @@ import (
 // building; flagged in the P24 handoff as a prerequisite gap for whichever
 // card owns the OAuth flow's exact metadata shape.
 //
-// KNOWN GAP (verified, not fixable from cmd/zatiti -- see the P24 handoff):
-// internal/connections/localio.go:495 reads the shared HMAC receipt key
-// with `s.secrets.Get(ctx, helperReceiptKeyRef)`, passing the literal
-// constant string directly as the reference. Neither landed
-// contract.SecretStore backend (internal/platform/secret.go's
-// keychainSecrets, internal/platform/secret_headless.go's headlessSecrets)
-// returns that string from Put: keychainSecrets.Put deterministically
-// returns "kc1:"+base64(key) (secret.go:146-158), and
-// headlessSecrets.Put returns a random "hl1:"+hex(16) per call
-// (secret_headless.go:80-119) -- never the key argument itself. So no
-// caller, including this helper, can ever make a later
-// Get(ctx, helperReceiptKeyRef) succeed against a real installation;
-// internal/connections' own tests never catch this because
-// internal/connections/helpers_test.go's fakeSecrets.Put returns its
-// reference argument unchanged (identity), masking the mismatch. This
-// command still calls ensureHelperReceiptKey (best effort: reads, then
-// mints and stores a fresh key if absent) and keeps the freshly minted key
-// in memory to sign THIS invocation's receipt correctly, but
-// connection.setup.complete's own server-side verification
-// (internal/connections/localio.go:480-530) will report
-// prerequisite_missing "the helper receipt key is not provisioned" against
-// a real platform-backed installation regardless, until internal/connections
-// or internal/platform (both outside cmd/zatiti's write scope) close this
-// gap -- for example by internal/connections storing and re-resolving the
-// opaque reference Put actually returns, the way this command's own
-// credential_ref handling already does correctly (see runConnectionHelper
-// below: it uses secrets.Put's *return value*, never its own invented
-// label, as the credential_ref the receipt names).
+// The shared receipt key is resolved by its trusted name through
+// SecretStore.Lookup. The opaque reference returned by the store is the
+// only value passed to Get; neither a receipt nor a caller chooses it.
 
 const (
 	// helperReceiptPrefix and helperReceiptKeyRef MUST stay byte-for-byte
@@ -129,45 +104,57 @@ type helperPayload struct {
 	ExpiresAt       time.Time   `json:"expires_at"`
 }
 
-// helperReceiptKeyProvisioned reports whether the shared HMAC receipt key
-// is retrievable at its well-known reference right now, without creating
-// it. Given the verified gap documented above, this reports false on
-// essentially every real installation today; it is still computed
-// honestly (a direct Get, not a hardcoded false) so it starts reporting
-// true the moment the underlying gap closes, with no readiness-logic
-// change needed here.
+// helperReceiptKeyProvisioned checks the trusted name without creating it.
 func helperReceiptKeyProvisioned(ctx context.Context, secrets contract.SecretStore) bool {
 	if secrets == nil {
 		return false
 	}
-	key, err := secrets.Get(ctx, helperReceiptKeyRef)
+	ref, err := secrets.Lookup(ctx, helperReceiptKeyRef)
+	if err != nil {
+		return false
+	}
+	key, err := secrets.Get(ctx, ref)
 	defer zero(key)
 	return err == nil && len(key) > 0
 }
 
-// ensureHelperReceiptKey returns the shared HMAC key for this invocation:
-// the stored one if Get(helperReceiptKeyRef) already resolves, else a
-// freshly minted 32-byte random key, best-effort stored (see the package
-// doc comment's KNOWN GAP for why a later Get by the same literal
-// reference is not guaranteed to find it again). The returned bytes must
-// be zeroed by the caller once the receipt is signed.
+// ensureHelperReceiptKey returns the shared HMAC key for this invocation.
+// A missing key is provisioned durably before any receipt is signed.
 func ensureHelperReceiptKey(ctx context.Context, secrets contract.SecretStore) ([]byte, error) {
-	if key, err := secrets.Get(ctx, helperReceiptKeyRef); err == nil && len(key) > 0 {
+	ref, err := secrets.Lookup(ctx, helperReceiptKeyRef)
+	if err == nil {
+		key, getErr := secrets.Get(ctx, ref)
+		if getErr != nil {
+			return nil, fmt.Errorf("reading the helper receipt key: %w", getErr)
+		}
+		if len(key) == 0 {
+			return nil, errors.New("the helper receipt key is empty")
+		}
 		return key, nil
+	}
+	var fault *contract.Fault
+	if !errors.As(err, &fault) || fault.Code != contract.CodeNotFound {
+		return nil, fmt.Errorf("looking up the helper receipt key: %w", err)
 	}
 	key := make([]byte, helperReceiptKeyBytes)
 	if _, err := rand.Read(key); err != nil {
 		return nil, fmt.Errorf("generating the helper receipt key: %w", err)
 	}
-	// Best effort: this Put succeeds and stores the key, but under an
-	// opaque reference platform mints (never helperReceiptKeyRef itself);
-	// a later, separate process's Get(helperReceiptKeyRef) is not
-	// guaranteed to find it. Ignoring a Put failure here is deliberate:
-	// this invocation's own receipt is still signed correctly below from
-	// the in-memory key regardless of whether storing it for reuse
-	// succeeds.
-	_, _ = secrets.Put(ctx, helperReceiptKeyRef, key)
-	return key, nil
+	if _, err := secrets.Put(ctx, helperReceiptKeyRef, key); err != nil {
+		zero(key)
+		return nil, fmt.Errorf("storing the helper receipt key: %w", err)
+	}
+	zero(key)
+	ref, err = secrets.Lookup(ctx, helperReceiptKeyRef)
+	if err != nil {
+		return nil, fmt.Errorf("confirming the helper receipt key: %w", err)
+	}
+	stored, err := secrets.Get(ctx, ref)
+	if err != nil || len(stored) == 0 {
+		zero(stored)
+		return nil, errors.New("the helper receipt key could not be verified after storage")
+	}
+	return stored, nil
 }
 
 // mintHelperReceipt builds the opaque receipt string
