@@ -3979,3 +3979,19 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   artifacts.metadata -> verification.record stale_version -> event-scope
   mismatch); the cooperative worker journey now completes end-to-end
   through real production code for the first time in this tree's history.
+- 2026-09-23 ~02:33 PT -- PR #64 LANDED (README status update, commit
+  543ff88). Status changed from "design stage" (no runnable
+  implementation) to "implemented, pre-release": CLI/MCP command tree
+  confirmed real and runnable (verified live, both by the implementing
+  agent and independently spot-checked by me: zatiti task/skill/
+  organization/capabilities --help all match the README's own interface
+  table), the core worker loop now runs end-to-end through real
+  production code including independent verification and a real terminal
+  state (following PR #63's landing, re-verified against real post-merge
+  main before writing this), two things remain openly incomplete (no
+  published install/tagged release; restore fails closed with
+  prerequisite_missing). Repo description left unchanged -- it describes
+  what the product is, not a maturity claim, so nothing in it is
+  factually wrong. All 7 CI checks passed clean. Confirmed on real
+  post-merge main via merge-base --is-ancestor. R-readme-update claim
+  released.
