@@ -119,15 +119,17 @@ func checkpointSQLiteFile(t *testing.T, path string) {
 // transitioned straight to "running" (with claimed_generation already set,
 // as handleJobRecord's unclaimed-record path does) under this fixture's
 // current generation, naming a synthetic verified backup reference in its
-// original input. The controller's own restore handoff never reads that
-// input back (StageCandidate resolves everything from the job id alone),
-// so its exact shape only needs to satisfy _execution.job.claim's schema.
+// original input -- the reference the controller now threads to
+// StageCandidate, exactly as the real protocol does. It also registers the
+// published recovery overlay _installation.restore.overlay reports for that
+// job, exactly as the real installation.restore's Finish registers one.
 func (f *fx) restoreJob(t *testing.T) contract.ID {
 	t.Helper()
 	id := contract.NewID()
+	backupArtifact := contract.ID(contract.NewID())
 	input, err := json.Marshal(map[string]any{
 		"scope":            f.scope(),
-		"backup_artifact":  map[string]any{"id": string(contract.NewID()), "digest": stagedDigest},
+		"backup_artifact":  map[string]any{"id": string(backupArtifact), "digest": stagedDigest},
 		"expected_version": 1,
 	})
 	if err != nil {
@@ -136,7 +138,31 @@ func (f *fx) restoreJob(t *testing.T) contract.ID {
 	f.exec(`INSERT INTO execution_jobs (id, version, state, owner, operation, operation_id, input, claimed_generation)
 		VALUES (?, 1, 'running', ?, ?, '', ?, ?)`,
 		string(id), restoreOwner, restoreOperation, string(input), f.generation())
+	f.mu.Lock()
+	f.restoreOverlays[id] = RestoreOverlayRef{
+		Artifact: contract.ArtifactRef{ID: contract.NewID(), Digest: contract.Digest(stagedDigest)}, Size: 512,
+	}
+	f.mu.Unlock()
 	return id
+}
+
+// restoreOverlay is the fixture's _installation.restore.overlay: the
+// published overlay artifact the owner registered against a restore job.
+func (f *fx) restoreOverlay(_ context.Context, _ contract.Unit, input json.RawMessage) (any, error) {
+	var in restoreOverlayInput
+	if err := decode(input, &in); err != nil {
+		return nil, err
+	}
+	f.mu.Lock()
+	ref, ok := f.restoreOverlays[in.JobID]
+	f.mu.Unlock()
+	if !ok {
+		return nil, fxFault(contract.CodeNotFound, "no recovery overlay registered for this restore job")
+	}
+	return map[string]any{
+		"artifact": map[string]any{"id": ref.Artifact.ID, "digest": ref.Artifact.Digest},
+		"size":     ref.Size,
+	}, nil
 }
 
 // fakeRestoreLifecycle stands in for entrypoint assembly's real,
@@ -146,13 +172,20 @@ func (f *fx) restoreJob(t *testing.T) contract.ID {
 // what StageCandidate itself retains), and MergeOverlay runs a fixture-
 // registered per-job merge closure standing in for real owner merge
 // methods this package cannot import.
+//
+// It also records what the controller actually handed it: how many times it
+// was asked to stage a candidate (a restore resumed past a durable swap must
+// never ask again), the job input the controller threaded through, and the
+// overlay reference every merge attempt received.
 type fakeRestoreLifecycle struct {
 	f *fx
 }
 
-func (l fakeRestoreLifecycle) StageCandidate(_ context.Context, jobID contract.ID, dir string) (RestoreCandidate, error) {
+func (l fakeRestoreLifecycle) StageCandidate(_ context.Context, jobID contract.ID, jobInput json.RawMessage, dir string) (RestoreCandidate, error) {
 	l.f.mu.Lock()
 	img, ok := l.f.restoreBackups[jobID]
+	l.f.stageCalls++
+	l.f.stagedInputs = append(l.f.stagedInputs, jobInput)
 	l.f.mu.Unlock()
 	if !ok {
 		return RestoreCandidate{}, fxFault(contract.CodeNotFound, "no backup image registered for this restore job")
@@ -170,9 +203,10 @@ func (l fakeRestoreLifecycle) StageCandidate(_ context.Context, jobID contract.I
 	}, nil
 }
 
-func (l fakeRestoreLifecycle) MergeOverlay(ctx context.Context, u contract.Unit, jobID contract.ID) error {
+func (l fakeRestoreLifecycle) MergeOverlay(ctx context.Context, u contract.Unit, jobID contract.ID, overlay RestoreOverlayRef) error {
 	l.f.mu.Lock()
 	merge := l.f.restoreMerge[jobID]
+	l.f.mergedOverlays = append(l.f.mergedOverlays, overlay)
 	l.f.mu.Unlock()
 	if merge == nil {
 		return nil

@@ -10,86 +10,80 @@ import (
 	"github.com/zatiti/zatiti/internal/controller"
 )
 
-// This file proves P46's honest restore ceiling through a REAL running
-// controller, extending TestBackupRestoresActualBytes (defects_test.go),
-// which already proves backup and restore-request admission for real but
-// never attaches a controller, so it stops at "restore job accepted,
-// awaiting the controller" -- exactly where installation.restore's own job
-// state ("running or pending while it awaits the controller") says it
-// should stop without one.
+// This file proves the controller's fail-closed restore boundary through a
+// REAL running controller, extending TestBackupRestoresActualBytes
+// (defects_test.go), which already proves backup and restore-request
+// admission for real but never attaches a controller, so it stops at
+// "restore job accepted, awaiting the controller" -- exactly where
+// installation.restore's own job state ("running or pending while it awaits
+// the controller") says it should stop without one.
 //
-// Per this card's own briefing and cmd/zatiti/restore.go's package doc
-// comment: the actual backup-to-restore DATA MERGE never completes
-// anywhere on this tree today. No operation, public or internal, hands
-// entrypoint assembly a pending restore job's original backup-artifact
-// reference, and no owner-defined merge operation exists in internal/
-// effects, internal/identity or internal/memory to fold a RecoveryOverlay's
-// obligations back into their own tables. cmd/zatiti's own restoreLifecycle{}
-// (restore.go) is production's answer to that gap: it fails closed with two
-// specific prerequisite_missing faults rather than fabricating success or
-// silently resuming a partially-restored installation. This is not a bug
-// this package could route around -- it is a genuine, already-known,
-// honestly documented production limitation -- so this file reproduces
-// restoreLifecycle{} verbatim (the identical fault text production ships,
-// cited to the same source) and proves, through a real controller, that a
-// restore job it observes is recorded failed with exactly that
-// prerequisite_missing disposition and the installation stays safely
-// paused rather than silently resumed or corrupted.
+// History, because this file's own premise changed: until P50 the actual
+// backup-to-restore DATA MERGE could not complete anywhere on this tree.
+// No operation handed entrypoint assembly a pending restore job's
+// backup-artifact reference or its published recovery overlay, and no owner
+// declared a merge operation for folding a RecoveryOverlay's obligations
+// back into its own tables, so cmd/zatiti's own restoreLifecycle failed
+// closed with two prerequisite_missing faults rather than fabricating
+// success. P50 closed all of that: production now resolves a real encrypted
+// bundle and a real sealed overlay and merges through _effects/_identity/
+// _memory.restore.merge, and cmd/zatiti's own tests exercise the completed
+// path end to end (cmd/zatiti/restore_merge_test.go).
+//
+// What remains worth proving here, and what this file now proves, is the
+// boundary itself rather than the gap it used to stand for:
+// Collaborators.RestoreLifecycle's own contract says "a restore job
+// observed without one attached is recorded failed with
+// prerequisite_missing, never guessed at". A capability that cannot stage a
+// candidate -- because a prerequisite is genuinely absent in this process --
+// must leave the installation paused with the job recorded failed, and must
+// never touch the database file. That is a permanent property of the
+// protocol, not a placeholder for a missing feature.
 
-// restoreLifecycle mirrors cmd/zatiti/restore.go's restoreLifecycle{}
-// verbatim. Entrypoint assembly alone has direct Go access to internal/
-// installation's private backup-bundle/key-resolution/overlay code (see
-// that file's own package doc comment for the full account); neither
-// cmd/zatiti nor this test package can duplicate it without inventing a
-// second, unsynced implementation of secret-bearing AEAD framing, exactly
-// what this remediation plan's "never invent a seam" rule forbids. Both
-// methods fail closed with the identical fault text cmd/zatiti ships in
-// production, so this test proves the real documented fallback behavior,
-// not a weaker stand-in for it.
-type restoreLifecycle struct{}
+// refusingRestoreLifecycle is a controller.RestoreLifecycle that cannot
+// stage a candidate. It stands for any process where a restore
+// prerequisite is genuinely unavailable -- no blob or secret store, an
+// unresolvable key reference, a bundle whose bytes are gone -- all of which
+// the production capability reports as the same fail-closed
+// prerequisite_missing at the same boundary. It is deliberately NOT a copy
+// of production: production does real work now (cmd/zatiti/restore.go), and
+// this file tests the controller's reaction to a refusal, not the
+// capability's own resolution logic.
+type refusingRestoreLifecycle struct{}
 
-var _ controller.RestoreLifecycle = restoreLifecycle{}
+var _ controller.RestoreLifecycle = refusingRestoreLifecycle{}
 
-// StageCandidate implements controller.RestoreLifecycle. See this file's
-// doc comment for why it fails closed.
-func (restoreLifecycle) StageCandidate(_ context.Context, restoreJobID contract.ID, _ string) (controller.RestoreCandidate, error) {
+// StageCandidate implements controller.RestoreLifecycle by refusing.
+func (refusingRestoreLifecycle) StageCandidate(_ context.Context, restoreJobID contract.ID, _ json.RawMessage, _ string) (controller.RestoreCandidate, error) {
 	return controller.RestoreCandidate{}, &contract.Fault{
 		Code: contract.CodePrerequisiteMissing,
-		Message: "no operation exposes restore job " + string(restoreJobID) +
-			"'s backup artifact reference to entrypoint assembly, and internal/installation's " +
-			"bundle-decrypt/key-resolution code is unexported; StageCandidate cannot resolve a " +
-			"decrypted candidate database image (see cmd/zatiti/restore.go and " +
-			"docs/implementation-remediation/assignments/P33.md's handoff)",
+		Message: "this process cannot resolve restore job " + string(restoreJobID) +
+			"'s backup artifact into a decrypted candidate database image",
 	}
 }
 
-// MergeOverlay implements controller.RestoreLifecycle. See this file's doc
-// comment for why it fails closed. Unreachable in this test:
-// StageCandidate's own failure means performSwap never calls
-// storage.Restorable.PrepareRestore/CommitRestore, so MergeOverlay is never
-// invoked -- the failure is safe, not merely honest.
-func (restoreLifecycle) MergeOverlay(_ context.Context, _ contract.Unit, restoreJobID contract.ID) error {
+// MergeOverlay implements controller.RestoreLifecycle by refusing.
+// Unreachable in this test: StageCandidate's own failure means performSwap
+// never calls storage.Restorable.PrepareRestore/CommitRestore, so
+// MergeOverlay is never invoked -- the failure is safe, not merely honest.
+func (refusingRestoreLifecycle) MergeOverlay(_ context.Context, _ contract.Unit, restoreJobID contract.ID, _ controller.RestoreOverlayRef) error {
 	return &contract.Fault{
-		Code: contract.CodePrerequisiteMissing,
-		Message: "no owner-defined merge operation exists in internal/effects, internal/identity or " +
-			"internal/memory to fold restore job " + string(restoreJobID) + "'s recovery overlay into " +
-			"their own tables, and credential/grant revocation obligations are never captured into the " +
-			"overlay in the first place; MergeOverlay cannot safely resume this restore (see " +
-			"cmd/zatiti/restore.go and docs/implementation-remediation/assignments/P33.md's handoff)",
+		Code:    contract.CodePrerequisiteMissing,
+		Message: "this process cannot open restore job " + string(restoreJobID) + "'s recovery overlay",
 	}
 }
 
 // TestControllerHonestlyRefusesRestoreMergeAndStaysSafelyPaused (P46 item 6,
-// the CRITICAL CONTEXT restore ceiling; Z14.paused_restore): with the real
-// restoreLifecycle{} attached (production's own fail-closed implementation,
-// reproduced verbatim above), a real controller driving a real accepted
-// installation.restore job records it failed with prerequisite_missing at
-// the documented StageCandidate boundary -- never guessed at, never
-// fabricated into a resumed installation -- and the installation stays
-// paused in maintenance. No database file is ever touched: StageCandidate
-// fails before performSwap ever calls storage.Restorable.PrepareRestore/
-// CommitRestore (internal/controller/restore.go), so the failure is safe,
-// not merely honest.
+// the CRITICAL CONTEXT restore ceiling; Z14.paused_restore): with a restore
+// lifecycle that cannot stage a candidate, a real controller driving a real
+// accepted installation.restore job records it failed with
+// prerequisite_missing at the StageCandidate boundary -- never guessed at,
+// never fabricated into a resumed installation -- and the installation
+// stays paused in maintenance. No database file is ever touched:
+// StageCandidate fails before performSwap ever calls
+// storage.Restorable.PrepareRestore/CommitRestore
+// (internal/controller/restore.go), so the failure is safe, not merely
+// honest.
 func TestControllerHonestlyRefusesRestoreMergeAndStaysSafelyPaused(t *testing.T) {
 	t.Parallel()
 	f := newBootstrappedFixture(t)
@@ -102,7 +96,7 @@ func TestControllerHonestlyRefusesRestoreMergeAndStaysSafelyPaused(t *testing.T)
 		Blobs:            f.plat.Blobs(),
 		Jobs:             f.jobRunners(),
 		Operator:         f.app,
-		RestoreLifecycle: restoreLifecycle{},
+		RestoreLifecycle: refusingRestoreLifecycle{},
 	}); err != nil {
 		t.Fatalf("controller.Attach: %v", err)
 	}
@@ -161,9 +155,8 @@ func TestControllerHonestlyRefusesRestoreMergeAndStaysSafelyPaused(t *testing.T)
 
 	// The real controller claims the accepted restore job (_execution.job.
 	// pending finds it "running", restoreWork/runRestore drives it to
-	// StageCandidate) and it fails closed exactly as production's own
-	// restoreLifecycle{} does -- never guessed at, never a fabricated
-	// success.
+	// StageCandidate) and records the refusal as the job's own durable
+	// disposition -- never guessed at, never a fabricated success.
 	waitFor(t, 15*time.Second, "the controller to record the restore job failed with prerequisite_missing", func() bool {
 		res := f.must(f.owner, "installation.job.get", "", map[string]any{"scope": f.scope(), "id": restoreJob.Resource.ID})
 		var out struct {

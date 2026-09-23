@@ -33,6 +33,7 @@ const (
 	opRecord                = "_effects.record"
 	opReconciliationPrepare = "_effects.reconciliation.prepare"
 	opReconciliationRecord  = "_effects.reconciliation.record"
+	opRestoreMerge          = "_effects.restore.merge"
 
 	opCompensationPropose = "operation.compensation.propose"
 	opGet                 = "operation.get"
@@ -85,6 +86,8 @@ var opMetas = []opMeta{
 	{id: opReconciliationPrepare, visibility: "internal", mode: "mutation", expected: true,
 		callers: []string{"controller"}},
 	{id: opReconciliationRecord, visibility: "internal", mode: "mutation",
+		callers: []string{"controller"}},
+	{id: opRestoreMerge, visibility: "internal", mode: "mutation",
 		callers: []string{"controller"}},
 	{id: opCompensationPropose, visibility: "public", mode: "mutation", submission: true, expected: true,
 		cli: "operation compensation propose"},
@@ -239,6 +242,8 @@ func (s *Service) bindHandler(d contract.Descriptor) (contract.Handler, error) {
 		return bind(d, s.handleReconciliationPrepare)
 	case opReconciliationRecord:
 		return bind(d, s.handleReconciliationRecord)
+	case opRestoreMerge:
+		return bind(d, s.handleRestoreMerge)
 	case opCompensationPropose:
 		return bind(d, s.handleCompensationPropose)
 	case opGet:

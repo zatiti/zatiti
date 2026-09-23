@@ -128,7 +128,7 @@ func (s *Service) prepareRestore(ctx context.Context, unit contract.Unit, inv co
 	if err != nil {
 		return contract.IOPlan{}, err
 	}
-	obligations, err := s.snapshotObligations(ctx, unit, in.Scope.InstallationID, job.ID, pending, manifest.Obligations)
+	obligations, err := s.snapshotObligations(ctx, unit, in.Scope, job.ID, pending, manifest.Obligations)
 	if err != nil {
 		return contract.IOPlan{}, err
 	}
@@ -171,25 +171,50 @@ func (o obligationRow) manifest() manifestObligation {
 	}
 }
 
+// Obligation kinds captured into a BackupManifest or RecoveryOverlay. The
+// owner named alongside each kind is the owner whose own restore.merge
+// operation folds it back after a rewind.
+const (
+	obligationClaimedEffect     = "claimed_effect"
+	obligationUnknownEffect     = "unknown_effect"
+	obligationMemoryWrite       = "memory_write"
+	obligationRevokedCredential = "revoked_credential"
+	obligationRevokedGrant      = "revoked_grant"
+)
+
 // snapshotObligations captures this installation's currently pending
-// effects and unresolved memory obligations as durable RecoveryObligation
-// rows tied to jobID (a backup or restore job), so they stay inspectable
-// and mergeable independent of any sealed bundle's own encrypted bytes.
+// effects, unresolved memory obligations and current credential/grant
+// revocations as durable RecoveryObligation rows tied to jobID (a backup or
+// restore job), so they stay inspectable and mergeable independent of any
+// sealed bundle's own encrypted bytes.
+//
 // Each pending Operation is classified by its actual state rather than one
 // undifferentiated bucket: outcome_unknown becomes kind unknown_effect
 // (contract.RecoveryObligation names it separately from an ordinary
 // in-flight claim precisely so a later monotonic merge can tell an unknown
 // outcome apart from a claim that is merely still running), everything
-// else becomes claimed_effect. Both installation.backup (the paused/
-// quiesced snapshot item 2 requires) and installation.restore (the
-// monotonic recovery overlay item 3 requires) call this at Prepare time.
-func (s *Service) snapshotObligations(ctx context.Context, unit contract.Unit, installationID, jobID contract.ID, pending []peerOperation, memObligations []wireRequirement) ([]manifestObligation, error) {
+// else becomes claimed_effect.
+//
+// Revocations are captured through _identity.revocations, identity's own
+// read of its own tables. Capturing them is what makes "retain revocation
+// through restore" (credential.revoke's frozen behavior) enforceable at
+// all: a credential or grant revoked AFTER a backup was taken is not in
+// that backup's bytes, so without an obligation carrying it, rewinding to
+// that backup would silently bring it back to life. This is the exact gap
+// restore_test.go's TestRestoreOverlayPreservesPostBackupUnknownEffectAcrossRewind
+// doc comment named as unexercisable before _identity.revocations existed.
+//
+// Both installation.backup (the paused/quiesced snapshot item 2 requires)
+// and installation.restore (the monotonic recovery overlay item 3 requires)
+// call this at Prepare time.
+func (s *Service) snapshotObligations(ctx context.Context, unit contract.Unit, scope wireScope, jobID contract.ID, pending []peerOperation, memObligations []wireRequirement) ([]manifestObligation, error) {
+	installationID := scope.InstallationID
 	now := s.deps.Clock.Now()
 	var obligations []manifestObligation
 	for _, op := range pending {
-		kind := "claimed_effect"
+		kind := obligationClaimedEffect
 		if op.State == "outcome_unknown" {
-			kind = "unknown_effect"
+			kind = obligationUnknownEffect
 		}
 		row := obligationRow{
 			ID: s.deps.IDs.New(), InstallationID: installationID, RestoreJobID: jobID,
@@ -209,8 +234,28 @@ func (s *Service) snapshotObligations(ctx context.Context, unit contract.Unit, i
 		}
 		row := obligationRow{
 			ID: s.deps.IDs.New(), InstallationID: installationID, RestoreJobID: jobID,
-			Owner: "memory", Kind: "memory_write", ResourceID: resourceID, ResourceVersion: 1,
+			Owner: "memory", Kind: obligationMemoryWrite, ResourceID: resourceID, ResourceVersion: 1,
 			State: req.Code, RecordedAt: now,
+		}
+		row.RecordArtifact, row.RecordDigest = obligationRecord(row)
+		if err := insertObligation(ctx, unit, row); err != nil {
+			return nil, err
+		}
+		obligations = append(obligations, row.manifest())
+	}
+	revocations, err := s.identityRevocations(ctx, unit, scope)
+	if err != nil {
+		return nil, err
+	}
+	for _, rev := range revocations {
+		kind := obligationRevokedCredential
+		if rev.Kind == "grant" {
+			kind = obligationRevokedGrant
+		}
+		row := obligationRow{
+			ID: s.deps.IDs.New(), InstallationID: installationID, RestoreJobID: jobID,
+			Owner: "identity", Kind: kind, ResourceID: rev.ID, ResourceVersion: rev.Version,
+			State: "revoked", RecordedAt: now,
 		}
 		row.RecordArtifact, row.RecordDigest = obligationRecord(row)
 		if err := insertObligation(ctx, unit, row); err != nil {
@@ -309,6 +354,48 @@ func (s *Service) performRestore(ctx context.Context, plan contract.IOPlan) (con
 	return contract.IOResult{Data: raw}, nil
 }
 
+// restoreOverlayInput is the _installation.restore.overlay input.
+type restoreOverlayInput struct {
+	JobID contract.ID `json:"job_id"`
+}
+
+// restoreOverlayOutput is the _installation.restore.overlay output: the
+// published, sealed recovery-overlay artifact and its exact byte size, which
+// a caller needs to read the blob back in full.
+type restoreOverlayOutput struct {
+	Artifact wireArtifactRef `json:"artifact"`
+	Size     int64           `json:"size"`
+}
+
+// handleRestoreOverlay implements _installation.restore.overlay: the
+// published recovery-overlay artifact this restore job's own Finish already
+// registered. The controller reads it BEFORE the database swap, while its
+// own Application is still valid, and journals it, so the reference survives
+// a crash between the claim and the merge exactly as the job id already
+// does. This operation performs no IO and decrypts nothing; a job with no
+// registered overlay is not_found rather than a guess.
+func handleRestoreOverlay(ctx context.Context, s *Service, unit contract.Unit, inv contract.Invocation) (contract.Payload, error) {
+	in, err := decodeInto[restoreOverlayInput](s, opRestoreOverlayName, inv.Input)
+	if err != nil {
+		return contract.Payload{}, err
+	}
+	j, err := loadJob(ctx, unit, in.JobID)
+	if err != nil {
+		return contract.Payload{}, err
+	}
+	if j == nil || j.InstallationID != unit.Scope().InstallationID {
+		return contract.Payload{}, notFound("job %s is unknown in this installation", in.JobID)
+	}
+	if j.Kind != "restore" {
+		return contract.Payload{}, invalidInput("job %s is not a restore job", in.JobID)
+	}
+	if j.OverlayArtifact.ID == "" || j.OverlayArtifact.Digest == "" || j.OverlaySize < 1 {
+		return contract.Payload{}, notFound(
+			"restore job %s has no published recovery overlay registered against it", in.JobID)
+	}
+	return completed(restoreOverlayOutput{Artifact: j.OverlayArtifact, Size: j.OverlaySize})
+}
+
 // openPublishedOverlay resolves the key from the overlay artifact's own
 // header and opens it, the path a later merge takes.
 func (s *Service) openPublishedOverlay(ctx context.Context, artifact []byte, installationID contract.ID) (recoveryOverlayDoc, error) {
@@ -383,6 +470,17 @@ func (s *Service) finishRestore(ctx context.Context, unit contract.Unit, plan co
 		// the verified backup names the image to rewind to, and the
 		// controller performs the rewind and reports through
 		// _installation.restore.record.
+		//
+		// The overlay reference is recorded twice, deliberately and for two
+		// different readers: as typed columns on this job row, which
+		// _installation.restore.overlay serves to the controller that must
+		// actually fetch and merge those bytes after the swap, and as the
+		// recovery_overlay_published requirement below, which installation.
+		// job.get surfaces as an inspectable disposition. A requirement is a
+		// human-readable prerequisite and carries neither digest nor size, so
+		// it can never stand in for the machine-resolvable reference.
+		j.OverlayArtifact = overlayRef
+		j.OverlaySize = perf.OverlaySize
 		j.State = "running"
 		j.Requirements = append(j.Requirements,
 			wireRequirement{

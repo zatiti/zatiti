@@ -199,6 +199,15 @@ type entry struct {
 	JobInput json.RawMessage `json:"job_input,omitempty"`
 	Outcome  *JobOutcome     `json:"outcome,omitempty"`
 
+	// OverlayArtifact is the published recovery-overlay artifact
+	// _installation.restore.overlay returned for a kindRestore entry,
+	// captured in the same pre-swap window as JobID/JobInput. It is
+	// journaled for exactly the reason those are: after CommitRestore this
+	// lifetime's Application is permanently stale, so the reference can
+	// never be fetched again, and a crash between the swap and the merge
+	// must resume with it rather than guess.
+	OverlayArtifact *RestoreOverlayRef `json:"overlay_artifact,omitempty"`
+
 	// Turn-work fields (kindTurn).
 	TurnID         contract.ID      `json:"turn_id,omitempty"`
 	Plan           *wireContextPlan `json:"plan,omitempty"`
@@ -332,6 +341,9 @@ func (j *journal) merge(e entry) {
 		}
 		if len(e.JobInput) == 0 {
 			e.JobInput = prev.JobInput
+		}
+		if e.OverlayArtifact == nil {
+			e.OverlayArtifact = prev.OverlayArtifact
 		}
 		if e.TurnID == "" {
 			e.TurnID = prev.TurnID

@@ -27,12 +27,13 @@ const ownerName = "memory"
 // Operation identifiers served by this module and the peer operations it
 // calls.
 const (
-	opActivate  = "_memory.activate"
-	opBootstrap = "_memory.bootstrap"
-	opManifest  = "_memory.manifest"
-	opRecord    = "_memory.record"
-	opSelect    = "_memory.select"
-	opValidate  = "_memory.validate"
+	opActivate     = "_memory.activate"
+	opBootstrap    = "_memory.bootstrap"
+	opManifest     = "_memory.manifest"
+	opRecord       = "_memory.record"
+	opRestoreMerge = "_memory.restore.merge"
+	opSelect       = "_memory.select"
+	opValidate     = "_memory.validate"
 
 	opBindingArchive = "memory.binding.archive"
 	opBindingCreate  = "memory.binding.create"
@@ -83,6 +84,8 @@ var opMetas = []opMeta{
 	{id: opManifest, visibility: "internal", mode: "query",
 		callers: []string{"installation"}},
 	{id: opRecord, visibility: "internal", mode: "mutation",
+		callers: []string{"controller"}},
+	{id: opRestoreMerge, visibility: "internal", mode: "mutation",
 		callers: []string{"controller"}},
 	{id: opSelect, visibility: "internal", mode: "query",
 		callers: []string{"execution", "effects", "configuration"}},
@@ -260,6 +263,8 @@ func (s *Service) bindHandler(d contract.Descriptor) (contract.Handler, error) {
 		return bind(d, s.handleManifest)
 	case opRecord:
 		return bind(d, s.handleRecord)
+	case opRestoreMerge:
+		return bind(d, s.handleRestoreMerge)
 	case opSelect:
 		return bind(d, s.handleSelect)
 	case opValidate:

@@ -45,6 +45,15 @@ type jobRow struct {
 	Result         json.RawMessage
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
+	// OverlayArtifact and OverlaySize name the published, sealed recovery
+	// overlay a restore job's own Finish registered through the artifacts
+	// owner (schemaV4). They are the machine-resolvable form of the
+	// recovery_overlay_published requirement the same Finish records, and
+	// _installation.restore.overlay serves them to the controller that must
+	// fetch and merge those bytes after the swap. A backup job, and any
+	// restore job written before schemaV4, leaves both zero.
+	OverlayArtifact wireArtifactRef
+	OverlaySize     int64
 }
 
 type obligationRow struct {
@@ -232,10 +241,12 @@ func insertJob(ctx context.Context, unit contract.Unit, j jobRow) error {
 	}
 	_, err = unit.ExecContext(ctx, `
 		INSERT INTO installation_jobs
-			(id, version, installation_id, kind, state, requirements_json, result_json, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			(id, version, installation_id, kind, state, requirements_json, result_json, created_at, updated_at,
+			 overlay_artifact_id, overlay_artifact_digest, overlay_size)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		string(j.ID), j.Version, string(j.InstallationID), j.Kind, j.State,
-		reqsJSON, string(result), formatStamp(j.CreatedAt), formatStamp(j.UpdatedAt))
+		reqsJSON, string(result), formatStamp(j.CreatedAt), formatStamp(j.UpdatedAt),
+		string(j.OverlayArtifact.ID), string(j.OverlayArtifact.Digest), j.OverlaySize)
 	if err != nil {
 		return fmt.Errorf("installation: insert job: %w", err)
 	}
@@ -253,9 +264,11 @@ func updateJob(ctx context.Context, unit contract.Unit, j jobRow, previousVersio
 	}
 	res, err := unit.ExecContext(ctx, `
 		UPDATE installation_jobs
-		SET version = ?, state = ?, requirements_json = ?, result_json = ?, updated_at = ?
+		SET version = ?, state = ?, requirements_json = ?, result_json = ?, updated_at = ?,
+		    overlay_artifact_id = ?, overlay_artifact_digest = ?, overlay_size = ?
 		WHERE id = ? AND version = ?`,
 		j.Version, j.State, reqsJSON, string(result), formatStamp(j.UpdatedAt),
+		string(j.OverlayArtifact.ID), string(j.OverlayArtifact.Digest), j.OverlaySize,
 		string(j.ID), previousVersion)
 	if err != nil {
 		return fmt.Errorf("installation: update job: %w", err)
@@ -265,15 +278,19 @@ func updateJob(ctx context.Context, unit contract.Unit, j jobRow, previousVersio
 
 func loadJob(ctx context.Context, r contract.Reader, id contract.ID) (*jobRow, error) {
 	row := r.QueryRowContext(ctx, `
-		SELECT id, version, installation_id, kind, state, requirements_json, result_json, created_at, updated_at
+		SELECT id, version, installation_id, kind, state, requirements_json, result_json, created_at, updated_at,
+		       overlay_artifact_id, overlay_artifact_digest, overlay_size
 		FROM installation_jobs WHERE id = ?`, string(id))
 	var (
-		j                    jobRow
-		reqsJSON, resultJSON string
-		createdAt, updatedAt string
+		j                     jobRow
+		reqsJSON, resultJSON  string
+		createdAt, updatedAt  string
+		overlayArtifactID     string
+		overlayArtifactDigest string
 	)
 	err := row.Scan(&j.ID, &j.Version, &j.InstallationID, &j.Kind, &j.State,
-		&reqsJSON, &resultJSON, &createdAt, &updatedAt)
+		&reqsJSON, &resultJSON, &createdAt, &updatedAt,
+		&overlayArtifactID, &overlayArtifactDigest, &j.OverlaySize)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -282,6 +299,9 @@ func loadJob(ctx context.Context, r contract.Reader, id contract.ID) (*jobRow, e
 	}
 	if j.Requirements, err = decodeRequirements(reqsJSON); err != nil {
 		return nil, err
+	}
+	j.OverlayArtifact = wireArtifactRef{
+		ID: contract.ID(overlayArtifactID), Digest: contract.Digest(overlayArtifactDigest),
 	}
 	j.Result = json.RawMessage(resultJSON)
 	if j.CreatedAt, err = parseStamp(createdAt); err != nil {

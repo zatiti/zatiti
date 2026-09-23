@@ -11,17 +11,18 @@ import (
 
 // Operation identifiers.
 const (
-	opBackup            = "installation.backup"
-	opDoctor            = "installation.doctor"
-	opInit              = "installation.init"
-	opJobGet            = "installation.job.get"
-	opMaintenanceEnter  = "installation.maintenance.enter"
-	opPause             = "installation.pause"
-	opRestore           = "installation.restore"
-	opResume            = "installation.resume"
-	opStatus            = "installation.status"
-	opVerifierList      = "installation.verifier.list"
-	opRestoreRecordName = "_installation.restore.record"
+	opBackup             = "installation.backup"
+	opDoctor             = "installation.doctor"
+	opInit               = "installation.init"
+	opJobGet             = "installation.job.get"
+	opMaintenanceEnter   = "installation.maintenance.enter"
+	opPause              = "installation.pause"
+	opRestore            = "installation.restore"
+	opResume             = "installation.resume"
+	opStatus             = "installation.status"
+	opVerifierList       = "installation.verifier.list"
+	opRestoreRecordName  = "_installation.restore.record"
+	opRestoreOverlayName = "_installation.restore.overlay"
 )
 
 // localIOOps is the frozen set of operations this package serves through
@@ -49,6 +50,8 @@ type opMeta struct {
 // opMetas lists every owned operation exactly as the implementation brief
 // embeds it: the internal operation first, then the public catalog.
 var opMetas = []opMeta{
+	{id: opRestoreOverlayName, visibility: contract.VisibilityInternal, mode: contract.ModeQuery,
+		callers: []string{"controller"}},
 	{id: opRestoreRecordName, visibility: contract.VisibilityInternal, mode: contract.ModeMutation,
 		callers: []string{"controller"}},
 
@@ -220,14 +223,15 @@ type handlerFunc func(ctx context.Context, s *Service, unit contract.Unit, inv c
 // are absent: they are served through Prepare/Perform/Finish, and Handle
 // refuses them rather than silently running their mutation phases here.
 var handlers = map[string]handlerFunc{
-	opRestoreRecordName: handleRestoreRecord,
-	opDoctor:            handleStatus,
-	opStatus:            handleStatus,
-	opJobGet:            handleJobGet,
-	opMaintenanceEnter:  handleMaintenanceEnter,
-	opPause:             handlePause,
-	opResume:            handleResume,
-	opVerifierList:      handleVerifierList,
+	opRestoreOverlayName: handleRestoreOverlay,
+	opRestoreRecordName:  handleRestoreRecord,
+	opDoctor:             handleStatus,
+	opStatus:             handleStatus,
+	opJobGet:             handleJobGet,
+	opMaintenanceEnter:   handleMaintenanceEnter,
+	opPause:              handlePause,
+	opResume:             handleResume,
+	opVerifierList:       handleVerifierList,
 }
 
 // Handle implements contract.Module with strict dispatch: the operation must

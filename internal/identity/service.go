@@ -12,12 +12,14 @@ import (
 
 // Operation IDs served by this module.
 const (
-	opActivate  = "_identity.activate"
-	opAuthority = "_identity.authority"
-	opBootstrap = "_identity.bootstrap"
-	opPromote   = "_identity.promote"
-	opRestrict  = "_identity.restrict"
-	opValidate  = "_identity.validate"
+	opActivate     = "_identity.activate"
+	opAuthority    = "_identity.authority"
+	opBootstrap    = "_identity.bootstrap"
+	opPromote      = "_identity.promote"
+	opRestoreMerge = "_identity.restore.merge"
+	opRestrict     = "_identity.restrict"
+	opRevocations  = "_identity.revocations"
+	opValidate     = "_identity.validate"
 
 	opCredProvision   = "credential.provision"
 	opCredRevoke      = "credential.revoke"
@@ -129,9 +131,20 @@ func (s *Service) assemble() error {
 			Callers: []string{"policy"},
 		},
 		{
+			ID: opRestoreMerge, Version: descriptorVersion, Owner: owner,
+			Visibility: contract.VisibilityInternal, Mode: contract.ModeMutation, Effect: contract.EffectLocal,
+			Callers: []string{"controller"},
+		},
+		{
 			ID: opRestrict, Version: descriptorVersion, Owner: owner,
 			Visibility: contract.VisibilityInternal, Mode: contract.ModeMutation, Effect: contract.EffectLocal,
 			Callers: []string{"policy", "installation"},
+		},
+		{
+			ID: opRevocations, Version: descriptorVersion, Owner: owner,
+			Visibility: contract.VisibilityInternal, Mode: contract.ModeQuery, Effect: contract.EffectLocal,
+			ScopeRequired: []string{"installation_id"},
+			Callers:       []string{"installation"},
 		},
 		{
 			ID: opValidate, Version: descriptorVersion, Owner: owner,
@@ -262,7 +275,9 @@ func (s *Service) assemble() error {
 		opAuthority:       bind(s, opAuthority, s.authority),
 		opBootstrap:       bind(s, opBootstrap, s.bootstrap),
 		opPromote:         bind(s, opPromote, s.promote),
+		opRestoreMerge:    bind(s, opRestoreMerge, s.restoreMerge),
 		opRestrict:        bind(s, opRestrict, s.restrict),
+		opRevocations:     bind(s, opRevocations, s.revocations),
 		opValidate:        bind(s, opValidate, s.validate),
 		opCredProvision:   bind(s, opCredProvision, s.credentialProvision),
 		opCredRevoke:      bind(s, opCredRevoke, s.credentialRevoke),

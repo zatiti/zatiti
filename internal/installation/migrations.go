@@ -108,6 +108,22 @@ CREATE TABLE installation_backup_keys (
 );
 `
 
+// schemaV4 promotes the published recovery-overlay artifact reference from
+// a free-form wireRequirement on the restore job to typed columns of the job
+// row itself, so _installation.restore.overlay can answer the controller
+// exactly and without parsing a message. installation.restore's Finish
+// already recorded the same overlay under the recovery_overlay_published
+// requirement (and still does, for job.get's inspectable disposition); a
+// requirement is a human-readable prerequisite, not a machine-resolvable
+// artifact reference -- it carries no digest and no size, and neither is
+// recoverable from the id alone. Rows written before this migration keep
+// the empty defaults and report not_found rather than a guess.
+const schemaV4 = `
+ALTER TABLE installation_jobs ADD COLUMN overlay_artifact_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE installation_jobs ADD COLUMN overlay_artifact_digest TEXT NOT NULL DEFAULT '';
+ALTER TABLE installation_jobs ADD COLUMN overlay_size INTEGER NOT NULL DEFAULT 0;
+`
+
 // migrations returns the installation-owned migration set. Each body is
 // pinned by SHA-256 so storage can detect any drift from the reviewed
 // schema.
@@ -127,5 +143,10 @@ func migrations() []contract.Migration {
 		Version: 3,
 		SQL:     schemaV3,
 		SHA256:  contract.Hash([]byte(schemaV3)),
+	}, {
+		Owner:   owner,
+		Version: 4,
+		SQL:     schemaV4,
+		SHA256:  contract.Hash([]byte(schemaV4)),
 	}}
 }

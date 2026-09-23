@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 
@@ -176,6 +177,228 @@ func TestRestoreCrashDuringOverlayMergeResumesPausedWithoutDispatch(t *testing.T
 	}
 	if got := f.queryString(`SELECT state FROM installation_restores ORDER BY seq DESC LIMIT 1`); got != "succeeded" {
 		t.Fatalf("final restore disposition = %q, want succeeded", got)
+	}
+}
+
+// TestRestoreThreadsTheJobInputAndJournaledOverlayIntoTheLifecycle proves
+// the two references P50 added to the pre-swap window actually reach the
+// capability that needs them, and reach it in the form the real
+// installation-backed implementation resolves: StageCandidate receives the
+// restore job's own original input, which is the only carrier of the
+// verified backup artifact reference anywhere in the protocol, and
+// MergeOverlay receives the published recovery-overlay reference
+// _installation.restore.overlay reported before the swap.
+func TestRestoreThreadsTheJobInputAndJournaledOverlayIntoTheLifecycle(t *testing.T) {
+	f := newFx(t)
+	f.exec(`INSERT INTO marker_value (id, value) VALUES (1, 'live-content')`)
+	img := f.buildBackupImage("backup-content")
+	job := f.restoreJob(t)
+	f.restoreBackups[job] = img
+	f.restoreLifecycle = fakeRestoreLifecycle{f: f}
+	registered := f.restoreOverlays[job]
+
+	c, sess := f.started()
+	awaitHandoff(t, f, c, sess)
+
+	if f.stageCalls != 1 {
+		t.Fatalf("StageCandidate ran %d times for one restore, want exactly 1", f.stageCalls)
+	}
+	var staged struct {
+		BackupArtifact struct {
+			ID     contract.ID     `json:"id"`
+			Digest contract.Digest `json:"digest"`
+		} `json:"backup_artifact"`
+	}
+	if err := json.Unmarshal(f.stagedInputs[0], &staged); err != nil {
+		t.Fatalf("StageCandidate received input that is not the restore job's own: %v", err)
+	}
+	if staged.BackupArtifact.ID == "" || staged.BackupArtifact.Digest != stagedDigest {
+		t.Fatalf("StageCandidate received %+v, want the job input's verified backup artifact", staged.BackupArtifact)
+	}
+	if len(f.mergedOverlays) != 1 {
+		t.Fatalf("MergeOverlay ran %d times, want exactly 1", len(f.mergedOverlays))
+	}
+	if f.mergedOverlays[0] != registered {
+		t.Fatalf("MergeOverlay received %+v, want the reference the owner registered (%+v)",
+			f.mergedOverlays[0], registered)
+	}
+}
+
+// TestRestoreResumeAfterACrashNeverRestagesTheBackupBundle is the required
+// behavior "killing the process between a successful StageCandidate/
+// CommitRestore and a completed MergeOverlay, then restarting, resumes from
+// the journaled phase and finishes without re-decrypting the backup
+// bundle." Staging is where the encrypted bundle is read, decrypted and
+// written to disk in the clear, so a second StageCandidate call after
+// recovery is exactly the waste (and the extra plaintext copy) the journal
+// exists to prevent. The recovered merge must also receive the same
+// journaled overlay reference, because the operation that produced it
+// cannot be called again after the swap.
+func TestRestoreResumeAfterACrashNeverRestagesTheBackupBundle(t *testing.T) {
+	f := newFx(t)
+	img := f.buildBackupImage("backup-content")
+	job := f.restoreJob(t)
+	f.restoreBackups[job] = img
+	registered := f.restoreOverlays[job]
+	attempts := 0
+	f.restoreMerge[job] = func(ctx context.Context, u contract.Unit) error {
+		attempts++
+		if attempts == 1 {
+			return errors.New("simulated crash before the merge transaction could commit")
+		}
+		return mergeInsertsRestoredObligation("ob-1", "revocation")(ctx, u)
+	}
+	f.restoreLifecycle = fakeRestoreLifecycle{f: f}
+
+	c, sess := f.started()
+	if err := f.pass(c, sess); err != nil {
+		t.Fatalf("tick: %v", err)
+	}
+	if f.stageCalls != 1 {
+		t.Fatalf("StageCandidate ran %d times before the crash, want 1", f.stageCalls)
+	}
+
+	// A genuine restart: the swap is already durable, so recovery resumes
+	// from the journaled phase rather than re-staging anything.
+	f.restart()
+	f.started()
+
+	if f.stageCalls != 1 {
+		t.Fatalf("recovery re-decrypted the backup bundle: StageCandidate ran %d times in total, want 1", f.stageCalls)
+	}
+	if attempts != 2 {
+		t.Fatalf("merge ran %d times across recovery, want exactly 2 (the failed attempt plus one success)", attempts)
+	}
+	if len(f.mergedOverlays) != 2 {
+		t.Fatalf("MergeOverlay ran %d times, want 2", len(f.mergedOverlays))
+	}
+	for i, got := range f.mergedOverlays {
+		if got != registered {
+			t.Fatalf("merge attempt %d received overlay %+v, want the journaled reference %+v", i+1, got, registered)
+		}
+	}
+	if got := f.queryString(`SELECT kind FROM marker_restored_obligations WHERE id = 'ob-1'`); got != "revocation" {
+		t.Fatal("the obligation merged on recovery did not survive")
+	}
+}
+
+// TestRestoreRefusesBeforeTheSwapWhenNoOverlayIsRegistered proves the
+// pre-swap resolution is a real gate, not bookkeeping: a restore job whose
+// owner registered no recovery overlay is recorded failed and the live
+// database is never touched, because the refusal happens before
+// performSwap runs at all. Resuming storage without merging an overlay
+// would silently drop every obligation it retained, so refusing is the
+// safe outcome, not merely the honest one.
+func TestRestoreRefusesBeforeTheSwapWhenNoOverlayIsRegistered(t *testing.T) {
+	f := newFx(t)
+	f.exec(`INSERT INTO marker_value (id, value) VALUES (1, 'live-content')`)
+	img := f.buildBackupImage("backup-content")
+	job := f.restoreJob(t)
+	f.restoreBackups[job] = img
+	f.mu.Lock()
+	delete(f.restoreOverlays, job)
+	f.mu.Unlock()
+	f.restoreLifecycle = fakeRestoreLifecycle{f: f}
+
+	c, sess := f.started()
+	for i := 0; i < 5; i++ {
+		if err := f.pass(c, sess); err != nil {
+			t.Fatalf("tick: %v", err)
+		}
+	}
+
+	if got := f.queryString(`SELECT state FROM installation_restores ORDER BY seq DESC LIMIT 1`); got != jobStateFailed {
+		t.Fatalf("restore disposition = %q, want failed", got)
+	}
+	if f.stageCalls != 0 {
+		t.Fatalf("StageCandidate ran %d times after an unresolvable overlay; no bundle may be decrypted", f.stageCalls)
+	}
+	if got := f.queryString(`SELECT value FROM marker_value WHERE id = 1`); got != "live-content" {
+		t.Fatalf("live database value = %q; a refused restore must never touch the database file", got)
+	}
+	select {
+	case <-c.restoreHandoff:
+		t.Fatal("handoff signalled for a restore that never swapped anything")
+	default:
+	}
+}
+
+// TestRestoreHandoffClosesTheDatabaseItAdoptedFromCommitRestore proves the
+// controller hands back the one database handle it ever owns.
+//
+// CommitRestore closes the pre-restore database and returns a freshly
+// reopened one, which this controller then serves from. Nothing outside
+// this package can close that handle afterwards: entrypoint assembly's own
+// field still names the pre-swap database, so its reassembly closes that
+// one (a no-op) and opens a third. Before this was fixed, every completed
+// restore left one extra live SQLite connection pool on the live file for
+// the remaining life of the process -- measured directly against a real
+// spawned `zatiti serve`: two pools on zatiti.db after a restore where a
+// process doing the identical work without a restore holds exactly one.
+//
+// The assertion is the one that matters: after the lifetime ends, the
+// adopted handle is genuinely closed, not merely dereferenced.
+func TestRestoreHandoffClosesTheDatabaseItAdoptedFromCommitRestore(t *testing.T) {
+	f := newFx(t)
+	f.exec(`INSERT INTO marker_value (id, value) VALUES (1, 'live-content')`)
+	img := f.buildBackupImage("backup-content")
+	job := f.restoreJob(t)
+	f.restoreBackups[job] = img
+	f.restoreLifecycle = fakeRestoreLifecycle{f: f}
+
+	c, sess := f.started()
+	awaitHandoff(t, f, c, sess)
+
+	c.mu.Lock()
+	adopted := c.adopted
+	c.mu.Unlock()
+	if adopted == nil {
+		t.Fatal("the controller did not adopt the database CommitRestore returned; nothing would ever close it")
+	}
+	if adopted != c.database() {
+		t.Fatal("the adopted handle is not the one this lifetime serves from")
+	}
+	// Still usable while the lifetime is live: the merge and resume steps
+	// run against it after the swap.
+	if err := adopted.Read(context.Background(), f.actor, f.scope(), func(contract.Unit) error { return nil }); err != nil {
+		t.Fatalf("the adopted database is unusable before the lifetime ends: %v", err)
+	}
+
+	// Ending the lifetime releases it.
+	c.releaseAdopted()
+	if err := adopted.Read(context.Background(), f.actor, f.scope(), func(contract.Unit) error { return nil }); err == nil {
+		t.Fatal("the database adopted from CommitRestore is still open after the lifetime ended; it leaks for the life of the process")
+	}
+	c.mu.Lock()
+	again := c.adopted
+	c.mu.Unlock()
+	if again != nil {
+		t.Fatal("releasing the adopted handle did not clear it; a second release would close it twice")
+	}
+	// Safe to repeat: Run reaches this on every exit path.
+	c.releaseAdopted()
+}
+
+// TestControllerNeverClosesTheDatabaseItWasConstructedWith is the other half
+// of the ownership rule: a lifetime that never performs a swap adopts
+// nothing, so ending it must leave entrypoint assembly's own database open.
+// Closing that one would pull the file out from under the process that
+// still owns it.
+func TestControllerNeverClosesTheDatabaseItWasConstructedWith(t *testing.T) {
+	f := newFx(t)
+	c, sess := f.started()
+	if err := f.pass(c, sess); err != nil {
+		t.Fatalf("tick: %v", err)
+	}
+	c.mu.Lock()
+	adopted := c.adopted
+	c.mu.Unlock()
+	if adopted != nil {
+		t.Fatal("a controller that performed no swap adopted a database it does not own")
+	}
+	c.releaseAdopted()
+	if err := f.raw.Read(context.Background(), f.actor, f.scope(), func(contract.Unit) error { return nil }); err != nil {
+		t.Fatalf("the controller closed the database entrypoint assembly owns: %v", err)
 	}
 }
 

@@ -178,6 +178,13 @@ type restoreRecordInput struct {
 	Requirements []Requirement `json:"requirements"`
 }
 
+// restoreOverlayInput is _installation.restore.overlay's input: the restore
+// job whose published recovery overlay the controller must merge after the
+// swap.
+type restoreOverlayInput struct {
+	JobID contract.ID `json:"job_id"`
+}
+
 // Outputs.
 
 type wakesOutput struct {
@@ -223,4 +230,13 @@ type jobOutput struct {
 
 type artifactOutput struct {
 	Resource wireArtifact `json:"resource"`
+}
+
+// restoreOverlayOutput is _installation.restore.overlay's output: the
+// published, sealed overlay artifact and the exact size needed to read it
+// back in full. The controller never opens those bytes itself; it hands the
+// reference to the entrypoint-supplied RestoreLifecycle.
+type restoreOverlayOutput struct {
+	Artifact wireArtifact `json:"artifact"`
+	Size     int64        `json:"size"`
 }

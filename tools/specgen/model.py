@@ -504,6 +504,44 @@ D['ReportOutputsProposal']=obj(bindings=arr(obj(name=S,artifact=ref('ArtifactRef
 D['CycleDecisionProposal']=obj(decision=enum('continue','wait','escalate','done'),reason=S,**{'next_wake?':TIME})
 D['LocalDecisionTool']={'oneOf':[dict(ref('ReplyProposal'),description='reply'),dict(ref('ClarifyProposal'),description='clarify'),dict(ref('ReportOutputsProposal'),description='report_outputs'),dict(ref('CycleDecisionProposal'),description='cycle_decision')]}
 
+# --- 8. Completing the offline restore handoff (P50) ------------------------
+# P00-011's restore protocol froze steps 1-6 but left two of them with no
+# operation behind them: nothing exposed a pending restore job's published
+# recovery-overlay artifact to the controller that must merge it, and no owner
+# declared a method for folding that overlay's obligations back into its own
+# tables after the swap. Both gaps are closed here.
+#
+# RecoveryObligation is the wire shape of one retained obligation exactly as it
+# is sealed inside a BackupManifest's retained_obligations or a RecoveryOverlay's
+# obligations: installation captures it, the overlay carries it, and its owner
+# merges its own slice of it back. The merge operations are deliberately
+# per-owner: writing into another owner's tables always goes through that
+# owner's own registered, schema-validated handler.
+D['RecoveryObligation']=obj(id=ID,owner=S,kind=S,resource_id=ID,resource_version=VER,
+    record_artifact=ref('ArtifactRef'),record_digest=DIG,state=S,recorded_at=TIME)
+# RecoveryMerge reports exactly which obligations this call folded in (applied)
+# and which it deliberately left alone (skipped: already merged, not this
+# owner's kind, absent from the restored image, or newer than the overlay's own
+# capture point). A repeat of the same merge therefore reports an empty applied
+# list, which is what makes idempotence observable rather than asserted.
+D['RecoveryMerge']=obj(restore_job_id=ID,owner=S,applied=arr(ID),skipped=arr(ID))
+# Revocation names one currently revoked credential or grant. Listing it IS the
+# assertion that it is revoked; nothing here can lift one.
+D['Revocation']=obj(kind=enum('credential','grant'),id=ID,version=VER,principal_id=ID)
+_RESTORE_MERGE_IN=obj(restore_job_id=ID,captured_at=TIME,source_generation=VER,
+    obligations=arr(ref('RecoveryObligation')))
+for _merge_owner,_merge_text in [
+ ('effects','Fold this restore overlay\'s claimed_effect/unknown_effect obligations back into effects\' own tables, monotonically. An operation absent from the restored image is never resurrected and an operation the restored image already records terminal is never reopened; an operation still in flight there is carried to outcome_unknown, never back to ready, so nothing is resent. Each obligation is folded at most once, keyed by its own obligation id, so a repeated call after a crash between the overlay write and the storage resume applies nothing twice. The caller is the controller inside storage\'s paused restore-overlay transaction, outside any application dispatch, so this handler independently rechecks the acting principal before writing.'),
+ ('identity','Re-apply this restore overlay\'s revoked_credential/revoked_grant obligations to identity\'s own tables, monotonically. A revocation is only ever re-applied, never lifted; a credential or grant absent from the restored image is never created to carry one, an already-revoked row is left exactly as it is, and an obligation recorded after the overlay\'s own capture point is refused rather than back-dated into the rewound state. Each obligation is folded at most once, keyed by its own obligation id. The caller is the controller inside storage\'s paused restore-overlay transaction, outside any application dispatch, so this handler independently rechecks that the acting principal is this installation\'s live controller service principal before writing.'),
+ ('memory','Fold this restore overlay\'s memory_write obligations back into memory\'s own reconciliation table, so a writer intent whose outcome was unresolved when the overlay was captured survives the rewind as an explicit unresolved obligation instead of vanishing with the rewound rows. It never claims a provider write happened, never resends one and never resolves an obligation. Each obligation is folded at most once, keyed by its own obligation id, so a repeated call after a crash applies nothing twice. The caller is the controller inside storage\'s paused restore-overlay transaction, outside any application dispatch, so this handler independently rechecks the acting principal before writing.')]:
+    internal('restore.merge',_merge_owner,deepcopy(_RESTORE_MERGE_IN),one('RecoveryMerge'),_merge_text,['controller'])
+internal('revocations','identity',fields(SC),obj(revocations=arr(ref('Revocation'))),
+ 'Report every credential and grant this installation currently holds revoked, so a paused backup or restore can capture revocations into its manifest and recovery overlay and a later merge can re-apply them after a rewind. Read only: it lists revocations, never creates, lifts or explains them, and returns no secret material or store reference.',
+ ['installation'],mode='query')
+internal('restore.overlay','installation',obj(job_id=ID),obj(artifact=ref('ArtifactRef'),size=INT),
+ 'Return the published, sealed recovery-overlay artifact installation.restore already registered against this restore job, so the controller can resolve and merge it after the database swap. The reference is read before the swap, while the caller\'s own application is still valid, and names bytes the artifacts owner already published; this operation performs no IO, decrypts nothing and returns not_found for a job with no registered overlay rather than guessing one.',
+ ['controller'],mode='query')
+
 # scope_required must be computed last, after every add() call above: it was
 # previously computed mid-file (once, by iterating OPS at that point), so
 # every operation added afterward -- 23 of them, including several

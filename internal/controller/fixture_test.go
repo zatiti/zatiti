@@ -308,8 +308,19 @@ type fx struct {
 	restoreLifecycle RestoreLifecycle
 	restoreBackups   map[contract.ID]restoreBackupImage
 	restoreMerge     map[contract.ID]func(context.Context, contract.Unit) error
-	ready            int
-	paused           map[contract.ID]bool
+	restoreOverlays  map[contract.ID]RestoreOverlayRef
+	// stageCalls, stagedInputs and mergedOverlays record what the controller
+	// actually handed the restore lifecycle, so a test can assert the
+	// protocol's own properties (the backup bundle is resolved exactly once,
+	// the job input carrying its reference is threaded through, every merge
+	// attempt receives the same journaled overlay reference) rather than
+	// only its end state. They survive f.restart(), which rebuilds the
+	// controller but keeps this fixture.
+	stageCalls     int
+	stagedInputs   []json.RawMessage
+	mergedOverlays []RestoreOverlayRef
+	ready          int
+	paused         map[contract.ID]bool
 }
 
 func newFx(t *testing.T) *fx {
@@ -319,19 +330,20 @@ func newFx(t *testing.T) *fx {
 		dir = resolved
 	}
 	f := &fx{
-		t:              t,
-		dir:            dir,
-		spec:           loadSpec(t),
-		clock:          newFakeClock(),
-		install:        contract.NewID(),
-		actor:          contract.Actor{PrincipalID: contract.NewID(), Kind: contract.KindService},
-		calls:          map[string]int{},
-		limits:         map[string]int64{},
-		inject:         map[string][]injection{},
-		adapters:       map[string]contract.Adapter{},
-		paused:         map[contract.ID]bool{},
-		restoreBackups: map[contract.ID]restoreBackupImage{},
-		restoreMerge:   map[contract.ID]func(context.Context, contract.Unit) error{},
+		t:               t,
+		dir:             dir,
+		spec:            loadSpec(t),
+		clock:           newFakeClock(),
+		install:         contract.NewID(),
+		actor:           contract.Actor{PrincipalID: contract.NewID(), Kind: contract.KindService},
+		calls:           map[string]int{},
+		limits:          map[string]int64{},
+		inject:          map[string][]injection{},
+		adapters:        map[string]contract.Adapter{},
+		paused:          map[contract.ID]bool{},
+		restoreBackups:  map[contract.ID]restoreBackupImage{},
+		restoreMerge:    map[contract.ID]func(context.Context, contract.Unit) error{},
+		restoreOverlays: map[contract.ID]RestoreOverlayRef{},
 	}
 	f.boot(true)
 	t.Cleanup(func() { _ = f.raw.Close() })
@@ -627,6 +639,7 @@ func (f *fx) catalog() *catalog {
 		"_messaging.ready":                f.messagingReady,
 		"_execution.work.pending":         f.executionWorkPending,
 		"_execution.verification.pending": f.executionVerificationPending,
+		"_installation.restore.overlay":   f.restoreOverlay,
 	} {
 		add(id, strings.SplitN(strings.TrimPrefix(id, "_"), ".", 2)[0], contract.ModeQuery, ctl, f.handler(id, true, fn))
 	}

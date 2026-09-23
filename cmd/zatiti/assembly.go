@@ -226,6 +226,13 @@ type installationHandle struct {
 	// third return value). superviseController turns it into the
 	// controller.JobRunner map Collaborators.Jobs requires.
 	jobRunners map[string]contract.LocalJobRunner
+	// owners is every constructed domain module keyed by owner name. It
+	// exists for exactly one caller: restore.go's restoreLifecycle, which
+	// must reach internal/effects, internal/identity and internal/memory
+	// through contract.Module.Handle directly while the database swap has
+	// left this lifetime with no usable *application.Application to route
+	// through. Nothing else may use it to bypass application dispatch.
+	owners map[string]contract.Module
 }
 
 // openInstallation is the frozen startup order: platform.Open -> Acquire ->
@@ -283,6 +290,10 @@ func (h *installationHandle) assemble(ctx context.Context) error {
 	}
 	h.identity = idn
 	h.jobRunners = jobRunners
+	h.owners = make(map[string]contract.Module, len(mods))
+	for _, m := range mods {
+		h.owners[m.Name()] = m
+	}
 	var migrations []contract.Migration
 	for _, m := range mods {
 		migrations = append(migrations, m.Migrations()...)
