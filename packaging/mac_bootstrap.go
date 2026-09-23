@@ -45,6 +45,7 @@ type MacAcceptedRelease struct {
 	DeliverySHA256 string
 }
 type MacSequenceWatermark interface {
+	Lock(context.Context) (func(), error)
 	Load(context.Context) (MacAcceptedRelease, error)
 	Advance(context.Context, MacAcceptedRelease) error
 }
@@ -72,6 +73,14 @@ func RunMacBootstrap(ctx context.Context, in MacBootstrapInput) error {
 	if in.Source == nil || in.Verifier == nil || in.Runner == nil || in.Watermark == nil || in.NativeArch == nil {
 		return errf(CodePrerequisiteMissing, "Mac bootstrap trust, installer or watermark capability is unavailable")
 	}
+	unlock, err := in.Watermark.Lock(ctx)
+	if err != nil {
+		return errWrap(CodeConflict, "Mac bootstrap lock is unavailable", err)
+	}
+	if unlock == nil {
+		return errf(CodeConflict, "Mac bootstrap lock is unavailable")
+	}
+	defer unlock()
 	accepted, err := in.Watermark.Load(ctx)
 	if err != nil {
 		return errWrap(CodePrerequisiteMissing, "Mac release watermark is unavailable", err)
@@ -139,8 +148,14 @@ func RunMacBootstrap(ctx context.Context, in MacBootstrapInput) error {
 	if staged.Installer, err = stageMacAsset(ctx, dir, plan.Installer, in.Source); err != nil {
 		return err
 	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if err := in.Verifier.Verify(ctx, d.Release, plan, staged); err != nil {
 		return errWrap(CodeVerificationFailed, "Mac installer or component signature verification failed", err)
+	}
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 	if err := in.Runner.Install(ctx, staged.Installer); err != nil {
 		return errWrap(CodePrerequisiteMissing, "Mac installer failed; inspect installation before retry", err)

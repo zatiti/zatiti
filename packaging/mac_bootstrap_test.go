@@ -80,6 +80,7 @@ type testMacWatermark struct {
 	fail   bool
 }
 
+func (w *testMacWatermark) Lock(context.Context) (func(), error) { return func() {}, nil }
 func (w *testMacWatermark) Load(context.Context) (MacAcceptedRelease, error) {
 	return MacAcceptedRelease{Sequence: w.n, DeliverySHA256: w.digest}, nil
 }
