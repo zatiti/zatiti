@@ -3913,3 +3913,19 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   auto-stamp; loosen the equality check to a narrows/subset relationship;
   give controller-internal calls a properly-scoped unit) before any fix is
   authorized.
+- 2026-09-22 ~20:15-23:05 PT -- R-worker-double-reservation-fix IMPLEMENTED
+  (PR #62, not yet merged). A worker-scoped task's concurrency was charged
+  twice: task.create's own reservation (internal/tasks/admission.go, never
+  settled, lives for the task's whole lifetime) AND run.claim's per-attempt
+  reservation both charged the worker-level position, permanently
+  exhausting a freshly configured worker's shipped default concurrency of
+  one before any attempt was ever claimed -- run.claim failed
+  deterministically for every worker-scoped task at default concurrency.
+  Fixed by clearing WorkerID from the scope admission.go's reserveBudget
+  sends to _accounting.reserve; confirmed via internal/accounting/limits.go's
+  buildLevels that this precisely stops the worker-level charge.
+  Independently red-green verified myself (reverted the one-liner,
+  reproduced the exact pre-fix failure, restored, confirmed green). Full
+  tests/integration suite green (39 tests), including new
+  TestRunClaimSucceedsAtDefaultWorkerConcurrency, a worker at the TRUE
+  shipped default (no concurrency override at all).
