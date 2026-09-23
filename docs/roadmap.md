@@ -4001,3 +4001,40 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   P50 held, own worktree. This is the last known gap from the original
   50-card scope -- completing this closes out the autonomous 24h
   remediation effort's full known scope (P00-P50, 51 cards total).
+- 2026-09-23 ~02:15-03:45 PT -- P50 IMPLEMENTED (not yet landed) --
+  BLOCKING ISSUE FOUND DURING REVIEW, holding the landing. Implementation
+  itself (all 7 steps, all 4 required behavioral tests, the full package
+  suites for internal/installation, internal/effects, internal/identity,
+  internal/memory, internal/controller, cmd/zatiti, tests/integration)
+  verified clean by me AND by three parallel review forks covering the
+  frozen-contract layer, the three owner merge handlers, and the
+  controller/cmd wiring respectively -- all three came back clean, no
+  blocking issues, every load-bearing claim independently verified
+  against real source.
+
+  Then a full `go test ./...` (run as an extra precaution given this is
+  the final, most complex card) surfaced a real failure in
+  tests/qualification's TestQualificationMacOSDistribution -- a package
+  P50's own diff never touches (confirmed: only the mechanical AGENTS.md
+  fingerprint line changed there). Root-caused this far myself: the test
+  drives a REAL zatiti-pack-installed binary through a real backup then
+  restore over its own private socket, and its own code comment
+  documents an expectation baked in from before P50 -- that restore
+  fails closed with prerequisite_missing (the old, now-fixed ceiling).
+  With P50 landed, restore now genuinely starts succeeding: the captured
+  controller log shows "installation.restore" accepted (202) and "restore
+  handoff durable; ... reassembling over the freshly reopened database"
+  logged -- then NOTHING further for 30+ seconds (the test's own polling
+  deadline) or beyond. cmd/zatiti's own e2e tests for this exact code path
+  (reassembleAfterRestoreHandoff) all pass, but those drive it in-process;
+  this is the first exercise of a real restore handoff inside an actual
+  spawned `zatiti serve` OS subprocess (the packaging qualification
+  harness's whole point) in this tree's history. Reproduced 2/2 in the
+  P50 worktree; confirmed 1/1 clean pass on unmodified origin/main via a
+  separate verification worktree, ruling out flake/environment noise as
+  the explanation. This looks like a real hang or silent failure in the
+  reassembly path specific to a genuinely separate OS process, not yet
+  root-caused past this point. Dispatching a focused investigation now.
+  Landing P50 is on hold until this is understood and either fixed or
+  the qualification test's own now-stale expectation is honestly
+  rewritten AND the underlying hang is ruled out as a real defect.
