@@ -3929,3 +3929,6 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   tests/integration suite green (39 tests), including new
   TestRunClaimSucceedsAtDefaultWorkerConcurrency, a worker at the TRUE
   shipped default (no concurrency override at all).
+- 2026-09-23 ~01:05 PT -- PR #62 LANDED (worker double-reservation fix,
+  commit 6629533). All 7 CI checks passed clean. Confirmed on real
+  post-merge main via merge-base --is-ancestor.
