@@ -317,6 +317,8 @@ jobs:
           test "$RUNNER_OS" = "$expected_os"
           test "$RUNNER_ARCH" = "$expected_runner"
           test "$(uname -m)" = "$expected_uname"
+          case "$RUNNER_ARCH" in ARM64) arch=arm64 ;; X64) arch=amd64 ;; esac
+          echo "CANDIDATE_ARCH=$arch" >> "$GITHUB_ENV"
       - name: Install the pinned Go toolchain
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
@@ -362,6 +364,18 @@ jobs:
       - name: Build the release-mode macOS application
         if: runner.os == 'macOS'
         run: go run ./.github/workflows/cigate bounded -name flutter-build -out-dir "$EVIDENCE" -dir apps/desktop -- flutter build macos --release
+      - name: Audit and archive the unsigned native desktop candidate
+        run: |
+          bundle="$GITHUB_WORKSPACE/apps/desktop/build/macos/Build/Products/Release/zatiti_desktop.app"
+          candidate="$RUNNER_TEMP/candidate"
+          mkdir -p "$candidate"
+          cp LICENSE "$candidate/LICENSE"
+          cp docs/implementation/dependencies.lock.json "$candidate/dependencies.lock.json"
+          cp apps/desktop/pubspec.lock "$candidate/pubspec.lock"
+          archive="$candidate/zatiti-unsigned-darwin-$CANDIDATE_ARCH-desktop.tar.gz"
+          go run ./packaging/cmd/zatiti-pack assemble-bundle --dir "$bundle" --archive "$archive" > "$EVIDENCE/desktop-archive.json"
+          go run ./.github/workflows/cigate candidate -kind desktop -arch "$CANDIDATE_ARCH" -root "$bundle" -archive "$archive" -license "$candidate/LICENSE" -dependency-lock "$candidate/dependencies.lock.json" -pubspec-lock "$candidate/pubspec.lock" -revision "$GITHUB_SHA" -out "$EVIDENCE/desktop-candidate.json"
+          cp "$EVIDENCE/desktop-candidate.json" "$candidate/candidate.json"
       - name: Require the integration_test suite
         run: go run ./.github/workflows/cigate require -kind dir apps/desktop/integration_test
       - name: Run integration_test on Linux under a virtual display
@@ -375,7 +389,9 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: release-evidence-flutter-${{ matrix.os }}
-          path: ${{ runner.temp }}/evidence/
+          path: |
+            ${{ runner.temp }}/evidence/
+            ${{ runner.temp }}/candidate/
           if-no-files-found: error
           retention-days: 30
 
@@ -472,6 +488,8 @@ jobs:
           test "$RUNNER_OS" = "$expected_os"
           test "$RUNNER_ARCH" = "$expected_runner"
           test "$(uname -m)" = "$expected_uname"
+          case "$RUNNER_ARCH" in ARM64) arch=arm64 ;; X64) arch=amd64 ;; esac
+          echo "CANDIDATE_ARCH=$arch" >> "$GITHUB_ENV"
       - name: Install the pinned Go toolchain
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
@@ -497,12 +515,26 @@ jobs:
           go build -trimpath -buildvcs=true -o "$RUNNER_TEMP/candidate/zatiti" ./cmd/zatiti
       - name: Record and verify build provenance
         run: go run ./.github/workflows/cigate provenance -go-version "$(go env GOVERSION)" -out "$EVIDENCE/provenance.json" "$RUNNER_TEMP/candidate/zatiti"
+      - name: Audit and archive the unsigned native controller candidate
+        run: |
+          candidate="$RUNNER_TEMP/candidate"
+          mkdir -p "$candidate/controller-tree/bin"
+          cp "$candidate/zatiti" "$candidate/controller-tree/bin/zatiti"
+          cp LICENSE "$candidate/controller-tree/LICENSE"
+          cp docs/implementation/dependencies.lock.json "$candidate/dependencies.lock.json"
+          cp LICENSE "$candidate/LICENSE"
+          archive="$candidate/zatiti-unsigned-darwin-$CANDIDATE_ARCH-controller.tar.gz"
+          go run ./packaging/cmd/zatiti-pack assemble-bundle --dir "$candidate/controller-tree" --archive "$archive" > "$EVIDENCE/controller-archive.json"
+          go run ./.github/workflows/cigate candidate -kind controller -arch "$CANDIDATE_ARCH" -root "$candidate/zatiti" -archive "$archive" -license "$candidate/LICENSE" -dependency-lock "$candidate/dependencies.lock.json" -revision "$GITHUB_SHA" -out "$EVIDENCE/controller-candidate.json"
+          cp "$EVIDENCE/controller-candidate.json" "$candidate/candidate.json"
       - name: Retain evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: release-evidence-build-${{ matrix.os }}
-          path: ${{ runner.temp }}/evidence/
+          path: |
+            ${{ runner.temp }}/evidence/
+            ${{ runner.temp }}/candidate/
           if-no-files-found: error
           retention-days: 30
 

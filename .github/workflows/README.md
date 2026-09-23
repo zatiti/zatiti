@@ -2,13 +2,25 @@
 
 This directory holds two workflows and the Go command that validates them and
 makes their decisions. Neither workflow publishes, releases, signs, tags, or
-deploys, and neither references a secret.
+deploys, and neither references a secret. The release workflow retains unsigned
+native build candidates for later review; those files are not release assets.
 
 | File | Starts on | Purpose |
 |---|---|---|
 | `ci.yml` | Pull requests, pushes to `main` | Specification drift check, workflow validation, static checks, Go build and tests, and the Flutter desktop client on Linux and macOS. |
 | `release-qualification.yml` | A version tag push, or a manual dispatch started from a version tag | Decides whether the tagged commit is qualified. Produces a verdict and evidence only. |
 | `cigate/` | Called by both workflows with `go run` | Policy validation, release verdict, qualification-evidence enumeration and freshness, bounded test evidence, input resolution, Flutter SDK pin, lock and drift checks. Standard library only. |
+
+The release workflow's native `build` and `flutter` matrix jobs now retain the
+actual controller executable and a deterministic archive of the complete
+Flutter `.app`, respectively, for each Mac architecture. The workflow records
+the source SHA, archive digest and size, license digest, and the digest and CPU
+slices of every Mach-O it finds. It refuses a missing or wrong-architecture
+controller, app runner, framework, or dylib before upload. The archiver is
+`zatiti-pack assemble-bundle`; the audit is `cigate candidate`. The retained
+directories also include `LICENSE` and the dependency lock report, with
+`pubspec.lock` for the desktop. They are unsigned, lack a matched four-part
+release descriptor and installer package, and carry no notarization evidence.
 
 ## Validate locally
 

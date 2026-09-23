@@ -71,6 +71,7 @@ var commands = map[string]command{
 	"notices":       {"verify the license text is the unmodified Apache License 2.0", runNotices},
 	"environ":       {"record the build environment as evidence", runEnviron},
 	"provenance":    {"record and verify build provenance of built binaries", runProvenance},
+	"candidate":     {"audit native Mach-O files and hash an unsigned candidate archive", runCandidate},
 	"flutterpin":    {"resolve the pinned Flutter SDK from the dependency lock report", runFlutterPin},
 	"flutterverify": {"verify the installed Flutter SDK matches the pin", runFlutterVerify},
 	"flutterlayout": {"report which optional Flutter application parts exist", runFlutterLayout},
