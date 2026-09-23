@@ -136,3 +136,7 @@ for package in P:
         package['design'] += ' Revision 6: on every serve startup recover the committed OwnerCredential StoreRef, verify its custody, and publish pre/post-bootstrap desktop discovery without rerunning init or minting authority; preserve CLI profile compatibility from that same ref.'
     elif package['name'] == 'desktop':
         package['design'] += ' Revision 6: installed Mac startup reads strict protected desktop.json, obtains the existing owner header from the named login-Keychain item, and authenticates installation.status before opening chat; distinguish repair states and reconcile ambiguous init.'
+    elif package['name'] == 'distribution':
+        package['design'] += ' Revision 7: own the signed bounded Mac delivery record and exact six-asset mapping around the existing staged descriptor; offline fixtures never imply a downloadable signed/notarized installer or a published command.'
+    elif package['name'] == 'ci':
+        package['design'] += ' Revision 7: bind delivery hashes to final signed and notarized package bytes for native Intel and Apple Silicon, with trust-key rotation outside fetched metadata; a synthetic descriptor pass is not publication evidence.'
