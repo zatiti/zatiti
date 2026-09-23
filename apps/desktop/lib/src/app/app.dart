@@ -4,6 +4,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../state/workspace_controller.dart';
 import '../ui/theme.dart';
@@ -85,6 +86,34 @@ class ConfigurationNeededApp extends StatelessWidget {
   final Future<BootstrapView> Function(String)? onInitialize;
   final BootstrapView? bootstrapView;
 
+  String get _title => switch (plan.issue) {
+    StartupIssue.awaitingBootstrap => 'Welcome to Zatiti',
+    StartupIssue.lockedKeychain => 'Unlock Keychain',
+    StartupIssue.refusedKeychain ||
+    StartupIssue.missingCredential ||
+    StartupIssue.malformedCredential ||
+    StartupIssue.authenticationFailed => 'Repair your owner credential',
+    StartupIssue.staleSocket ||
+    StartupIssue.missingDiscovery => 'Local service unavailable',
+    StartupIssue.identityMismatch ||
+    StartupIssue.unsafeDiscovery ||
+    StartupIssue.malformedDiscovery ||
+    StartupIssue.unreadableDiscovery => 'Repair the local connection',
+    null => 'Connect to your controller',
+  };
+
+  String get _instruction => switch (plan.issue) {
+    StartupIssue.awaitingBootstrap =>
+      'Create your personal installation and chief to begin.',
+    StartupIssue.lockedKeychain =>
+      'Unlock your login Keychain, then reopen Zatiti.',
+    StartupIssue.staleSocket || StartupIssue.missingDiscovery =>
+      'Start the installed local service, then reopen Zatiti.',
+    null =>
+      'Zatiti runs on your own controller. This app needs to know where it is. Set these before starting the app:',
+    _ => 'Review the repair detail below, then reopen Zatiti.',
+  };
+
   @override
   Widget build(BuildContext context) => MaterialApp(
     title: 'Zatiti',
@@ -104,25 +133,22 @@ class ConfigurationNeededApp extends StatelessWidget {
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      plan.issue == null
-                          ? 'Connect to your controller'
-                          : 'Zatiti needs attention',
-                      style: text.titleLarge,
+                    Semantics(
+                      header: true,
+                      child: Text(_title, style: text.titleLarge),
                     ),
                     const SizedBox(height: Space.md),
-                    Text(
-                      plan.issue == null
-                          ? 'Zatiti runs on your own controller. This app needs to '
-                                'know where it is. Set these before starting the app:'
-                          : 'Check the local Zatiti service or Keychain, then reopen the app.',
-                      style: text.bodyMedium,
-                    ),
+                    Text(_instruction, style: text.bodyMedium),
                     const SizedBox(height: Space.lg),
                     for (final m in plan.missing)
                       Padding(
                         padding: const EdgeInsets.only(bottom: Space.sm),
-                        child: Text('• $m', style: text.bodyMedium),
+                        child: Semantics(
+                          label: m,
+                          child: ExcludeSemantics(
+                            child: Text('• $m', style: text.bodyMedium),
+                          ),
+                        ),
                       ),
                     const SizedBox(height: Space.md),
                     if (plan.issue == null)
@@ -177,6 +203,8 @@ class InstalledBootstrapForm extends StatefulWidget {
 
 class _InstalledBootstrapFormState extends State<InstalledBootstrapForm> {
   final TextEditingController _name = TextEditingController();
+  final FocusNode _nameFocus = FocusNode(debugLabel: 'owner name');
+  final FocusNode _actionFocus = FocusNode(debugLabel: 'setup action');
   bool _busy = false;
   BootstrapView? _result;
 
@@ -189,6 +217,8 @@ class _InstalledBootstrapFormState extends State<InstalledBootstrapForm> {
   @override
   void dispose() {
     _name.dispose();
+    _nameFocus.dispose();
+    _actionFocus.dispose();
     super.dispose();
   }
 
@@ -241,35 +271,45 @@ class _InstalledBootstrapFormState extends State<InstalledBootstrapForm> {
       BootstrapState.fresh =>
         'This creates your local installation and personal chief once.',
     };
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const SizedBox(height: Space.md),
-        TextField(
-          key: const ValueKey('installed-owner-name'),
-          controller: _name,
-          enabled: canSubmit && !_busy,
-          maxLength: 8192,
-          decoration: const InputDecoration(labelText: 'Your name'),
-          onSubmitted: (_) {
-            if (canSubmit && !_busy) _submit();
-          },
-        ),
-        const SizedBox(height: Space.sm),
-        Text(notice),
-        const SizedBox(height: Space.md),
-        FilledButton(
-          key: const ValueKey('installed-initialize'),
-          onPressed: (canSubmit || canCheck) && !_busy ? _submit : null,
-          child: Text(
-            _busy
-                ? 'Checking…'
-                : canCheck
-                ? 'Check setup status'
-                : 'Set up Zatiti',
+    return CallbackShortcuts(
+      bindings: {
+        const SingleActivator(LogicalKeyboardKey.escape): () =>
+            FocusManager.instance.primaryFocus?.unfocus(),
+      },
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const SizedBox(height: Space.md),
+          TextField(
+            key: const ValueKey('installed-owner-name'),
+            controller: _name,
+            focusNode: _nameFocus,
+            autofocus: canSubmit,
+            enabled: canSubmit && !_busy,
+            maxLength: 8192,
+            decoration: const InputDecoration(labelText: 'Your name'),
+            onSubmitted: (_) {
+              if (canSubmit && !_busy) _submit();
+            },
           ),
-        ),
-      ],
+          const SizedBox(height: Space.sm),
+          Semantics(liveRegion: true, child: Text(notice)),
+          const SizedBox(height: Space.md),
+          FilledButton(
+            key: const ValueKey('installed-initialize'),
+            focusNode: _actionFocus,
+            autofocus: canCheck,
+            onPressed: (canSubmit || canCheck) && !_busy ? _submit : null,
+            child: Text(
+              _busy
+                  ? 'Checking…'
+                  : canCheck
+                  ? 'Check setup status'
+                  : 'Set up Zatiti',
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
