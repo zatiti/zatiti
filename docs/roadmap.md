@@ -4038,3 +4038,34 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   Landing P50 is on hold until this is understood and either fixed or
   the qualification test's own now-stale expectation is honestly
   rewritten AND the underlying hang is ruled out as a real defect.
+- 2026-09-23 ~03:50 PT -- P50 IMPLEMENTATION COMPLETE, PR #65 OPENED (not
+  yet merged). The real-subprocess "hang" turned out to be a
+  misdiagnosis on my part: the process never hung -- a real restore
+  handoff genuinely tears down and rebinds the listener (~5s, matching
+  registry/application/bind assembly cost, the same startup pays too),
+  and the qualification test's own polling loop failed hard on the
+  first connection error during that expected window instead of
+  tolerating it, then killed the subprocess mid-reassembly -- which is
+  exactly why the captured log appeared to "stop". Investigating this
+  surfaced a second, real, independent defect: CommitRestore's freshly
+  reopened database handle was never closed, leaking one live SQLite
+  connection pool per completed restore. Fixed (Controller.Run now
+  tracks and closes an "adopted" handle) and independently verified via
+  a fourth review pass plus my own red-green check (which itself
+  surfaced a narrow, honestly-flagged test-coverage gap: no automated
+  test drives a real Run() exit to prove the close call site itself
+  fires, only a direct unit test of the close mechanism's own
+  correctness -- not blocking, noted in the PR).
+
+  Also caught and fixed 4 real golangci-lint errcheck violations
+  (unchecked *contract.Fault-as-error returns in 3 new test files) that
+  go vet did not catch -- the pre-commit hook's lint pass found these;
+  fixed to match this codebase's own established `_ = e.expectFault(...)`
+  convention, reverified clean.
+
+  Full `go test ./...` clean twice (once pre-rebase, once post-rebase),
+  including tests/qualification (the package that held this landing).
+  All review: 4 independent parallel verification passes total across
+  this and the prior entry (frozen contract, 3 owner merge handlers,
+  controller/cmd wiring, the follow-up DB-leak fix + packaging test
+  rewrite) -- all came back clean.
