@@ -98,12 +98,11 @@ func validateSecretKey(key string) error {
 	return nil
 }
 
-// keychainSecrets stores credentials in the OS keychain through the local
-// trusted helper process (/usr/bin/security on macOS). Values are base64
-// encoded so arbitrary bytes survive; the returned reference is opaque.
-// Known limitation: the helper takes the encoded value as an argument, so it
-// is briefly visible to same-user process inspection during writes; a
-// qualified cgo helper binary is the follow-up that removes this.
+// keychainSecrets stores credentials in the OS keychain. Writes use the
+// Security.framework on macOS so secret bytes never enter a child process's
+// arguments. Reads and deletes retain the security CLI for compatibility.
+// Values are base64 encoded so arbitrary bytes survive; the returned
+// reference is opaque.
 type keychainSecrets struct {
 	service    string // keychain service name, namespaced per installation
 	helperPath string
@@ -153,9 +152,10 @@ func (k *keychainSecrets) Put(ctx context.Context, key string, secret []byte) (s
 	if len(secret) > 32*1024 {
 		return "", errf(contractCodeInvalidInput, "credential exceeds the keychain size limit")
 	}
-	encoded := base64.StdEncoding.EncodeToString(secret)
-	args := []string{"add-generic-password", "-U", "-s", k.service, "-a", key, "-w", encoded}
-	if err := k.run(ctx, args); err != nil {
+	encoded := make([]byte, base64.StdEncoding.EncodedLen(len(secret)))
+	base64.StdEncoding.Encode(encoded, secret)
+	defer zero(encoded)
+	if err := k.putEncoded(ctx, key, encoded); err != nil {
 		return "", err
 	}
 	return keychainRef(key), nil
