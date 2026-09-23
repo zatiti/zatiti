@@ -133,7 +133,11 @@ func ensureHelperReceiptKey(ctx context.Context, secrets contract.SecretStore) (
 		return key, nil
 	}
 	var fault *contract.Fault
-	if !errors.As(err, &fault) || fault.Code != contract.CodeNotFound {
+	code := platform.Code(err)
+	if code == "" && errors.As(err, &fault) {
+		code = fault.Code
+	}
+	if code != contract.CodeNotFound {
 		return nil, fmt.Errorf("looking up the helper receipt key: %w", err)
 	}
 	key := make([]byte, helperReceiptKeyBytes)
