@@ -69,7 +69,11 @@ var requiredPlatformRegressionTests = []string{
 	"github.com/zatiti/zatiti/internal/platform#TestBlobTamperedObjectFailsPublishOverExisting",
 }
 
-var supportedRunners = []string{"ubuntu-24.04", "macos-15"}
+// macos-15 is GitHub's native Apple Silicon image; macos-15-intel is its
+// native Intel image. The runtime architecture step below catches a runner
+// label whose actual host does not match its documented architecture.
+var supportedRunners = []string{"ubuntu-24.04", "macos-15", "macos-15-intel"}
+var requiredMacRunners = []string{"macos-15", "macos-15-intel"}
 
 const (
 	verdictJob       = "verdict"
@@ -354,12 +358,37 @@ func (l *linter) checkJob(j entry) {
 	if !sawLock {
 		l.add(j.Line, "toolchain-lock", "job %s must verify the toolchain and dependency lock with \"cigate lock\"", j.Key)
 	}
+	if runner, _ := job.get("runs-on").scalar(); runner == matrixRunner {
+		l.checkNativeArchitecture(j.Key, steps)
+	}
 	if name, _ := actionName(steps.Items[0]); name != "actions/checkout" {
 		l.add(steps.Items[0].Line, "steps", "job %s: the first step must check out the source", j.Key)
 	}
 	last := steps.Items[len(steps.Items)-1]
 	if name, _ := actionName(last); name != "actions/upload-artifact" {
 		l.add(last.Line, "evidence", "job %s: the last step must retain evidence with actions/upload-artifact", j.Key)
+	}
+}
+
+// checkNativeArchitecture requires an early, unconditional host check in
+// every matrix job. A runner label alone is insufficient evidence that a
+// Go or Flutter build actually ran on the requested native CPU.
+func (l *linter) checkNativeArchitecture(jobName string, steps *node) {
+	if len(steps.Items) < 2 {
+		l.add(steps.Line, "runner-arch", "job %s must check its native host architecture", jobName)
+		return
+	}
+	st := steps.Items[1]
+	name, _ := st.get("name").scalar()
+	run, _ := st.get("run").scalar()
+	image, _ := st.path("env", "EXPECTED_IMAGE").scalar()
+	if name != "Verify native runner architecture" || image != matrixRunner || st.get("if") != nil ||
+		!strings.Contains(run, `macos-15) expected_os=macOS; expected_runner=ARM64; expected_uname=arm64`) ||
+		!strings.Contains(run, `macos-15-intel) expected_os=macOS; expected_runner=X64; expected_uname=x86_64`) ||
+		!strings.Contains(run, `test "$RUNNER_OS" = "$expected_os"`) ||
+		!strings.Contains(run, `test "$RUNNER_ARCH" = "$expected_runner"`) ||
+		!strings.Contains(run, `test "$(uname -m)" = "$expected_uname"`) {
+		l.add(st.Line, "runner-arch", "job %s must verify the native OS and CPU against its matrix image immediately after checkout", jobName)
 	}
 }
 
@@ -390,6 +419,13 @@ func (l *linter) checkRunner(jobName string, job *node) {
 	for _, r := range runners {
 		if !contains(supportedRunners, r) {
 			l.add(job.Line, "runner", "job %s: runner %q is not a pinned supported image (%s)", jobName, r, strings.Join(supportedRunners, ", "))
+		}
+	}
+	if l.prof == profileCI && (jobName == "test" || jobName == flutterJob) {
+		for _, r := range requiredMacRunners {
+			if !contains(runners, r) {
+				l.add(job.Line, "runner", "job %s must run on native Mac image %s", jobName, r)
+			}
 		}
 	}
 }
@@ -667,7 +703,7 @@ func (l *linter) checkReleaseGates(jobs *node) {
 			continue
 		}
 		runners, _ := j.Value.path("strategy", "matrix", "os").strings()
-		for _, r := range supportedRunners {
+		for _, r := range requiredMacRunners {
 			if !contains(runners, r) {
 				l.add(j.Line, "release-gates", "gate %s must run on %s", g, r)
 			}

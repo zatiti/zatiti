@@ -44,7 +44,12 @@ one property at a time and requires each rule to fire.
   `release-qualification.yml` accepts `workflow_dispatch` with a required
   `version` input and `push` of `v*` tags only. `pull_request_target` and
   every other trigger are rejected.
-- Runners are the pinned images `ubuntu-24.04` and `macos-15`.
+- Runners are the pinned OS labels `ubuntu-24.04`, `macos-15` (Apple
+  Silicon), and `macos-15-intel` (Intel). GitHub documents the two Mac
+  architectures in its [hosted-runner reference](https://docs.github.com/en/actions/reference/runners/github-hosted-runners).
+  Matrix jobs also check `RUNNER_OS`, `RUNNER_ARCH`, and `uname -m` before
+  installing toolchains or running tests. CI retains Linux development jobs;
+  the first-release qualification matrix requires both native Mac images.
 - Every job has `timeout-minutes` of at most 60, starts with checkout using
   `persist-credentials: false`, verifies the toolchain and dependency lock,
   and ends by retaining evidence with `if: always()`, `if-no-files-found:
@@ -290,9 +295,9 @@ These items are stated so that nobody reads them as qualified:
   revision differs, so a wrong assumption blocks instead of passing.
 - The Flutter SDK's own artifact downloads (Dart SDK, engine) come from the
   SDK's pinned manifests, not from this policy.
-- `macos-15` runners are `arm64` and `ubuntu-24.04` runners are `amd64`. No
-  job covers `darwin/amd64` or `linux/arm64`. Windows, remote MCP, and
-  contained runners are not release targets and have no job.
+- `macos-15` runs native `arm64`, `macos-15-intel` runs native `amd64`,
+  and `ubuntu-24.04` runs `amd64`. No job covers `linux/arm64`. Windows,
+  remote MCP, and contained runners are not release targets and have no job.
 - The `qualification` gate references no credentials. When operator-provided
   test accounts exist, add them through a protected environment in a reviewed
   change to this policy; until then, tests that need them skip and the strict
