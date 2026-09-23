@@ -179,7 +179,7 @@ def main():
     for p in P:rows.append(f"| [`{p['path']}`](../../{p['path']}/AGENTS.md) | {p['kind']} | {p['wave']} | {p['mission']} |")
     outputs['docs/implementation/README.md']=f'''# Package implementation specification
 
-Revision {REVISION}. **Specification scaffold; no product implementation or executed release qualification is claimed.**
+Revision {REVISION}. **Specification scaffold.** The packages below have been implemented against it (see the root README for current product status); no executed release qualification is claimed.
 
 {len(P)} disjoint implementation roots; {sum(o['visibility']=='public' for o in OPS)} public operations; {sum(o['visibility']=='internal' for o in OPS)} internal owner methods; {len(requirements)} source blocks with explicit ownership; {len(acceptance)} named acceptance cases covering Z01–Z21 and release journeys.
 

@@ -1,5 +1,7 @@
 # Zatiti implementation completion plan
 
+> **Status (2026-09-23): complete.** All 51 cards (P00–P50) have landed on `main`; the last, P50, closed backup/restore on 2026-09-22. The landing record and the open follow-ups are in the [roadmap](../roadmap.md). The `status` fields in [plan.json](plan.json) are the plan as authored and were not updated as cards landed. The text below is the original plan, kept as written.
+
 **The control plane exists; autonomous useful work does not.** The audit found 27 confirmed gaps or explicitly labeled integration risks. The central missing piece is a durable worker loop that consumes intent, builds context, interprets model proposals, executes authorized actions and submits outputs for independent verification. Wiring the model adapter alone will not fix it.
 
 Baseline: `34d291f4c44b1a2a4950e8155498daad2a56c251`, audited 2026-09-19. This directory is a plan, not implemented behavior or release evidence. It supplements the existing frozen specification and supersedes package-count completion as a product-readiness measure. Historical roadmap/sitreps remain intact.

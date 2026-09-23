@@ -6,7 +6,20 @@ Zatiti is an open-source project in Go for defining organizations, equipping wor
 
 A coding agent such as Claude Code, Codex, or Cursor should be able to operate Zatiti through MCP or its command line: create an organization, import a skill, configure a connection, assign a worker, start a task, and follow it to a verified result. CLI and MCP feature parity is a release requirement.
 
-**Status: implemented, pre-release.** The [RFC](docs/rfc.md) defines the architecture. `cmd/zatiti` builds, and the CLI/MCP command tree in the table below is real, generated from the same operation catalog, and runnable today -- not illustrative. The core worker loop -- create a task, start it, have a worker claim and check in on a run, report a result, and reach a real terminal state -- runs end to end through real production code, including independent verification of the reported result rather than trusting it. Two things are still openly incomplete: there is no published installation command or tagged release yet, and resuming an installation from a backup does not yet finish -- it fails closed with an explicit error rather than guessing at a merge. Compatibility with individual agent clients will be tested before it is advertised as supported.
+**Status: implemented, pre-release (2026-09-23).** The [RFC](docs/rfc.md) defines the architecture, and every card of the [implementation completion plan](docs/implementation-remediation/README.md) has landed on `main`. What works today, through real production code:
+
+- `cmd/zatiti` builds, and the CLI/MCP command tree below is real: both are generated from the same catalog of 201 public operations.
+- First run works: `zatiti serve` on an empty state directory, then `zatiti init`, creates the installation and writes the owner credential profile.
+- The core worker loop runs end to end: create a task, start it, have a worker claim and check in on a run, report a result, verify that result independently, and reach a terminal state.
+- Backup and restore complete end to end.
+
+What is not done yet:
+
+- There is no tagged release, installer, or signed artifact. Run it from source (see [Run from source](#run-from-source)).
+- Hosted workers need a model adapter profile that you write by hand; no hosted model step can start without one. Until you configure it, the controller runs in storage-only readiness, and the practical mode is a coding agent acting as an external worker over MCP.
+- The tool adapters (GitHub, HTTP read, Serenity memory) are not registered by default.
+- Release qualification on real hosts and agent clients has not been run. Compatibility with individual agent clients will be tested before it is advertised as supported.
+- Known open items, none blocking: two intermittent CI tests, and three restore follow-ups recorded in the [roadmap](docs/roadmap.md).
 
 The [package implementation scaffold](docs/implementation/README.md) freezes ownership and shared contracts for parallel implementation. Each package directory contains a committed, self-contained `AGENTS.md` with its requirements, interfaces, schemas, and acceptance cases.
 
@@ -53,11 +66,51 @@ Resource creation produces drafts where activation changes live configuration. A
 
 The local MCP entry point is `zatiti mcp serve`. Client configuration selects a local credential profile. A configured MCP client needs no separate hosted Zatiti account. See the [transport contract](docs/rfc.md#8-cli-and-mcp-contract) for the connection, Mint generation, and parity rules.
 
+## Run from source
+
+These steps build the controller and bootstrap a local installation. They require Go 1.26.
+
+1. Build the binary:
+
+   ```sh
+   go build -o zatiti ./cmd/zatiti
+   ```
+
+1. Create a 32-byte master key outside the state directory. Artifacts and stored secrets are always encrypted at rest, so `serve` refuses to start without one:
+
+   ```sh
+   mkdir -p ~/.zatiti-keys
+   head -c 32 /dev/urandom > ~/.zatiti-keys/master.key
+   chmod 600 ~/.zatiti-keys/master.key
+   ```
+
+1. Start the controller. It serves bootstrap only until the installation is initialized:
+
+   ```sh
+   ./zatiti serve --credential-backend headless --master-key file:$HOME/.zatiti-keys/master.key
+   ```
+
+1. In another terminal, initialize the installation. This writes the `owner` credential profile:
+
+   ```sh
+   ./zatiti init --json --input '{"credential_store":"headless","owner_name":"Owner","headless_key_ref":"installation/owner"}'
+   ```
+
+1. Confirm that the owner profile authenticates:
+
+   ```sh
+   ./zatiti capabilities --json
+   ```
+
+1. Point your MCP client at `zatiti mcp serve`. It uses the `owner` profile by default.
+
+Use `--state-dir` or `ZATITI_STATE_DIR` to keep an installation somewhere other than the default per-user state directory.
+
 ## Execution you can inspect
 
 Zatiti distinguishes a worker's report from an independently verified result. It also distinguishes an accepted external request from a confirmed outcome. If a connection drops after a write might have happened, the operation stays unresolved until evidence establishes what happened; it is not blindly repeated.
 
-Worker execution is separate from client access. A coding agent may manage Zatiti without being a runner that Zatiti can launch. The proposed first release supports a hosted worker loop and externally operated workers. External workers are advisory: Zatiti governs operations submitted to it, but cannot account for actions taken independently with other credentials.
+Worker execution is separate from client access. A coding agent may manage Zatiti without being a runner that Zatiti can launch. The first release supports a hosted worker loop and externally operated workers. External workers are advisory: Zatiti governs operations submitted to it, but cannot account for actions taken independently with other credentials.
 
 ## Scope
 

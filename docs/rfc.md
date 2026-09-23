@@ -4,7 +4,7 @@
 
 | Field | Value |
 |---|---|
-| Status | Draft; proposed implementation specification |
+| Status | Draft; implemented on `main`, pre-release (see the [README](../README.md)) |
 | Date | 2026-09-07 |
 | Repository | [zatiti/zatiti](https://github.com/zatiti/zatiti) |
 | License | Apache-2.0 |
