@@ -30,6 +30,7 @@ keychain is qualification work. See [QUALIFICATION.md](QUALIFICATION.md).
 | `tree.go` | `Build` measures a staged tree into a manifest; `VerifyTree` checks a tree against one |
 | `licenses.go` | License notice audit: the license entries and the SBOM must describe the same components |
 | `signature.go` | Detached Ed25519 manifest signature, verified against caller-supplied trusted keys |
+| `mac_release.go` | Matched Intel/Apple Silicon Mac descriptor, component and bundle verification, and a separate detached metadata signature |
 | `service.go`, `templates/` | The macOS LaunchAgent and the Linux user `systemd` unit |
 | `layout.go`, `plan.go`, `apply.go` | Install, upgrade, and uninstall planning and execution |
 | `servicemanager.go` | `launchctl` and `systemctl --user` drivers behind the `ServiceManager` interface |
@@ -165,6 +166,17 @@ repository holds no key, and the tests generate throwaway keys.
 Platform code signing and notarization are outside this package. A release
 workflow that performs them records the result as an attestation with its
 evidence file.
+
+`AssembleMacRelease` accepts exactly four staged, separately signed macOS
+trees: controller and desktop for both `amd64` and `arm64`. It verifies the
+component signatures, tree digests, desktop archives and declared executable,
+then rejects mismatched version, source revision, protocol, SDK/plugin pin,
+Serenity pin, profile or license records. The canonical descriptor contains
+the four manifest digests and signatures. `SignMacRelease` signs that metadata
+under a distinct schema; a consumer must verify the descriptor signature
+**and** call `VerifyMacRelease` with the four downloaded trees. These functions
+use caller-supplied trust keys and make no claim about code signing,
+notarization or a qualified downloadable release.
 
 ## Service launchers
 
