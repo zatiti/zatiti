@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io/fs"
 	"os/exec"
+	"sync"
 )
 
 // Credential backends. "keychain" uses the OS secure store through a local
@@ -26,6 +27,7 @@ type secretStore struct {
 // secretBackend is the internal backend surface.
 type secretBackend interface {
 	Put(ctx context.Context, key string, secret []byte) (string, error)
+	Lookup(ctx context.Context, key string) (string, error)
 	Get(ctx context.Context, ref string) ([]byte, error)
 	Delete(ctx context.Context, ref string) error
 	refForKey(key string) string
@@ -34,6 +36,12 @@ type secretBackend interface {
 
 func (s *secretStore) Put(ctx context.Context, key string, secret []byte) (string, error) {
 	return s.impl.Put(ctx, key, secret)
+}
+
+// Lookup returns the current opaque reference for a trusted, stable local
+// name only after proving the referenced credential is still readable.
+func (s *secretStore) Lookup(ctx context.Context, key string) (string, error) {
+	return s.impl.Lookup(ctx, key)
 }
 
 func (s *secretStore) Get(ctx context.Context, ref string) ([]byte, error) {
@@ -106,6 +114,8 @@ func validateSecretKey(key string) error {
 type keychainSecrets struct {
 	service    string // keychain service name, namespaced per installation
 	helperPath string
+	mu         sync.RWMutex
+	closed     bool
 }
 
 const defaultSecurityHelper = "/usr/bin/security"
@@ -140,7 +150,20 @@ func parseKeychainRef(ref string) (string, error) {
 
 func (k *keychainSecrets) refForKey(key string) string { return keychainRef(key) }
 
-func (k *keychainSecrets) zeroKeys() {}
+func (k *keychainSecrets) zeroKeys() {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	k.closed = true
+}
+
+func (k *keychainSecrets) ensureOpen() error {
+	k.mu.RLock()
+	defer k.mu.RUnlock()
+	if k.closed {
+		return errf(contractCodeControllerUnavailable, "platform is closed")
+	}
+	return nil
+}
 
 func (k *keychainSecrets) Put(ctx context.Context, key string, secret []byte) (string, error) {
 	if err := validateSecretKey(key); err != nil {
@@ -152,6 +175,9 @@ func (k *keychainSecrets) Put(ctx context.Context, key string, secret []byte) (s
 	if len(secret) > 32*1024 {
 		return "", errf(contractCodeInvalidInput, "credential exceeds the keychain size limit")
 	}
+	if err := k.ensureOpen(); err != nil {
+		return "", err
+	}
 	encoded := make([]byte, base64.StdEncoding.EncodedLen(len(secret)))
 	base64.StdEncoding.Encode(encoded, secret)
 	defer zero(encoded)
@@ -161,7 +187,26 @@ func (k *keychainSecrets) Put(ctx context.Context, key string, secret []byte) (s
 	return keychainRef(key), nil
 }
 
+func (k *keychainSecrets) Lookup(ctx context.Context, key string) (string, error) {
+	if err := validateSecretKey(key); err != nil {
+		return "", err
+	}
+	if err := k.ensureOpen(); err != nil {
+		return "", err
+	}
+	ref := keychainRef(key)
+	value, err := k.Get(ctx, ref)
+	if err != nil {
+		return "", err
+	}
+	zero(value)
+	return ref, nil
+}
+
 func (k *keychainSecrets) Get(ctx context.Context, ref string) ([]byte, error) {
+	if err := k.ensureOpen(); err != nil {
+		return nil, err
+	}
 	key, err := parseKeychainRef(ref)
 	if err != nil {
 		return nil, err
@@ -179,6 +224,9 @@ func (k *keychainSecrets) Get(ctx context.Context, ref string) ([]byte, error) {
 }
 
 func (k *keychainSecrets) Delete(ctx context.Context, ref string) error {
+	if err := k.ensureOpen(); err != nil {
+		return err
+	}
 	key, err := parseKeychainRef(ref)
 	if err != nil {
 		return err
