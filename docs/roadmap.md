@@ -3968,3 +3968,14 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   tests/integration suite myself (192s, all green) including watching
   the cooperative journey test assert real "succeeded". Rebased cleanly
   onto PR #62 (no conflict despite both touching cooperative_journey_test.go).
+- 2026-09-23 ~01:56 PT -- PR #63 LANDED (Unit.Emit scope-narrows fix,
+  commit 31c3eaf). All 7 CI checks passed clean. Confirmed on real
+  post-merge main via merge-base --is-ancestor AND via a dedicated,
+  separate verification worktree built directly from the merged commit:
+  ran TestCooperativeWorkerClaimsAndCheckpointsThenHitsTheArtifactResolutionCeiling
+  one final time against real merged main (not a pre-merge worktree) --
+  PASS, task genuinely reaches "succeeded". This closes the chain of five
+  masked bugs found this session (run.claim operation_id -> evidence_ids/
+  artifacts.metadata -> verification.record stale_version -> event-scope
+  mismatch); the cooperative worker journey now completes end-to-end
+  through real production code for the first time in this tree's history.
