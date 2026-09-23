@@ -224,8 +224,12 @@ change the path they run.
   services.
 - **Upgrade** publishes the new release while the services still run, then
   unloads them, moves `current`, rewrites the launchers, and loads them. The
-  previous release stays on disk. If a step fails after the unload and before
-  `current` moves, `Apply` loads the services again on the old release.
+  previous release stays on disk. If a controller service step or start fails,
+  `Apply` attempts to restore the old link and launchers and restart the old
+  service. A failed recovery is reported explicitly for operator repair.
+- **Repeat install** of the same version verifies the installed manifest,
+  files, bundle, and launchers against the requested release, then changes
+  nothing. A damaged or different same-version release is refused.
 - **Downgrade** is refused. State written by a later release cannot be read
   by an earlier one; restore a backup instead.
 - **Uninstall** unloads the services and removes the launchers and the
@@ -236,7 +240,11 @@ change the path they run.
 
 `Apply` treats a plan as untrusted data. It re-validates the layout, refuses
 any step outside the layout, refuses to write through a symlinked directory,
-and refuses a plan built against a different active release.
+and refuses a plan built against a different active release. An owner-only
+advisory lock in the user's home serializes controller and desktop changes;
+waiting is cancelled with the caller's context and otherwise stops after ten
+seconds. The lock file stays in place so a second process always locks the
+same inode.
 
 ### Desktop distribution
 
