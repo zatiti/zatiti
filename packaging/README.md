@@ -170,7 +170,10 @@ evidence file.
 `AssembleMacRelease` accepts exactly four staged, separately signed macOS
 trees: controller and desktop for both `amd64` and `arm64`. It verifies the
 component signatures, tree digests, desktop archives and declared executable,
-then rejects mismatched version, source revision, protocol, SDK/plugin pin,
+including a thin Mach-O executable whose CPU matches the manifest target.
+Universal and malformed executables are refused. Desktop executable inspection
+uses a bounded temporary file and removes it after the check. Assembly also
+rejects mismatched version, source revision, protocol, SDK/plugin pin,
 Serenity pin, profile or license records. The canonical descriptor contains
 the four manifest digests and signatures. `SignMacRelease` signs that metadata
 under a distinct schema; a consumer must verify the descriptor signature

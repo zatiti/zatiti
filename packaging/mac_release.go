@@ -93,12 +93,28 @@ func AssembleMacRelease(parts []MacReleasePart, trusted []ed25519.PublicKey) (Ma
 		if err := VerifyTree(m, part.Root); err != nil {
 			return MacReleaseDescriptor{}, err
 		}
+		if m.Distribution == DistributionController {
+			for _, a := range m.Artifacts {
+				if a.Kind == KindControllerBinary {
+					if a.Size > maxMacExecutableBytes {
+						return MacReleaseDescriptor{}, errf(CodeVerificationFailed, "Mac controller executable exceeds the inspection limit")
+					}
+					if err := verifyThinMachO(filepath.Join(part.Root, filepath.FromSlash(a.Path)), m.Target.Arch); err != nil {
+						return MacReleaseDescriptor{}, err
+					}
+				}
+			}
+		}
 		if m.Distribution == DistributionDesktop {
 			archive := filepath.Join(part.Root, filepath.FromSlash(m.Desktop.Bundle))
 			found := false
 			gotDigest, gotSize, err := readBundle(archive, func(e bundleEntry, r io.Reader) error {
 				if e.path == m.Desktop.Executable && e.kind == tar.TypeReg && e.mode&0o100 != 0 {
+					if err := verifyArchivedMachO(r, e.size, m.Target.Arch); err != nil {
+						return err
+					}
 					found = true
+					return nil
 				}
 				_, err := io.Copy(io.Discard, r)
 				return err
