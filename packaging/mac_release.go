@@ -109,15 +109,21 @@ func AssembleMacRelease(parts []MacReleasePart, trusted []ed25519.PublicKey) (Ma
 			archive := filepath.Join(part.Root, filepath.FromSlash(m.Desktop.Bundle))
 			found := false
 			gotDigest, gotSize, err := readBundle(archive, func(e bundleEntry, r io.Reader) error {
-				if e.path == m.Desktop.Executable && e.kind == tar.TypeReg && e.mode&0o100 != 0 {
-					if err := verifyArchivedMachO(r, e.size, m.Target.Arch); err != nil {
-						return err
-					}
-					found = true
+				if e.kind != tar.TypeReg {
 					return nil
 				}
-				_, err := io.Copy(io.Discard, r)
-				return err
+				runner := e.path == m.Desktop.Executable
+				if runner && e.mode&0o100 == 0 {
+					return errf(CodeVerificationFailed, "Mac desktop runner is not executable")
+				}
+				_, err := inspectArchivedMachO(r, e.size, m.Target.Arch, runner)
+				if err != nil {
+					return err
+				}
+				if runner {
+					found = true
+				}
+				return nil
 			})
 			if err != nil {
 				return MacReleaseDescriptor{}, err

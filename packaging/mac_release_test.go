@@ -207,7 +207,6 @@ func TestMacReleaseRejectsWrongOrAmbiguousMachO(t *testing.T) {
 		{"Intel controller with arm64 code", 0, syntheticMachO("arm64")},
 		{"Apple Silicon desktop with amd64 code", 3, syntheticMachO("amd64")},
 		{"universal controller", 0, syntheticFatMachO()},
-		{"universal desktop", 3, syntheticFatMachO()},
 		{"library passed as controller executable", 0, notExecutable},
 		{"non Mach-O controller", 0, []byte("not a native binary")},
 	} {
@@ -220,6 +219,77 @@ func TestMacReleaseRejectsWrongOrAmbiguousMachO(t *testing.T) {
 			parts[tc.index] = macPartWithBinary(t, signer, "1.0.0", arch, dist, tc.executable)
 			_, err := AssembleMacRelease(parts, []ed25519.PublicKey{pub})
 			wantCode(t, err, CodeVerificationFailed)
+		})
+	}
+}
+
+func macPartWithNestedLibrary(t *testing.T, signer ed25519.PrivateKey, arch string, runner, library []byte) MacReleasePart {
+	t.Helper()
+	f := newDesktopFixture(t, "1.0.0", "darwin")
+	bundleDir, executable := stageBundle(t, "darwin", "1.0.0")
+	writeFile(t, filepath.Join(bundleDir, filepath.FromSlash(executable)), runner, 0o755)
+	writeFile(t, filepath.Join(bundleDir, "Zatiti.app", "Contents", "Frameworks", "libswiftCore.dylib"), library, 0o755)
+	archive := filepath.Join(f.root, filepath.FromSlash(f.input.Desktop.Bundle))
+	if err := os.Remove(archive); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := AssembleBundle(bundleDir, archive); err != nil {
+		t.Fatal(err)
+	}
+	f.input.Desktop.Executable = executable
+	f.input.Target.Arch = arch
+	m := f.build(t)
+	raw, err := Encode(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sig, err := Sign(raw, signer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return MacReleasePart{Root: f.root, Manifest: raw, Signature: sig}
+}
+
+func TestMacReleaseAuditsEveryNestedMachO(t *testing.T) {
+	pub, signer, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parts := macParts(t, signer)
+	library := syntheticMachO("amd64")
+	binary.LittleEndian.PutUint32(library[12:], uint32(macho.TypeDylib))
+	parts[1] = macPartWithNestedLibrary(t, signer, "amd64", syntheticFatMachO(), library)
+	parts[3] = macPartWithNestedLibrary(t, signer, "arm64", syntheticFatMachO(), library)
+	if _, err := AssembleMacRelease(parts, []ed25519.PublicKey{pub}); Code(err) != CodeVerificationFailed {
+		t.Fatalf("arm64 bundle accepted Intel-only nested dylib: %v", err)
+	}
+	// The same bundle is valid for Intel, and an independently native arm64
+	// library makes the Apple Silicon component valid too.
+	armLibrary := syntheticMachO("arm64")
+	binary.LittleEndian.PutUint32(armLibrary[12:], uint32(macho.TypeDylib))
+	parts[3] = macPartWithNestedLibrary(t, signer, "arm64", syntheticFatMachO(), armLibrary)
+	if _, err := AssembleMacRelease(parts, []ed25519.PublicKey{pub}); err != nil {
+		t.Fatalf("compatible mixed thin/fat bundles: %v", err)
+	}
+}
+
+func TestMacBundleRejectsMalformedAndUnsupportedFatSlices(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		mutate func([]byte)
+	}{
+		{"unsupported CPU", func(b []byte) { binary.BigEndian.PutUint32(b[8:], uint32(macho.Cpu386)) }},
+		{"out of bounds slice", func(b []byte) { binary.BigEndian.PutUint32(b[8+20+8:], 0xffffff00) }},
+		{"fat64 unsupported", func(b []byte) { binary.BigEndian.PutUint32(b[:4], 0xcafebabf) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			raw := syntheticFatMachO()
+			tc.mutate(raw)
+			path := filepath.Join(t.TempDir(), "object.dylib")
+			if err := os.WriteFile(path, raw, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			wantCode(t, verifyDesktopMachO(path, "amd64", false), CodeVerificationFailed)
 		})
 	}
 }
