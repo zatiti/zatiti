@@ -1,6 +1,9 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zatiti_desktop/src/app/app.dart';
+import 'package:zatiti_desktop/src/app/installed_bootstrap.dart';
 import 'package:zatiti_desktop/src/app/startup.dart';
 
 void main() {
@@ -29,5 +32,39 @@ void main() {
     await t.tap(find.byKey(const ValueKey('open-demo')));
     expect(opened, isTrue);
     expect(find.textContaining('fictional'), findsOneWidget);
+  });
+
+  testWidgets('installed form sends one init while first tap is pending', (
+    t,
+  ) async {
+    final completed = Completer<BootstrapView>();
+    var calls = 0;
+    await t.pumpWidget(
+      ConfigurationNeededApp(
+        plan: const NeedsConfiguration(
+          ['The local service is ready.'],
+          demoOffered: false,
+          issue: StartupIssue.awaitingBootstrap,
+        ),
+        onOpenDemo: () => fail('no demo'),
+        onInitialize: (name) {
+          expect(name, 'Ada');
+          calls++;
+          return completed.future;
+        },
+        bootstrapView: const BootstrapView(BootstrapState.fresh),
+      ),
+    );
+    await t.enterText(
+      find.byKey(const ValueKey('installed-owner-name')),
+      'Ada',
+    );
+    await t.tap(find.byKey(const ValueKey('installed-initialize')));
+    await t.pump();
+    await t.tap(find.byKey(const ValueKey('installed-initialize')));
+    expect(calls, 1);
+    completed.complete(const BootstrapView(BootstrapState.pending));
+    await t.pump();
+    expect(find.text('Check setup status'), findsOneWidget);
   });
 }

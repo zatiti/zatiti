@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 import 'src/app/app.dart';
 import 'src/app/credential_store.dart';
 import 'src/app/desktop_discovery.dart';
+import 'src/app/installed_bootstrap.dart';
 import 'src/app/local_store.dart';
 import 'src/app/startup.dart';
 import 'src/state/demo_source.dart';
@@ -44,12 +45,33 @@ Future<void> runZatiti({
     macOS: macOS,
     reader: discoveryReader,
   );
-  runApp(_Root(plan: plan));
+  runApp(
+    _Root(
+      plan: plan,
+      environment: environment,
+      releaseMode: releaseMode,
+      demoRequested: demoRequested,
+      macOS: macOS,
+      discoveryReader: discoveryReader,
+    ),
+  );
 }
 
 class _Root extends StatefulWidget {
-  const _Root({required this.plan});
+  const _Root({
+    required this.plan,
+    required this.environment,
+    required this.releaseMode,
+    required this.demoRequested,
+    required this.macOS,
+    this.discoveryReader,
+  });
   final StartupPlan plan;
+  final Map<String, String> environment;
+  final bool releaseMode;
+  final bool demoRequested;
+  final bool macOS;
+  final DesktopDiscoveryReader? discoveryReader;
 
   @override
   State<_Root> createState() => _RootState();
@@ -61,6 +83,10 @@ class _RootState extends State<_Root> {
   WorkspaceController? _controller;
   CredentialStore? _credentials;
   String? _startupError;
+  late final InstalledBootstrap _bootstrap = InstalledBootstrap(
+    reader: widget.discoveryReader ?? DesktopDiscoveryReader(),
+  );
+  BootstrapView? _bootstrapView;
 
   @override
   void initState() {
@@ -80,7 +106,16 @@ class _RootState extends State<_Root> {
     Map<String, String> initialDrafts = const {};
     Future<void> Function(Map<String, String> drafts)? persistDrafts;
     switch (plan) {
-      case NeedsConfiguration():
+      case NeedsConfiguration(:final issue):
+        if (issue == StartupIssue.awaitingBootstrap) {
+          final view = await _bootstrap.inspect();
+          if (!mounted) return;
+          if (view.state == BootstrapState.ready) {
+            await _refreshInstalled();
+          } else {
+            setState(() => _bootstrapView = view);
+          }
+        }
         return;
       case StartDemo():
         source = DemoWorkspaceSource();
@@ -222,6 +257,33 @@ class _RootState extends State<_Root> {
     );
   }
 
+  Future<void> _refreshInstalled() async {
+    final plan = await resolveStartupPlan(
+      environment: widget.environment,
+      releaseMode: widget.releaseMode,
+      demoRequested: widget.demoRequested,
+      macOS: widget.macOS,
+      reader: widget.discoveryReader,
+    );
+    if (!mounted) return;
+    setState(() {
+      _plan = plan;
+      _bootstrapView = null;
+    });
+    if (plan is StartLive) await _open();
+  }
+
+  Future<BootstrapView> _initializeInstalled(String ownerName) async {
+    final view = await _bootstrap.initialize(ownerName);
+    if (!mounted) return view;
+    if (view.state == BootstrapState.ready) {
+      await _refreshInstalled();
+    } else {
+      setState(() => _bootstrapView = view);
+    }
+    return view;
+  }
+
   Future<ControllerEndpoint> _endpoint(
     ConnectionProfile profile,
     CredentialStore store,
@@ -278,6 +340,12 @@ class _RootState extends State<_Root> {
         setState(() => _plan = const StartDemo());
         _open();
       },
+      onInitialize:
+          plan is NeedsConfiguration &&
+              plan.issue == StartupIssue.awaitingBootstrap
+          ? _initializeInstalled
+          : null,
+      bootstrapView: _bootstrapView,
     );
   }
 }

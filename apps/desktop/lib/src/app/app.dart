@@ -10,6 +10,7 @@ import '../ui/theme.dart';
 import '../ui/workspace_settings.dart';
 import '../ui/workspace_shell.dart';
 import 'credential_store.dart';
+import 'installed_bootstrap.dart';
 import 'startup.dart';
 
 class ZatitiApp extends StatefulWidget {
@@ -75,10 +76,14 @@ class ConfigurationNeededApp extends StatelessWidget {
     super.key,
     required this.plan,
     required this.onOpenDemo,
+    this.onInitialize,
+    this.bootstrapView,
   });
 
   final NeedsConfiguration plan;
   final VoidCallback onOpenDemo;
+  final Future<BootstrapView> Function(String)? onInitialize;
+  final BootstrapView? bootstrapView;
 
   @override
   Widget build(BuildContext context) => MaterialApp(
@@ -127,6 +132,11 @@ class ConfigurationNeededApp extends StatelessWidget {
                         'system’s secure storage.',
                         style: text.bodySmall,
                       ),
+                    if (onInitialize != null)
+                      InstalledBootstrapForm(
+                        onInitialize: onInitialize!,
+                        view: bootstrapView,
+                      ),
                     if (plan.demoOffered) ...[
                       const SizedBox(height: Space.xl),
                       OutlinedButton(
@@ -150,4 +160,116 @@ class ConfigurationNeededApp extends StatelessWidget {
       },
     ),
   );
+}
+
+class InstalledBootstrapForm extends StatefulWidget {
+  const InstalledBootstrapForm({
+    super.key,
+    required this.onInitialize,
+    this.view,
+  });
+  final Future<BootstrapView> Function(String) onInitialize;
+  final BootstrapView? view;
+
+  @override
+  State<InstalledBootstrapForm> createState() => _InstalledBootstrapFormState();
+}
+
+class _InstalledBootstrapFormState extends State<InstalledBootstrapForm> {
+  final TextEditingController _name = TextEditingController();
+  bool _busy = false;
+  BootstrapView? _result;
+
+  @override
+  void initState() {
+    super.initState();
+    _name.text = widget.view?.ownerName ?? '';
+  }
+
+  @override
+  void dispose() {
+    _name.dispose();
+    super.dispose();
+  }
+
+  @override
+  void didUpdateWidget(covariant InstalledBootstrapForm oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.view != widget.view) {
+      _result = null;
+      if (_name.text.isEmpty && widget.view?.ownerName != null) {
+        _name.text = widget.view!.ownerName!;
+      }
+    }
+  }
+
+  Future<void> _submit() async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    final result = await widget.onInitialize(_name.text);
+    if (mounted) {
+      setState(() {
+        _busy = false;
+        _result = result;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final state = (_result ?? widget.view)?.state ?? BootstrapState.fresh;
+    final canSubmit =
+        state == BootstrapState.fresh ||
+        state == BootstrapState.retryable ||
+        state == BootstrapState.invalidName ||
+        state == BootstrapState.refused;
+    final canCheck =
+        state == BootstrapState.pending || state == BootstrapState.unavailable;
+    final notice = switch (state) {
+      BootstrapState.pending =>
+        'Setup may already have completed. Zatiti will check the local service on the next launch. Do not start setup again.',
+      BootstrapState.retryable =>
+        'The service could not be reached before setup was sent. You can retry with the same name.',
+      BootstrapState.unavailable =>
+        'The local service is unavailable. Restart it and reopen Zatiti.',
+      BootstrapState.storageUnavailable =>
+        'Secure storage is unavailable. Unlock Keychain and reopen Zatiti.',
+      BootstrapState.invalidName => 'Enter a name to continue.',
+      BootstrapState.refused =>
+        'The local service refused setup. Check its status before retrying.',
+      BootstrapState.ready => 'Setup completed. Opening your workspace…',
+      BootstrapState.fresh =>
+        'This creates your local installation and personal chief once.',
+    };
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SizedBox(height: Space.md),
+        TextField(
+          key: const ValueKey('installed-owner-name'),
+          controller: _name,
+          enabled: canSubmit && !_busy,
+          maxLength: 8192,
+          decoration: const InputDecoration(labelText: 'Your name'),
+          onSubmitted: (_) {
+            if (canSubmit && !_busy) _submit();
+          },
+        ),
+        const SizedBox(height: Space.sm),
+        Text(notice),
+        const SizedBox(height: Space.md),
+        FilledButton(
+          key: const ValueKey('installed-initialize'),
+          onPressed: (canSubmit || canCheck) && !_busy ? _submit : null,
+          child: Text(
+            _busy
+                ? 'Checking…'
+                : canCheck
+                ? 'Check setup status'
+                : 'Set up Zatiti',
+          ),
+        ),
+      ],
+    );
+  }
 }

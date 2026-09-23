@@ -113,6 +113,37 @@ class ControllerClient {
     }
   }
 
+  /// The one local bootstrap exception: unauthenticated, with no submission
+  /// key. It is never retried automatically after an ambiguous send.
+  Future<ResultEnvelope> bootstrapInstallation(String ownerName) async {
+    if (endpoint is! LocalSocketEndpoint) {
+      throw const InvalidRequestException('bootstrap requires a local socket');
+    }
+    if (ownerName.trim().isEmpty || ownerName.runes.length > 8192) {
+      throw const InvalidRequestException(
+        'owner name must be 1..8192 characters',
+      );
+    }
+    final attempt = await _exchange(
+      'installation.init',
+      encodeRequest(
+        input: {'credential_store': 'os', 'owner_name': ownerName.trim()},
+      ),
+      omitCredential: true,
+    );
+    switch (attempt) {
+      case _Answered(:final envelope):
+        return _returnOrThrow('installation.init', envelope);
+      case _NotSent(:final error):
+        throw error;
+      case _MaybeSent(:final cause):
+        throw OutcomeUnknownException(
+          'installation.init acknowledgment unknown: $cause',
+          operation: 'installation.init',
+        );
+    }
+  }
+
   /// Freezes one intended mutation: mints its submission key and renders the
   /// request bytes once.
   Submission prepare(
@@ -230,10 +261,11 @@ class ControllerClient {
     String operation,
     List<int> body, {
     void Function()? onRequestWritten,
+    bool omitCredential = false,
   }) async {
     final String? credential;
     try {
-      credential = await _credentials();
+      credential = omitCredential ? null : await _credentials();
     } on Object {
       return const _NotSent(
         ControllerUnavailableException('the credential could not be read'),
