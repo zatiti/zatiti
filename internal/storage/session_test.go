@@ -451,6 +451,117 @@ func TestWriteRejectsInvalidCaller(t *testing.T) {
 	}
 }
 
+// TestEmitAcceptsAndPersistsAScopeThatNarrowsTheUnitScope proves scenario
+// (a) of the event-scope-mismatch fix: a unit scoped only to the bare
+// installation can emit an event scoped more specifically (installation +
+// organization + worker + task), the emit itself succeeds, and -- the part
+// that actually matters -- the WIDER, more-specific event scope is what
+// gets persisted, not silently coerced back to the unit's own coarser
+// scope. internal/evidence's scopeVisible needs the real, specific columns
+// to authorize visibility, so a persisted event that lost its own scope
+// back to the unit's would defeat the whole point of allowing this.
+func TestEmitAcceptsAndPersistsAScopeThatNarrowsTheUnitScope(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	db := openTestDB(t, 0)
+	if err := db.Migrate(ctx, counterMigrations()); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+
+	unitScope := contract.Scope{InstallationID: contract.NewID()}
+	eventScope := contract.Scope{
+		InstallationID: unitScope.InstallationID,
+		OrganizationID: contract.NewID(),
+		WorkerID:       contract.NewID(),
+		TaskID:         contract.NewID(),
+	}
+	resourceID := contract.NewID()
+
+	err := db.Write(ctx, testActor(), unitScope, func(u contract.Unit) error {
+		return u.Emit(ctx, contract.Event{
+			Kind:            "testx.counter.bumped",
+			ResourceID:      resourceID,
+			ResourceVersion: 1,
+			Scope:           eventScope,
+		})
+	})
+	if err != nil {
+		t.Fatalf("emit with a narrowing event scope: %v, want success", err)
+	}
+
+	events, err := db.Events(ctx, 0, maxEventPage)
+	if err != nil {
+		t.Fatalf("list events: %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("event count = %d, want 1", len(events))
+	}
+	if got := events[0].Scope; got != eventScope {
+		t.Fatalf("persisted event scope = %+v, want the narrower event scope %+v (not coerced back to the unit scope %+v)", got, eventScope, unitScope)
+	}
+}
+
+// TestEmitRejectsAScopeThatContradictsAUnitScopeDimension is the regression
+// test for the relaxed check: an event whose scope actively CONTRADICTS a
+// dimension the unit's own scope HAS set (here: unit bound to worker A,
+// event claims worker B) must still be refused exactly as before. This
+// proves the fix narrowed the check rather than deleting the safety
+// property it protects.
+func TestEmitRejectsAScopeThatContradictsAUnitScopeDimension(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	db := openTestDB(t, 0)
+	if err := db.Migrate(ctx, counterMigrations()); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+
+	installationID := contract.NewID()
+	unitScope := contract.Scope{InstallationID: installationID, WorkerID: contract.NewID()}
+	contradictingScope := contract.Scope{InstallationID: installationID, WorkerID: contract.NewID()}
+
+	err := db.Write(ctx, testActor(), unitScope, func(u contract.Unit) error {
+		return u.Emit(ctx, contract.Event{
+			Kind:            "testx.counter.bumped",
+			ResourceID:      contract.NewID(),
+			ResourceVersion: 1,
+			Scope:           contradictingScope,
+		})
+	})
+	requireFault(t, err, contract.CodeInvalidInput, false)
+	if got := countEvents(t, db); got != 0 {
+		t.Fatalf("event count after a contradicting-scope emit = %d, want 0", got)
+	}
+}
+
+// TestEmitRejectsAScopeNamingADifferentInstallation proves the
+// tenancy-isolation guarantee stays absolute under the relaxed check: an
+// event naming a different installation than the unit's own is refused
+// regardless of every other dimension, exactly as before the fix.
+func TestEmitRejectsAScopeNamingADifferentInstallation(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	db := openTestDB(t, 0)
+	if err := db.Migrate(ctx, counterMigrations()); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+
+	unitScope := contract.Scope{InstallationID: contract.NewID()}
+	otherInstallationScope := contract.Scope{InstallationID: contract.NewID()}
+
+	err := db.Write(ctx, testActor(), unitScope, func(u contract.Unit) error {
+		return u.Emit(ctx, contract.Event{
+			Kind:            "testx.counter.bumped",
+			ResourceID:      contract.NewID(),
+			ResourceVersion: 1,
+			Scope:           otherInstallationScope,
+		})
+	})
+	requireFault(t, err, contract.CodeInvalidInput, false)
+	if got := countEvents(t, db); got != 0 {
+		t.Fatalf("event count after a cross-installation emit = %d, want 0", got)
+	}
+}
+
 func TestForeignKeyEnforcement(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()

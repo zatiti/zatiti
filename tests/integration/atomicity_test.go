@@ -103,17 +103,33 @@ func replayedCode(res contract.Result, err error) string {
 }
 
 // TestLateEventFailureRollsBackStateAndEvents (Z14 atomic state/event
-// failure): a task whose definition scope is narrower than the request scope
-// passes every owner's checks and writes, then storage refuses the event
-// because its scope does not match the unit. The state written before the
-// event in the same transaction must not survive.
+// failure): a task whose definition scope CONTRADICTS the request/unit
+// scope -- dropping a dimension the unit itself has set, rather than merely
+// narrowing it -- passes every owner's checks and writes, then storage
+// refuses the event because its scope does not narrow the unit's. The state
+// written before the event in the same transaction must not survive.
+//
+// Before R-event-scope-fix, Unit.Emit (internal/storage/session.go)
+// required an event's explicit scope to equal the unit's own scope EXACTLY,
+// so a definition scope merely narrower than the request scope (the
+// original form of this test: request scoped to the bare installation,
+// definition scoped to installation+organization) was enough to trigger
+// this same late refusal. That fix relaxed Unit.Emit to a narrows relation
+// -- the unit may be coarser than an event's own scope, so that narrower
+// case now legitimately succeeds (see internal/storage/session_test.go's
+// TestEmitAcceptsAndPersistsAScopeThatNarrowsTheUnitScope) -- which is why
+// this test now needs a genuine contradiction instead: the request/unit is
+// scoped to the organization, but the task definition's own scope claims
+// only the bare installation, dropping the organization dimension the unit
+// itself set. Unit.Emit still refuses that: the unit may be coarser than an
+// event, never the reverse.
 func TestLateEventFailureRollsBackStateAndEvents(t *testing.T) {
 	t.Parallel()
 	f := newBootstrappedFixture(t)
 	org, chief := f.rootOrganization()
 	narrow := contract.Scope{InstallationID: f.installationID, OrganizationID: org}
 	lateInput := map[string]any{
-		"scope": f.scope(), "definition": f.taskDefinition(narrow, f.owner.PrincipalID, chief, unconfiguredCurrency),
+		"scope": narrow, "definition": f.taskDefinition(f.scope(), f.owner.PrincipalID, chief, unconfiguredCurrency),
 	}
 	before := f.observe()
 
