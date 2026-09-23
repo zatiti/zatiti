@@ -4069,3 +4069,35 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   this and the prior entry (frozen contract, 3 owner merge handlers,
   controller/cmd wiring, the follow-up DB-leak fix + packaging test
   rewrite) -- all came back clean.
+- 2026-09-23 ~06:45 PT -- *** P50 LANDED (PR #65, commit 7abe3e4). ***
+  *** ALL 51 CARDS OF THE PLAN (P00-P50) ARE NOW LANDED. *** All 7 CI
+  checks passed clean, including P48's own new qualevidence gate and
+  platform-regression requirement exercising for real on this PR.
+  Confirmed on real post-merge main via merge-base --is-ancestor AND via
+  a dedicated final verification worktree built directly from the merged
+  commit: ran both TestQualificationMacOSDistribution (the test that
+  held this landing) and the flagship
+  TestRestoreRewindsDomainStateWhileRevokedCredentialAndGrantStaySuppressed
+  one more time against real merged main -- both PASS.
+
+  Backup/restore now completes end-to-end in production for the first
+  time in this tree's history, closing the last known gap from the
+  original 50-card scope. Combined with PR #63's earlier milestone (the
+  cooperative worker journey reaching a real terminal "succeeded" state),
+  this closes out the autonomous 24h remediation effort's full known
+  scope.
+
+  Three findings remain open, tracked, not blocking, needing a
+  P00/integration-level decision at some future point (not urgent):
+  (1) _installation.restore.record's own succeeded disposition is
+  structurally unreachable for a genuine restore (bookkeeping/
+  observability gap only, the installation itself resumes correctly);
+  (2) backup manifests still write an empty database_schema_versions,
+  worked around conservatively rather than fixed at the source; (3) a
+  real restore costs ~5s of socket unavailability during listener
+  teardown/rebind (inherent to the design, not a defect, worth an
+  operator-docs line). Plus the two still-open, non-blocking items from
+  earlier in the session: two untriaged CI flakes (cmd/zatiti's
+  TestServeCompletesBootstrapOverTheSocket, internal/platform's
+  TestConcurrentAcquireHasExactlyOneWinner -- the platform one now
+  actively monitored by P48's CI gate).
