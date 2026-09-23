@@ -137,6 +137,6 @@ for package in P:
     elif package['name'] == 'desktop':
         package['design'] += ' Revision 6: installed Mac startup reads strict protected desktop.json, obtains the existing owner header from the named login-Keychain item, and authenticates installation.status before opening chat; distinguish repair states and reconcile ambiguous init.'
     elif package['name'] == 'distribution':
-        package['design'] += ' Revision 7: own the signed bounded Mac delivery record and exact six-asset mapping around the existing staged descriptor; offline fixtures never imply a downloadable signed/notarized installer or a published command.'
+        package['design'] += ' Revision 7: own the signed bounded Mac delivery record and exact six-asset mapping around the existing staged descriptor; offline fixtures never imply a downloadable signed/notarized installer or a published command. Revision 8: own the protected atomic Mac accepted-release fence and separate bootstrap lock, with audited same-release rerun and install-before-fence recovery; package activation remains unavailable without its separately frozen verifier.'
     elif package['name'] == 'ci':
         package['design'] += ' Revision 7: bind delivery hashes to final signed and notarized package bytes for native Intel and Apple Silicon, with trust-key rotation outside fetched metadata; a synthetic descriptor pass is not publication evidence.'

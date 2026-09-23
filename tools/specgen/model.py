@@ -3,7 +3,7 @@ from copy import deepcopy
 
 # Specification revision. Bump with every coordinated contract revision; the renderer
 # refuses to render unless contracts.md names the same revision in its title.
-REVISION=7
+REVISION=8
 
 S={'type':'string','maxLength':8192}
 ID={'type':'string','format':'uuid'}
