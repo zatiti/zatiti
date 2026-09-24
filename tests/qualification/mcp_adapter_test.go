@@ -28,10 +28,6 @@ import (
 const mcpQualCredRef = "qual-mcp-cred"
 const mcpQualToken = "mcp_qual_bearer_token_secret_value_z13"
 
-func init() {
-	mcpclient.EnableInsecureTLSForTest()
-}
-
 // ---------- controlled MCP server (server-side request log) ----------
 
 type mcpControlledServer struct {
@@ -47,6 +43,10 @@ func newMCPControlledServer() *mcpControlledServer {
 	cs := &mcpControlledServer{dropSessions: map[string]bool{}}
 	impl := &mcp.Implementation{Name: "qualification-controlled-mcp", Version: "1.0.0"}
 	server := mcp.NewServer(impl, nil)
+	// Exercise the frozen legacy request methods through the SDK wire handler;
+	// the convenience APIs are deprecated in newer protocol versions.
+	var send mcp.MethodHandler
+	server.AddSendingMiddleware(func(next mcp.MethodHandler) mcp.MethodHandler { send = next; return next })
 
 	mcp.AddTool(server, &mcp.Tool{Name: "echo", Description: "echoes its text argument"},
 		func(ctx context.Context, req *mcp.CallToolRequest, in struct {
@@ -77,13 +77,16 @@ func newMCPControlledServer() *mcpControlledServer {
 		})
 	mcp.AddTool(server, &mcp.Tool{Name: "server-requests", Description: "issues refused server-to-client requests"},
 		func(ctx context.Context, req *mcp.CallToolRequest, in struct{}) (*mcp.CallToolResult, struct{}, error) {
-			_, _ = req.Session.CreateMessage(ctx, &mcp.CreateMessageParams{
-				Messages:  []*mcp.SamplingMessage{{Role: "user", Content: &mcp.TextContent{Text: "hi"}}},
-				MaxTokens: 100,
-			})
-			_, _ = req.Session.Elicit(ctx, &mcp.ElicitParams{Message: "confirm?"})
-			_, _ = req.Session.ListRoots(ctx, &mcp.ListRootsParams{})
-			_ = req.Session.Ping(ctx, &mcp.PingParams{})
+			var sampling struct {
+				mcp.ParamsBase
+				Messages  json.RawMessage `json:"messages"`
+				MaxTokens int             `json:"maxTokens"`
+			}
+			_ = json.Unmarshal([]byte(`{"messages":[{"role":"user","content":{"type":"text","text":"hi"}}],"maxTokens":100}`), &sampling)
+			_, _ = send(ctx, "sampling/createMessage", &mcp.ServerRequest[mcp.Params]{Session: req.Session, Params: &sampling})
+			_, _ = send(ctx, "elicitation/create", &mcp.ServerRequest[*mcp.ElicitParams]{Session: req.Session, Params: &mcp.ElicitParams{Message: "confirm?"}})
+			_, _ = send(ctx, "roots/list", &mcp.ServerRequest[*mcp.PingParams]{Session: req.Session, Params: &mcp.PingParams{}})
+			_, _ = send(ctx, "ping", &mcp.ServerRequest[*mcp.PingParams]{Session: req.Session, Params: &mcp.PingParams{}})
 			return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: "done"}}}, struct{}{}, nil
 		})
 
@@ -223,10 +226,10 @@ func mcpDispatch(t *testing.T, action any, credentialRef string, deadline time.T
 	return dispatch(t, "mcp", action, credentialRef, deadline)
 }
 
-func mcpNewAdapter(t *testing.T, blobs *memoryBlobs, secrets contract.SecretStore, profile json.RawMessage) contract.Adapter {
+func mcpNewAdapter(t *testing.T, client *http.Client, blobs *memoryBlobs, secrets contract.SecretStore, profile json.RawMessage) contract.Adapter {
 	t.Helper()
 	a, err := mcpclient.New(contract.AdapterDependencies{
-		HTTP:    &http.Client{},
+		HTTP:    client,
 		Secrets: secrets,
 		Clock:   &stepClock{now: time.Now().UTC()},
 		Blobs:   blobs,
@@ -322,7 +325,7 @@ func TestZ05MCPDiscoveryGrantsNothing(t *testing.T) {
 	blobs := newMemoryBlobs()
 	secrets := memorySecrets{refs: map[string][]byte{mcpQualCredRef: []byte(mcpQualToken)}}
 	profile := mcpBindProfile(t, srv.endpoint(), true, []string{"echo"}, []string{"public"}, "none", 0)
-	a := mcpNewAdapter(t, blobs, secrets, profile)
+	a := mcpNewAdapter(t, srv.httpSrv.Client(), blobs, secrets, profile)
 	c.attach("contract", json.RawMessage(a.Contract()))
 
 	handle, _ := mcpOpenSession(t, a, mcpQualCredRef, 10*time.Second)
@@ -422,7 +425,7 @@ func TestZ06MCPOneRequestPerCall(t *testing.T) {
 	blobs := newMemoryBlobs()
 	secrets := memorySecrets{refs: map[string][]byte{mcpQualCredRef: []byte(mcpQualToken)}}
 	profile := mcpBindProfile(t, srv.endpoint(), true, []string{"echo"}, []string{"public"}, "none", 0)
-	a := mcpNewAdapter(t, blobs, secrets, profile)
+	a := mcpNewAdapter(t, srv.httpSrv.Client(), blobs, secrets, profile)
 
 	handle, openObs := mcpOpenSession(t, a, mcpQualCredRef, 10*time.Second)
 	counts := srv.counts()
@@ -491,7 +494,7 @@ func TestZ06MCPOneRequestPerCall(t *testing.T) {
 	fresh := newMCPControlledServer()
 	defer fresh.close()
 	freshProfile := mcpBindProfile(t, fresh.endpoint(), true, []string{"echo"}, []string{"public"}, "none", 0)
-	freshAdapter := mcpNewAdapter(t, newMemoryBlobs(), secrets, freshProfile)
+	freshAdapter := mcpNewAdapter(t, fresh.httpSrv.Client(), newMemoryBlobs(), secrets, freshProfile)
 	_, _ = mcpOpenSession(t, freshAdapter, mcpQualCredRef, 10*time.Second)
 	if fresh.total() != 3 {
 		c.fail("fresh open_session expected 3 requests, got %d", fresh.total())
@@ -511,7 +514,7 @@ func TestZ06NoHiddenRetriesMCP(t *testing.T) {
 	blobs := newMemoryBlobs()
 	secrets := memorySecrets{refs: map[string][]byte{mcpQualCredRef: []byte(mcpQualToken)}}
 	profile := mcpBindProfile(t, srv.endpoint(), true, []string{"echo"}, []string{"public"}, "none", 0)
-	a := mcpNewAdapter(t, blobs, secrets, profile)
+	a := mcpNewAdapter(t, srv.httpSrv.Client(), blobs, secrets, profile)
 	handle, _ := mcpOpenSession(t, a, mcpQualCredRef, 10*time.Second)
 	before := srv.total()
 	schema, digest := mcpInputSchema(t)
@@ -583,7 +586,7 @@ func TestZ08MCPLostToolCallResponse(t *testing.T) {
 	blobs := newMemoryBlobs()
 	secrets := memorySecrets{refs: map[string][]byte{mcpQualCredRef: []byte(mcpQualToken)}}
 	profile := mcpBindProfile(t, srv.endpoint(), true, []string{"stall"}, []string{"public"}, "none", 0)
-	a := mcpNewAdapter(t, blobs, secrets, profile)
+	a := mcpNewAdapter(t, srv.httpSrv.Client(), blobs, secrets, profile)
 	handle, _ := mcpOpenSession(t, a, mcpQualCredRef, 10*time.Second)
 
 	schema, digest := mcpInputSchema(t)
@@ -642,7 +645,7 @@ func TestZ13MCPCredentialConfined(t *testing.T) {
 	blobs := newMemoryBlobs()
 	secrets := memorySecrets{refs: map[string][]byte{mcpQualCredRef: []byte(mcpQualToken)}}
 	profile := mcpBindProfile(t, srv.endpoint(), true, []string{"echo"}, []string{"public"}, "bearer", 0)
-	a := mcpNewAdapter(t, blobs, secrets, profile)
+	a := mcpNewAdapter(t, srv.httpSrv.Client(), blobs, secrets, profile)
 
 	handle, openObs := mcpOpenSession(t, a, mcpQualCredRef, 10*time.Second)
 	assertNoCredentialBytes(t, mcpQualToken, blobs, openObs.Evidence)
@@ -663,9 +666,8 @@ func TestZ13MCPCredentialConfined(t *testing.T) {
 	assertNoCredentialBytes(t, mcpQualToken, blobs, callObs.Evidence)
 	c.observe("call_tool: credential absent from staged docs and evidence; server saw Bearer")
 
-	// stdio = frozen subprocess; credential-in-path and OAuth have no schema
-	// shape (credential_kind enum is bearer|none only) so they cannot be
-	// constructed — same refusal class as stdio at the capability boundary.
+	// stdio is frozen but unsupported. This check proves only subprocess
+	// refusal; it does not qualify credential-in-path detection.
 	transport, _ := json.Marshal(map[string]any{
 		"kind": "stdio", "command": "/usr/bin/false", "args": []string{},
 	})
@@ -687,7 +689,7 @@ func TestZ13MCPCredentialConfined(t *testing.T) {
 	if mcpMustFault(t, err).Code != contract.CodeCapabilityUnsupported {
 		c.fail("stdio expected capability_unsupported, got %v", err)
 	}
-	c.observe("stdio (and by schema omission credential-in-path/OAuth) refused capability_unsupported at construction")
+	c.observe("stdio refused capability_unsupported at construction; credential-in-path detection is not proved by this case")
 }
 
 func TestZ05MCPServerRequestsRefused(t *testing.T) {
@@ -702,7 +704,7 @@ func TestZ05MCPServerRequestsRefused(t *testing.T) {
 	blobs := newMemoryBlobs()
 	secrets := memorySecrets{refs: map[string][]byte{mcpQualCredRef: []byte(mcpQualToken)}}
 	profile := mcpBindProfile(t, srv.endpoint(), true, []string{"server-requests"}, []string{"public"}, "none", 0)
-	a := mcpNewAdapter(t, blobs, secrets, profile)
+	a := mcpNewAdapter(t, srv.httpSrv.Client(), blobs, secrets, profile)
 	handle, _ := mcpOpenSession(t, a, mcpQualCredRef, 10*time.Second)
 
 	schema, digest := mcpInputSchema(t)

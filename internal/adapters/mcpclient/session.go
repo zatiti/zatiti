@@ -23,9 +23,11 @@ const maxSessions = 65536
 // against it may find no server-side session even though this adapter's
 // handle is still live.
 type sessionEntry struct {
-	session      *mcp.ClientSession
-	roundTripper *callRoundTripper
-	stateless    bool
+	mu            sync.Mutex
+	credentialRef string
+	session       *mcp.ClientSession
+	roundTripper  *callRoundTripper
+	stateless     bool
 }
 
 // sessionTable is the bounded, mutex-protected map from opaque

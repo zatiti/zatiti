@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -71,7 +72,7 @@ func (a *Adapter) doOpenSession(ctx context.Context, dispatch contract.Dispatch,
 		return a.observeOpenSessionFailure(physical, outcome, handshake, state, finished)
 	}
 
-	handle, err := a.sessions.add(&sessionEntry{session: session, roundTripper: rt, stateless: session.ID() == ""})
+	handle, err := a.sessions.add(&sessionEntry{credentialRef: dispatch.CredentialRef, session: session, roundTripper: rt, stateless: session.ID() == ""})
 	if err != nil {
 		_ = session.Close()
 		return contract.Observation{}, err
@@ -95,7 +96,7 @@ func (a *Adapter) doOpenSession(ctx context.Context, dispatch contract.Dispatch,
 		SessionState:          sessionState,
 		Handshake:             handshake,
 		RefusedServerRequests: state.refused,
-		Usage:                 noChargeUsage(),
+		Usage:                 a.attemptUsage(),
 	}
 	if init := session.InitializeResult(); init != nil {
 		ev.ProtocolVersion = init.ProtocolVersion
@@ -108,12 +109,16 @@ func (a *Adapter) doOpenSession(ctx context.Context, dispatch contract.Dispatch,
 	if staged, _, ok := firstStaged(state.captured); ok {
 		ev.StagedOutputs = []wireStagedOutput{staged}
 	}
-	doc, usage, evErr := a.buildEvidence(ev)
+	doc, usage, evErr := a.buildSafeEvidence(&ev, state)
 	if evErr != nil {
 		return contract.Observation{}, evErr
 	}
 	t := finished
-	return contract.Observation{Disposition: contract.DispositionSucceeded, Evidence: doc, Usage: usage, ConfirmedAt: &t}, nil
+	disposition := contract.DispositionSucceeded
+	if ev.PhysicalCall.ErrorCode == "response_redacted" {
+		disposition = contract.DispositionFailed
+	}
+	return contract.Observation{Disposition: disposition, Evidence: doc, Usage: usage, ConfirmedAt: &t}, nil
 }
 
 func (a *Adapter) observeOpenSessionFailure(physical wirePhysicalCallEvidence, outcome attemptOutcome, handshake []wireHandshakeExchange, state *callState, finished time.Time) (contract.Observation, error) {
@@ -121,7 +126,7 @@ func (a *Adapter) observeOpenSessionFailure(physical wirePhysicalCallEvidence, o
 	physical.Confirmation = outcome.confirmation
 	physical.HTTPStatus = outcome.httpStatus
 	physical.ErrorCode = outcome.errorCode
-	physical.ErrorMessage = truncateText(outcome.errorMessage, 2048)
+	physical.ErrorMessage = truncateText(state.scrub(outcome.errorMessage), 2048)
 
 	ev := wireMCPEvidence{
 		PhysicalCall:          physical,
@@ -129,12 +134,12 @@ func (a *Adapter) observeOpenSessionFailure(physical wirePhysicalCallEvidence, o
 		SessionState:          "unknown",
 		Handshake:             handshake,
 		RefusedServerRequests: state.refused,
-		Usage:                 noChargeUsage(),
+		Usage:                 a.attemptUsage(),
 	}
 	if staged, _, ok := firstStaged(state.captured); ok {
 		ev.StagedOutputs = []wireStagedOutput{staged}
 	}
-	doc, usage, evErr := a.buildEvidence(ev)
+	doc, usage, evErr := a.buildSafeEvidence(&ev, state)
 	if evErr != nil {
 		return contract.Observation{}, evErr
 	}
@@ -184,6 +189,10 @@ func (a *Adapter) doListTools(ctx context.Context, dispatch contract.Dispatch, s
 
 	if err != nil {
 		outcome := classifyAttemptError(err, state)
+		if outcome.sessionGone {
+			a.sessions.remove(in.SessionHandle)
+			sessionState = "expired"
+		}
 		return a.observeSimpleFailure(physical, outcome, kindListTools, in.SessionHandle, sessionState, state, finished)
 	}
 
@@ -210,17 +219,21 @@ func (a *Adapter) doListTools(ctx context.Context, dispatch contract.Dispatch, s
 		Tools:                 tools,
 		NextCursor:            result.NextCursor,
 		RefusedServerRequests: state.refused,
-		Usage:                 noChargeUsage(),
+		Usage:                 a.attemptUsage(),
 	}
 	if staged, _, ok := firstStaged(state.captured); ok {
 		ev.StagedOutputs = []wireStagedOutput{staged}
 	}
-	doc, usage, evErr := a.buildEvidence(ev)
+	doc, usage, evErr := a.buildSafeEvidence(&ev, state)
 	if evErr != nil {
 		return contract.Observation{}, evErr
 	}
 	t := finished
-	return contract.Observation{Disposition: contract.DispositionSucceeded, Evidence: doc, Usage: usage, ConfirmedAt: &t}, nil
+	disposition := contract.DispositionSucceeded
+	if ev.PhysicalCall.ErrorCode == "response_redacted" {
+		disposition = contract.DispositionFailed
+	}
+	return contract.Observation{Disposition: disposition, Evidence: doc, Usage: usage, ConfirmedAt: &t}, nil
 }
 
 // doCallTool implements the call_tool action kind: exactly one tools/call
@@ -254,7 +267,7 @@ func (a *Adapter) doCallTool(ctx context.Context, dispatch contract.Dispatch, se
 	}
 
 	started := a.deps.Clock.Now()
-	state := &callState{ctx: ctx, blobs: a.deps.Blobs, secret: secret}
+	state := &callState{ctx: ctx, blobs: a.deps.Blobs, secret: secret, classification: in.Classification}
 	entry.roundTripper.arm(state)
 	result, err := entry.session.CallTool(ctx, &mcp.CallToolParams{Name: in.Tool, Arguments: json.RawMessage(in.Arguments)})
 	entry.roundTripper.disarm()
@@ -273,11 +286,18 @@ func (a *Adapter) doCallTool(ctx context.Context, dispatch contract.Dispatch, se
 
 	if err != nil {
 		outcome := classifyAttemptError(err, state)
+		if outcome.sessionGone {
+			a.sessions.remove(in.SessionHandle)
+			sessionState = "expired"
+		}
 		return a.observeCallToolFailure(physical, outcome, in, sessionState, state, finished)
 	}
 
 	physical.RequestSent = "yes"
 	physical.Confirmation = "authoritative_success"
+	if result.IsError {
+		physical.Confirmation = "authoritative_failure"
+	}
 	if last := lastStatus(state.captured); last != 0 {
 		physical.HTTPStatus = int64(last)
 	}
@@ -295,7 +315,7 @@ func (a *Adapter) doCallTool(ctx context.Context, dispatch contract.Dispatch, se
 		IsError:               result.IsError,
 		ContentSummary:        &summary,
 		RefusedServerRequests: state.refused,
-		Usage:                 noChargeUsage(),
+		Usage:                 a.attemptUsage(),
 	}
 
 	resultDoc, merr := json.Marshal(struct {
@@ -315,9 +335,17 @@ func (a *Adapter) doCallTool(ctx context.Context, dispatch contract.Dispatch, se
 		}
 	}
 
-	staged, stageErr := stageToolResult(ctx, a.deps.Blobs, resultDoc, in.Classification)
+	var staged *wireStagedOutput
+	var stageErr error
+	if state.containsSensitive(resultDoc) {
+		ev.PhysicalCall.ErrorCode = "result_redacted"
+		ev.PhysicalCall.ErrorMessage = "tool completed but its result contains confidential transport material and was not staged"
+	} else {
+		staged, stageErr = stageToolResult(ctx, a.deps.Blobs, resultDoc, in.Classification)
+	}
 	if stageErr != nil {
-		return contract.Observation{}, stageErr
+		ev.PhysicalCall.ErrorCode = "artifact_fault"
+		ev.PhysicalCall.ErrorMessage = "tool completed but its result could not be staged"
 	}
 	outputs := []wireStagedOutput{}
 	if s, _, ok := firstStaged(state.captured); ok {
@@ -328,12 +356,16 @@ func (a *Adapter) doCallTool(ctx context.Context, dispatch contract.Dispatch, se
 	}
 	ev.StagedOutputs = outputs
 
-	doc, usage, evErr := a.buildEvidence(ev)
+	doc, usage, evErr := a.buildSafeEvidence(&ev, state)
 	if evErr != nil {
 		return contract.Observation{}, evErr
 	}
 	t := finished
-	return contract.Observation{Disposition: contract.DispositionSucceeded, Evidence: doc, Usage: usage, ConfirmedAt: &t}, nil
+	disposition := contract.DispositionSucceeded
+	if result.IsError {
+		disposition = contract.DispositionFailed
+	}
+	return contract.Observation{Disposition: disposition, Evidence: doc, Usage: usage, ConfirmedAt: &t}, nil
 }
 
 func (a *Adapter) observeCallToolFailure(physical wirePhysicalCallEvidence, outcome attemptOutcome, in *wireCallTool, sessionState string, state *callState, finished time.Time) (contract.Observation, error) {
@@ -341,7 +373,7 @@ func (a *Adapter) observeCallToolFailure(physical wirePhysicalCallEvidence, outc
 	physical.Confirmation = outcome.confirmation
 	physical.HTTPStatus = outcome.httpStatus
 	physical.ErrorCode = outcome.errorCode
-	physical.ErrorMessage = truncateText(outcome.errorMessage, 2048)
+	physical.ErrorMessage = truncateText(state.scrub(outcome.errorMessage), 2048)
 
 	ev := wireMCPEvidence{
 		PhysicalCall:          physical,
@@ -351,12 +383,12 @@ func (a *Adapter) observeCallToolFailure(physical wirePhysicalCallEvidence, outc
 		Tool:                  in.Tool,
 		ArgumentsDigest:       contract.Hash(canonicalOrRaw(in.Arguments)),
 		RefusedServerRequests: state.refused,
-		Usage:                 noChargeUsage(),
+		Usage:                 a.attemptUsage(),
 	}
 	if staged, _, ok := firstStaged(state.captured); ok {
 		ev.StagedOutputs = []wireStagedOutput{staged}
 	}
-	doc, usage, evErr := a.buildEvidence(ev)
+	doc, usage, evErr := a.buildSafeEvidence(&ev, state)
 	if evErr != nil {
 		return contract.Observation{}, evErr
 	}
@@ -392,8 +424,27 @@ func (a *Adapter) doCloseSession(ctx context.Context, dispatch contract.Dispatch
 	started := a.deps.Clock.Now()
 	state := &callState{ctx: ctx, blobs: a.deps.Blobs, secret: secret}
 	entry.roundTripper.arm(state)
-	closeErr := entry.session.Close()
+	var closeErr error
+	if entry.stateless {
+		// A stateless SDK Close sends nothing. The frozen adapter action
+		// still requires one explicit termination attempt and its real status.
+		req, err := http.NewRequestWithContext(ctx, http.MethodDelete, a.profile.Endpoint, nil)
+		if err != nil {
+			closeErr = err
+		} else {
+			resp, err := entry.roundTripper.RoundTrip(req)
+			closeErr = err
+			if resp != nil {
+				closeErr = resp.Body.Close()
+			}
+		}
+	} else {
+		closeErr = entry.session.Close()
+	}
 	entry.roundTripper.disarm()
+	if entry.stateless {
+		_ = entry.session.Close()
+	}
 	finished := a.deps.Clock.Now()
 
 	physical := a.newPhysicalCall(dispatch, pinnedAddr, started)
@@ -404,26 +455,13 @@ func (a *Adapter) doCloseSession(ctx context.Context, dispatch contract.Dispatch
 
 	sessionState := "closed"
 
-	if len(state.captured) == 0 {
-		// Stateless session: the SDK never assigned a server-side session
-		// ID, so Close sent no DELETE. Nothing was owed to the server, and
-		// this succeeds trivially with zero requests.
-		physical.RequestSent = "no"
-		physical.Confirmation = "authoritative_success"
-		ev := wireMCPEvidence{
-			PhysicalCall: physical, Kind: kindCloseSession, SessionHandle: in.SessionHandle,
-			SessionState: sessionState, RefusedServerRequests: state.refused, Usage: noChargeUsage(),
-		}
-		doc, usage, evErr := a.buildEvidence(ev)
-		if evErr != nil {
-			return contract.Observation{}, evErr
-		}
-		t := finished
-		return contract.Observation{Disposition: contract.DispositionSucceeded, Evidence: doc, Usage: usage, ConfirmedAt: &t}, nil
-	}
-
 	if closeErr != nil {
 		outcome := classifyAttemptError(closeErr, state)
+		return a.observeSimpleFailure(physical, outcome, kindCloseSession, in.SessionHandle, sessionState, state, finished)
+	}
+
+	if status := lastStatus(state.captured); status < 200 || status >= 300 {
+		outcome := attemptOutcome{requestSent: "yes", confirmation: "authoritative_failure", httpStatus: int64(status), errorCode: "termination_refused", errorMessage: "server did not confirm session termination"}
 		return a.observeSimpleFailure(physical, outcome, kindCloseSession, in.SessionHandle, sessionState, state, finished)
 	}
 
@@ -434,17 +472,21 @@ func (a *Adapter) doCloseSession(ctx context.Context, dispatch contract.Dispatch
 	}
 	ev := wireMCPEvidence{
 		PhysicalCall: physical, Kind: kindCloseSession, SessionHandle: in.SessionHandle,
-		SessionState: sessionState, RefusedServerRequests: state.refused, Usage: noChargeUsage(),
+		SessionState: sessionState, RefusedServerRequests: state.refused, Usage: a.attemptUsage(),
 	}
 	if staged, _, ok := firstStaged(state.captured); ok {
 		ev.StagedOutputs = []wireStagedOutput{staged}
 	}
-	doc, usage, evErr := a.buildEvidence(ev)
+	doc, usage, evErr := a.buildSafeEvidence(&ev, state)
 	if evErr != nil {
 		return contract.Observation{}, evErr
 	}
 	t := finished
-	return contract.Observation{Disposition: contract.DispositionSucceeded, Evidence: doc, Usage: usage, ConfirmedAt: &t}, nil
+	disposition := contract.DispositionSucceeded
+	if ev.PhysicalCall.ErrorCode == "response_redacted" {
+		disposition = contract.DispositionFailed
+	}
+	return contract.Observation{Disposition: disposition, Evidence: doc, Usage: usage, ConfirmedAt: &t}, nil
 }
 
 // observeSimpleFailure builds the failure Observation shared by list_tools
@@ -454,16 +496,16 @@ func (a *Adapter) observeSimpleFailure(physical wirePhysicalCallEvidence, outcom
 	physical.Confirmation = outcome.confirmation
 	physical.HTTPStatus = outcome.httpStatus
 	physical.ErrorCode = outcome.errorCode
-	physical.ErrorMessage = truncateText(outcome.errorMessage, 2048)
+	physical.ErrorMessage = truncateText(state.scrub(outcome.errorMessage), 2048)
 
 	ev := wireMCPEvidence{
 		PhysicalCall: physical, Kind: kind, SessionHandle: sessionHandle,
-		SessionState: sessionState, RefusedServerRequests: state.refused, Usage: noChargeUsage(),
+		SessionState: sessionState, RefusedServerRequests: state.refused, Usage: a.attemptUsage(),
 	}
 	if staged, _, ok := firstStaged(state.captured); ok {
 		ev.StagedOutputs = []wireStagedOutput{staged}
 	}
-	doc, usage, evErr := a.buildEvidence(ev)
+	doc, usage, evErr := a.buildSafeEvidence(&ev, state)
 	if evErr != nil {
 		return contract.Observation{}, evErr
 	}
@@ -536,7 +578,10 @@ func serverCapabilityNames(c *mcp.ServerCapabilities) []string {
 	if c.Completions != nil {
 		names = append(names, "completions")
 	}
-	if c.Logging != nil {
+	encoded, _ := json.Marshal(c)
+	var fields map[string]json.RawMessage
+	_ = json.Unmarshal(encoded, &fields)
+	if _, ok := fields["logging"]; ok {
 		names = append(names, "logging")
 	}
 	if c.Prompts != nil {

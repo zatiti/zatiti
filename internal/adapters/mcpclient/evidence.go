@@ -27,7 +27,7 @@ type requestRecordHeader struct {
 }
 
 // requestRecord is the exact secret-free record of one physical request:
-// method, destination, every header except Authorization, and the body as
+// method, destination, every header except Authorization and Mcp-Session-Id, and the body as
 // sent. The body is base64 so the record is exact whatever its encoding.
 type requestRecord struct {
 	Schema      string                `json:"schema"`
@@ -92,11 +92,13 @@ type capturedRequest struct {
 // call_tool/close_session calls); arm/disarm bracket each such call so a
 // RoundTrip always attributes its staging and captures to the right one.
 type callState struct {
-	ctx      context.Context
-	blobs    contract.BlobStore
-	secret   []byte
-	captured []capturedRequest
-	refused  []string
+	ctx            context.Context
+	blobs          contract.BlobStore
+	secret         []byte
+	sessionIDs     []string
+	classification string
+	captured       []capturedRequest
+	refused        []string
 
 	// oversize is set directly by boundedBody.Read the instant a response
 	// body crosses max_response_bytes. The go-sdk's own SSE stream reader
@@ -166,6 +168,11 @@ func (rt *callRoundTripper) RoundTrip(req *http.Request) (*http.Response, error)
 		return nil, internalError("mcpclient: a physical request was attempted outside any armed call")
 	}
 
+	req = req.Clone(state.ctx)
+	req.GetBody = nil // never allow net/http to replay a request
+	if id := req.Header.Get("Mcp-Session-Id"); id != "" {
+		state.sessionIDs = append(state.sessionIDs, id)
+	}
 	var bodyBytes []byte
 	if req.Body != nil {
 		var err error
@@ -185,7 +192,7 @@ func (rt *callRoundTripper) RoundTrip(req *http.Request) (*http.Response, error)
 
 	permitted := http.Header{}
 	for name, values := range req.Header {
-		if strings.EqualFold(name, "Authorization") {
+		if strings.EqualFold(name, "Authorization") || strings.EqualFold(name, "Mcp-Session-Id") {
 			continue
 		}
 		permitted[name] = values
@@ -196,6 +203,9 @@ func (rt *callRoundTripper) RoundTrip(req *http.Request) (*http.Response, error)
 		return nil, err
 	}
 
+	if state.classification != "" {
+		staged.Classification = state.classification
+	}
 	rt.mu.Lock()
 	state.captured = append(state.captured, capturedRequest{rpcMethod: rpcMethod, httpMethod: req.Method, staged: staged, locator: locator})
 	rt.mu.Unlock()
@@ -215,6 +225,9 @@ func (rt *callRoundTripper) RoundTrip(req *http.Request) (*http.Response, error)
 	}
 	rt.mu.Unlock()
 
+	if id := resp.Header.Get("Mcp-Session-Id"); id != "" {
+		state.sessionIDs = append(state.sessionIDs, id)
+	}
 	if resp.StatusCode >= 300 && resp.StatusCode < 400 {
 		location := resp.Header.Get("Location")
 		_ = resp.Body.Close()
@@ -335,14 +348,10 @@ func stageRequestRecord(ctx context.Context, blobs contract.BlobStore, secret []
 	return staged, wireStagedLocator{Kind: "staged", StagingRef: stagingRef, Digest: digest}, nil
 }
 
-// noChargeUsage is the ProviderUsage this adapter reports for every kind:
-// the frozen contract prices tool_call_cost as a bounded estimate the
-// operator configures, not a metered per-call cost this adapter observes.
-func noChargeUsage() wireProviderUsage {
-	return wireProviderUsage{
-		Accounting: wireUsage{Currency: "USD"},
-		Billing:    "no_charge",
-	}
+// attemptUsage retains the configured bounded estimate, including zero, for
+// every attempted operation. Unknown outcomes retain the same liability.
+func (a *Adapter) attemptUsage() wireProviderUsage {
+	return wireProviderUsage{Accounting: wireUsage{Currency: a.profile.ToolCallCost.Currency, Estimated: a.profile.ToolCallCost.MicroUnits}, Billing: "bounded_estimate"}
 }
 
 // stageToolResult stages the tool call's raw content/structured content as

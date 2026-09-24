@@ -51,14 +51,6 @@ type wireStreamableHTTPTransport struct {
 	MaxRedirects         int64  `json:"max_redirects"` // const 0
 }
 
-// wireStdioTransport is the frozen but unqualified stdio transport shape.
-// A profile naming it refuses capability_unsupported.
-type wireStdioTransport struct {
-	Kind    string   `json:"kind"` // stdio
-	Command string   `json:"command"`
-	Args    []string `json:"args"`
-}
-
 // wireTransportKind decodes only the discriminant, to route to the correct
 // transport shape before a strict typed decode.
 type wireTransportKind struct {

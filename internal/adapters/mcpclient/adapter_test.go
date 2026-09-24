@@ -493,7 +493,9 @@ func TestCloseSession_ExactlyOneDelete(t *testing.T) {
 	if err2 == nil {
 		t.Fatalf("expected prerequisite_missing for a handle already closed")
 	}
-	mustFault(t, err2)
+	if got := mustFault(t, err2).Code; got != contract.CodePrerequisiteMissing {
+		t.Errorf("fault code=%s", got)
+	}
 }
 
 func TestCallTool_UnknownSessionHandle_PrerequisiteMissing(t *testing.T) {

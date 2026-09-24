@@ -19,21 +19,6 @@ import (
 
 const adapterName = "mcp"
 
-// testTLSConfig is a test-only seam: nil in production (the zero value),
-// so New always dials with the standard verified TLS configuration. This
-// package's own tests run a real httptest.NewTLSServer, whose self-signed
-// certificate a production TLS configuration correctly refuses to trust;
-// tests set this to a config that trusts it before constructing an
-// Adapter. Production code and cmd/zatiti never set it.
-var testTLSConfig *tls.Config
-
-// EnableInsecureTLSForTest is the test-only seam used by this package's
-// tests and by tests/qualification against an in-process
-// httptest.NewTLSServer. Production and cmd/zatiti never call it.
-func EnableInsecureTLSForTest() {
-	testTLSConfig = &tls.Config{InsecureSkipVerify: true} //nolint:gosec // test-only seam for self-signed httptest
-}
-
 // refusedMethods are the server-to-client request methods this adapter
 // always refuses with a JSON-RPC method-not-found error, regardless of the
 // go-sdk's own default per-feature behavior (which is inconsistent: a nil
@@ -84,7 +69,12 @@ func New(deps contract.AdapterDependencies, raw json.RawMessage) (contract.Adapt
 	// rebinding, and it is wrapped per call by a callRoundTripper that
 	// injects Authorization and bounds request/response size, neither of
 	// which may leak onto a Transport shared with a sibling adapter.
-	transport := &http.Transport{DialContext: pinnedDialContext, TLSClientConfig: testTLSConfig}
+	transport := &http.Transport{DialContext: pinnedDialContext, DisableKeepAlives: true}
+	// Installation trust roots may be injected without inheriting a proxy,
+	// insecure verification, client credentials, or an alternate dialer.
+	if supplied, ok := deps.HTTP.Transport.(*http.Transport); ok && supplied.TLSClientConfig != nil && supplied.TLSClientConfig.RootCAs != nil {
+		transport.TLSClientConfig = &tls.Config{RootCAs: supplied.TLSClientConfig.RootCAs.Clone(), MinVersion: tls.VersionTLS12}
+	}
 	return &Adapter{
 		profile:    profile,
 		deps:       deps,
@@ -157,6 +147,33 @@ func (a *Adapter) call(ctx context.Context, dispatch contract.Dispatch) (contrac
 	act, err := decodeAction(dispatch.Action)
 	if err != nil {
 		return contract.Observation{}, err
+	}
+
+	var handle string
+	switch act.Kind {
+	case kindListTools:
+		handle = act.ListTools.SessionHandle
+	case kindCallTool:
+		handle = act.CallTool.SessionHandle
+	case kindCloseSession:
+		handle = act.CloseSession.SessionHandle
+	}
+	if handle != "" {
+		entry, ok := a.sessions.get(handle)
+		if !ok {
+			return contract.Observation{}, prerequisiteMissing("mcpclient: unknown session handle")
+		}
+		if !entry.mu.TryLock() {
+			return contract.Observation{}, prerequisiteMissing("mcpclient: session already has an active operation")
+		}
+		defer entry.mu.Unlock()
+		// Recheck after locking: close_session may have removed the handle.
+		if current, ok := a.sessions.get(handle); !ok || current != entry {
+			return contract.Observation{}, prerequisiteMissing("mcpclient: session is closed")
+		}
+		if entry.credentialRef != dispatch.CredentialRef {
+			return contract.Observation{}, permissionDenied("mcpclient: session belongs to another credential reference")
+		}
 	}
 
 	secret, err := a.resolveCredential(ctx, dispatch.CredentialRef)

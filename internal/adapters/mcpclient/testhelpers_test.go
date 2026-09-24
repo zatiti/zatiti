@@ -3,6 +3,7 @@ package mcpclient
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -13,13 +14,6 @@ import (
 
 	"github.com/zatiti/zatiti/internal/contract"
 )
-
-func init() {
-	// This package's tests dial a real httptest.NewTLSServer; its
-	// self-signed certificate is not in any real trust store. Production
-	// code never sets testTLSConfig (see its doc comment in adapter.go).
-	EnableInsecureTLSForTest()
-}
 
 // ---------- fakes ----------
 
@@ -35,7 +29,7 @@ type fakeClock struct {
 }
 
 func newFakeClock() *fakeClock {
-	return &fakeClock{now: time.Now()}
+	return &fakeClock{now: time.Now().UTC()}
 }
 
 func (c *fakeClock) Now() time.Time {
@@ -229,6 +223,7 @@ func newTestAdapter(t *testing.T, blobs contract.BlobStore, secrets contract.Sec
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
+	a.(*Adapter).transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} // test-only fixture
 	return a
 }
 

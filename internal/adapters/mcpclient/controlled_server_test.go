@@ -31,6 +31,7 @@ type controlledServer struct {
 	requestLog     []string // JSON-RPC method per physical request, in arrival order (server's own log)
 	dropSessions   map[string]bool
 	rejectDiscover bool
+	onRequest      func(http.ResponseWriter, *http.Request, []byte, string) bool
 }
 
 // newControlledServer starts a stateful streamable-HTTP MCP server with a
@@ -61,6 +62,10 @@ func newControlledServer() *controlledServer {
 func newMCPToolServer() *mcp.Server {
 	impl := &mcp.Implementation{Name: "controlled-test-server", Version: "1.0.0"}
 	server := mcp.NewServer(impl, nil)
+	// Exercise the frozen legacy request methods through the SDK wire handler;
+	// the convenience APIs are deprecated in newer protocol versions.
+	var send mcp.MethodHandler
+	server.AddSendingMiddleware(func(next mcp.MethodHandler) mcp.MethodHandler { send = next; return next })
 
 	mcp.AddTool(server, &mcp.Tool{Name: "echo", Description: "echoes its text argument"},
 		func(ctx context.Context, req *mcp.CallToolRequest, in struct {
@@ -88,13 +93,16 @@ func newMCPToolServer() *mcp.Server {
 
 	mcp.AddTool(server, &mcp.Tool{Name: "server-requests", Description: "issues refused server-to-client requests, then succeeds"},
 		func(ctx context.Context, req *mcp.CallToolRequest, in struct{}) (*mcp.CallToolResult, struct{}, error) {
-			_, _ = req.Session.CreateMessage(ctx, &mcp.CreateMessageParams{
-				Messages:  []*mcp.SamplingMessage{{Role: "user", Content: &mcp.TextContent{Text: "hi"}}},
-				MaxTokens: 100,
-			})
-			_, _ = req.Session.Elicit(ctx, &mcp.ElicitParams{Message: "confirm?"})
-			_, _ = req.Session.ListRoots(ctx, &mcp.ListRootsParams{})
-			_ = req.Session.Ping(ctx, &mcp.PingParams{})
+			var sampling struct {
+				mcp.ParamsBase
+				Messages  json.RawMessage `json:"messages"`
+				MaxTokens int             `json:"maxTokens"`
+			}
+			_ = json.Unmarshal([]byte(`{"messages":[{"role":"user","content":{"type":"text","text":"hi"}}],"maxTokens":100}`), &sampling)
+			_, _ = send(ctx, "sampling/createMessage", &mcp.ServerRequest[mcp.Params]{Session: req.Session, Params: &sampling})
+			_, _ = send(ctx, "elicitation/create", &mcp.ServerRequest[*mcp.ElicitParams]{Session: req.Session, Params: &mcp.ElicitParams{Message: "confirm?"}})
+			_, _ = send(ctx, "roots/list", &mcp.ServerRequest[*mcp.PingParams]{Session: req.Session, Params: &mcp.PingParams{}})
+			_, _ = send(ctx, "ping", &mcp.ServerRequest[*mcp.PingParams]{Session: req.Session, Params: &mcp.PingParams{}})
 			return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: "done"}}}, struct{}{}, nil
 		})
 
@@ -144,6 +152,9 @@ func buildControlledServer(stateless, rejectDiscover bool) *controlledServer {
 		reject := cs.rejectDiscover
 		cs.mu.Unlock()
 
+		if cs.onRequest != nil && cs.onRequest(w, r, bodyBytes, method) {
+			return
+		}
 		if reject && method == "server/discover" {
 			var peek struct {
 				ID json.RawMessage `json:"id"`
