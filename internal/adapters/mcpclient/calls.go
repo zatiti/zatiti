@@ -3,6 +3,7 @@ package mcpclient
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -44,6 +45,29 @@ func (a *Adapter) doOpenSession(ctx context.Context, dispatch contract.Dispatch,
 
 	if connErr != nil {
 		outcome := classifyAttemptError(connErr, state)
+		return a.observeOpenSessionFailure(physical, outcome, handshake, state, finished)
+	}
+
+	// The profile's protocol_version is what the server must negotiate
+	// (docs/implementation/contracts.md, "MCP client connection adapter"):
+	// Client.Connect itself only fails on a version its own SDK build
+	// doesn't support at all, so a server that negotiates a version this
+	// SDK supports but the operator's profile does not pin still needs an
+	// explicit adapter-side check -- the physical handshake already
+	// happened (bytes were sent and a session was actually negotiated), so
+	// this is an authoritative post-hoc capability refusal, not a
+	// pre-flight validation failure.
+	if init := session.InitializeResult(); init == nil || init.ProtocolVersion != a.profile.ProtocolVersion {
+		negotiated := "unknown"
+		if init != nil {
+			negotiated = init.ProtocolVersion
+		}
+		_ = session.Close()
+		outcome := attemptOutcome{
+			requestSent: "yes", confirmation: "authoritative_failure",
+			errorCode:    "capability_unsupported",
+			errorMessage: fmt.Sprintf("server negotiated protocol_version %q, profile pins %q", negotiated, a.profile.ProtocolVersion),
+		}
 		return a.observeOpenSessionFailure(physical, outcome, handshake, state, finished)
 	}
 
@@ -461,22 +485,34 @@ func (a *Adapter) observeSimpleFailure(physical wirePhysicalCallEvidence, outcom
 	return contract.Observation{Disposition: disposition, Evidence: doc, Usage: usage, ConfirmedAt: confirmedAt}, nil
 }
 
-// buildHandshake filters captured physical requests down to the exactly-two
-// legacy handshake messages the frozen MCPHandshakeExchange schema can
-// represent (initialize, notifications/initialized), in the order sent. A
-// captured request that never received a response (status 0, e.g. a stall)
-// is omitted: the schema requires a real HTTP status on every entry.
+// handshakeMessages are the physical requests buildHandshake records, in
+// the frozen MCPHandshakeExchange schema's allowed order: the pinned
+// go-sdk client always tries the SEP-2575 server/discover probe first
+// (never omitted from evidence, whether the server answers it or not),
+// then, only when the server does not, the legacy initialize request and
+// notifications/initialized.
+var handshakeMessages = map[string]bool{
+	"server/discover":           true,
+	"initialize":                true,
+	"notifications/initialized": true,
+}
+
+// buildHandshake filters captured physical requests down to the at-most-
+// three handshake messages the frozen MCPHandshakeExchange schema can
+// represent, in the order sent. A captured request that never received a
+// response (status 0, e.g. a stall) is omitted: the schema requires a real
+// HTTP status on every entry.
 func buildHandshake(captured []capturedRequest) []wireHandshakeExchange {
-	out := make([]wireHandshakeExchange, 0, 2)
+	out := make([]wireHandshakeExchange, 0, 3)
 	for _, c := range captured {
 		if c.status == 0 {
 			continue
 		}
-		if c.rpcMethod != "initialize" && c.rpcMethod != "notifications/initialized" {
+		if !handshakeMessages[c.rpcMethod] {
 			continue
 		}
 		out = append(out, wireHandshakeExchange{Message: c.rpcMethod, HTTPStatus: int64(c.status), RequestSent: "yes"})
-		if len(out) == 2 {
+		if len(out) == 3 {
 			break
 		}
 	}

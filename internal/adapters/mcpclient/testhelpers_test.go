@@ -160,9 +160,18 @@ func testCapabilityArtifact() wireArtifactRef {
 }
 
 // buildProfileJSON builds a schema-valid zatiti.mcp/v1 profile document
-// whose capability_evidence.profile_digest correctly binds to the rest of
-// the document, exactly as loadProfile requires.
+// pinning protocol_version 2025-11-25 (the legacy-handshake path), whose
+// capability_evidence.profile_digest correctly binds to the rest of the
+// document, exactly as loadProfile requires.
 func buildProfileJSON(t *testing.T, endpoint string, allowPrivate bool, allowedTools, classifications []string, credentialKind string) json.RawMessage {
+	t.Helper()
+	return buildProfileJSONWithVersion(t, endpoint, allowPrivate, allowedTools, classifications, credentialKind, "2025-11-25")
+}
+
+// buildProfileJSONWithVersion is buildProfileJSON with an explicit
+// protocol_version, for tests against a server that negotiates 2026-07-28
+// (the SEP-2575 discover-only path) rather than the legacy default.
+func buildProfileJSONWithVersion(t *testing.T, endpoint string, allowPrivate bool, allowedTools, classifications []string, credentialKind, protocolVersion string) json.RawMessage {
 	t.Helper()
 	transport, err := json.Marshal(wireStreamableHTTPTransport{
 		Kind: transportStreamableHTTP, Endpoint: endpoint, AllowPrivateEndpoint: allowPrivate, MaxRedirects: 0,
@@ -173,7 +182,7 @@ func buildProfileJSON(t *testing.T, endpoint string, allowPrivate bool, allowedT
 	w := wireMCPProfile{
 		Schema:           "zatiti.mcp/v1",
 		Transport:        transport,
-		ProtocolVersion:  "2025-11-25",
+		ProtocolVersion:  protocolVersion,
 		CredentialKind:   credentialKind,
 		AllowedTools:     allowedTools,
 		ToolCallCost:     wireMoney{Currency: "USD", MicroUnits: 0},

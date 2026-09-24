@@ -38,7 +38,7 @@ func inputSchemaFor(t *testing.T, arguments map[string]any) (json.RawMessage, co
 	return raw, contract.Hash(canon)
 }
 
-func TestOpenSession_ExactlyTwoRequests_LegacyServer(t *testing.T) {
+func TestOpenSession_LegacyServer_ThreeRequests(t *testing.T) {
 	srv := newControlledServer()
 	defer srv.close()
 
@@ -57,13 +57,13 @@ func TestOpenSession_ExactlyTwoRequests_LegacyServer(t *testing.T) {
 	counts := srv.counts()
 	t.Logf("server-observed physical request counts: %+v (total=%d)", counts, srv.total())
 
-	// Empirical confirmation of the open_session contract-defect finding:
+	// Empirical confirmation of the open_session contract finding (folded
+	// into the frozen contract 2026-09-24, "at most three JSON-RPC
+	// messages... the discover probe is never omitted from evidence"):
 	// go-sdk v1.7.0's Client.Connect always attempts SEP-2575
-	// server/discover first. Against a legacy server (this one) that fails,
-	// yielding THREE physical requests total, not the frozen contract's
-	// declared "exactly two" -- and MCPHandshakeExchange's schema
-	// (additionalProperties:false, message enum of exactly two values,
-	// maxItems:2) cannot represent the discover attempt at all.
+	// server/discover first. Against a legacy server (this one) that
+	// fails it, Connect falls back to the legacy handshake, for THREE
+	// physical requests total, all three recorded in evidence.handshake.
 	if counts["server/discover"] != 1 {
 		t.Errorf("expected exactly one server/discover attempt (SEP-2575 preflight), got %d", counts["server/discover"])
 	}
@@ -74,14 +74,14 @@ func TestOpenSession_ExactlyTwoRequests_LegacyServer(t *testing.T) {
 		t.Errorf("expected exactly one notifications/initialized request, got %d", counts["notifications/initialized"])
 	}
 	if srv.total() != 3 {
-		t.Errorf("CONTRACT DEFECT CONFIRMED: expected 3 total physical requests for open_session against a legacy server (1 discover + 2 legacy handshake), got %d -- the frozen contract declares exactly two", srv.total())
+		t.Errorf("expected 3 total physical requests for open_session against a legacy server (1 discover + 2 legacy handshake), got %d", srv.total())
 	}
 
 	ev := decodeEvidence(t, obs)
-	if len(ev.Handshake) != 2 {
-		t.Fatalf("expected evidence.handshake to carry exactly the 2 legacy messages the schema permits, got %d: %+v", len(ev.Handshake), ev.Handshake)
+	if len(ev.Handshake) != 3 {
+		t.Fatalf("expected evidence.handshake to carry all 3 messages, got %d: %+v", len(ev.Handshake), ev.Handshake)
 	}
-	if ev.Handshake[0].Message != "initialize" || ev.Handshake[1].Message != "notifications/initialized" {
+	if ev.Handshake[0].Message != "server/discover" || ev.Handshake[1].Message != "initialize" || ev.Handshake[2].Message != "notifications/initialized" {
 		t.Errorf("unexpected handshake messages: %+v", ev.Handshake)
 	}
 	if ev.ProtocolVersion != "2025-11-25" {
@@ -97,7 +97,12 @@ func TestOpenSession_SEP2575AwareServer_OneRequest(t *testing.T) {
 	defer srv.close()
 
 	blobs := newFakeBlobStore()
-	profile := buildProfileJSON(t, srv.endpoint(), true, []string{"echo"}, []string{"public"}, "none")
+	// This server only ever advertises 2026-07-28 support (see
+	// buildControlledServer's doc comment): a profile pinning 2025-11-25
+	// would now correctly be refused capability_unsupported by the
+	// negotiated-version check, so this test pins what the server actually
+	// negotiates to isolate the request-count/handshake-evidence finding.
+	profile := buildProfileJSONWithVersion(t, srv.endpoint(), true, []string{"echo"}, []string{"public"}, "none", "2026-07-28")
 	a := newTestAdapter(t, blobs, newFakeSecrets(testCredentialRef, []byte(testToken)), profile)
 
 	_, obs := openSession(t, a, 10*time.Second)
@@ -111,16 +116,45 @@ func TestOpenSession_SEP2575AwareServer_OneRequest(t *testing.T) {
 	// Second, sharper edge of the same finding: against a server that DOES
 	// support SEP-2575 (the same go-sdk build this adapter itself pins),
 	// Connect never sends initialize/notifications/initialized at all --
-	// evidence.handshake is empty and the negotiated protocol version is
-	// 2026-07-28, not the profile's pinned 2025-11-25 constant.
+	// evidence.handshake carries only the single successful discover
+	// exchange, and the negotiated protocol version is 2026-07-28.
 	if srv.total() != 1 || counts["server/discover"] != 1 {
 		t.Errorf("expected exactly one server/discover request and nothing else, got counts=%+v total=%d", counts, srv.total())
 	}
 	ev := decodeEvidence(t, obs)
-	if len(ev.Handshake) != 0 {
-		t.Errorf("expected no legacy handshake messages when discover succeeds, got %+v", ev.Handshake)
+	if len(ev.Handshake) != 1 || ev.Handshake[0].Message != "server/discover" {
+		t.Errorf("expected evidence.handshake to carry only the successful discover exchange, got %+v", ev.Handshake)
 	}
-	t.Logf("negotiated protocol_version against a SEP-2575-aware server: %q (profile pins 2025-11-25)", ev.ProtocolVersion)
+	if ev.ProtocolVersion != "2026-07-28" {
+		t.Errorf("expected negotiated protocol_version 2026-07-28, got %q", ev.ProtocolVersion)
+	}
+}
+
+// TestOpenSession_NegotiatedVersionNotPinned_CapabilityUnsupported proves
+// the frozen contract's explicit rule (contracts.md, "MCP client connection
+// adapter"): "any other negotiated version fails open_session as
+// capability_unsupported." A profile pinning 2025-11-25 against a server
+// that only negotiates 2026-07-28 must refuse, not silently accept a
+// session at a version the operator never authorized.
+func TestOpenSession_NegotiatedVersionNotPinned_CapabilityUnsupported(t *testing.T) {
+	srv := newSEP2575AwareControlledServer()
+	defer srv.close()
+
+	blobs := newFakeBlobStore()
+	profile := buildProfileJSON(t, srv.endpoint(), true, []string{"echo"}, []string{"public"}, "none") // pins 2025-11-25
+	a := newTestAdapter(t, blobs, newFakeSecrets(testCredentialRef, []byte(testToken)), profile)
+
+	_, obs := openSession(t, a, 10*time.Second)
+	if obs.Disposition != contract.DispositionFailed {
+		t.Fatalf("expected failed, got %s; evidence=%s", obs.Disposition, obs.Evidence)
+	}
+	ev := decodeEvidence(t, obs)
+	if ev.PhysicalCall.ErrorCode != "capability_unsupported" {
+		t.Errorf("expected error_code capability_unsupported, got %q", ev.PhysicalCall.ErrorCode)
+	}
+	if ev.PhysicalCall.RequestSent != "yes" {
+		t.Errorf("expected request_sent yes (the discover probe genuinely went out), got %q", ev.PhysicalCall.RequestSent)
+	}
 }
 
 func TestListTools_ExactlyOneRequest(t *testing.T) {
