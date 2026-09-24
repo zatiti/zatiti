@@ -1,8 +1,8 @@
 # Package implementation specification
 
-Revision 9. **Specification scaffold; no product implementation or executed release qualification is claimed.**
+Revision 10. **Specification scaffold; no product implementation or executed release qualification is claimed.**
 
-36 disjoint implementation roots; 201 public operations; 91 internal owner methods; 147 source blocks with explicit ownership; 134 named acceptance cases covering Z01–Z21 and release journeys.
+36 disjoint implementation roots; 201 public operations; 91 internal owner methods; 150 source blocks with explicit ownership; 135 named acceptance cases covering Z01–Z21 and release journeys.
 
 Each root already contains a complete committed AGENTS.md: local mission, allowed imports, owned requirements, exact Go interfaces, incoming/outgoing operation schemas, persistence/recovery rules and named acceptance criteria. An agent can implement from that file without the RFC. Scope prompts intentionally repeat necessary contracts; do not edit generated copies independently.
 
@@ -54,7 +54,7 @@ Root dependency work and the lock report belong only to integration's serialized
 | [`cmd/zatiti`](../../cmd/zatiti/AGENTS.md) | entrypoint | 3 | Assemble controller/CLI/MCP binary and local bootstrap/helper mechanics. |
 | [`tests/integration`](../../tests/integration/AGENTS.md) | verification | 4 | Own real cross-package fixtures, atomicity, transport parity and end-to-end journeys. |
 | [`tests/qualification`](../../tests/qualification/AGENTS.md) | verification | 4 | Own executable external adapter, real Flutter desktop/platform/client qualification and release evidence. |
-| [`packaging`](../../packaging/AGENTS.md) | support | 4 | Own release manifests, service launchers, secure helper and Serenity distribution lifecycle. |
+| [`packaging`](../../packaging/AGENTS.md) | infrastructure | 4 | Own release manifests, service launchers, secure helper and Serenity distribution lifecycle. |
 | [`.github/workflows`](../../.github/workflows/AGENTS.md) | support | 4 | Own CI workflow validation and release qualification orchestration. |
 
 ## Sources and validation

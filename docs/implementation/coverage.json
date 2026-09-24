@@ -1,5 +1,5 @@
 {
-  "revision": 9,
+  "revision": 10,
   "requirements": [
     {
       "requirement": "R1-002",
@@ -2443,6 +2443,53 @@
         "tests/integration",
         "tests/qualification"
       ]
+    },
+    {
+      "requirement": "R-MAC10-001",
+      "section": "MAC10",
+      "kind": "requirement",
+      "owner": "packaging",
+      "participants": [
+        "cmd/zatiti",
+        "internal/platform",
+        "tests/qualification",
+        ".github/workflows"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R-MAC10-002",
+      "section": "MAC10",
+      "kind": "requirement",
+      "owner": "cmd/zatiti",
+      "participants": [
+        "internal/connections",
+        "tests/qualification"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R-MAC10-003",
+      "section": "MAC10",
+      "kind": "requirement",
+      "owner": "tests/qualification",
+      "participants": [
+        ".github/workflows",
+        "packaging",
+        "cmd/zatiti",
+        "internal/adapters/serenity",
+        "apps/desktop"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
     }
   ],
   "acceptance_cases": [
@@ -3819,6 +3866,18 @@
         ".github/workflows",
         "cmd/zatiti",
         "tests/qualification"
+      ]
+    },
+    {
+      "id": "QUALIFICATION.macos_install_to_first_chat",
+      "gate": "QUALIFICATION",
+      "scopes": [
+        "tests/qualification",
+        ".github/workflows",
+        "packaging",
+        "cmd/zatiti",
+        "apps/desktop",
+        "internal/adapters/serenity"
       ]
     }
   ]

@@ -2000,5 +2000,29 @@
     ],
     "kind": "requirement",
     "text": "The one-line Mac command is generated only after the hosted bootstrap script has a literal SHA-256 in the command. That script verifies a literal hash of the signed/notarized universal bootstrap app archive before extracting and launching its fixed executable. The bootstrap app embeds the trusted delivery-signature public keys and hardware-architecture detection, then consumes the six-asset signed delivery record through RunMacBootstrap. Neither an unsigned curl-pipe-shell stage nor a fetched trust key establishes trust. Real Team ID, hosting URL, notarization and clean-host evidence are external gates; no public command is claimed from fixture tests."
+  },
+  {
+    "id": "R-MAC10-001",
+    "section": "MAC10",
+    "owner": "distribution",
+    "participants": ["zatiti", "platform", "qualification", "ci"],
+    "kind": "requirement",
+    "text": "Mac bootstrap activation is a locked ordered chain: prove signed package bytes and Apple trust, run the fixed per-user installer, verify the installed three-file inbox against the signed plan, create or validate the fixed login-Keychain master item without rotation, activate through Apply, audit the active controller and desktop trees, helper and LaunchAgent, then advance the protected release fence. Existing-release and crash recovery require the same authoritative active-tree audit; package receipts and inert inbox bytes are insufficient. Packaging owns narrow injected interfaces and imports no platform code; cmd/zatiti composes the platform provisioner."
+  },
+  {
+    "id": "R-MAC10-002",
+    "section": "MAC10",
+    "owner": "zatiti",
+    "participants": ["connections", "qualification"],
+    "kind": "requirement",
+    "text": "A protected credential-helper recovery intent retains only bounded nonsecret replay identities, account and credential name, opaque store reference, challenge version/expiry, stable begin and complete submission keys, and an exact request digest or request bytes persisted before each mutation call. A retry reconstructs byte-identical input under the same key or refuses; phase-dependent fields are validated and provider/owner/HMAC secret bytes are absent."
+  },
+  {
+    "id": "R-MAC10-003",
+    "section": "MAC10",
+    "owner": "qualification",
+    "participants": ["ci", "distribution", "zatiti", "serenity", "desktop"],
+    "kind": "requirement",
+    "text": "Each native Mac release report must prove one linked clean-host install-to-first-chat journey on its architecture, binding the same signed delivery, literal script and universal bootstrap hashes to its architecture-specific package, component and helper hashes, installed-inbox and active-tree audits, fixed launcher and Keychain readiness, genuine provider response readback and full Serenity capability evidence. The Intel and Apple Silicon reports use distinct host-run IDs, agree on shared release identity, and both pass the linked named case; absent, skipped, synthetic or independently assembled evidence blocks release."
   }
 ]

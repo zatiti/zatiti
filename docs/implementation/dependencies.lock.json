@@ -1,11 +1,11 @@
 {
-  "revision": 2,
+  "revision": 3,
   "module": "github.com/zatiti/zatiti",
   "go_directive": "1.26.0",
   "toolchain": "go1.26.2",
-  "recorded": "2026-09-19",
+  "recorded": "2026-09-24",
   "owner": "integration (serialized root-file exception per ADR 001)",
-  "scope_note": "Dependency resolution and upstream qualification only. This file records resolved pins and observed evidence; it does not claim upstream behavior beyond what was executed. Regenerate via the named commands when changing any pin; do not edit go.mod pins independently of this report. Revision 2 (P02, implementation-remediation) reconciled this report against the actual source tree after revision 1 left a stale forward-looking claim in qualified_features: fyne.io/fyne/v2 was removed from go.mod/go.sum on 2026-09-19 (fdba444, following ADR 002's Flutter replacement of the native Go desktop six days earlier), but the prior revision still asserted 'Fyne v2.8.1 compiles and links' as though it were a current qualified feature. That claim is moved to historical_evidence below, clearly labeled as a fact about a build that no longer exists in the module graph, not a current qualification. No fyne import remains anywhere in Go source; the only surviving string 'fyne' is packaging/desktop_test.go asserting the framework is rejected as capability_unsupported.",
+  "scope_note": "Dependency resolution and upstream qualification only. This file records resolved pins and observed evidence; it does not claim upstream behavior beyond what was executed. Regenerate via the named commands when changing any pin; do not edit go.mod pins independently of this report. Revision 2 (P02, implementation-remediation) reconciled this report against the actual source tree after revision 1 left a stale forward-looking claim in qualified_features: fyne.io/fyne/v2 was removed from go.mod/go.sum on 2026-09-19 (fdba444, following ADR 002's Flutter replacement of the native Go desktop six days earlier), but the prior revision still asserted 'Fyne v2.8.1 compiles and links' as though it were a current qualified feature. That claim is moved to historical_evidence below, clearly labeled as a fact about a build that no longer exists in the module graph, not a current qualification. No fyne import remains anywhere in Go source; the only surviving string 'fyne' is packaging/desktop_test.go asserting the framework is rejected as capability_unsupported. Revision 3 refreshes the public Serenity inspection to b4febdf7 after upstream changed; it records observed narrow improvements while preserving the full first-chat hard gate. Rev10 native Mac package/CI code is implementation in progress, not release qualification.",
   "historical_evidence": [
     {
       "module": "fyne.io/fyne/v2",
@@ -76,7 +76,7 @@
     "serenity_seam": {
       "owner_root": "internal/adapters/serenity",
       "status": "no new library required; source commit pinned by inspection, not a Go module dependency",
-      "evidence": "internal/adapters/serenity/PROTOCOL.md pins github.com/sirerun/serenity @ f5a5154e1c4d808e10b495fca3bd50d842f0aa92 (MEMORY_VERBS v1 over MCP 2025-11-25) by read-only source inspection, not by importing it: the package's only allowed production import is internal/contract, and the upstream Go read facade (pkg/serenity) is explicitly unusable under that constraint. See external_services.Serenity below for the capability consequence."
+      "evidence": "internal/adapters/serenity/PROTOCOL.md and capability.go pin public github.com/sirerun/serenity @ b4febdf7bbc0d3c33f9939c79099dc64cce89e84 (v0.1.10-hosted-candidate, MEMORY_VERBS v1 over MCP 2025-11-25) by source inspection. The adapter imports only internal/contract and deliberately sends no physical calls; no new Go module dependency was added."
     }
   },
   "external_services": [
@@ -97,15 +97,15 @@
     },
     {
       "service": "Serenity",
-      "pin": "Source commit pinned by read-only inspection: github.com/sirerun/serenity @ f5a5154e1c4d808e10b495fca3bd50d842f0aa92 (2026-09-07, branch main, MEMORY_VERBS v1 over MCP 2025-11-25). See internal/adapters/serenity/PROTOCOL.md for the full pin and its 20-row requirement-versus-pin table.",
-      "resolution": "Every MEMORY_VERBS capability stays explicitly blocked at this pin: PROTOCOL.md's own gap table shows row 1 (one Invoke = one physical request) fails against the documented three-request MCP session handshake, which blocks every other row independently of their individual gaps (no UUID claim ids, no command identity/status lookup, no revision report, no enforceable cost/destination bound, no verifiable running commit). internal/adapters/serenity/adapter_test.go exercises the adapter as an honest refuser against these fixtures; that is controlled-fixture evidence only. No live Serenity process has been contacted (PROTOCOL.md: 'read-only... no live Serenity process was contacted'). Required to lift any row to Provided: the upstream changes PROTOCOL.md's closing section names (sessionless call path, stored caller command identity with status lookup, UUID-compatible claim identities, revision reporting, per-call spend/destination bounds, a build that reports its commit) plus a real-service qualification run recorded under tests/qualification."
+      "pin": "Source commit pinned by public source inspection: github.com/sirerun/serenity @ b4febdf7bbc0d3c33f9939c79099dc64cce89e84 (2026-09-24, v0.1.10-hosted-candidate, MEMORY_VERBS v1 over MCP 2025-11-25). See internal/adapters/serenity/PROTOCOL.md for the 20-row requirement-versus-pin table.",
+      "resolution": "Public HEAD now includes durable remember.operation_key keyed replay/conflict, cancel_memory_operation fencing, exact read_memory_fact by its 64-hex id, a cooperative serve writer lock, and named Keychain credential profiles. Source tests for internal/server/memory, internal/server/mcp, and internal/writer passed in the inspected clone; no live Zatiti-to-Serenity service call occurred. Full Zatiti dispatch remains blocked: MCP session handshake still violates one Invoke/one physical request, no authoritative read-only status lookup by command key exists, claim identity/version/confidence/freshness and revision reports are insufficient, and per-call cost/destination bounds and running-commit attestation are not established. Adapter tests verify fail-closed behavior only. Required to lift: qualified public protocol coverage for every row and real-service tests/observed evidence in tests/qualification; partial upstream improvements are not a reduced release gate."
     }
   ],
   "test_commands": [
     "go build ./... && go vet ./... (green 2026-09-19 under R-build-lease; go mod verify: all modules verified)",
     "go list -m all (43 lines including the main module; go.sum pins 41 distinct modules used by the actual build, see qualified_features)",
     "python3 tools/specgen/render.py --check (specification freshness; currently green)",
-    "python3 -m pytest -q tools/specgen/test_render.py (specification integrity; currently green, 6 tests)",
+    "cd tools/specgen && python3 -m unittest test_render (specification integrity; 13 tests passed 2026-09-24)",
     "go test -p 2 -timeout 30m ./... (pre-commit hook; grows as packages land, expected-red.txt tracks known contract-ahead-of-implementation failures; integration owns product-wide fixtures)",
     ".github/workflows/cigate: \"cigate lock -go-version <go env GOVERSION>\" (checkLock in tree.go) verifies go.mod's go/toolchain directives and direct_modules pins/sums against go.sum; \"cigate flutterpin\"/\"cigate flutterverify\" (flutter.go) verify flutter_sdk below against apps/desktop/pubspec.lock's sdks constraints and the installed Flutter toolchain"
   ],
@@ -118,9 +118,10 @@
   ],
   "unresolved_gaps": [
     "OpenAI Responses live account/profile (endpoint, model, credential, prices) is an operator/foundation-integration decision deferred with contract knowledge; the wire protocol is pinned but dependent adapters must not start against a guessed endpoint, and the input_token_bound:utf8_bytes hard-cap capability stays unqualified until a real-service run records it.",
-    "Serenity has no dispatchable operation at its pinned source commit; every MEMORY_VERBS capability is explicitly blocked pending upstream changes PROTOCOL.md names, plus a real-service qualification run this report does not authorize.",
+    "Serenity candidate b4febdf7 adds keyed remember, exact read and writer-lock improvements, but no dispatchable Zatiti MEMORY_VERBS operation satisfies the full frozen contract; real-service qualification and remaining public protocol guarantees are required.",
     "Rebuild reproducibility (vendor/ or GONOSUMDB policy) is undecided; go.sum-only pinning is the current state.",
-    "darwin/arm64, linux, and windows release targets unexercised; packaging and CI must qualify before release evidence."
+    "darwin/arm64, linux, and windows release targets unexercised; packaging and CI must qualify before release evidence.",
+    "Mac rev10 qualification is incomplete: local Developer ID Application/Installer identities and Xcode tools are visible, but no final signed/notarized package, bootstrap app, linked native Intel/Apple Silicon clean-host reports, or published one-line command has been produced or qualified."
   ],
   "flutter_sdk": {
     "version": "3.32.1",

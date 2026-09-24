@@ -2210,5 +2210,17 @@
       "The bootstrap app embeds trusted Ed25519 roots, never adopts a fetched key, detects native hardware under Rosetta and downloads only the matching controller/desktop/pkg assets.",
       "Actual hosted bytes, URL, command hash, Team ID, OS/arch and installer evidence are recorded; any missing artifact or failed clean-host run blocks the advertised one-line installation claim."
     ]
+  },
+  {
+    "id": "QUALIFICATION.macos_install_to_first_chat",
+    "gate": "QUALIFICATION",
+    "owners": ["qualification", "ci", "distribution", "zatiti", "desktop", "serenity"],
+    "setup": "Prepare the final signed release delivery, literal bootstrap script and universal app, both architecture-specific signed packages and a clean native Intel or Apple Silicon account without developer tools; provide qualified live provider and full public Serenity capabilities.",
+    "action": "On each native host run the exact one-line command, verify installed inbox and active tree/launcher/master Keychain against the same signed bytes, capture a provider credential in the signed helper, send the first chief chat, and read the response and Serenity effects back from authoritative controller state. Repeat on the other native architecture and aggregate the two redacted host reports.",
+    "expected": [
+      "Each host records a unique host-run ID, native OS build, fixed installer invocation, actual signer Team ID/certificate, descriptor/delivery/script/universal-bootstrap digests and that host's package/controller/desktop/helper digests, with no credential or raw model text.",
+      "The same run links package payload and installed inbox checks, retained master key, active trees/LaunchAgent, real provider response readback and every full Serenity writer, memory, reconciliation, cost/disclosure and backup-revision guarantee; a synthetic or independent case cannot substitute.",
+      "Both native reports agree on shared release identity and hashes, differ by host-run ID, and pass the linked case. Missing fields, Rosetta, skipped/not-run cases, no installed artifact, or unavailable upstream guarantee blocks the first-chat release and public one-line command."
+    ]
   }
 ]
