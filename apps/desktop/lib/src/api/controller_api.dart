@@ -273,6 +273,14 @@ class ControllerApi {
   Future<List<Connection>> connections() =>
       listAll(Operations.connectionList, Connection.fromJson);
 
+  Future<Connection> connectionGet(String id) async {
+    final response = await client.query(Operations.connectionGet, {
+      'scope': client.scope(),
+      'id': id,
+    });
+    return Connection.fromJson(_resource(response.data, 'connection.get'));
+  }
+
   Future<List<Artifact>> taskArtifacts(String taskId) => listAll(
     Operations.artifactList,
     Artifact.fromJson,

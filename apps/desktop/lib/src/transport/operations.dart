@@ -113,6 +113,7 @@ abstract final class Operations {
   static const usageGet = OperationDescriptor.query('usage.get');
   static const budgetGet = OperationDescriptor.query('budget.get');
   static const connectionList = OperationDescriptor.query('connection.list');
+  static const connectionGet = OperationDescriptor.query('connection.get');
   static const installationVerifierList = OperationDescriptor.query(
     'installation.verifier.list',
   );
@@ -175,6 +176,7 @@ abstract final class Operations {
     usageGet,
     budgetGet,
     connectionList,
+    connectionGet,
     installationVerifierList,
     memoryBindingList,
     memoryList,

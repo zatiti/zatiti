@@ -3,6 +3,9 @@
 import 'package:flutter/material.dart';
 
 import '../app/credential_store.dart';
+import '../app/installed_credential_capture.dart';
+import '../api/models.dart' as wire;
+import '../state/live_source.dart';
 import '../state/workspace_controller.dart';
 import '../state/workspace_source.dart';
 import 'theme.dart';
@@ -57,11 +60,68 @@ class WorkspaceSettings extends StatefulWidget {
 class _WorkspaceSettingsState extends State<WorkspaceSettings> {
   final TextEditingController _credential = TextEditingController();
   String? _credentialStatus;
+  Future<List<wire.Connection>>? _connections;
+  String? _providerKeyStatus;
+  bool _capturingProviderKey = false;
 
   @override
   void initState() {
     super.initState();
     _describeStored();
+    _refreshConnections();
+  }
+
+  void _refreshConnections() {
+    final source = widget.controller.source;
+    if (source is LiveWorkspaceSource && source.installedMac) {
+      _connections = source.api.connections();
+    }
+  }
+
+  Future<void> _captureProviderKey(wire.Connection connection) async {
+    final source = widget.controller.source;
+    if (source is! LiveWorkspaceSource ||
+        !source.installedMac ||
+        _capturingProviderKey) {
+      return;
+    }
+    setState(() {
+      _capturingProviderKey = true;
+      _providerKeyStatus = null;
+    });
+    String status;
+    try {
+      final result = await const InstalledCredentialCapture().capture(
+        installedMac: source.installedMac,
+        installationId: source.installationId,
+        connectionId: connection.id,
+      );
+      // A helper disposition is not proof that the provider is ready.
+      final current = await source.api.connectionGet(connection.id);
+      await widget.controller.reconnect();
+      _refreshConnections();
+      status = switch (result.status) {
+        CredentialCaptureStatus.completed
+            when current.validationState ==
+                wire.ConnectionValidationState.valid =>
+          'Provider connection validated.',
+        CredentialCaptureStatus.completed =>
+          'Key submitted. Provider connection is still ${current.validationState.name}.',
+        CredentialCaptureStatus.cancelled => 'Key entry cancelled.',
+        CredentialCaptureStatus.retryable =>
+          'Key entry could not finish. Please try again.',
+        CredentialCaptureStatus.repairRequired =>
+          'Credential helper needs repair before key entry can continue.',
+      };
+    } on Exception {
+      status = 'Key entry could not start. Check the local installation.';
+    }
+    if (mounted) {
+      setState(() {
+        _capturingProviderKey = false;
+        _providerKeyStatus = status;
+      });
+    }
   }
 
   Future<void> _describeStored() async {
@@ -190,6 +250,52 @@ class _WorkspaceSettingsState extends State<WorkspaceSettings> {
                   'This Mac keeps the owner credential in Keychain. Zatiti '
                   'reads it when connecting to the local service.',
                 ),
+                if (_connections != null) ...[
+                  const SizedBox(height: Space.xl),
+                  const SectionLabel('Provider connections'),
+                  FutureBuilder<List<wire.Connection>>(
+                    future: _connections,
+                    builder: (context, snapshot) {
+                      if (snapshot.hasError) {
+                        return const Text('Connections could not be loaded.');
+                      }
+                      if (!snapshot.hasData) {
+                        return const Text('Loading connections…');
+                      }
+                      final connections = snapshot.data!;
+                      if (connections.isEmpty) {
+                        return const Text(
+                          'No provider connections are configured yet.',
+                        );
+                      }
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          for (final connection in connections)
+                            ListTile(
+                              contentPadding: EdgeInsets.zero,
+                              title: Text(connection.provider),
+                              subtitle: Text(
+                                '${connection.accountIdentity} · '
+                                '${connection.validationState.name}',
+                              ),
+                              trailing: TextButton(
+                                key: ValueKey(
+                                  'capture-provider-${connection.id}',
+                                ),
+                                onPressed: _capturingProviderKey
+                                    ? null
+                                    : () => _captureProviderKey(connection),
+                                child: const Text('Enter provider key'),
+                              ),
+                            ),
+                        ],
+                      );
+                    },
+                  ),
+                  if (_providerKeyStatus != null)
+                    Text(_providerKeyStatus!, style: text.bodySmall),
+                ],
               ] else ...[
                 Text(_credentialStatus ?? 'Checking…', style: text.bodySmall),
                 const SizedBox(height: Space.md),

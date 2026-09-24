@@ -94,6 +94,9 @@ class LiveWorkspaceSource implements WorkspaceSource {
   final LocalStore? _localStore;
   final String _installationId;
 
+  /// Nonsecret identity already authenticated during installed Mac startup.
+  String get installationId => _installationId;
+
   /// Persists the fully-consistent (cursor, sequence) pair once the page
   /// loop that may have advanced both has finished — never mid-page, so a
   /// persisted pair is never observed half-updated. Read-modify-write: the
