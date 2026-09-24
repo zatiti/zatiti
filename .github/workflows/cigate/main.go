@@ -63,6 +63,7 @@ var commands = map[string]command{
 	"lint":             {"validate the workflow files against the policy", runLint},
 	"gate":             {"evaluate the release qualification verdict from the needs context", runGate},
 	"qualevidence":     {"enforce enumeration and freshness of tests/qualification's release report", runQualEvidence},
+	"qualmatrix":       {"compare native Intel and Apple Silicon release evidence", runQualMatrix},
 	"gotest":           {"run go test and retain a bounded summary and log", runGoTest},
 	"inputs":           {"resolve and validate release qualification inputs", runInputs},
 	"lock":             {"verify the Go toolchain and dependency lock agree", runLock},

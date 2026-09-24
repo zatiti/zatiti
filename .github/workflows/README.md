@@ -37,6 +37,21 @@ signed/notarized package, hosted bootstrap, or real provider/Serenity gates.
 The qualification owner must provide and verify that evidence in those cases
 before the workflow can claim them. No workflow here signs or publishes assets.
 
+`qualification_matrix` downloads the two native `release-report.json` files
+from this run and requires the planned rev10
+`QUALIFICATION.macos_install_to_first_chat` case on each. Each report must add
+`mac_release` using `zatiti.ci.mac_release_host/v1`: version, positive release
+sequence, native arch, distinct host-run UUID, OS build, `developer_tools_absent`,
+Team ID and application/installer certificate SHA-256s; shared descriptor,
+delivery, script and universal bootstrap ZIP SHA-256s; and that host's final
+installer, controller, desktop and helper SHA-256s. The clean-host case's
+`evidence` must repeat its host-run ID and seven script/bootstrap/delivery and
+selected-asset hashes. The matrix checks source and `go.mod` against the tag,
+requires both reports to refer to the same signed release, and allows the
+native asset hashes to differ. Missing or legacy reports block. The rev10 case
+and producer fields are pending specification and real clean-host evidence;
+this consumer does not turn the current unsigned candidates into release assets.
+
 ## Validate locally
 
 Run these from the repository root. `go test ./...` does not match directories

@@ -50,6 +50,7 @@ var registeredWorkflows = map[string]profile{
 var requiredReleaseGates = []string{
 	"inputs", "spec", "workflows", "static", "test",
 	"flutter", "qualification", "build", "candidate_matrix",
+	"qualification_matrix",
 }
 
 // platformReleaseGates must run on every supported release platform.
@@ -706,6 +707,28 @@ func (l *linter) checkReleaseGates(jobs *node) {
 	for _, g := range requiredReleaseGates {
 		if _, ok := byName[g]; !ok {
 			l.add(jobs.Line, "release-gates", "required release gate %q is missing", g)
+		}
+	}
+	if matrix, ok := byName["qualification_matrix"]; ok {
+		needs := needsOf(matrix.Value)
+		if !contains(needs, "qualification") || !contains(needs, "spec") {
+			l.add(matrix.Line, "native-evidence", "native qualification matrix must depend on both qualification and specification")
+		}
+		var intel, silicon, compare bool
+		for _, st := range matrix.Value.get("steps").items() {
+			name, _ := st.path("with", "name").scalar()
+			switch name {
+			case "release-evidence-qualification-macos-15-intel":
+				intel = true
+			case "release-evidence-qualification-macos-15":
+				silicon = true
+			}
+			if run, _ := st.get("run").scalar(); strings.Contains(run, "cigate qualmatrix") && strings.Contains(run, `-amd64-report "$RUNNER_TEMP/native-reports/amd64/qualification-cases/release-report.json"`) && strings.Contains(run, `-arm64-report "$RUNNER_TEMP/native-reports/arm64/qualification-cases/release-report.json"`) {
+				compare = true
+			}
+		}
+		if !intel || !silicon || !compare {
+			l.add(matrix.Line, "native-evidence", "native qualification matrix must download and compare both exact architecture reports")
 		}
 	}
 	// The native Security.framework Keychain writer is built only with cgo.

@@ -609,6 +609,58 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+  qualification_matrix:
+    name: native Mac final-release evidence matrix
+    needs:
+      - spec
+      - qualification
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out the source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install the pinned Go toolchain
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Verify the toolchain and dependency lock
+        env:
+          GOTOOLCHAIN: local
+        run: |
+          evidence="$RUNNER_TEMP/evidence"
+          echo "EVIDENCE=$evidence" >> "$GITHUB_ENV"
+          echo "GOTOOLCHAIN=local" >> "$GITHUB_ENV"
+          go run ./.github/workflows/cigate lock -go-version "$(go env GOVERSION)"
+          go run ./.github/workflows/cigate environ -go-version "$(go env GOVERSION)" -out "$evidence/environment.json"
+      - name: Download native Intel qualification evidence
+        uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3 # v8.0.0
+        with:
+          name: release-evidence-qualification-macos-15-intel
+          path: ${{ runner.temp }}/native-reports/amd64
+      - name: Download native Apple Silicon qualification evidence
+        uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3 # v8.0.0
+        with:
+          name: release-evidence-qualification-macos-15
+          path: ${{ runner.temp }}/native-reports/arm64
+      - name: Bind both clean-host reports to one final signed release
+        run: |
+          go run ./.github/workflows/cigate qualmatrix \
+            -amd64-report "$RUNNER_TEMP/native-reports/amd64/qualification-cases/release-report.json" \
+            -arm64-report "$RUNNER_TEMP/native-reports/arm64/qualification-cases/release-report.json" \
+            -revision "$GITHUB_SHA" \
+            -out "$EVIDENCE/native-qualification-matrix.json"
+      - name: Retain evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-evidence-native-qualification-matrix
+          path: ${{ runner.temp }}/evidence/
+          if-no-files-found: error
+          retention-days: 30
+
   verdict:
     name: release qualification verdict
     if: always()
@@ -622,6 +674,7 @@ jobs:
       - qualification
       - build
       - candidate_matrix
+      - qualification_matrix
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:

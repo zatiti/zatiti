@@ -231,8 +231,9 @@ func runInputs(ctx context.Context, args []string, stdout, stderr io.Writer) err
 // this root); this struct is the coordinated read-only contract with that
 // file's committed JSON shape (tests/qualification/evidence_test.go).
 type qualificationReport struct {
-	Versions map[string]string `json:"versions"`
-	Cases    []struct {
+	Versions   map[string]string `json:"versions"`
+	MacRelease macReleaseHost    `json:"mac_release"`
+	Cases      []struct {
 		Case     string                     `json:"case"`
 		Status   string                     `json:"status"`
 		Reason   string                     `json:"reason"`
