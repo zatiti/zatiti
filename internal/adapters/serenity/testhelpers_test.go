@@ -156,7 +156,7 @@ func testEnforcementEvidence() wireCapabilityEvidence {
 // no supported operation and every guarantee unsupported.
 func truthfulProfile() wireSerenityProfile {
 	return wireSerenityProfile{
-		Schema:  "zatiti.serenity/v1",
+		Schema:  "zatiti.serenity/v2",
 		Version: pinnedDescribe,
 		Commit:  pinnedCommit,
 		BrainMappings: []wireBrainMapping{

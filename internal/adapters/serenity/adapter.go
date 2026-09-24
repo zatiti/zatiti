@@ -19,7 +19,7 @@ type Adapter struct {
 	schema  json.RawMessage
 }
 
-// New constructs the Serenity adapter from a zatiti.serenity/v1 profile. The
+// New constructs the Serenity adapter from a zatiti.serenity/v2 profile. The
 // profile must bind its own capability evidence, name the pinned upstream,
 // and claim nothing that upstream does not provide (see loadProfile). No
 // dependency is required: the adapter reaches nothing outside itself.
@@ -135,6 +135,12 @@ func (a *Adapter) admit(dispatch contract.Dispatch) (*action, error) {
 	brain, ok := a.profile.Brains[act.BrainID]
 	if !ok {
 		return nil, permissionDenied("brain %s is not in the profile's brain_mappings; the adapter cannot widen a query", act.BrainID)
+	}
+	if brain.HostedProjectID != "" {
+		// AdapterDependencies and Dispatch expose no current connection-grant
+		// lookup or verified hosted project selector. A profile mapping alone
+		// cannot prove that the OAuth grant still names this project.
+		return nil, capabilityUnsupported("hosted Serenity brain dispatch needs a current verified connection grant for the mapped project")
 	}
 	if act.WriterOwner != "" && act.WriterOwner != brain.WriterOwner {
 		return nil, permissionDenied("writer_owner does not own brain %s; each brain has exactly one canonical writer", act.BrainID)
