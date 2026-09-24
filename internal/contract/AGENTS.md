@@ -1,6 +1,6 @@
 # Implementation assignment: `internal/contract`
 
-Generated specification revision 4; source digest `fba03707377b601e69ee2150bca4e74da8804b62474e85a9c7039a205e3c0ff2`. This file is committed implementation context. Do not independently edit it. Everything required from the product specification and adjacent interfaces is embedded below; no RFC copy is required.
+Generated specification revision 4; source digest `c01f3bc31dc5dd33292b6ffcfc024b981b829783dd430ec00dff3efde7ab9f12`. This file is committed implementation context. Do not independently edit it. Everything required from the product specification and adjacent interfaces is embedded below; no RFC copy is required.
 
 ## Mission and scope
 

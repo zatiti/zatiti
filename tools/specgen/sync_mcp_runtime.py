@@ -25,6 +25,11 @@ def outputs():
  defs=closure(['MCPClientProfile','MCPClientParameters','MCPClientEvidence'],D)
  for name,value in [('schemaDefs',{'$defs':defs}),('schemaProfileBody',D['MCPClientProfile']),('schemaParametersBody',D['MCPClientParameters']),('schemaEvidenceBody',D['MCPClientEvidence'])]:s=re.sub(r'(const '+name+r' = `)[^`]*`',lambda m:m[1]+compact(value)+'`',s)
  out[p]=s
+ p=ROOT/'internal/connections/builtin_tools.go';s=p.read_text()
+ probe={'$ref':'#/$defs/MCPClientEvidence','$defs':closure(['MCPClientEvidence'],D)}
+ s,count=re.subn(r'(schemaMCPProbeOut\s*=\s*`)[^`]*`',lambda m:m[1]+compact(probe)+'`',s)
+ assert count==1
+ out[p]=s
  p=ROOT/'internal/connections/schema_defs.go';s=p.read_text()
  s,count=re.subn(r'(const schemaDefs = `)[^`]*`',lambda m:m[1]+compact({'$defs':model.D})+'`',s)
  assert count==1
