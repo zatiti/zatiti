@@ -65,6 +65,9 @@ func runServe(ctx context.Context, cfg config, log *slog.Logger, opts serveOptio
 	if err := cfg.validateServe(); err != nil {
 		return &contract.Fault{Code: contract.CodeInvalidInput, Message: err.Error()}
 	}
+	if err := validateInstalledMacServeConfig(cfg); err != nil {
+		return &contract.Fault{Code: contract.CodeInvalidInput, Message: err.Error()}
+	}
 	if opts.pollInterval <= 0 {
 		opts.pollInterval = defaultPollInterval
 	}
