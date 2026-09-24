@@ -3,7 +3,6 @@ package mcpclient
 import (
 	"bytes"
 	"context"
-	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -19,7 +18,7 @@ func init() {
 	// This package's tests dial a real httptest.NewTLSServer; its
 	// self-signed certificate is not in any real trust store. Production
 	// code never sets testTLSConfig (see its doc comment in adapter.go).
-	testTLSConfig = &tls.Config{InsecureSkipVerify: true} //nolint:gosec // test-only, never wired into production code
+	EnableInsecureTLSForTest()
 }
 
 // ---------- fakes ----------

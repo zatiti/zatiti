@@ -27,6 +27,13 @@ const adapterName = "mcp"
 // Adapter. Production code and cmd/zatiti never set it.
 var testTLSConfig *tls.Config
 
+// EnableInsecureTLSForTest is the test-only seam used by this package's
+// tests and by tests/qualification against an in-process
+// httptest.NewTLSServer. Production and cmd/zatiti never call it.
+func EnableInsecureTLSForTest() {
+	testTLSConfig = &tls.Config{InsecureSkipVerify: true} //nolint:gosec // test-only seam for self-signed httptest
+}
+
 // refusedMethods are the server-to-client request methods this adapter
 // always refuses with a JSON-RPC method-not-found error, regardless of the
 // go-sdk's own default per-feature behavior (which is inconsistent: a nil
