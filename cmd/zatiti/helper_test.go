@@ -7,7 +7,10 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -147,22 +150,47 @@ func TestRunConnectionHelperNeverPrintsTheCredential(t *testing.T) {
 	expiresAt := time.Now().UTC().Add(30 * time.Minute).Truncate(time.Second)
 
 	var completeInput map[string]any
+	completed := false
+	credentialRef := ""
 	op := &fakeOperator{fn: func(_ context.Context, operation string, req contract.Request) (contract.Result, error) {
 		switch operation {
 		case "connection.get":
 			return contract.Result{Payload: contract.Payload{Status: contract.StatusCompleted,
-				Data: mustJSON(t, map[string]any{"resource": map[string]any{"version": 1, "account_identity": "acct-1"}}),
+				Data: mustJSON(t, map[string]any{"resource": map[string]any{"version": 1, "account_identity": "acct-1", "credential_ref": credentialRef}}),
 			}}, nil
+		case "command.get":
+			return contract.Result{Payload: contract.Payload{Status: contract.StatusFailed, Error: &contract.Fault{Code: contract.CodeNotFound}}}, nil
 		case "connection.setup.begin":
+			if req.SubmissionKey == "" {
+				t.Fatal("setup.begin has no submission key")
+			}
 			return contract.Result{Payload: contract.Payload{Status: contract.StatusCompleted,
 				Data: mustJSON(t, map[string]any{"resource": map[string]any{
 					"id": challengeID, "version": 1, "expires_at": expiresAt.Format(time.RFC3339),
 				}}),
 			}}, nil
+		case "connection.setup.status":
+			state := "external_action_required"
+			if completed {
+				state = "completed"
+			}
+			return contract.Result{Payload: contract.Payload{Status: contract.StatusCompleted,
+				Data: mustJSON(t, map[string]any{"resource": map[string]any{"id": challengeID, "version": 1, "connection_id": connectionID, "state": state, "expires_at": expiresAt.Format(time.RFC3339)}}),
+			}}, nil
 		case "connection.setup.complete":
+			if req.SubmissionKey == "" {
+				t.Fatal("setup.complete has no submission key")
+			}
 			if err := json.Unmarshal(req.Input, &completeInput); err != nil {
 				t.Fatalf("decoding connection.setup.complete input: %v", err)
 			}
+			rest := strings.TrimPrefix(completeInput["helper_ref"].(string), helperReceiptPrefix)
+			body, _, _ := strings.Cut(rest, ".")
+			payloadBytes, _ := base64.RawURLEncoding.DecodeString(body)
+			var payload helperPayload
+			_ = json.Unmarshal(payloadBytes, &payload)
+			credentialRef = payload.CredentialRef
+			completed = true
 			return contract.Result{Payload: contract.Payload{Status: contract.StatusCompleted,
 				Data: mustJSON(t, map[string]any{"resource": map[string]any{"id": connectionID}}),
 			}}, nil
@@ -240,6 +268,194 @@ func TestRunConnectionHelperNeverPrintsTheCredential(t *testing.T) {
 	}
 	if string(stored) != secretMarker {
 		t.Fatalf("stored credential = %q, want the entered secret", stored)
+	}
+}
+
+func TestReadSecretLineEnforcesUTF8ByteLimit(t *testing.T) {
+	for _, tc := range []struct {
+		name, input string
+		valid       bool
+	}{
+		{"exact bound", strings.Repeat("x", 4096) + "\n", true},
+		{"over bound", strings.Repeat("x", 4097) + "\n", false},
+		{"multibyte over bound", strings.Repeat("é", 2049) + "\n", false},
+		{"invalid utf8", string([]byte{0xff, '\n'}), false},
+		{"empty", "\n", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := readSecretLine(strings.NewReader(tc.input))
+			if (err == nil) != tc.valid {
+				t.Fatalf("valid=%t, error=%v", tc.valid, err)
+			}
+			if tc.valid && len(got) != 4096 {
+				t.Fatalf("got %d bytes", len(got))
+			}
+		})
+	}
+}
+
+func TestHelperIntentRejectsSymlinkAndPermissiveFile(t *testing.T) {
+	store, err := newHelperIntentStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := string(contract.NewID())
+	path := filepath.Join(store.dir, id+".json")
+	if err := os.Symlink(filepath.Join(t.TempDir(), "outside"), path); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.read(id); err == nil {
+		t.Fatal("symlinked intent accepted")
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.read(id); err == nil {
+		t.Fatal("permissive intent accepted")
+	}
+}
+
+type countingSecrets struct {
+	*fakeSecretStore
+	puts int
+}
+
+func (s *countingSecrets) Put(ctx context.Context, name string, b []byte) (string, error) {
+	s.puts++
+	return s.fakeSecretStore.Put(ctx, name, b)
+}
+
+func TestHelperUnknownCompletionReconcilesWithoutSecondCredentialWrite(t *testing.T) {
+	root := t.TempDir()
+	secrets := &countingSecrets{fakeSecretStore: newFakeSecretStore()}
+	installationID, connectionID, challengeID := contract.NewID(), contract.NewID(), contract.NewID()
+	expires := time.Now().UTC().Add(time.Hour).Truncate(time.Second)
+	var beginKey, completeKey, effectiveRef string
+	completed := false
+	completeCalls := 0
+	op := &fakeOperator{fn: func(_ context.Context, operation string, req contract.Request) (contract.Result, error) {
+		switch operation {
+		case "command.get":
+			return contract.Result{Payload: contract.Payload{Status: contract.StatusFailed, Error: &contract.Fault{Code: contract.CodeNotFound}}}, nil
+		case "connection.get":
+			return contract.Result{Payload: contract.Payload{Status: contract.StatusCompleted, Data: mustJSON(t, map[string]any{"resource": map[string]any{"version": 1, "account_identity": "acct", "credential_ref": effectiveRef}})}}, nil
+		case "connection.setup.begin":
+			if req.SubmissionKey == "" {
+				t.Fatal("unkeyed begin")
+			}
+			beginKey = req.SubmissionKey
+			return contract.Result{Payload: contract.Payload{Status: contract.StatusCompleted, Data: mustJSON(t, map[string]any{"resource": map[string]any{"id": challengeID, "version": 1, "expires_at": expires}})}}, nil
+		case "connection.setup.status":
+			state := "external_action_required"
+			if completed {
+				state = "completed"
+			}
+			return contract.Result{Payload: contract.Payload{Status: contract.StatusCompleted, Data: mustJSON(t, map[string]any{"resource": map[string]any{"id": challengeID, "version": 1, "connection_id": connectionID, "state": state, "expires_at": expires}})}}, nil
+		case "connection.setup.complete":
+			if req.SubmissionKey == "" || req.SubmissionKey == beginKey {
+				t.Fatal("missing or reused completion key")
+			}
+			completeKey = req.SubmissionKey
+			completeCalls++
+			var input struct {
+				HelperRef string `json:"helper_ref"`
+			}
+			if err := json.Unmarshal(req.Input, &input); err != nil {
+				t.Fatal(err)
+			}
+			parts := strings.Split(strings.TrimPrefix(input.HelperRef, helperReceiptPrefix), ".")
+			body, _ := base64.RawURLEncoding.DecodeString(parts[0])
+			var payload helperPayload
+			_ = json.Unmarshal(body, &payload)
+			effectiveRef = payload.CredentialRef
+			completed = true
+			return contract.Result{}, errors.New("lost acknowledgment")
+		default:
+			t.Fatalf("unexpected operation %s", operation)
+			return contract.Result{}, nil
+		}
+	}}
+	const marker = "secret-never-public"
+	var diagnostics lockedBuffer
+	if err := runHelperEngine(context.Background(), root, op, secrets, strings.NewReader(marker+"\n"), &diagnostics, installationID, connectionID); err == nil {
+		t.Fatal("lost acknowledgment reported success")
+	}
+	if beginKey == "" || completeKey == "" || secrets.puts != 2 {
+		t.Fatalf("keys=%q,%q puts=%d", beginKey, completeKey, secrets.puts)
+	} // credential + receipt key
+	if err := runHelperEngine(context.Background(), root, op, secrets, strings.NewReader("different-secret\n"), &diagnostics, installationID, connectionID); err != nil {
+		t.Fatalf("recovery: %v", err)
+	}
+	if completeCalls != 1 || secrets.puts != 2 {
+		t.Fatalf("completion calls=%d, secret writes=%d", completeCalls, secrets.puts)
+	}
+	if strings.Contains(diagnostics.String(), marker) {
+		t.Fatal("credential leaked to diagnostics")
+	}
+	store, _ := newHelperIntentStore(root)
+	if pending, err := store.read(string(connectionID)); err != nil || pending != nil {
+		t.Fatalf("pending after recovery: %+v %v", pending, err)
+	}
+}
+
+func TestHelperResumesCrashAfterPutBeforeIntentReference(t *testing.T) {
+	root := t.TempDir()
+	store, err := newHelperIntentStore(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secrets := &countingSecrets{fakeSecretStore: newFakeSecretStore()}
+	installationID, connectionID, challengeID := contract.NewID(), contract.NewID(), contract.NewID()
+	expires := time.Now().UTC().Add(time.Hour).Truncate(time.Second)
+	intent := helperIntent{Schema: helperIntentSchema, InstallationID: string(installationID), ConnectionID: string(connectionID), ConnectionVersion: 1, AccountIdentity: "acct", BeginKey: "begin-key", ChallengeID: string(challengeID), ChallengeVersion: 1, ExpiresAt: expires, CredentialName: "connections/credential/" + string(contract.NewID()), CompleteKey: "complete-key"}
+	if err := store.write(intent); err != nil {
+		t.Fatal(err)
+	}
+	ref, err := secrets.Put(context.Background(), intent.CredentialName, []byte("already-custodied"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var effectiveRef string
+	completed := false
+	op := &fakeOperator{fn: func(_ context.Context, operation string, req contract.Request) (contract.Result, error) {
+		switch operation {
+		case "command.get":
+			return contract.Result{Payload: contract.Payload{Status: contract.StatusFailed, Error: &contract.Fault{Code: contract.CodeNotFound}}}, nil
+		case "connection.get":
+			return contract.Result{Payload: contract.Payload{Status: contract.StatusCompleted, Data: mustJSON(t, map[string]any{"resource": map[string]any{"version": 1, "account_identity": "acct", "credential_ref": effectiveRef}})}}, nil
+		case "connection.setup.status":
+			state := "external_action_required"
+			if completed {
+				state = "completed"
+			}
+			return contract.Result{Payload: contract.Payload{Status: contract.StatusCompleted, Data: mustJSON(t, map[string]any{"resource": map[string]any{"id": challengeID, "version": 1, "connection_id": connectionID, "state": state, "expires_at": expires}})}}, nil
+		case "connection.setup.complete":
+			if req.SubmissionKey != intent.CompleteKey {
+				t.Fatal("completion key changed")
+			}
+			if strings.Contains(string(req.Input), "already-custodied") {
+				t.Fatal("credential leaked into operation")
+			}
+			effectiveRef = ref
+			completed = true
+			return contract.Result{Payload: contract.Payload{Status: contract.StatusCompleted}}, nil
+		default:
+			t.Fatalf("unexpected operation %s", operation)
+			return contract.Result{}, nil
+		}
+	}}
+	var diagnostics lockedBuffer
+	if err := runHelperEngine(context.Background(), root, op, secrets, strings.NewReader("different-secret\n"), &diagnostics, installationID, connectionID); err != nil {
+		t.Fatal(err)
+	}
+	if secrets.puts != 2 {
+		t.Fatalf("credential was overwritten: puts=%d", secrets.puts)
+	} // existing credential + receipt key
+	if strings.Contains(diagnostics.String(), "already-custodied") {
+		t.Fatal("credential leaked")
 	}
 }
 

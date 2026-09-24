@@ -14,8 +14,8 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/spf13/cobra"
 
@@ -90,9 +90,10 @@ const (
 	// deliberate, documented wire-format mirror -- the same pattern
 	// internal/controller's own wire.go already uses for frozen
 	// cross-package shapes it does not import Go types for.
-	helperReceiptPrefix   = "zatiti-helper/v1."
-	helperReceiptKeyRef   = "connections/helper/receipt-key"
-	helperReceiptKeyBytes = 32
+	helperReceiptPrefix      = "zatiti-helper/v1."
+	helperReceiptKeyRef      = "connections/helper/receipt-key"
+	helperReceiptKeyBytes    = 32
+	maxHelperCredentialBytes = 4096
 )
 
 // helperPayload mirrors internal/connections/localio.go:54-59's unexported
@@ -252,94 +253,19 @@ func runConnectionHelper(ctx context.Context, cfg *config, op contract.Operator,
 		return fmt.Errorf("opening the local secret store: %w", err)
 	}
 	defer func() { _ = plat.Close() }()
-	secrets := plat.Secrets()
-
-	scope := map[string]any{"installation_id": installationID}
-
-	getRes, err := callOperation(ctx, op, "connection.get", map[string]any{"scope": scope, "id": connectionID})
-	if err != nil {
-		return fmt.Errorf("connection.get: %w", err)
-	}
-	var conn struct {
-		Resource struct {
-			Version         int64  `json:"version"`
-			AccountIdentity string `json:"account_identity"`
-		} `json:"resource"`
-	}
-	if err := json.Unmarshal(getRes.Data, &conn); err != nil {
-		return fmt.Errorf("decoding connection.get: %w", err)
-	}
-
-	beginRes, err := callOperation(ctx, op, "connection.setup.begin", map[string]any{
-		"scope": scope, "connection_id": connectionID, "expected_version": conn.Resource.Version, "method": "store_reference",
-	})
-	if err != nil {
-		return fmt.Errorf("connection.setup.begin: %w", err)
-	}
-	var challenge struct {
-		Resource struct {
-			ID        contract.ID `json:"id"`
-			Version   int64       `json:"version"`
-			ExpiresAt time.Time   `json:"expires_at"`
-		} `json:"resource"`
-	}
-	if err := json.Unmarshal(beginRes.Data, &challenge); err != nil {
-		return fmt.Errorf("decoding connection.setup.begin: %w", err)
-	}
-
-	_, _ = fmt.Fprintf(streams.Err, "zatiti: enter the credential for connection %s (account %s); input is not echoed and never leaves this terminal as an operation argument\n", connectionID, conn.Resource.AccountIdentity)
-	secret, err := readSecretLine(streams.In)
-	if err != nil {
-		return fmt.Errorf("reading the credential: %w", err)
-	}
-	defer zero(secret)
-	if len(secret) == 0 {
-		return errors.New("an empty credential was entered; setup cancelled")
-	}
-
-	// credentialRef is the store's OWN opaque return value, never a label
-	// this command invents: connection.setup.complete's Perform phase later
-	// calls secrets.Get(ctx, payload.CredentialRef) with exactly what this
-	// receipt names, so it must be the reference platform.Secrets().Put
-	// actually returns (contract.SecretStore.Put's opaque-reference
-	// contract, internal/contract/stores.go:11).
-	credentialRef, err := secrets.Put(ctx, "connections/credential/"+string(contract.NewID()), secret)
-	if err != nil {
-		return fmt.Errorf("writing the credential to the local secret store: %w", err)
-	}
-
-	key, err := ensureHelperReceiptKey(ctx, secrets)
-	if err != nil {
-		return err
-	}
-	defer zero(key)
-	receipt, err := mintHelperReceipt(key, helperPayload{
-		ChallengeID: challenge.Resource.ID, CredentialRef: credentialRef,
-		AccountIdentity: conn.Resource.AccountIdentity, ExpiresAt: challenge.Resource.ExpiresAt,
-	})
-	if err != nil {
-		return err
-	}
-
-	if _, err := callOperation(ctx, op, "connection.setup.complete", map[string]any{
-		"scope": scope, "challenge_id": challenge.Resource.ID, "expected_version": challenge.Resource.Version, "helper_ref": receipt,
-	}); err != nil {
-		return fmt.Errorf("connection.setup.complete: %w", err)
-	}
-	_, _ = fmt.Fprintf(streams.Err, "zatiti: connection %s setup complete\n", connectionID)
-	return nil
+	return runHelperEngine(ctx, cfg.StateDir, op, plat.Secrets(), streams.In, streams.Err, installationID, connectionID)
 }
 
 // callOperation runs one operation call and normalizes a non-completed
 // outcome (a transport error, or a completed transport carrying a fault)
 // into a single Go error the caller can wrap and exitFor can map to a CLI
 // exit code.
-func callOperation(ctx context.Context, op contract.Operator, operation string, input map[string]any) (contract.Result, error) {
+func callOperation(ctx context.Context, op contract.Operator, operation string, input map[string]any, submissionKey string) (contract.Result, error) {
 	raw, err := json.Marshal(input)
 	if err != nil {
 		return contract.Result{}, fmt.Errorf("encoding request input: %w", err)
 	}
-	res, err := op.Call(ctx, operation, contract.Request{Schema: contract.SchemaRequest, Input: raw})
+	res, err := op.Call(ctx, operation, contract.Request{Schema: contract.SchemaRequest, SubmissionKey: submissionKey, Input: raw})
 	if err != nil {
 		return contract.Result{}, err
 	}
@@ -357,13 +283,34 @@ func callOperation(ctx context.Context, op contract.Operator, operation string, 
 func readSecretLine(in io.Reader) ([]byte, error) {
 	restore := suppressTerminalEcho()
 	defer restore()
-	reader := bufio.NewReader(in)
-	line, err := reader.ReadString('\n')
-	if err != nil && !errors.Is(err, io.EOF) {
-		return nil, err
+	reader := bufio.NewReaderSize(in, 512)
+	secret := make([]byte, 0, 128)
+	for {
+		b, err := reader.ReadByte()
+		if err != nil {
+			if !errors.Is(err, io.EOF) {
+				zero(secret)
+				return nil, err
+			}
+			break
+		}
+		if b == '\n' {
+			break
+		}
+		if len(secret) == maxHelperCredentialBytes+1 {
+			zero(secret)
+			return nil, errors.New("credential exceeds the 4096-byte limit")
+		}
+		secret = append(secret, b)
 	}
-	line = strings.TrimRight(line, "\r\n")
-	return []byte(line), nil
+	if len(secret) > 0 && secret[len(secret)-1] == '\r' {
+		secret = secret[:len(secret)-1]
+	}
+	if len(secret) == 0 || len(secret) > maxHelperCredentialBytes || !utf8.Valid(secret) {
+		zero(secret)
+		return nil, errors.New("credential must be 1..4096 valid UTF-8 bytes")
+	}
+	return secret, nil
 }
 
 // suppressTerminalEcho best-effort disables local terminal echo on
