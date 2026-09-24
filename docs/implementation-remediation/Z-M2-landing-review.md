@@ -1,0 +1,36 @@
+# Generic MCP adapter landing review
+
+Status: blocked, not merged. Contract PR [#67](https://github.com/zatiti/zatiti/pull/67) and implementation PR [#69](https://github.com/zatiti/zatiti/pull/69) remain separate. The implementation is stacked on the contract branch; neither may be represented as landed without remote verification.
+
+The independent review examined the full main-to-implementation diff at `e9951be64170033e2502cbb17e3cbf0792222814` in a separate checkout. It reproduced raw MCP session-ID staging and bearer-token echo leakage using synthetic fixtures, and returned BLOCK. Follow-up tests reproduced a discovery job without a prepared effect or operation link, incompatible discovered-tool and adapter input shapes, and sent handshake exchanges omitted when responses were lost.
+
+## Verified fixes
+
+The integration assertions now require the frozen 203 public operations, including the two new connection operations; the domain-only count is 201. Query close failures propagate, and an unused MCP catalog query was removed. Regression verification passed 84 application and 44 integration test/subtest results with no skips, plus connections unit tests and zero connections lint issues. These first local checks used Go 1.27.1 and lint 2.13.2; pinned-toolchain results are recorded separately below.
+
+Adapter fixes integrated at `24eb9c3d8c11f45949fd5e2ffa148cf5fccdfde7` remove the global insecure-TLS switch, confine bearer and session material, preserve restricted request classification, report profile cost estimates, isolate sessions by credential and operation, preserve known outcomes when result staging fails, and record termination status/deadline failures. Twelve new regression tests fail against the original implementation; 26 adapter tests passed including race detection. Seven controlled MCP qualification cases passed with Go 1.26.2.
+
+Pinned full verification at that head: `GOTOOLCHAIN=go1.26.2 go test -race -json -count=1 -timeout 10m ./... ./.github/workflows/...` passed 36 tested packages and 3,311 test/subtest results. Two packages have no tests. Thirteen qualification tests/subtests skipped: live Responses provider, named external clients, ten desktop journey cases, and Linux distribution on this macOS host. `go vet ./... ./.github/workflows/...` and golangci-lint 2.11.3 over the same package set passed with zero issues. Toolchain/lock verification, `go mod verify`, and `go mod tidy -diff` passed. The generated specification check and all 13 Python specgen tests passed.
+
+Subsequent fixes at `01416b1a14be7cb8c42bf4d943aadae8e3c247c9` reject credential-bearing endpoint routes, synchronize concurrent control replies, prevent numeric and reflected session secrets from staging, and block SDK-generated GET/DELETE outside explicit close. The deterministic method-guard regression was added at `c00d90ee129b14c827abf30707bcf4ed582de470`.
+
+An independent Codex reviewer approved the safe-fix delta at `01416b1` and inspected the additional test-only change, but explicitly BLOCKED overall Z-M2 and merge. Independent Go 1.26.2 adapter race verification passed 31 top-level tests. The concurrency fixture observes 17 physical POSTs for one tool call plus 16 refused requests; this proves safe concurrent handling, not compliance with the frozen one-request requirement.
+
+Final targeted verification at `c00d90ee129b14c827abf30707bcf4ed582de470`: Go 1.26.2 `go test -race -json -count=1 -timeout 10m ./internal/adapters/mcpclient ./tests/qualification` passed both packages, 82 test/subtest results and 13 explicitly skipped qualification results. Vet and golangci-lint 2.11.3 passed for both packages with zero issues. The final method-guard regression is included. Shared build leases were checked, acquired and released by exact SHA in the same foreground process/trap.
+
+## Required coordinated resolution
+
+The [contract review request](https://github.com/zatiti/zatiti/pull/67#issuecomment-5819294109) records the affected owners and proposed changes. Specification maintenance is a separate assignment under the root guidance; implementation fixes did not modify frozen schemas or relax authority checks.
+
+- **Initial validation.** Both `_connections.resolve` and effects admission/claim require a valid connection. The resolve input has no action/purpose/provenance discriminator. The built-in probe permits `open_session` and `list_tools`, so exempting its identity would also exempt discovery freshness. Establish an immutable initial-validation capability and provenance-bound admission path checked by connections and effects. Do not fabricate a valid connection result.
+- **Governed discovery.** Prepare the immutable effect and operation-linked job in the same transaction, with real configuration revision, authoritative profile/account/destination/cost bounds and persisted callback routing. The controller must distinguish discovery from validation from durable state. Existing fields support operation linkage; this is missing implementation, not a reason to add a redundant field.
+- **Pinned tool composition.** Define and implement the owner that composes the discovered argument schema into the exact MCP action envelope, pins tool/schema/digest/session/classification before admission, and rejects stale catalog bindings. Effects currently stores the complete governed Action in Dispatch.Action while this adapter expects MCP parameters directly; translation must retain governed metadata and match the shared dispatch contract. Changing schema bytes while retaining the same tool ID/version must not silently reauthorize a binding.
+- **Control replies.** An independent Go 1.26.2 reproduction at `24eb9c3` recorded five HTTP requests during one `call_tool`: one tools/call and four reply POSTs for sampling, elicitation, roots and ping. The frozen requirements to answer every request and perform exactly one HTTP request cannot both describe this exchange. Specify an explicit bounded/accounted reply policy and evidence, or change refusal/termination behavior. Existing one-request qualification uses a tool with no callbacks and does not prove this case.
+- **Pre-send evidence.** A failure staging request context cannot supply the mandatory artifact. Define a typed pre-send refusal/evidence representation without inventing staged bytes.
+- **Lost handshake evidence.** `MCPHandshakeExchange.http_status` is mandatory and bounded to 100..599. A sent request without a response has no HTTP status. Permit omission only when no response exists, retain `message` and `request_sent`, and preserve the ordered three-exchange bound. Do not invent status or drop the exchange.
+
+Affected owners: connections, effects, controller, execution, mcpclient, authored specification inputs, integration and qualification. The authored assignment also retains obsolete exact-two-handshake/constant-protocol wording after the existing at-most-three amendment; reconcile it with the frozen contract in the serialized specification pass.
+
+## Limits
+
+Controlled fixtures establish only their exercised behavior. No live provider call, Postiz publishing, deployment, release qualification, or merge was performed. Desktop, named external-client and live-provider skips are not passing qualification evidence. Existing implementation and contract worktrees were preserved.
