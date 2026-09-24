@@ -2140,5 +2140,75 @@
       "render --check reports zero stale/missing generated files.",
       "All prior Z01-Z21 and JOURNEY/QUALIFICATION cases remain present and unweakened in the regenerated coverage.json."
     ]
+  },
+  {
+    "id": "QUALIFICATION.macos_pkg_binding",
+    "gate": "QUALIFICATION",
+    "owners": [
+      "distribution",
+      "ci",
+      "qualification"
+    ],
+    "setup": "Build one final signed/notarized pkg for each native Mac architecture, with exact component archives, signed release descriptor/delivery record, external Team ID pin and a clean user account. Include synthetic tampered fixtures.",
+    "action": "Inspect the real package payload and signer, run fixed current-user installer on clean hosts, rehash installed inbox, activate and audit both trees/launcher, then inject crash after package staging and after Apply before watermark publication.",
+    "expected": [
+      "Exact three-file package inbox and acyclic binding match the signed inner descriptor and both downloaded archives; scripts, extra choices/paths, wrong signer/arch and tampered payload are rejected before activation.",
+      "Only audited active trees advance the protected fence; rerun after each crash preserves state and neither replays an ambiguous activation blindly nor treats a package receipt as evidence.",
+      "Signed/notarized and Gatekeeper evidence is recorded for Intel and Apple Silicon with actual OS/tool/artifact versions; Xcode is not needed on the destination, and inability to use the fixed per-user target blocks release."
+    ]
+  },
+  {
+    "id": "QUALIFICATION.macos_gui_secret_helper",
+    "gate": "QUALIFICATION",
+    "owners": [
+      "zatiti",
+      "platform",
+      "connections",
+      "desktop",
+      "distribution",
+      "qualification"
+    ],
+    "setup": "Install the signed architecture-matched controller helper and Flutter Runner with a provisioned default login Keychain on clean Intel and Apple Silicon accounts; use synthetic credentials until explicit live-provider qualification.",
+    "action": "Capture, cancel, lock/refuse Keychain, invoke helper from an unsigned/other-team parent, lose setup.begin and setup.complete responses, crash after SecretStore.Put, then upgrade and reopen the app. Inspect argv/environment/channel/log/public-operation bytes.",
+    "expected": [
+      "Dart, argv, environment, output, logs and public operation inputs contain no raw provider key; native request/result fields are strictly bounded and redacted.",
+      "Only the signed Runner launches the declared helper; wrong caller/signature, missing master item, locked Keychain and stale installation identity fail closed without plaintext fallback.",
+      "Durable submission keys and challenge/connection status reconcile lost acknowledgements; the effective credential is retained, a stale orphan is removed only after authoritative check, and no second challenge/key is silently minted.",
+      "Real signed GUI and Keychain ACL continuity pass separately on both native architectures; fake UI/store tests alone are not qualification."
+    ]
+  },
+  {
+    "id": "QUALIFICATION.macos_serenity_hard_gate",
+    "gate": "QUALIFICATION",
+    "owners": [
+      "serenity",
+      "memory",
+      "accounting",
+      "qualification",
+      "distribution"
+    ],
+    "setup": "Pin the actual public Serenity commit/protocol and install its runtime/read facade with the Mac release on clean native Intel and Apple Silicon hosts.",
+    "action": "Prove scoped recall and write/curation, one canonical writer per brain, command disposition after lost acknowledgement, bounded spend/disclosure behavior, exportable backup revision and paused restore reconciliation through public interfaces.",
+    "expected": [
+      "Each required guarantee has observed versioned evidence, including physical call counts and crash/unknown cases; a missing upstream method or missing qualification blocks the first-chat release.",
+      "No reduced-capability preview, fake success, private Serenity API or empty-brain backup substitutes for the full requirement."
+    ]
+  },
+  {
+    "id": "QUALIFICATION.macos_bootstrap_entrypoint",
+    "gate": "QUALIFICATION",
+    "owners": [
+      "distribution",
+      "ci",
+      "zatiti",
+      "qualification"
+    ],
+    "setup": "Build and host final script plus signed/notarized universal bootstrap app using external trusted signing inputs, then publish a literal command pinned to the exact script SHA on a reviewed release page.",
+    "action": "On clean native Intel and Apple Silicon hosts without developer tools, run the literal command, tamper each script/app archive hash and signature, attempt redirect and Rosetta execution, and inspect the selected signed delivery assets.",
+    "expected": [
+      "The command never executes network script bytes before verifying its literal SHA; the script verifies a separately pinned bootstrap app archive and exact code-signing/notarization identity before launch.",
+      "The bootstrap app embeds trusted Ed25519 roots, never adopts a fetched key, detects native hardware under Rosetta and downloads only the matching controller/desktop/pkg assets.",
+      "Actual hosted bytes, URL, command hash, Team ID, OS/arch and installer evidence are recorded; any missing artifact or failed clean-host run blocks the advertised one-line installation claim."
+    ]
   }
 ]

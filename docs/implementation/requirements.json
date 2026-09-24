@@ -1961,5 +1961,44 @@
     ],
     "kind": "requirement",
     "text": "memory.list lists authorized scoped claim refs (source, freshness, lineage, supported actions) for brains the calling principal can access; it never lists an unauthorized brain and never performs paid retrieval. installation.verifier.list separately enumerates installed trusted verifier profiles (secret-free, no executable path or argv) so a task's acceptance contract can name one before admission."
+  },
+  {
+    "id": "R-MAC9-001",
+    "section": "MAC9",
+    "owner": "distribution",
+    "participants": [
+      "ci",
+      "qualification",
+      "desktop",
+      "platform"
+    ],
+    "kind": "requirement",
+    "text": "The first Mac release uses architecture-specific signed, notarized, data-only per-user packages. Each package has one exact inbox payload with canonical acyclic binding to the separately signed inner descriptor and controller/desktop archive bytes; no package script, extra choice, unexpected path or executable payload activates. The trusted bootstrap verifies actual payload bytes, pinned Developer ID identity and Gatekeeper decision before fixed current-user installation, re-verifies installed bytes, activates only through packaging.Apply, audits active trees and launcher, then advances the protected sequence fence. Both native Mac architectures and real supported OS versions must pass clean-host installation, upgrade and crash-recovery qualification without Xcode on the destination."
+  },
+  {
+    "id": "R-MAC9-002",
+    "section": "MAC9",
+    "owner": "zatiti",
+    "participants": [
+      "platform",
+      "connections",
+      "desktop",
+      "distribution",
+      "qualification"
+    ],
+    "kind": "requirement",
+    "text": "An installed signed Mac GUI credential helper in the controller distribution captures a bounded provider key through AppKit without passing raw bytes through Dart, argv, environment or any public operation. The signed Runner sends only installation and connection IDs and receives a redacted status; the helper owns the protected Keychain and trusted challenge/store-reference/receipt flow. Setup mutations use durable submission keys and command/status reconciliation; a protected pending intent prevents silent duplicate challenges or orphaned credential refs after a lost acknowledgement or crash. Missing master-key/owner access and locked or refused Keychain fail closed. A real provider first reply and all required Serenity protocol, writer, memory, accounting, reconciliation and backup guarantees remain mandatory release gates."
+  },
+  {
+    "id": "R-MAC9-003",
+    "section": "MAC9",
+    "owner": "distribution",
+    "participants": [
+      "ci",
+      "zatiti",
+      "qualification"
+    ],
+    "kind": "requirement",
+    "text": "The one-line Mac command is generated only after the hosted bootstrap script has a literal SHA-256 in the command. That script verifies a literal hash of the signed/notarized universal bootstrap app archive before extracting and launching its fixed executable. The bootstrap app embeds the trusted delivery-signature public keys and hardware-architecture detection, then consumes the six-asset signed delivery record through RunMacBootstrap. Neither an unsigned curl-pipe-shell stage nor a fetched trust key establishes trust. Real Team ID, hosting URL, notarization and clean-host evidence are external gates; no public command is claimed from fixture tests."
   }
 ]

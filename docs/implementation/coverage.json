@@ -1,5 +1,5 @@
 {
-  "revision": 8,
+  "revision": 9,
   "requirements": [
     {
       "requirement": "R1-002",
@@ -2395,6 +2395,54 @@
         "tests/integration",
         "tests/qualification"
       ]
+    },
+    {
+      "requirement": "R-MAC9-001",
+      "section": "MAC9",
+      "kind": "requirement",
+      "owner": "packaging",
+      "participants": [
+        ".github/workflows",
+        "tests/qualification",
+        "apps/desktop",
+        "internal/platform"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R-MAC9-002",
+      "section": "MAC9",
+      "kind": "requirement",
+      "owner": "cmd/zatiti",
+      "participants": [
+        "internal/platform",
+        "internal/connections",
+        "apps/desktop",
+        "packaging",
+        "tests/qualification"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R-MAC9-003",
+      "section": "MAC9",
+      "kind": "requirement",
+      "owner": "packaging",
+      "participants": [
+        ".github/workflows",
+        "cmd/zatiti",
+        "tests/qualification"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
     }
   ],
   "acceptance_cases": [
@@ -3729,6 +3777,48 @@
       "gate": "P00",
       "scopes": [
         "tests/integration"
+      ]
+    },
+    {
+      "id": "QUALIFICATION.macos_pkg_binding",
+      "gate": "QUALIFICATION",
+      "scopes": [
+        "packaging",
+        ".github/workflows",
+        "tests/qualification"
+      ]
+    },
+    {
+      "id": "QUALIFICATION.macos_gui_secret_helper",
+      "gate": "QUALIFICATION",
+      "scopes": [
+        "cmd/zatiti",
+        "internal/platform",
+        "internal/connections",
+        "apps/desktop",
+        "packaging",
+        "tests/qualification"
+      ]
+    },
+    {
+      "id": "QUALIFICATION.macos_serenity_hard_gate",
+      "gate": "QUALIFICATION",
+      "scopes": [
+        "internal/adapters/serenity",
+        "internal/memory",
+        "internal/accounting",
+        "tests/qualification",
+        "packaging"
+      ]
+    },
+    {
+      "id": "QUALIFICATION.macos_bootstrap_entrypoint",
+      "gate": "QUALIFICATION",
+      "scopes": [
+        "packaging",
+        ".github/workflows",
+        "cmd/zatiti",
+        "tests/qualification"
       ]
     }
   ]
