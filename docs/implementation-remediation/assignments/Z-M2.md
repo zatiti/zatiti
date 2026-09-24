@@ -93,25 +93,49 @@ not patched locally.
   provider `mcp` is `open_session`. Effect classification of an mcp tool
   binding defaults to `external_mutation`; annotations change nothing.
 
-## Postiz endpoint shape and tonight's acceptance (verified live 2026-09-23, chief-operator 06:23Z + chief-architect probe)
+## Postiz endpoint shape and tonight's acceptance (verified live 2026-09-23 with the real key; chief-developer's dispatch call 23:4x PT)
 
 On our deployment the MCP endpoint lives under the backend path, not `/mcp`
-(which hits the frontend): the Bearer form is `https://post.sire.blog/api/mcp`
-and answers a placeholder `Authorization: Bearer <x>` with HTTP 401 "Invalid
-API Key or OAuth token", and a missing header with 401 "Missing Authorization
-header". The credential-in-path form `/api/mcp/<key>` also exists (400
-"Invalid API Key") and is exactly what this contract refuses as
-`capability_unsupported`: the fixture, the qualification profile and any
-default MUST use the Bearer form at `/api/mcp`. Routing already works through
-Cloudflare with no reverse-proxy change.
+(which hits the frontend). The adapter's shape is **`POST
+https://post.sire.blog/api/mcp` with `Authorization: Bearer <key>`**,
+verified with the real key by chief-architect and chief-operator
+independently: `initialize` 200 (server "Postiz MCP" 1.0.0), `tools/list`
+200 with **11 tools** (integrationList, groupList, integrationSchema,
+triggerTool, integrationSchedulePostTool, generateVideoOptions,
+videoFunctionTool, generateVideoTool, generateImageTool, uploadFromUrlTool,
+ask_postiz; the design doc's "13" came from Postiz docs, discovery records
+what is served). A placeholder Bearer returns 401 "Invalid API Key or OAuth
+token"; no header returns 401 "Missing Authorization header". The
+credential-in-path form `/api/mcp/<key>` also exists and is exactly what
+this contract refuses as `capability_unsupported`: never the fixture, the
+profile endpoint or a default. Routing works through Cloudflare with no
+reverse-proxy change.
 
-No real key exists in the fleet; minting is David's action. Tonight's
-acceptance for this card is therefore: the adapter proven against
-`open_session`/`list_tools` toward `https://post.sire.blog/api/mcp` with a
-placeholder Bearer connection, where the 401 is recorded as a typed refusal
-(`physical_call.http_status` 401, disposition `failed`, `error_code` from the
-sanitized body, no credential bytes anywhere) and never as success or
-unknown. Real-key streaming end to end is the Z-M3 follow-on card.
+Transport facts, all representable in the frozen seam:
+- Postiz echoes whatever `protocolVersion` the client offers. go-sdk
+  `Connect`'s fallback `initialize` offers `2025-11-25`, so a profile with
+  `protocol_version: 2025-11-25` negotiates cleanly; evidence records the
+  negotiated value.
+- Replies are `application/json` even when `text/event-stream` is
+  accepted; the SDK's streamable HTTP client handles both, the adapter
+  must not require SSE.
+- No `mcp-session-id` header: record `session_state: stateless` and send
+  no session header on later calls.
+
+**Tonight's acceptance (raised from the placeholder-401 path):** the
+adapter proven against the real deployment with the real key read from the
+installation's `SecretStore` via `Dispatch.CredentialRef` (operator seeds
+it from hq `.env` `POSTIZ_API_KEY` / Secrets Manager
+`sire/postiz/public-api-key`; the value is never in a test file, log,
+fixture, PR body or evidence): one admitted `open_session` (handshake
+exchanges recorded in order, negotiated `2025-11-25`, `session_state`
+stateless) and one admitted `list_tools` returning the 11 tools with pinned
+schema digests, evidence and staged request record byte-checked for the
+absence of the key (`Z13.mcp_credential_confined` against a real secret).
+Read-only discovery only: **no `call_tool` tonight**, nothing with an
+effect (schedule, video, image, upload) runs before Z-M3's reviewed
+end-to-end post. The placeholder-401 typed-refusal case stays as a unit
+test, not as the acceptance.
 
 ## Implement in this order
 
