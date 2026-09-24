@@ -40,8 +40,8 @@ func TestToolListIsFixedSnapshot(t *testing.T) {
 	tools := env.mustOK("tool.list", connListIn{Scope: env.scope})
 	var out toolListOut
 	env.decode(tools.Data, &out)
-	if len(out.Items) != 5 {
-		t.Fatalf("catalog carries %d contracts, want the 5 seeded ones", len(out.Items))
+	if len(out.Items) != 6 {
+		t.Fatalf("catalog carries %d contracts, want the 6 seeded ones", len(out.Items))
 	}
 	names := map[string]bool{}
 	for _, item := range out.Items {
@@ -49,7 +49,7 @@ func TestToolListIsFixedSnapshot(t *testing.T) {
 	}
 	for _, want := range []string{
 		"model-responses", "provider-rest-read", "provider-rest-mutate",
-		"public-http-read", "memory-read",
+		"public-http-read", "memory-read", "mcp-probe",
 	} {
 		if !names[want] {
 			t.Fatalf("catalog missing seeded contract %q: %v", want, names)
@@ -208,7 +208,7 @@ func TestExternalPluginDiscoveryGrantsNoExecution(t *testing.T) {
 	payload := env.mustOK("tool.list", connListIn{Scope: env.scope})
 	var out toolListOut
 	env.decode(payload.Data, &out)
-	if len(out.Items) != 5 {
+	if len(out.Items) != 6 {
 		t.Fatalf("discovery changed the catalog size to %d", len(out.Items))
 	}
 	for _, item := range out.Items {

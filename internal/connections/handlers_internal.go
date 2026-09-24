@@ -279,16 +279,41 @@ func handleResolve(ctx context.Context, s *Service, unit contract.Unit, inv cont
 	if terr != nil {
 		return contract.Payload{}, terr
 	}
-	if !found {
-		return contract.Payload{}, notFound("tool %s is unknown", in.Tool.ID)
+	var composed wireTool
+	if found {
+		if tool.Version != in.Tool.Version {
+			return contract.Payload{}, staleVersion("tool %s is at version %d; dispatch pinned version %d",
+				tool.ID, tool.Version, in.Tool.Version)
+		}
+		composed = tool.wire()
+	} else {
+		// Dynamic MCP composition: a discovered catalog entry is addressable
+		// by its deterministic UUID without a connections_contracts row.
+		discovered, ok, derr := s.findMCPToolByID(ctx, unit, row.ID, in.Tool.ID)
+		if derr != nil {
+			return contract.Payload{}, derr
+		}
+		if !ok {
+			return contract.Payload{}, notFound("tool %s is unknown", in.Tool.ID)
+		}
+		if in.Tool.Version != 1 {
+			return contract.Payload{}, staleVersion("tool %s is at version 1; dispatch pinned version %d",
+				in.Tool.ID, in.Tool.Version)
+		}
+		probe, pfound, perr := s.loadContractByName(ctx, unit, toolNameMCPProbe)
+		if perr != nil {
+			return contract.Payload{}, perr
+		}
+		if !pfound {
+			return contract.Payload{}, internalError("built-in tool %q is not seeded", toolNameMCPProbe)
+		}
+		composed = composeMCPTool(probe, discovered, row.Destinations)
 	}
-	if tool.Version != in.Tool.Version {
-		return contract.Payload{}, staleVersion("tool %s is at version %d; dispatch pinned version %d",
-			tool.ID, tool.Version, in.Tool.Version)
-	}
-	if !contains(tool.Destinations, in.Destination) {
+	// Empty tool Destinations skip the tool-side containment check (mcp-probe
+	// and composed MCP tools inherit destinations from the connection only).
+	if len(composed.Destinations) > 0 && !contains(composed.Destinations, in.Destination) {
 		return contract.Payload{}, permissionDenied(
-			"tool %s is not bound to destination %s", tool.ID, in.Destination)
+			"tool %s is not bound to destination %s", composed.ID, in.Destination)
 	}
 	if !contains(row.Destinations, in.Destination) {
 		return contract.Payload{}, permissionDenied(
@@ -297,7 +322,7 @@ func handleResolve(ctx context.Context, s *Service, unit contract.Unit, inv cont
 	return s.completed(struct {
 		Connection wireConnection `json:"connection"`
 		Tool       wireTool       `json:"tool"`
-	}{Connection: row.wire(), Tool: tool.wire()})
+	}{Connection: row.wire(), Tool: composed})
 }
 
 // contains reports whether v is present in vs.
