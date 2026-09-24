@@ -3070,6 +3070,23 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   have an IDSource to mint a durable ArtifactRef for request bytes they
   build synchronously. A tools/specgen contract change, not a plain Go
   edit.
+- 2026-09-23 -- first cards after P50 (all 51 original cards landed
+  2026-09-23 ~06:45 PT, PR #65): the marketer's AI-agent org
+  (designs/2026-09-23-marketer-org-on-zatiti.md, dec-1255/dec-1256),
+  dispatched by chief-developer per dec-1065, using this repo's own
+  worktree-lane convention -- no kazi goal.toml, this repo opted out of
+  kazi by design (docs/implementation/README.md). Z-M5 (assignments/Z-M5.md,
+  internal/skills + cmd/zatiti, no new root, no coordinated revision):
+  accept/strip argument-hint, disable-model-invocation, metadata from
+  SKILL.md frontmatter (32 of 128 skills under ~/.agents/skills fail
+  import today for exactly these three keys, confirmed by count
+  2026-09-23) and add a cmd/zatiti bulk `import-dir` helper. Dispatched
+  now. Z-M2 (generic MCP connection adapter, a NEW internal/adapters/mcp
+  root) is BLOCKED, not dispatched: this repo's own rule is no new
+  ownership root or exported seam without a coordinated revision
+  (tools/specgen/model.py + packages.py, contracts.md, a new AGENTS.md)
+  -- routed to chief-architect for that design pass before any
+  implementation lane starts.
 
 ## Blocked
 
