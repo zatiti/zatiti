@@ -94,6 +94,7 @@ func runWith(ctx context.Context, args []string, stdin io.Reader, stdout, stderr
 	root.AddCommand(serveCommand(&cfg, log, diag, opts.serve))
 	root.AddCommand(mcpCommand(&cfg, descriptors, op, streams))
 	attachConnectionHelper(root, &cfg, op, streams)
+	attachSkillImportHelper(root, op, streams)
 	root.SetArgs(args)
 
 	err = root.ExecuteContext(ctx)
