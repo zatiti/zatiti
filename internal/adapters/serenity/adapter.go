@@ -96,13 +96,13 @@ func (a *Adapter) Invoke(_ context.Context, dispatch contract.Dispatch) (contrac
 	return contract.Observation{}, operationUnsupported(op)
 }
 
-// Reconcile implements contract.Adapter. The pinned upstream stores no
-// caller command identity and serves no status lookup, and an accepted
-// upstream call outlives a dropped connection, so nothing this adapter could
-// read would establish whether the original command committed. Reconcile
+// Reconcile implements contract.Adapter. Keyed remember now stores a caller
+// identity, but the upstream serves no read-only status lookup. An accepted
+// upstream call can outlive a dropped connection, so nothing this adapter
+// could read establishes whether the original command committed. Reconcile
 // therefore builds no request and refuses with capability_unsupported naming
-// the lookup gap. It never repeats the original call: an upstream replay can
-// insert a second fact or resurrect a retracted one.
+// the lookup gap. It never repeats the original call: replay would be another
+// physical mutation attempt and other action kinds lack keyed replay.
 //
 // The refusal carries no Observation. PhysicalCallEvidence records one
 // physical request and its staged request record; this attempt builds
