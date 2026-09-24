@@ -365,7 +365,7 @@ for o in OPS:
 # Async completion schemas are distinct from the immediate accepted Job envelope.
 _COMPLETIONS={
  'skill.evaluate':obj(evaluation_id=ID,passed=BOOL,evidence=arr(ref('ArtifactRef'))),
- 'connection.validate':one('Connection'),'connection.rotate':one('Connection'),
+ 'connection.validate':one('Connection'),'connection.discover':one('Connection'),'connection.rotate':one('Connection'),
  'operation.reconcile':one('Operation'),
  'memory.recall':obj(context_artifact=ref('ArtifactRef'),claims=arr(ref('Claim')),brain_versions=arr(ref('Ref')),freshness=TIME,requirements=arr(ref('Requirement'))),
  'memory.remember':obj(claims=arr(ref('Claim')),obligations=arr(ref('Requirement'))),

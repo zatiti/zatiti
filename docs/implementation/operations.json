@@ -15306,6 +15306,18 @@
       "submission_key": true,
       "expected_version": true,
       "callers": [],
+      "completion_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "resource": {
+            "$ref": "#/$defs/Connection"
+          }
+        },
+        "required": [
+          "resource"
+        ]
+      },
       "scope_required": [
         "installation_id"
       ]

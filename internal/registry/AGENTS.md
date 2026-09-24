@@ -1,6 +1,6 @@
 # Implementation assignment: `internal/registry`
 
-Generated specification revision 3; source digest `1c68fc9d3d58427b2cf78218997e0908c66ae30b6e4f2506acc37d4331926f0c`. This file is committed implementation context. Do not independently edit it. Everything required from the product specification and adjacent interfaces is embedded below; no RFC copy is required.
+Generated specification revision 3; source digest `30eaa5b15e99e3b454a0fc0315010ed50f8d30f00c9d416aa8f62476e73a1066`. This file is committed implementation context. Do not independently edit it. Everything required from the product specification and adjacent interfaces is embedded below; no RFC copy is required.
 
 ## Mission and scope
 
@@ -1320,6 +1320,11 @@ Input schema:
 Output data schema:
 ```json
 {"type":"object","additionalProperties":false,"properties":{"resource":{"$ref":"#/$defs/Job"}},"required":["resource"]}
+```
+
+Eventual job result schema (job.get resource.result):
+```json
+{"type":"object","additionalProperties":false,"properties":{"resource":{"$ref":"#/$defs/Connection"}},"required":["resource"]}
 ```
 
 ### `connection.get` v1 — connections / public / query / local
