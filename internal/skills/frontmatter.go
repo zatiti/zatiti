@@ -120,6 +120,11 @@ func parseFrontmatter(data []byte) (*frontmatter, []byte, error) {
 				}
 				fm.Dependencies = append(fm.Dependencies, ref)
 			}
+		case "metadata":
+			if strings.TrimSpace(value) != "" {
+				return nil, nil, invalidInput("SKILL.md frontmatter key %q takes a block value, not an inline value", key)
+			}
+			i = skipMetadataBlock(lines, i)
 		default:
 			value = strings.TrimSpace(value)
 			if value == "" {
@@ -154,16 +159,21 @@ func parseFrontmatter(data []byte) (*frontmatter, []byte, error) {
 }
 
 // knownFrontmatterKey reports whether the key is part of the supported
-// published metadata set.
+// published metadata set, or one of the Claude-Code-only extensions this
+// parser accepts and discards (argument-hint, disable-model-invocation,
+// metadata): Zatiti has no execution-model counterpart for any of the
+// three, so none gains a frontmatter field.
 func knownFrontmatterKey(key string) bool {
 	switch key {
-	case "name", "description", "license", "allowed-tools", "dependencies":
+	case "name", "description", "license", "allowed-tools", "dependencies",
+		"argument-hint", "disable-model-invocation", "metadata":
 		return true
 	}
 	return false
 }
 
-// applyFrontmatterScalar stores one scalar frontmatter value.
+// applyFrontmatterScalar stores one scalar frontmatter value, or validates
+// and discards a Claude-Code-only scalar extension.
 func applyFrontmatterScalar(fm *frontmatter, key, value string) error {
 	switch key {
 	case "name":
@@ -181,8 +191,53 @@ func applyFrontmatterScalar(fm *frontmatter, key, value string) error {
 			return err
 		}
 		fm.AllowedTools = tools
+	case "argument-hint", "disable-model-invocation":
+		// Claude-Code-specific extensions with no Zatiti execution-model
+		// counterpart: bounded and validated present, then discarded. No
+		// frontmatter field is added for data nothing reads; a later card
+		// adds one only against a real consumer.
+		if len(value) > maxDescriptionLength {
+			return invalidInput("SKILL.md frontmatter key %q exceeds %d characters", key, maxDescriptionLength)
+		}
 	}
 	return nil
+}
+
+// skipMetadataBlock advances past every line of a nested metadata: block
+// without parsing its shape, returning the new index i (pointing at the
+// metadata: line itself, or the last line consumed). It tracks the column
+// of the block's first indented line and consumes every following line
+// indented to at least that column, the same way a YAML block-scalar
+// reader bounds a nested map without parsing it — correct for both an
+// arbitrary-depth nested map (list-under-map, e.g. canvas's
+// "surfaces:"/"- ide") and a single flat "key: value" line (e.g. launch's
+// "version: 1.0.0"). A line dedented back to metadata's own column (0, since
+// metadata is itself always a top-level key) or shallower ends the block
+// and is left for the caller's own loop to parse as the next key. An empty
+// block (metadata: with no following indented line) advances nothing.
+func skipMetadataBlock(lines []string, i int) int {
+	blockIndent := -1
+	for i+1 < len(lines) {
+		next := lines[i+1]
+		if strings.TrimSpace(next) == "" {
+			if blockIndent < 0 {
+				break
+			}
+			i++
+			continue
+		}
+		indent := len(next) - len(strings.TrimLeft(next, " "))
+		if blockIndent < 0 {
+			if indent == 0 {
+				break
+			}
+			blockIndent = indent
+		} else if indent < blockIndent {
+			break
+		}
+		i++
+	}
+	return i
 }
 
 // parseAllowedTools splits the comma-separated allowed-tools declaration
