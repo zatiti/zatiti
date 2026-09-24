@@ -92,7 +92,7 @@ func runCandidate(_ context.Context, args []string, stdout, stderr io.Writer) er
 	if err := os.WriteFile(*out, data, 0o644); err != nil {
 		return err
 	}
-	fmt.Fprintf(stdout, "%s/%s unsigned candidate: %d Mach-O files, archive sha256 %s\n", record.Kind, record.Arch, len(record.MachO), record.ArchiveSHA256)
+	_, _ = fmt.Fprintf(stdout, "%s/%s unsigned candidate: %d Mach-O files, archive sha256 %s\n", record.Kind, record.Arch, len(record.MachO), record.ArchiveSHA256)
 	return nil
 }
 
@@ -183,7 +183,7 @@ func machoMagic(path string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	var magic [4]byte
 	if _, err := io.ReadFull(f, magic[:]); err != nil {
 		if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
@@ -213,7 +213,7 @@ func auditMachO(path, arch string) (candidateO, error) {
 	}
 	fat, err := macho.OpenFat(path)
 	if err == nil {
-		defer fat.Close()
+		defer func() { _ = fat.Close() }()
 		found := false
 		for _, a := range fat.Arches {
 			out.CPUs = append(out.CPUs, a.Cpu.String())
@@ -229,7 +229,7 @@ func auditMachO(path, arch string) (candidateO, error) {
 		if thinErr != nil {
 			return out, faultf(codeVerificationFailed, "Mach-O %s is malformed: %v", path, thinErr)
 		}
-		defer thin.Close()
+		defer func() { _ = thin.Close() }()
 		out.CPUs = []string{thin.Cpu.String()}
 		if thin.Cpu != want {
 			return out, faultf(codeVerificationFailed, "Mach-O %s targets %s, need %s", path, thin.Cpu, arch)
@@ -246,7 +246,7 @@ func hashFile(path string) (string, int64, error) {
 	if err != nil {
 		return "", 0, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	info, err := f.Stat()
 	if err != nil || !info.Mode().IsRegular() {
 		return "", 0, faultf(codeInvalidInput, "candidate input is not a regular file: %s", path)

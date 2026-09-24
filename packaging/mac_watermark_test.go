@@ -14,11 +14,20 @@ import (
 
 func newFenceFixture(t *testing.T) *FileMacSequenceWatermark {
 	t.Helper()
-	w, err := NewFileMacSequenceWatermark(t.TempDir())
+	w, err := NewFileMacSequenceWatermark(canonicalTempDir(t))
 	if err != nil {
 		t.Fatal(err)
 	}
 	return w
+}
+
+func canonicalTempDir(t *testing.T) string {
+	t.Helper()
+	path, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return path
 }
 func acceptedFixture(n int64) MacAcceptedRelease {
 	return MacAcceptedRelease{Sequence: n, DeliverySHA256: strings.Repeat("a", 64)}
@@ -221,7 +230,7 @@ func (v *blockingMacVerifier) Verify(ctx context.Context, _ MacReleaseDescriptor
 }
 func TestRunMacBootstrapSerializesCompetingProcesses(t *testing.T) {
 	in, source, _, runner, _ := bootstrapFixture(t)
-	home := t.TempDir()
+	home := canonicalTempDir(t)
 	firstFence, err := NewFileMacSequenceWatermark(home)
 	if err != nil {
 		t.Fatal(err)
@@ -278,7 +287,7 @@ func (f *failOnceFence) Advance(ctx context.Context, a MacAcceptedRelease) error
 }
 func TestRunMacBootstrapRecoversActivationBeforeFence(t *testing.T) {
 	in, source, _, runner, _ := bootstrapFixture(t)
-	realFence, err := NewFileMacSequenceWatermark(t.TempDir())
+	realFence, err := NewFileMacSequenceWatermark(canonicalTempDir(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -348,6 +357,24 @@ func TestMacBootstrapLockRejectsSymlinkAndPermissiveMode(t *testing.T) {
 	}
 }
 
+func TestMacFenceRejectsSymlinkInHomeAncestor(t *testing.T) {
+	base := canonicalTempDir(t)
+	realHome := filepath.Join(base, "real", "user")
+	if err := os.MkdirAll(realHome, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(base, "real"), filepath.Join(base, "alias")); err != nil {
+		t.Fatal(err)
+	}
+	aliasHome := filepath.Join(base, "alias", "user")
+	if _, err := NewFileMacSequenceWatermark(aliasHome); Code(err) != CodeInvalidInput {
+		t.Fatalf("symlinked home ancestor accepted: %v", err)
+	}
+	if _, err := NewFileMacSequenceWatermark(realHome); err != nil {
+		t.Fatalf("canonical home refused: %v", err)
+	}
+}
+
 type cancelOnInstallerSource struct {
 	inner  *testMacSource
 	cancel context.CancelFunc
@@ -362,7 +389,7 @@ func (s cancelOnInstallerSource) Open(ctx context.Context, a MacDeliveryAsset) (
 }
 func TestRunMacBootstrapCancellationCleansStageBeforeActivation(t *testing.T) {
 	in, source, verifier, runner, _ := bootstrapFixture(t)
-	fence, err := NewFileMacSequenceWatermark(t.TempDir())
+	fence, err := NewFileMacSequenceWatermark(canonicalTempDir(t))
 	if err != nil {
 		t.Fatal(err)
 	}

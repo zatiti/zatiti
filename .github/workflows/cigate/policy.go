@@ -698,6 +698,29 @@ func (l *linter) checkReleaseGates(jobs *node) {
 			l.add(jobs.Line, "release-gates", "required release gate %q is missing", g)
 		}
 	}
+	// The native Security.framework Keychain writer is built only with cgo.
+	// A controller candidate without it cannot complete installed setup.
+	if build, ok := byName["build"]; ok {
+		var nativeController bool
+		for _, st := range build.Value.get("steps").items() {
+			name, _ := st.get("name").scalar()
+			if name != "Build from the unmodified tagged commit" {
+				continue
+			}
+			nativeController = true
+			cgo, _ := st.path("env", "CGO_ENABLED").scalar()
+			run, _ := st.get("run").scalar()
+			if cgo != "1" || !strings.Contains(run, `test "$(go env CGO_ENABLED)" = 1`) ||
+				!strings.Contains(run, `go version -m "$RUNNER_TEMP/candidate/zatiti" | grep -Eq '^[[:space:]]*build[[:space:]]+CGO_ENABLED=1$'`) ||
+				!strings.Contains(run, `nm "$RUNNER_TEMP/candidate/zatiti" | grep -F '_SecItemAdd' >/dev/null`) ||
+				!strings.Contains(run, `nm "$RUNNER_TEMP/candidate/zatiti" | grep -F '_SecItemUpdate' >/dev/null`) {
+				l.add(st.Line, "native-keychain", "native Mac controller candidate must build with cgo and verify its Keychain symbols")
+			}
+		}
+		if !nativeController {
+			l.add(build.Line, "native-keychain", "native Mac controller build step is missing")
+		}
+	}
 	for _, g := range platformReleaseGates {
 		j, ok := byName[g]
 		if !ok {

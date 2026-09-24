@@ -44,6 +44,13 @@ func NewFileMacSequenceWatermark(home string) (*FileMacSequenceWatermark, error)
 	if !filepath.IsAbs(home) || filepath.Clean(home) != home || strings.IndexByte(home, 0) >= 0 {
 		return nil, errf(CodeInvalidInput, "Mac installer home path is unsafe")
 	}
+	// Lstat(home) alone follows symlinks in its parents. Resolve the entire
+	// supplied path before using it as the identity of the replay fence and
+	// lock: two spellings of a home must not select different release state.
+	resolved, err := filepath.EvalSymlinks(home)
+	if err != nil || resolved != home {
+		return nil, errf(CodeInvalidInput, "Mac installer home path traverses a symlink or is unavailable")
+	}
 	return &FileMacSequenceWatermark{dir: filepath.Join(home, "Library", "Application Support", "zatiti-installer")}, nil
 }
 
@@ -127,7 +134,7 @@ func (w *FileMacSequenceWatermark) Load(ctx context.Context) (MacAcceptedRelease
 		return MacAcceptedRelease{}, errWrap(CodeVerificationFailed, "Mac release fence cannot be opened safely", err)
 	}
 	f := os.NewFile(uintptr(fd), path)
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	info, err := f.Stat()
 	if err != nil || !acceptedFileInfo(info) {
 		return MacAcceptedRelease{}, errf(CodeVerificationFailed, "Mac release fence is not owner-only")
@@ -188,7 +195,7 @@ func (w *FileMacSequenceWatermark) Advance(ctx context.Context, next MacAccepted
 		return errWrap(CodePrerequisiteMissing, "Mac release fence cannot be staged", err)
 	}
 	name := f.Name()
-	defer os.Remove(name)
+	defer func() { _ = os.Remove(name) }()
 	if err := f.Chmod(0o600); err != nil {
 		_ = f.Close()
 		return errWrap(CodePrerequisiteMissing, "Mac release fence permissions failed", err)

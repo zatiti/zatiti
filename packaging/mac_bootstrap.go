@@ -134,7 +134,7 @@ func RunMacBootstrap(ctx context.Context, in MacBootstrapInput) error {
 	if err != nil {
 		return errWrap(CodePrerequisiteMissing, "private Mac staging is unavailable", err)
 	}
-	defer os.RemoveAll(dir)
+	defer func() { _ = os.RemoveAll(dir) }()
 	if err := os.Chmod(dir, 0o700); err != nil {
 		return errWrap(CodePrerequisiteMissing, "private Mac staging cannot be secured", err)
 	}
@@ -187,7 +187,7 @@ func stageMacAsset(ctx context.Context, dir string, a MacDeliveryAsset, source M
 	if reader == nil {
 		return "", errf(CodePrerequisiteMissing, "Mac asset download returned no bytes")
 	}
-	defer reader.Close()
+	defer func() { _ = reader.Close() }()
 	path := filepath.Join(dir, a.Filename)
 	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
@@ -234,11 +234,11 @@ func (s *HTTPSMacAssetSource) Open(ctx context.Context, a MacDeliveryAsset) (io.
 		return nil, errWrap(CodePrerequisiteMissing, "Mac asset HTTPS request failed", err)
 	}
 	if resp.StatusCode != http.StatusOK || resp.Request.URL.Host != req.URL.Host || resp.Request.URL.Scheme != "https" || resp.Header.Get("Content-Encoding") != "" {
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		return nil, errf(CodeVerificationFailed, "Mac asset HTTPS response is unsafe")
 	}
 	if resp.ContentLength >= 0 && resp.ContentLength != a.Size {
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		return nil, errf(CodeVerificationFailed, "Mac asset HTTPS length differs from signed delivery")
 	}
 	return resp.Body, nil

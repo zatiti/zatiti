@@ -326,6 +326,12 @@ func qualifyDistribution(t *testing.T, caseID, goos string) {
 	if err != nil {
 		c.fail("temp root: %v", err)
 	}
+	// macOS may return /var/... while /var itself is a symlink to
+	// /private/var. Exercise the installer with a real, canonical home path.
+	work, err = filepath.EvalSymlinks(work)
+	if err != nil {
+		c.fail("canonical temp root: %v", err)
+	}
 	defer func() { _ = os.RemoveAll(work) }()
 
 	packBin, err := buildZatitiPack(work, runtime.GOOS, runtime.GOARCH)

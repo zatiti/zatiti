@@ -76,7 +76,7 @@ func runCandidateMatrix(_ context.Context, args []string, stdout, stderr io.Writ
 	if err := os.WriteFile(*out, append(raw, '\n'), 0o644); err != nil {
 		return err
 	}
-	fmt.Fprintf(stdout, "unsigned Mac candidate matrix: four native components from %s verified\n", *revision)
+	_, _ = fmt.Fprintf(stdout, "unsigned Mac candidate matrix: four native components from %s verified\n", *revision)
 	return nil
 }
 
@@ -216,6 +216,7 @@ func readCandidate(p string) (candidate, error) {
 
 func checkDownloadedTree(root string) error {
 	count := 0
+	var total int64
 	return filepath.WalkDir(root, func(p string, e os.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -230,6 +231,16 @@ func checkDownloadedTree(root string) error {
 		if !e.IsDir() && !e.Type().IsRegular() {
 			return faultf(codeVerificationFailed, "downloaded candidate contains a special file: %s", p)
 		}
+		if !e.IsDir() {
+			info, err := e.Info()
+			if err != nil {
+				return err
+			}
+			if info.Size() < 0 || info.Size() > maxCandidateArchive || total > maxCandidateUnpacked-info.Size() {
+				return faultf(codeVerificationFailed, "downloaded candidate exceeds file or total size bounds")
+			}
+			total += info.Size()
+		}
 		return nil
 	})
 }
@@ -239,12 +250,12 @@ func verifyCandidateArchive(p string, c candidate) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	gz, err := gzip.NewReader(f)
 	if err != nil {
 		return faultf(codeVerificationFailed, "candidate archive gzip is malformed: %v", err)
 	}
-	defer gz.Close()
+	defer func() { _ = gz.Close() }()
 	tr := tar.NewReader(gz)
 	seen := map[string]bool{}
 	actual := []candidateO{}
@@ -332,10 +343,10 @@ func verifyCandidateEntry(r io.Reader, h *tar.Header, name, arch string, actual 
 	if err != nil {
 		return err
 	}
-	defer os.Remove(tmp.Name())
+	defer func() { _ = os.Remove(tmp.Name()) }()
 	copied, err := io.Copy(tmp, reader)
 	if err != nil || copied != h.Size {
-		tmp.Close()
+		_ = tmp.Close()
 		return faultf(codeVerificationFailed, "candidate Mach-O entry is truncated")
 	}
 	if err := tmp.Close(); err != nil {

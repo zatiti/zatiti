@@ -76,7 +76,7 @@ func AssembleMacRelease(parts []MacReleasePart, trusted []ed25519.PublicKey) (Ma
 	var descriptor MacReleaseDescriptor
 	descriptor.Schema = MacReleaseSchema
 	var first Manifest
-	var controller, desktop map[string]Manifest = map[string]Manifest{}, map[string]Manifest{}
+	controller, desktop := map[string]Manifest{}, map[string]Manifest{}
 	for i, part := range parts {
 		if err := VerifySignature(part.Manifest, part.Signature, trusted); err != nil {
 			return MacReleaseDescriptor{}, err

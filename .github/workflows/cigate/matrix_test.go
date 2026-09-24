@@ -100,7 +100,7 @@ func (m matrixFixture) component(t *testing.T, arch, kind string) {
 	}
 	binary := thinMachO(cpu)
 	runner := "bin/zatiti"
-	entries := []matrixTestEntry{}
+	var entries []matrixTestEntry
 	if kind == "controller" {
 		entries = []matrixTestEntry{{"LICENSE", m.license, 0o644, tar.TypeReg, ""}, {"bin/", nil, 0o755, tar.TypeDir, ""}, {runner, binary, 0o755, tar.TypeReg, ""}}
 		matrixWrite(t, filepath.Join(base, "zatiti"), binary)

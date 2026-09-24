@@ -509,10 +509,14 @@ jobs:
         run: go run ./.github/workflows/cigate require -kind main cmd/zatiti
       - name: Build from the unmodified tagged commit
         env:
-          CGO_ENABLED: "0"
+          CGO_ENABLED: "1"
         run: |
+          test "$(go env CGO_ENABLED)" = 1
           mkdir -p "$RUNNER_TEMP/candidate"
           go build -trimpath -buildvcs=true -o "$RUNNER_TEMP/candidate/zatiti" ./cmd/zatiti
+          go version -m "$RUNNER_TEMP/candidate/zatiti" | grep -Eq '^[[:space:]]*build[[:space:]]+CGO_ENABLED=1$'
+          nm "$RUNNER_TEMP/candidate/zatiti" | grep -F '_SecItemAdd' >/dev/null
+          nm "$RUNNER_TEMP/candidate/zatiti" | grep -F '_SecItemUpdate' >/dev/null
       - name: Record and verify build provenance
         run: go run ./.github/workflows/cigate provenance -go-version "$(go env GOVERSION)" -out "$EVIDENCE/provenance.json" "$RUNNER_TEMP/candidate/zatiti"
       - name: Audit and archive the unsigned native controller candidate

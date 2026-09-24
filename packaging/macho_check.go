@@ -41,7 +41,7 @@ func verifyThinMachO(path, arch string) error {
 	if err != nil {
 		return errWrap(CodeVerificationFailed, "Mac executable is not a valid thin Mach-O file", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	if f.Cpu != want || f.Type != macho.TypeExec {
 		return errf(CodeVerificationFailed, "Mac executable CPU or file type differs from its manifest target")
 	}
@@ -76,7 +76,7 @@ func inspectArchivedMachO(r io.Reader, size int64, arch string, executable bool)
 	if err != nil {
 		return true, errWrap(CodeInternalError, "Mac object could not be staged for inspection", err)
 	}
-	defer os.Remove(f.Name())
+	defer func() { _ = os.Remove(f.Name()) }()
 	if _, err := f.Write(prefix[:n]); err != nil {
 		_ = f.Close()
 		return true, errWrap(CodeInternalError, "Mac object staging failed", err)
@@ -112,7 +112,7 @@ func verifyDesktopMachO(path, arch string, executable bool) error {
 	}
 	fat, err := macho.OpenFat(path)
 	if err == nil {
-		defer fat.Close()
+		defer func() { _ = fat.Close() }()
 		found := false
 		for _, slice := range fat.Arches {
 			if slice.Cpu != macho.CpuAmd64 && slice.Cpu != macho.CpuArm64 {
@@ -121,7 +121,7 @@ func verifyDesktopMachO(path, arch string, executable bool) error {
 			if slice.File == nil || slice.File.Cpu != slice.Cpu {
 				return errf(CodeVerificationFailed, "Mac universal object has an invalid architecture")
 			}
-			if executable && slice.File.Type != macho.TypeExec {
+			if executable && slice.Type != macho.TypeExec {
 				return errf(CodeVerificationFailed, "Mac desktop runner has a non-executable slice")
 			}
 			if slice.Cpu == want {
@@ -140,7 +140,7 @@ func verifyDesktopMachO(path, arch string, executable bool) error {
 	if err != nil {
 		return errWrap(CodeVerificationFailed, "Mac bundle object is not a valid thin Mach-O", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	if f.Cpu != want {
 		return errf(CodeVerificationFailed, "Mac bundle object lacks its target architecture")
 	}
