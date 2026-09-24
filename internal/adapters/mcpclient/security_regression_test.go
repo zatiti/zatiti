@@ -6,11 +6,12 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
-	"github.com/zatiti/zatiti/internal/contract"
 	"io"
 	"net/http"
 	"testing"
 	"time"
+
+	"github.com/zatiti/zatiti/internal/contract"
 )
 
 func TestReviewSessionIDMustNotBeStaged(t *testing.T) {
@@ -330,5 +331,36 @@ func TestStatelessCloseStillAttemptsOneDelete(t *testing.T) {
 	}
 	if srv.counts()["DELETE"] != 1 || decodeEvidence(t, obs).PhysicalCall.RequestContext.StagingRef == "" {
 		t.Errorf("stateless close missing physical attempt: %s", obs.Evidence)
+	}
+}
+
+func TestNumericCredentialEchoIsNotStaged(t *testing.T) {
+	const token = "123456789"
+	srv := newControlledServer()
+	defer srv.close()
+	srv.onRequest = func(w http.ResponseWriter, r *http.Request, body []byte, method string) bool {
+		if method != "tools/call" {
+			return false
+		}
+		var rpc struct{ ID json.RawMessage }
+		_ = json.Unmarshal(body, &rpc)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprintf(w, `{"jsonrpc":"2.0","id":%s,"result":{"content":[],"structuredContent":{"token":%s}}}`, rpc.ID, token)
+		return true
+	}
+	blobs := newFakeBlobStore()
+	a := newTestAdapter(t, blobs, newFakeSecrets(testCredentialRef, []byte(token)), buildProfileJSON(t, srv.endpoint(), true, []string{"echo"}, []string{"public"}, "bearer"))
+	handle, _ := openSession(t, a, time.Second)
+	obs, err := a.Invoke(t.Context(), testDispatch(t, echoAction(t, handle), time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decodeEvidence(t, obs).PhysicalCall.ErrorCode != "result_redacted" {
+		t.Errorf("numeric credential not withheld: %s", obs.Evidence)
+	}
+	for _, doc := range blobs.stagedDocs() {
+		if bytes.Contains(doc, []byte(token)) {
+			t.Error("numeric credential staged")
+		}
 	}
 }

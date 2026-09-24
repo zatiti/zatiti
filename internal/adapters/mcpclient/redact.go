@@ -29,7 +29,20 @@ func truncateText(s string, n int) string {
 	return s[:n]
 }
 
+func (s *callState) addSessionID(id string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, existing := range s.sessionIDs {
+		if existing == id {
+			return
+		}
+	}
+	s.sessionIDs = append(s.sessionIDs, id)
+}
+
 func (s *callState) scrub(text string) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	text = scrubSecret(s.secret, text)
 	for _, id := range s.sessionIDs {
 		text = scrubSecret([]byte(id), text)
@@ -39,6 +52,10 @@ func (s *callState) scrub(text string) string {
 
 // Decode strings before checking so JSON escaping cannot hide reflected secrets.
 func (s *callState) containsSensitive(doc []byte) bool {
+	// Raw bytes cover numeric JSON echoes, without float conversion/rounding.
+	if s.scrub(string(doc)) != string(doc) {
+		return true
+	}
 	var value any
 	if json.Unmarshal(doc, &value) != nil {
 		return s.scrub(string(doc)) != string(doc)

@@ -92,10 +92,13 @@ type capturedRequest struct {
 // call_tool/close_session calls); arm/disarm bracket each such call so a
 // RoundTrip always attributes its staging and captures to the right one.
 type callState struct {
+	mu             sync.Mutex     // protects sessionIDs while SDK reply requests overlap
+	requests       sync.WaitGroup // registered under round-tripper mutex before disarm
 	ctx            context.Context
 	blobs          contract.BlobStore
 	secret         []byte
 	sessionIDs     []string
+	kind           string
 	classification string
 	captured       []capturedRequest
 	refused        []string
@@ -143,8 +146,14 @@ func (rt *callRoundTripper) arm(state *callState) {
 
 func (rt *callRoundTripper) disarm() {
 	rt.mu.Lock()
+	state := rt.current
 	rt.current = nil
 	rt.mu.Unlock()
+	// No new request can register after current is cleared. Wait for already
+	// registered round trips (all bound to state.ctx) before reading evidence.
+	if state != nil {
+		state.requests.Wait()
+	}
 }
 
 // recordRefusal appends method to the armed call's refused_server_requests.
@@ -163,15 +172,27 @@ func (rt *callRoundTripper) recordRefusal(method string) {
 func (rt *callRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
 	rt.mu.Lock()
 	state := rt.current
+	if state != nil {
+		state.requests.Add(1)
+	}
 	rt.mu.Unlock()
 	if state == nil {
 		return nil, internalError("mcpclient: a physical request was attempted outside any armed call")
 	}
 
+	defer state.requests.Done()
+	// SDK cleanup can call DELETE after a malformed protocol response. Only
+	// the separately admitted close_session action may terminate a session.
+	if req.Method != http.MethodPost && (req.Method != http.MethodDelete || state.kind != kindCloseSession) {
+		return nil, internalError("mcpclient: SDK attempted an HTTP method outside the admitted action")
+	}
+	if state.kind == kindCloseSession && req.Method != http.MethodDelete {
+		return nil, internalError("mcpclient: close_session may only send DELETE")
+	}
 	req = req.Clone(state.ctx)
 	req.GetBody = nil // never allow net/http to replay a request
 	if id := req.Header.Get("Mcp-Session-Id"); id != "" {
-		state.sessionIDs = append(state.sessionIDs, id)
+		state.addSessionID(id)
 	}
 	var bodyBytes []byte
 	if req.Body != nil {
@@ -198,7 +219,7 @@ func (rt *callRoundTripper) RoundTrip(req *http.Request) (*http.Response, error)
 		permitted[name] = values
 	}
 
-	staged, locator, err := stageRequestRecord(state.ctx, state.blobs, state.secret, req.Method, req.URL.String(), permitted, bodyBytes)
+	staged, locator, err := stageRequestRecord(state.ctx, state.blobs, state, req.Method, req.URL.String(), permitted, bodyBytes)
 	if err != nil {
 		return nil, err
 	}
@@ -207,6 +228,7 @@ func (rt *callRoundTripper) RoundTrip(req *http.Request) (*http.Response, error)
 		staged.Classification = state.classification
 	}
 	rt.mu.Lock()
+	captureIndex := len(state.captured)
 	state.captured = append(state.captured, capturedRequest{rpcMethod: rpcMethod, httpMethod: req.Method, staged: staged, locator: locator})
 	rt.mu.Unlock()
 
@@ -220,13 +242,11 @@ func (rt *callRoundTripper) RoundTrip(req *http.Request) (*http.Response, error)
 	}
 
 	rt.mu.Lock()
-	if n := len(state.captured); n > 0 {
-		state.captured[n-1].status = resp.StatusCode
-	}
+	state.captured[captureIndex].status = resp.StatusCode
 	rt.mu.Unlock()
 
 	if id := resp.Header.Get("Mcp-Session-Id"); id != "" {
-		state.sessionIDs = append(state.sessionIDs, id)
+		state.addSessionID(id)
 	}
 	if resp.StatusCode >= 300 && resp.StatusCode < 400 {
 		location := resp.Header.Get("Location")
@@ -309,7 +329,7 @@ func (b *boundedBody) Close() error {
 // containing the credential is refused rather than staged -- a backstop
 // that should never trigger, since Authorization is set only after this
 // call returns.
-func stageRequestRecord(ctx context.Context, blobs contract.BlobStore, secret []byte, method, destination string, permitted http.Header, body []byte) (wireStagedOutput, wireStagedLocator, error) {
+func stageRequestRecord(ctx context.Context, blobs contract.BlobStore, state *callState, method, destination string, permitted http.Header, body []byte) (wireStagedOutput, wireStagedLocator, error) {
 	if blobs == nil {
 		return wireStagedOutput{}, wireStagedLocator{}, prerequisiteMissing("mcpclient adapter requires a blob store dependency to stage the request context before sending")
 	}
@@ -330,8 +350,8 @@ func stageRequestRecord(ctx context.Context, blobs contract.BlobStore, secret []
 	if err != nil {
 		return wireStagedOutput{}, wireStagedLocator{}, internalError("encoding the mcpclient request record failed")
 	}
-	if len(secret) > 0 && (bytes.Contains(doc, secret) || bytes.Contains(body, secret)) {
-		return wireStagedOutput{}, wireStagedLocator{}, internalError("the mcpclient request record would contain credential material; nothing was staged or sent")
+	if state.containsSensitive(doc) || state.containsSensitive(body) {
+		return wireStagedOutput{}, wireStagedLocator{}, internalError("the mcpclient request record would contain confidential transport material; nothing was staged or sent")
 	}
 	stagingRef, digest, size, err := blobs.Stage(ctx, bytes.NewReader(doc), int64(len(doc)))
 	if err != nil {

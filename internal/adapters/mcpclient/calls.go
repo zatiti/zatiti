@@ -25,7 +25,7 @@ func (a *Adapter) doOpenSession(ctx context.Context, dispatch contract.Dispatch,
 	})
 	client.AddReceivingMiddleware(refusalMiddleware(rt))
 
-	state := &callState{ctx: ctx, blobs: a.deps.Blobs, secret: secret}
+	state := &callState{kind: kindOpenSession, ctx: ctx, blobs: a.deps.Blobs, secret: secret}
 	rt.arm(state)
 	transport := &mcp.StreamableClientTransport{
 		Endpoint:             a.profile.Endpoint,
@@ -170,7 +170,7 @@ func (a *Adapter) doListTools(ctx context.Context, dispatch contract.Dispatch, s
 	}
 
 	started := a.deps.Clock.Now()
-	state := &callState{ctx: ctx, blobs: a.deps.Blobs, secret: secret}
+	state := &callState{kind: kindListTools, ctx: ctx, blobs: a.deps.Blobs, secret: secret}
 	entry.roundTripper.arm(state)
 	result, err := entry.session.ListTools(ctx, &mcp.ListToolsParams{Cursor: in.Cursor})
 	entry.roundTripper.disarm()
@@ -267,7 +267,7 @@ func (a *Adapter) doCallTool(ctx context.Context, dispatch contract.Dispatch, se
 	}
 
 	started := a.deps.Clock.Now()
-	state := &callState{ctx: ctx, blobs: a.deps.Blobs, secret: secret, classification: in.Classification}
+	state := &callState{kind: kindCallTool, ctx: ctx, blobs: a.deps.Blobs, secret: secret, classification: in.Classification}
 	entry.roundTripper.arm(state)
 	result, err := entry.session.CallTool(ctx, &mcp.CallToolParams{Name: in.Tool, Arguments: json.RawMessage(in.Arguments)})
 	entry.roundTripper.disarm()
@@ -410,10 +410,9 @@ func (a *Adapter) observeCallToolFailure(physical wirePhysicalCallEvidence, outc
 	return contract.Observation{Disposition: disposition, Evidence: doc, Usage: usage, ConfirmedAt: confirmedAt}, nil
 }
 
-// doCloseSession implements the close_session action kind: at most one
-// DELETE (a stateless session, which the server never assigned an ID for,
-// has nothing to delete and sends none). The local handle is dropped
-// either way, whether the server confirms termination or not.
+// doCloseSession attempts one HTTP DELETE, including for stateless sessions.
+// The real termination status is recorded and the local handle is dropped
+// whether the server confirms termination or not.
 func (a *Adapter) doCloseSession(ctx context.Context, dispatch contract.Dispatch, secret []byte, pinnedAddr string, in *wireCloseSession) (contract.Observation, error) {
 	entry, ok := a.sessions.get(in.SessionHandle)
 	if !ok {
@@ -422,7 +421,7 @@ func (a *Adapter) doCloseSession(ctx context.Context, dispatch contract.Dispatch
 	defer a.sessions.remove(in.SessionHandle)
 
 	started := a.deps.Clock.Now()
-	state := &callState{ctx: ctx, blobs: a.deps.Blobs, secret: secret}
+	state := &callState{kind: kindCloseSession, ctx: ctx, blobs: a.deps.Blobs, secret: secret}
 	entry.roundTripper.arm(state)
 	var closeErr error
 	if entry.stateless {

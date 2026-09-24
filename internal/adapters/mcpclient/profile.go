@@ -3,6 +3,10 @@ package mcpclient
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
+	"path"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/zatiti/zatiti/internal/contract"
@@ -44,11 +48,11 @@ func loadProfile(raw json.RawMessage) (*mcpProfile, error) {
 		return nil, internalError("mcp profile schema composition failed: %v", err)
 	}
 	if err := contract.ValidateSchema(schema, raw); err != nil {
-		return nil, invalidInput("mcp profile does not match the zatiti.mcp/v1 schema: %v", err)
+		return nil, invalidInput("mcp profile does not match the zatiti.mcp/v1 schema")
 	}
 	var w wireMCPProfile
 	if err := contract.DecodeStrict(raw, &w); err != nil {
-		return nil, invalidInput("mcp profile decode failed: %v", err)
+		return nil, invalidInput("mcp profile decode failed")
 	}
 
 	digest, err := profileDigestWithoutCapabilityEvidence(raw)
@@ -79,6 +83,10 @@ func loadProfile(raw json.RawMessage) (*mcpProfile, error) {
 	var st wireStreamableHTTPTransport
 	if err := contract.DecodeStrict(w.Transport, &st); err != nil {
 		return nil, invalidInput("mcp profile streamable_http transport decode failed: %v", err)
+	}
+
+	if err := validateEndpoint(st.Endpoint); err != nil {
+		return nil, err
 	}
 
 	tools := make(map[string]bool, len(w.AllowedTools))
@@ -131,4 +139,74 @@ func (p *mcpProfile) allowsTool(name string) bool {
 
 func (p *mcpProfile) allowsClassification(c string) bool {
 	return p.Classifications[c]
+}
+
+// validateEndpoint excludes known credential-carrying URL forms. An opaque
+// path or an unrecognized query name cannot establish whether its value is a
+// credential; credential bytes are still checked before staging any request.
+func validateEndpoint(endpoint string) error {
+	u, err := url.Parse(endpoint)
+	if err != nil || u.Scheme != "https" || u.Hostname() == "" || u.Opaque != "" {
+		return invalidInput("mcp endpoint must be an absolute HTTPS URL with a host")
+	}
+	if u.User != nil {
+		return capabilityUnsupported("mcp endpoint userinfo credentials are unsupported; use an opaque credential reference")
+	}
+	if u.Fragment != "" || strings.Contains(endpoint, "#") {
+		return invalidInput("mcp endpoint fragments are unsupported")
+	}
+	if port := u.Port(); port != "" {
+		n, err := strconv.Atoi(port)
+		if err != nil || n < 1 || n > 65535 {
+			return invalidInput("mcp endpoint port is invalid")
+		}
+	}
+	// Inspect decoded and dot-normalized segments without rewriting the actual
+	// endpoint. The frozen /mcp/<credential> route is forbidden under any prefix.
+	decodedPath := decodeEndpointComponent(u.Path)
+	if credentialPathRoute(decodedPath) || credentialPathRoute(path.Clean(decodedPath)) {
+		return capabilityUnsupported("mcp credential-in-path endpoints are unsupported; use an opaque credential reference")
+	}
+	query, err := url.ParseQuery(u.RawQuery)
+	if err != nil {
+		return invalidInput("mcp endpoint query is malformed")
+	}
+	for key := range query {
+		key = strings.ToLower(decodeEndpointComponent(key))
+		key = strings.NewReplacer("_", "", "-", "").Replace(key)
+		switch key {
+		case "key", "apikey", "token", "accesstoken", "authtoken", "bearer", "auth", "authorization", "credential", "credentials", "secret", "clientsecret", "password", "signature", "sig", "oauthtoken", "xamzsignature", "xamzcredential", "xamzsecuritytoken", "xgoogsignature", "xgoogcredential":
+			return capabilityUnsupported("mcp endpoint query credentials are unsupported; use an opaque credential reference")
+		}
+	}
+	return nil
+}
+
+func decodeEndpointComponent(value string) string {
+	for {
+		decoded, err := url.PathUnescape(value)
+		if err != nil || decoded == value {
+			return value
+		}
+		value = decoded
+	}
+}
+
+func credentialPathRoute(endpointPath string) bool {
+	segments := strings.Split(endpointPath, "/")
+	for i, segment := range segments {
+		if !strings.EqualFold(segment, "mcp") {
+			continue
+		}
+		for _, next := range segments[i+1:] {
+			if next == "" || next == "." {
+				continue
+			}
+			if next != ".." {
+				return true
+			}
+			break
+		}
+	}
+	return false
 }
