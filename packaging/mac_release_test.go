@@ -47,6 +47,7 @@ func macPartWithBinary(t *testing.T, signer ed25519.PrivateKey, version, arch, d
 	if distribution == DistributionController {
 		f = newFixture(t, version, "darwin")
 		writeFile(t, filepath.Join(f.root, "bin", "zatiti"), binary, 0o755)
+		writeFile(t, filepath.Join(f.root, "bin", "zatiti-credential-helper"), syntheticMachO(arch), 0o755)
 	} else {
 		f = newDesktopFixture(t, version, "darwin")
 		bundleDir, executable := stageBundle(t, "darwin", version)

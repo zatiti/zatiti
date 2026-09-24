@@ -95,7 +95,7 @@ func AssembleMacRelease(parts []MacReleasePart, trusted []ed25519.PublicKey) (Ma
 		}
 		if m.Distribution == DistributionController {
 			for _, a := range m.Artifacts {
-				if a.Kind == KindControllerBinary {
+				if a.Kind == KindControllerBinary || a.Kind == KindCredentialHelper {
 					if a.Size > maxMacExecutableBytes {
 						return MacReleaseDescriptor{}, errf(CodeVerificationFailed, "Mac controller executable exceeds the inspection limit")
 					}

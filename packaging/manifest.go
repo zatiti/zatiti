@@ -53,6 +53,7 @@ const (
 // Artifact kinds.
 const (
 	KindControllerBinary    = "controller_binary"
+	KindCredentialHelper    = "credential_helper"
 	KindDesktopBundle       = "desktop_bundle"
 	KindSerenityRuntime     = "serenity_runtime"
 	KindSerenityReadFacade  = "serenity_read_facade"
@@ -195,14 +196,14 @@ var supportedTargets = map[Target]bool{
 }
 
 var artifactKinds = map[string]bool{
-	KindControllerBinary: true, KindDesktopBundle: true,
+	KindControllerBinary: true, KindCredentialHelper: true, KindDesktopBundle: true,
 	KindSerenityRuntime: true, KindSerenityReadFacade: true,
 	KindServiceTemplate: true, KindLicense: true, KindNotice: true,
 	KindSBOM: true, KindAttestationEvidence: true, KindDocumentation: true,
 }
 
 var executableKinds = map[string]bool{
-	KindControllerBinary: true, KindSerenityRuntime: true, KindSerenityReadFacade: true,
+	KindControllerBinary: true, KindCredentialHelper: true, KindSerenityRuntime: true, KindSerenityReadFacade: true,
 }
 
 // Validate checks every structural rule of a release manifest. For the
@@ -261,16 +262,36 @@ func (m Manifest) Validate() error {
 // desktop client.
 func (m Manifest) validateController(index map[string]Artifact) error {
 	controllers := 0
+	helpers := 0
 	for _, a := range m.Artifacts {
 		switch a.Kind {
 		case KindControllerBinary:
 			controllers++
+		case KindCredentialHelper:
+			helpers++
+			if m.Target.OS != "darwin" || a.Path != "bin/zatiti-credential-helper" {
+				return errf(CodeInvalidInput, "the credential helper belongs only at the fixed Mac controller path")
+			}
 		case KindDesktopBundle:
 			return errf(CodeInvalidInput, "the desktop bundle is packaged separately from the controller distribution")
 		}
 	}
 	if controllers != 1 {
 		return errf(CodeInvalidInput, "a controller distribution carries exactly one controller binary, found %d", controllers)
+	}
+	if m.Target.OS == "darwin" && helpers != 1 {
+		return errf(CodeInvalidInput, "a Mac controller distribution requires exactly one credential helper")
+	}
+	if m.Target.OS == "darwin" {
+		signed := false
+		for _, at := range m.Attestations {
+			if at.Kind == AttestationCodeSignature && at.Subject == "bin/zatiti-credential-helper" {
+				signed = true
+			}
+		}
+		if !signed {
+			return errf(CodeInvalidInput, "the Mac credential helper requires code-signature evidence")
+		}
 	}
 	if m.Desktop != nil {
 		return errf(CodeInvalidInput, "the desktop section belongs to the desktop distribution")
