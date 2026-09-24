@@ -13,7 +13,7 @@ import (
 
 // inspectMacPkgPayload checks the actual package Payload's old ASCII cpio
 // stream against the independently signed release plan. It is not a complete
-// installer verifier: product metadata and Apple trust remain mandatory.
+// installer verifier: Apple signing, notarization and Gatekeeper checks remain mandatory.
 func inspectMacPkgPayload(ctx context.Context, pkg string, release MacReleaseDescriptor, plan MacDownloadPlan) error {
 	binding, err := NewMacPkgBinding(release, plan)
 	if err != nil {
@@ -37,7 +37,10 @@ func inspectMacPkgPayload(ctx context.Context, pkg string, release MacReleaseDes
 	if err := inspectMacCPIO(bufio.NewReader(&macPayloadContextReader{ctx: ctx, reader: gz}), binding, plan); err != nil {
 		return err
 	}
-	return inspectMacPkgBOM(ctx, x, binding, plan)
+	if err := inspectMacPkgBOM(ctx, x, binding, plan); err != nil {
+		return err
+	}
+	return inspectMacPkgMetadata(x, release.Version, plan.Arch)
 }
 
 type macPayloadContextReader struct {

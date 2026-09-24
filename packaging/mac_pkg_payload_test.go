@@ -9,16 +9,24 @@ import (
 	"testing"
 )
 
-func buildMacPayloadFixture(t *testing.T, root string) string {
+func buildMacPayloadFixture(t *testing.T, root, version, arch string) string {
 	t.Helper()
 	if runtime.GOOS != "darwin" {
 		t.Skip("native pkgbuild fixture requires macOS")
 	}
 	dir := t.TempDir()
 	component, product := filepath.Join(dir, "component.pkg"), filepath.Join(dir, "product.pkg")
+	distribution, err := macPkgDistributionXML(version, arch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	distributionPath := filepath.Join(dir, "Distribution.xml")
+	if err := os.WriteFile(distributionPath, distribution, 0o600); err != nil {
+		t.Fatal(err)
+	}
 	for _, args := range [][]string{
-		{"/usr/bin/pkgbuild", "--root", root, "--identifier", "com.zatiti.fixture", "--version", "1", "--install-location", "/", "--ownership", "preserve", component},
-		{"/usr/bin/productbuild", "--package", component, product},
+		{"/usr/bin/pkgbuild", "--root", root, "--identifier", macPkgComponentID, "--version", version, "--install-location", "/", "--ownership", "preserve", component},
+		{"/usr/bin/productbuild", "--distribution", distributionPath, "--package-path", dir, product},
 	} {
 		cmd := exec.CommandContext(context.Background(), args[0], args[1:]...)
 		if out, err := cmd.CombinedOutput(); err != nil {
@@ -30,7 +38,7 @@ func buildMacPayloadFixture(t *testing.T, root string) string {
 
 func TestMacPkgPayloadMatchesSignedBindingAndArchives(t *testing.T) {
 	home, release, plan, _, _ := macPkgBindingFixture(t)
-	pkg := buildMacPayloadFixture(t, home)
+	pkg := buildMacPayloadFixture(t, home, release.Version, plan.Arch)
 	if err := inspectMacPkgPayload(context.Background(), pkg, release, plan); err != nil {
 		t.Fatal(err)
 	}
@@ -84,7 +92,7 @@ func TestMacPkgPayloadRejectsUnexpectedPathsModesAndLinks(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			home, release, plan, _, inbox := macPkgBindingFixture(t)
 			mutate(t, inbox)
-			pkg := buildMacPayloadFixture(t, home)
+			pkg := buildMacPayloadFixture(t, home, release.Version, plan.Arch)
 			if err := inspectMacPkgPayload(context.Background(), pkg, release, plan); err == nil {
 				t.Fatal("accepted unsafe package payload")
 			}
@@ -93,8 +101,8 @@ func TestMacPkgPayloadRejectsUnexpectedPathsModesAndLinks(t *testing.T) {
 }
 
 func TestMacPkgBOMRejectsCorruptedActualBytes(t *testing.T) {
-	home, _, plan, b, _ := macPkgBindingFixture(t)
-	pkg := buildMacPayloadFixture(t, home)
+	home, release, plan, b, _ := macPkgBindingFixture(t)
+	pkg := buildMacPayloadFixture(t, home, release.Version, plan.Arch)
 	x, err := openMacPkgXAR(pkg)
 	if err != nil {
 		t.Fatal(err)
