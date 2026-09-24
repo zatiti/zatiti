@@ -188,13 +188,23 @@ func (s ServiceSpec) validate() error {
 			return errf(CodeInvalidInput, "the controller socket path would be %d bytes or longer and the controller refuses it; set %s or --%s to a shorter path", maxSocketPathBytes, socketEnvName, socketFlagName)
 		}
 	}
-	for _, arg := range s.Arguments {
+	fixedMaster := hasFixedMacMasterSelector(s.Arguments)
+	if fixedMaster {
+		if s.Manager != ManagerLaunchd || s.Role != RoleController || !strings.HasSuffix(s.Owns, string(filepath.Separator)+filepath.Join("Library", "Application Support", "zatiti")) || !hasFixedMacCredentialBackend(s.Arguments) {
+			return errf(CodeInvalidInput, "the fixed Mac master selector requires a Keychain controller at the default state directory")
+		}
+	}
+	for i, arg := range s.Arguments {
 		if arg == "" || hasControl(arg) || len(arg) > 4096 {
 			return errf(CodeInvalidInput, "service arguments must be non-empty and free of control characters")
 		}
+		if fixedMaster && (arg == "--master-key-ref" || strings.HasPrefix(arg, "--master-key-ref=")) {
+			return errf(CodeInvalidInput, "the fixed Mac master selector cannot be overridden")
+		}
 		if strings.HasPrefix(arg, "-") {
 			flag, _, _ := strings.Cut(strings.TrimLeft(arg, "-"), "=")
-			if carriesSecret(flag) {
+			allowedFixedMaster := fixedMaster && flag == "master-key" && arg == "--master-key" && i+1 < len(s.Arguments) && s.Arguments[i+1] == "secret:master"
+			if carriesSecret(flag) && !allowedFixedMaster {
 				return errf(CodeInvalidInput, "service arguments must not carry secret material; provision it through the secret store")
 			}
 		}
@@ -211,6 +221,32 @@ func (s ServiceSpec) validate() error {
 		}
 	}
 	return nil
+}
+
+// The only secret-named argument allowed in a Mac launcher is the fixed,
+// nonsecret Keychain item selector. Duplicate or alternate selectors fail.
+func hasFixedMacMasterSelector(args []string) bool {
+	count := 0
+	for i, arg := range args {
+		if arg == "--master-key" && i+1 < len(args) && args[i+1] == "secret:master" {
+			count++
+		} else if arg == "--master-key" || strings.HasPrefix(arg, "--master-key=") {
+			return false
+		}
+	}
+	return count == 1
+}
+
+func hasFixedMacCredentialBackend(args []string) bool {
+	count := 0
+	for i, arg := range args {
+		if arg == "--credential-backend" && i+1 < len(args) && args[i+1] == "keychain" {
+			count++
+		} else if arg == "--credential-backend" || strings.HasPrefix(arg, "--credential-backend=") {
+			return false
+		}
+	}
+	return count == 1
 }
 
 // socketPath resolves the socket the controller would listen on: an

@@ -207,9 +207,7 @@ var executableKinds = map[string]bool{
 }
 
 // Validate checks every structural rule of a release manifest. For the
-// controller distribution the Serenity pin is checked last: an entirely
-// absent pin is prerequisite_missing, the named gap in the dependency lock
-// report, and every other defect surfaces first as the fault it is.
+// controller distribution the optional local Serenity pin is checked last.
 func (m Manifest) Validate() error {
 	if m.Schema != ManifestSchema {
 		return errf(CodeInvalidInput, "manifest schema must be %s", ManifestSchema)
@@ -258,8 +256,7 @@ func (m Manifest) Validate() error {
 }
 
 // validateController applies the rules of the controller distribution: one
-// controller binary, the secure helper, the Serenity pin, and nothing of the
-// desktop client.
+// controller binary, the secure helper, and nothing of the desktop client.
 func (m Manifest) validateController(index map[string]Artifact) error {
 	controllers := 0
 	helpers := 0
@@ -447,6 +444,14 @@ func (m Manifest) validateAttestations(index map[string]Artifact) error {
 
 func (m Manifest) validateSerenity(index map[string]Artifact) error {
 	s := m.Serenity
+	if m.Target.OS == "darwin" && s == (SerenityPin{}) {
+		for _, a := range m.Artifacts {
+			if a.Kind == KindSerenityRuntime || a.Kind == KindSerenityReadFacade {
+				return errf(CodeInvalidInput, "hosted Mac controller must not bundle a Serenity runtime or read facade")
+			}
+		}
+		return nil
+	}
 	if s == (SerenityPin{}) {
 		return errf(CodePrerequisiteMissing, "the Serenity distribution pin is not resolved; a release cannot be described until the runtime, read facade and qualification evidence are pinned")
 	}

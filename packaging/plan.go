@@ -262,7 +262,7 @@ func planRelease(l Layout, m Manifest, sourceRoot string, installed Installed) (
 
 // planUnits renders the launchers and binds them to this layout: the
 // controller launcher runs the binary behind the active link and owns the
-// state directory, and a Serenity launcher runs the pinned runtime.
+// state directory. A local-mode Serenity launcher runs its pinned runtime.
 func planUnits(l Layout, m Manifest, specs []ServiceSpec) ([]Unit, error) {
 	if err := ValidateServices(specs); err != nil {
 		return nil, err
@@ -280,6 +280,9 @@ func planUnits(l Layout, m Manifest, specs []ServiceSpec) ([]Unit, error) {
 				return nil, errf(CodeInvalidInput, "the controller service must run the installed controller binary and own the state directory")
 			}
 		case RoleSerenity:
+			if m.Target.OS == "darwin" && m.Serenity == (SerenityPin{}) {
+				return nil, errf(CodeInvalidInput, "hosted Mac installation must not launch a local Serenity service")
+			}
 			if s.Executable != filepath.Join(l.Current, filepath.FromSlash(m.Serenity.Runtime)) {
 				return nil, errf(CodeInvalidInput, "a Serenity service must run the pinned Serenity runtime from the installed release")
 			}
