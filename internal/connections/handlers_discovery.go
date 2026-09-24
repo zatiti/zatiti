@@ -377,7 +377,7 @@ func (s *Service) findMCPToolByID(ctx context.Context, unit contract.Unit, conne
 // findAnyMCPToolByID scans every non-stale MCP catalog row in the
 // installation for a deterministic identity match. Used by checkBinding,
 // which has no connection pin.
-func (s *Service) findAnyMCPToolByID(ctx context.Context, unit contract.Unit, toolID contract.ID) (mcpToolRow, bool, error) {
+func (s *Service) findAnyMCPToolByID(ctx context.Context, unit contract.Unit, toolID contract.ID) (result mcpToolRow, found bool, retErr error) {
 	rows, err := unit.QueryContext(ctx, `
 		SELECT connection_id, name, title, description, input_schema, input_schema_digest,
 			output_schema, annotations_json, discovered_at, discovery_operation_id, stale
@@ -386,7 +386,11 @@ func (s *Service) findAnyMCPToolByID(ctx context.Context, unit contract.Unit, to
 	if err != nil {
 		return mcpToolRow{}, false, fmt.Errorf("connections: scan mcp tools: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil && retErr == nil {
+			retErr = fmt.Errorf("connections: close mcp tool rows: %w", err)
+		}
+	}()
 	for rows.Next() {
 		r, serr := scanMCPTool(rows.Scan)
 		if serr != nil {

@@ -622,7 +622,7 @@ func nullIfEmpty(s string) any {
 // markMCPToolsStaleExcept marks every tool for connectionID whose name is
 // not in keep as stale. A complete catalog page (no next_cursor) uses this
 // so tools the server no longer advertises stop resolving.
-func (s *Service) markMCPToolsStaleExcept(ctx context.Context, unit contract.Unit, connectionID contract.ID, keep []string) error {
+func (s *Service) markMCPToolsStaleExcept(ctx context.Context, unit contract.Unit, connectionID contract.ID, keep []string) (retErr error) {
 	keepSet := make(map[string]struct{}, len(keep))
 	for _, n := range keep {
 		keepSet[n] = struct{}{}
@@ -633,7 +633,11 @@ func (s *Service) markMCPToolsStaleExcept(ctx context.Context, unit contract.Uni
 	if err != nil {
 		return fmt.Errorf("connections: list mcp tools for stale mark: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil && retErr == nil {
+			retErr = fmt.Errorf("connections: close mcp tool rows: %w", err)
+		}
+	}()
 	var stale []string
 	for rows.Next() {
 		var name string
@@ -657,28 +661,9 @@ func (s *Service) markMCPToolsStaleExcept(ctx context.Context, unit contract.Uni
 	return nil
 }
 
-// loadMCPTool returns one non-stale discovered tool by name, if any.
-func (s *Service) loadMCPTool(ctx context.Context, unit contract.Unit, connectionID contract.ID, name string) (mcpToolRow, bool, error) {
-	row := unit.QueryRowContext(ctx, `
-		SELECT connection_id, name, title, description, input_schema, input_schema_digest,
-			output_schema, annotations_json, discovered_at, discovery_operation_id, stale
-		FROM connections_mcp_tools
-		WHERE connection_id = ? AND name = ? AND stale = 0`,
-		string(connectionID), name)
-	r, err := scanMCPTool(row.Scan)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return mcpToolRow{}, false, nil
-		}
-		return mcpToolRow{}, false, err
-	}
-	return r, true, nil
-}
-
-// listMCPToolsPage returns a name-ordered page of discovered tools for the
-// connection. includeStale controls whether stale rows appear (connection.tools
-// lists every recorded row so operators can see what went stale).
-func (s *Service) listMCPToolsPage(ctx context.Context, unit contract.Unit, connectionID contract.ID, offset, limit int) ([]mcpToolRow, error) {
+// listMCPToolsPage returns a name-ordered page of every recorded tool for the
+// connection, including stale rows so operators can inspect them.
+func (s *Service) listMCPToolsPage(ctx context.Context, unit contract.Unit, connectionID contract.ID, offset, limit int) (result []mcpToolRow, retErr error) {
 	rows, err := unit.QueryContext(ctx, `
 		SELECT connection_id, name, title, description, input_schema, input_schema_digest,
 			output_schema, annotations_json, discovered_at, discovery_operation_id, stale
@@ -690,7 +675,11 @@ func (s *Service) listMCPToolsPage(ctx context.Context, unit contract.Unit, conn
 	if err != nil {
 		return nil, fmt.Errorf("connections: list mcp tools: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil && retErr == nil {
+			retErr = fmt.Errorf("connections: close mcp tool rows: %w", err)
+		}
+	}()
 	var out []mcpToolRow
 	for rows.Next() {
 		r, serr := scanMCPTool(rows.Scan)
