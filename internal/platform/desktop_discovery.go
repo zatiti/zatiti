@@ -85,7 +85,7 @@ func ReadDesktopDiscovery(stateDir string) (DesktopDiscovery, error) {
 	if err != nil {
 		return d, errWrap(contractCodeControllerUnavailable, "desktop discovery cannot be opened", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	info, err := f.Stat()
 	if err != nil {
 		return d, errWrap(contractCodeControllerUnavailable, "desktop discovery cannot be inspected", err)
