@@ -25,81 +25,14 @@ func runHelperEngine(ctx context.Context, stateDir string, op contract.Operator,
 		return fmt.Errorf("locking helper recovery state: %w", err)
 	}
 	defer unlock()
-	intent, err := store.read(string(connectionID))
+	intent, conn, done, err := helperPrepareLocked(ctx, store, op, secrets, installationID, connectionID)
 	if err != nil {
-		return fmt.Errorf("reading helper recovery state: %w", err)
+		return err
 	}
-	if intent != nil && intent.InstallationID != string(installationID) {
-		return errors.New("helper recovery state belongs to a different installation")
-	}
-	conn, err := helperConnection(ctx, op, installationID, connectionID)
-	if err != nil {
-		return fmt.Errorf("connection.get: %w", err)
-	}
-	if intent == nil {
-		intent = &helperIntent{
-			Schema: helperIntentSchema, InstallationID: string(installationID), ConnectionID: string(connectionID),
-			ConnectionVersion: conn.Version, AccountIdentity: conn.AccountIdentity,
-			BeginKey: "helper-begin/" + string(contract.NewID()), CompleteKey: "helper-complete/" + string(contract.NewID()),
-			CredentialName: "connections/credential/" + string(contract.NewID()),
-		}
-		if err := store.write(*intent); err != nil {
-			return fmt.Errorf("saving helper begin intent: %w", err)
-		}
-	} else if intent.AccountIdentity != conn.AccountIdentity && conn.CredentialRef != intent.CredentialRef {
-		return errors.New("connection account changed while setup was pending; repair is required")
+	if done {
+		return nil
 	}
 	scope := map[string]any{"installation_id": installationID}
-	if intent.ChallengeID == "" {
-		res, found, err := helperCommandLookup(ctx, op, installationID, "connection.setup.begin", intent.BeginKey)
-		if err != nil {
-			return fmt.Errorf("reconciling setup.begin: %w", err)
-		}
-		if !found {
-			if conn.Version != intent.ConnectionVersion {
-				return errors.New("connection changed before setup.begin could be confirmed; repair is required")
-			}
-			res, err = callOperation(ctx, op, "connection.setup.begin", map[string]any{
-				"scope": scope, "connection_id": connectionID, "expected_version": intent.ConnectionVersion, "method": "store_reference",
-			}, intent.BeginKey)
-			if err != nil {
-				return fmt.Errorf("connection.setup.begin needs reconciliation with its original submission key: %w", err)
-			}
-		}
-		var body struct {
-			Resource struct {
-				ID        contract.ID `json:"id"`
-				Version   int64       `json:"version"`
-				ExpiresAt time.Time   `json:"expires_at"`
-			} `json:"resource"`
-		}
-		if res.Status != contract.StatusCompleted || json.Unmarshal(res.Data, &body) != nil || !helperIDPattern.MatchString(string(body.Resource.ID)) || body.Resource.Version < 1 || !body.Resource.ExpiresAt.After(time.Now()) {
-			return errors.New("setup.begin did not return a live challenge; repair is required")
-		}
-		intent.ChallengeID, intent.ChallengeVersion, intent.ExpiresAt = string(body.Resource.ID), body.Resource.Version, body.Resource.ExpiresAt
-		if err := store.write(*intent); err != nil {
-			return fmt.Errorf("saving helper challenge: %w", err)
-		}
-	}
-	challenge, err := helperChallenge(ctx, op, installationID, contract.ID(intent.ChallengeID))
-	if err != nil {
-		return fmt.Errorf("connection.setup.status: %w", err)
-	}
-	if challenge.ConnectionID != string(connectionID) {
-		return errors.New("challenge belongs to a different connection")
-	}
-	if challenge.State == "completed" {
-		if intent.CredentialRef != "" && conn.CredentialRef == intent.CredentialRef {
-			return store.remove(string(connectionID))
-		}
-		return errors.New("completed challenge does not match the recorded credential; repair is required")
-	}
-	if challenge.State == "cancelled" || challenge.State == "expired" || challenge.State == "failed" {
-		return helperDiscardTerminal(ctx, store, secrets, *intent, conn.CredentialRef)
-	}
-	if challenge.State != "external_action_required" || challenge.Version != intent.ChallengeVersion || !challenge.ExpiresAt.Equal(intent.ExpiresAt) || !challenge.ExpiresAt.After(time.Now()) {
-		return errors.New("setup challenge is pending or changed; inspect authoritative status before retrying")
-	}
 	if intent.CredentialRef == "" {
 		// A crash can occur after Put but before intent publication. The name
 		// was durable before Put, so an existing item is reused, never overwritten.
@@ -159,7 +92,7 @@ func runHelperEngine(ctx context.Context, stateDir string, op contract.Operator,
 			return fmt.Errorf("connection.setup.complete needs reconciliation with its original submission key: %w", err)
 		}
 	}
-	challenge, err = helperChallenge(ctx, op, installationID, contract.ID(intent.ChallengeID))
+	challenge, err := helperChallenge(ctx, op, installationID, contract.ID(intent.ChallengeID))
 	if err != nil || challenge.State != "completed" {
 		return errors.New("setup completion is awaiting authoritative challenge status")
 	}
@@ -176,6 +109,7 @@ func runHelperEngine(ctx context.Context, stateDir string, op contract.Operator,
 
 type helperConnectionRecord struct {
 	Version         int64  `json:"version"`
+	Provider        string `json:"provider"`
 	AccountIdentity string `json:"account_identity"`
 	CredentialRef   string `json:"credential_ref"`
 }
