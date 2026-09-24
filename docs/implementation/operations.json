@@ -7930,8 +7930,12 @@
           ]
         },
         "protocol_version": {
-          "const": "2025-11-25",
-          "type": "string"
+          "type": "string",
+          "enum": [
+            "2025-11-25",
+            "2026-07-28"
+          ],
+          "description": "The protocol version the server must negotiate. The pinned go-sdk client (v1.7.0) always probes SEP-2575 server/discover first and falls back to the legacy initialize handshake; a negotiated version other than this value fails open_session as capability_unsupported."
         },
         "credential_kind": {
           "type": "string",
@@ -8143,6 +8147,7 @@
         "message": {
           "type": "string",
           "enum": [
+            "server/discover",
             "initialize",
             "notifications/initialized"
           ]
@@ -8246,7 +8251,7 @@
             "$ref": "#/$defs/Adapter_MCPHandshakeExchange"
           },
           "minItems": 0,
-          "maxItems": 2
+          "maxItems": 3
         },
         "server_name": {
           "type": "string",

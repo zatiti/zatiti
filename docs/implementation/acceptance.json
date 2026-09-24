@@ -2173,7 +2173,7 @@
     "action": "Dispatch one call_tool, one list_tools and one close_session attempt; then dispatch open_session against a fresh server.",
     "expected": [
       "call_tool, list_tools and close_session each produce exactly one HTTP request per claimed attempt; next_cursor is never followed by the adapter.",
-      "open_session produces exactly the two handshake requests, both listed in evidence.handshake; no GET listening stream is opened.",
+      "open_session produces at most the three handshake requests the pinned SDK makes (server/discover probe, initialize, initialized), every one listed in evidence.handshake in order; no GET listening stream is opened.",
       "SDK retry and reconnect are disabled; a permitted retry is a new authorized recorded attempt."
     ]
   },
