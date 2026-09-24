@@ -3,7 +3,7 @@ from copy import deepcopy
 
 # Specification revision. Bump with every coordinated contract revision; the renderer
 # refuses to render unless contracts.md names the same revision in its title.
-REVISION=10
+REVISION=11
 
 S={'type':'string','maxLength':8192}
 ID={'type':'string','format':'uuid'}
@@ -41,7 +41,8 @@ D['Worker']=obj(id=ID,version=VER,organization_id=ID,key=S,name=S,purpose=S,inst
 D['Binding']=obj(id=ID,version=VER,scope=ref('Scope'),kind=enum('tool','skill','connection','worker','repository','reporting','memory'),target_id=ID,permissions=arr(S),**{'source_scope?':ref('Scope'),'destinations?':arr(S)})
 D['Skill']=obj(id=ID,version=VER,name=S,instruction_artifact=ref('ArtifactRef'),content_digest=DIG,input_schema=JSON,output_schema=JSON,requirements=arr(S),dependencies=arr(ref('Ref')),source=S,license=S,evaluation_refs=arr(ID),diagnostics=arr(ref('Diagnostic')))
 D['Tool']=obj(id=ID,version=VER,name=S,input_schema=JSON,output_schema=JSON,effect=enum('local','disclosure','external_read','external_mutation'),destinations=arr(S),credential_kind=S,cost_bound=ref('Money'),timeout_seconds=VER,idempotency=enum('none','qualified_key','authoritative_nonexecution'),key_retention_seconds=INT,confirmation=enum('synchronous','asynchronous','advisory'),reconciliation=S,adapter=S)
-D['Connection']=obj(id=ID,version=VER,scope=ref('Scope'),provider=S,account_identity=S,credential_ref=S,destinations=arr(S),allowed_scopes=arr(S),validation_state=enum('unverified','valid','invalid','expired','revoked'),**{'validated_at?':TIME,'valid_until?':TIME})
+D['HostedMemoryGrant']=obj(issuer=S,resource=S,account_id=S,project_id=S,scopes=arr(enum('memory:read','memory:write'),2),verified_at=TIME)
+D['Connection']=obj(id=ID,version=VER,scope=ref('Scope'),provider=S,account_identity=S,credential_ref=S,destinations=arr(S),allowed_scopes=arr(S),validation_state=enum('unverified','valid','invalid','expired','revoked'),**{'validated_at?':TIME,'valid_until?':TIME,'hosted_memory_grant?':ref('HostedMemoryGrant')})
 D['Challenge']=obj(id=ID,version=VER,connection_id=ID,state=enum('pending','external_action_required','completed','cancelled','expired','failed'),expires_at=TIME,**{'consent_url?':S,'helper_ref?':S,'requirements?':arr(ref('Requirement'))})
 D['Policy']=obj(id=ID,version=VER,scope=ref('Scope'),rules=arr(ref('Rule')),**{'extensions?':JSON})
 D['PromotionRule']=obj(id=ID,version=VER,scope=ref('Scope'),capability=S,destinations=arr(S),required_evidence=arr(S),minimum_successes=VER,evidence_window_seconds=VER,disqualifying_events=arr(S),ceiling_grant_id=ID,human_required_preserved=BOOL)
@@ -89,7 +90,7 @@ PAGE={**SC,'cursor?':S,'limit?':{'type':'integer','minimum':1,'maximum':200},'fi
 def one(t): return obj(resource=ref(t))
 def page(t): return obj(items=arr(ref(t),500))
 def without_generated(t):
-    x=deepcopy(D[t]); generated={'id','version','created_at','activated_at','state','validation_state','validated_at','valid_until','diagnostics','next_wake','last_meaningful_event'}
+    x=deepcopy(D[t]); generated={'id','version','created_at','activated_at','state','validation_state','validated_at','valid_until','hosted_memory_grant','diagnostics','next_wake','last_meaningful_event'}
     for k in generated: x['properties'].pop(k,None)
     x['required']=[k for k in x['required'] if k not in generated]
     return x

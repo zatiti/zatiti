@@ -1821,7 +1821,7 @@
     "action": "Install on clean native Apple Silicon and Intel macOS hosts without developer tools; bootstrap, complete provider and limits setup in the desktop, receive a real first reply, run CLI/MCP/desktop journeys, stop/restart controller, back up/restore and uninstall according to documentation.",
     "expected": [
       "Documented installation commands work from actual artifacts; private socket, secure-store and local-lock behavior are exercised.",
-      "Serenity process packaging and one-writer lifecycle work with the controller/desktop.",
+      "Hosted Serenity OAuth, verified existing-brain binding, scoped memory and reconnection work with the controller/desktop; no local Serenity process is required in hosted mode.",
       "Both native architectures pass with signed/notarized installed artifacts; release evidence identifies exact OS/architecture/artifact/source/tool versions and observed results. One architecture or compile success alone is not Mac release qualification."
     ]
   },
@@ -2187,8 +2187,8 @@
       "qualification",
       "distribution"
     ],
-    "setup": "Pin the actual public Serenity commit/protocol and install its runtime/read facade with the Mac release on clean native Intel and Apple Silicon hosts.",
-    "action": "Prove scoped recall and write/curation, one canonical writer per brain, command disposition after lost acknowledgement, bounded spend/disclosure behavior, exportable backup revision and paused restore reconciliation through public interfaces.",
+    "setup": "Pin and verify the public hosted Serenity build/protocol and obtain an OAuth grant to an existing personal brain on clean native Intel and Apple Silicon hosts.",
+    "action": "Prove bearer-authenticated grant/brain identity, scoped recall and write/curation, canonical hosted writer, authoritative command disposition after lost acknowledgement, bounded spend/disclosure behavior, immutable exportable backup revision and paused restore reconciliation through public interfaces.",
     "expected": [
       "Each required guarantee has observed versioned evidence, including physical call counts and crash/unknown cases; a missing upstream method or missing qualification blocks the first-chat release.",
       "No reduced-capability preview, fake success, private Serenity API or empty-brain backup substitutes for the full requirement."
@@ -2214,13 +2214,40 @@
   {
     "id": "QUALIFICATION.macos_install_to_first_chat",
     "gate": "QUALIFICATION",
-    "owners": ["qualification", "ci", "distribution", "zatiti", "desktop", "serenity"],
+    "owners": [
+      "qualification",
+      "ci",
+      "distribution",
+      "zatiti",
+      "desktop",
+      "serenity"
+    ],
     "setup": "Prepare the final signed release delivery, literal bootstrap script and universal app, both architecture-specific signed packages and a clean native Intel or Apple Silicon account without developer tools; provide qualified live provider and full public Serenity capabilities.",
-    "action": "On each native host run the exact one-line command, verify installed inbox and active tree/launcher/master Keychain against the same signed bytes, capture a provider credential in the signed helper, send the first chief chat, and read the response and Serenity effects back from authoritative controller state. Repeat on the other native architecture and aggregate the two redacted host reports.",
+    "action": "On each native host run the exact one-line command, verify installed inbox and active tree/launcher/master Keychain against the same signed bytes, sign in to hosted Serenity through the system browser and verify the selected existing personal brain, capture a provider credential in the signed helper, send the first chief chat, and read the response and Serenity effects back from authoritative controller state. Repeat on the other native architecture and aggregate the two redacted host reports.",
     "expected": [
       "Each host records a unique host-run ID, native OS build, fixed installer invocation, actual signer Team ID/certificate, descriptor/delivery/script/universal-bootstrap digests and that host's package/controller/desktop/helper digests, with no credential or raw model text.",
-      "The same run links package payload and installed inbox checks, retained master key, active trees/LaunchAgent, real provider response readback and every full Serenity writer, memory, reconciliation, cost/disclosure and backup-revision guarantee; a synthetic or independent case cannot substitute.",
+      "The same run links package payload and installed inbox checks, retained master key, active trees/LaunchAgent, verified hosted OAuth account/project/scopes, real provider response readback and every full Serenity writer, memory, reconciliation, cost/disclosure and backup-revision guarantee; a synthetic or independent case cannot substitute.",
       "Both native reports agree on shared release identity and hashes, differ by host-run ID, and pass the linked case. Missing fields, Rosetta, skipped/not-run cases, no installed artifact, or unavailable upstream guarantee blocks the first-chat release and public one-line command."
+    ]
+  },
+  {
+    "id": "QUALIFICATION.macos_hosted_serenity_oauth",
+    "gate": "QUALIFICATION",
+    "owners": [
+      "qualification",
+      "serenity",
+      "connections",
+      "zatiti",
+      "desktop",
+      "platform",
+      "memory"
+    ],
+    "setup": "A clean installed Mac account has access to an already populated hosted Serenity personal project and an installed signed Zatiti helper.",
+    "action": "Sign in through the system browser, select that project and read/write consent, complete the exact loopback callback, verify bearer-bound account/project/scopes, recall an existing fact, write and read back a new fact, then revoke/reconnect and exercise denied, expired, wrong-project and ambiguous-refresh cases.",
+    "expected": [
+      "No code/token/verifier reaches Dart, argv, public operations, logs or model context; the trusted connection records only observed grant metadata and a protected credential reference.",
+      "The personal chief uses the selected pre-existing hosted brain, while unrelated scopes cannot read it; revocation and account/project substitution fail closed.",
+      "Real hosted capability, command-status, spend/disclosure and immutable backup-revision evidence is required before the first-chat gate passes."
     ]
   }
 ]

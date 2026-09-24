@@ -176,3 +176,30 @@ for package in P:
         package['design'] += ' Revision 10: one real native clean-host run per architecture must link the exact signed bootstrap, delivery and architecture-specific package/component/helper digests through install, active-tree audit and first real provider/Serenity reply in QUALIFICATION.macos_install_to_first_chat. Populate the mac_release evidence object from verified artifacts and authoritative readbacks only, with unique host-run identity and no secrets.'
     elif package['name'] == 'ci':
         package['design'] += ' Revision 10: aggregate separate native amd64 and arm64 reports for the same signed release. Require QUALIFICATION.macos_install_to_first_chat passed in both with distinct host-run IDs, shared delivery/script/bootstrap digests, architecture-specific package/component/helper digests, native OS and Xcode-absent evidence. Missing producer fields or not_run cases block release.'
+
+# Revision 11 selects hosted Serenity and its existing personal brain for Mac.
+# Authenticated provider identity and the local-to-hosted brain mapping must be
+# observed, never accepted from a model or inferred from an opaque token.
+for package in P:
+    if package['name'] == 'connections':
+        package['design'] += ' Revision 11: browser setup is a trusted hosted-Serenity OAuth challenge. Populate Connection.hosted_memory_grant only from a bearer-authenticated binding read after code exchange; never accept it in a draft/definition. Reconcile lost begin/complete, denied/expired callback and account/project substitution through challenge status and command.get. A valid token without verified issuer/resource/account/project/scopes is not a valid connection.'
+        package['tests'] += ' Rev11: wrong issuer/resource/project/account/scope, expired or revoked grant, ambiguous exchange, and same-key retry cannot activate another binding.'
+    elif package['name'] == 'platform':
+        package['design'] += ' Revision 11: retain OAuth refresh/access tokens and PKCE/state material only in protected installation-local secret custody; refresh rotation is atomic from the controller perspective and a lost refresh response fails to re-sign-in rather than reusing a spent refresh token.'
+    elif package['name'] == 'zatiti':
+        package['design'] += ' Revision 11: the signed installed helper owns Serenity OAuth discovery, dynamic public-client registration, numeric-loopback callback, S256 PKCE, browser opening and code exchange. Its existing Go bridge owns Keychain, exact keyed challenge and verified hosted binding; Swift/Dart receive no code or token. Provider-key capture remains a separate helper mode.'
+        package['tests'] += ' Rev11: callback state/port/replay, browser denial, bounded discovery, token-secret absence and crash/lost-response reconciliation.'
+    elif package['name'] == 'desktop':
+        package['design'] += ' Revision 11: after local owner/chief initialization, guide Sign in to Serenity, show existing project selection in the hosted consent page, wait on authoritative challenge/connection status, display the verified account/project and chosen read/write scopes, then request model-provider setup and activate the chief. Keep composer gated until actual Serenity and provider readiness; offer reconnect without silently switching memory.'
+        package['tests'] += ' Rev11: keyboard/VoiceOver/200-percent sign-in, cancel/retry/reconnect, wrong project and no-token-in-Dart checks.'
+    elif package['name'] == 'serenity':
+        package['design'] += ' Revision 11: hosted Streamable HTTP MCP is the Mac primary. Map local UUID brains to verified hosted alphanumeric project IDs via the connection grant, never parse one as the other. Account the MCP handshake separately. Require public authenticated binding identity, authoritative command status, full claim/lineage/freshness and immutable revision/export evidence, enforced per-call cost/disclosure and verifiable build capabilities before advertising a supported operation. A hosted quota alone is not a hard cost bound; keep unsupported actions fail-closed.'
+        package['tests'] += ' Rev11: live OAuth-bound existing-brain recall/write, session restart, revocation, status reconciliation, cost/disclosure and backup-revision qualification; synthetic fixtures alone are insufficient.'
+    elif package['name'] == 'memory':
+        package['design'] += ' Revision 11: the personal chief may bind to an already populated hosted Serenity brain under one verified grant. Keep separate hosted projects for narrower private worker/organization brains. Resolve local UUID to exact external project before dispatch; no inherited read across bindings. Backup pins the immutable hosted revision/export and paused restore reconciles outstanding writes.'
+    elif package['name'] == 'distribution':
+        package['design'] += ' Revision 11: Mac hosted mode installs controller, desktop and signed credential helper only. Do not require or launch a bundled Serenity runtime or local read facade in manifests, service plans or active-tree audit. Preserve fixed Keychain master selector and all package trust/activation checks.'
+    elif package['name'] == 'ci':
+        package['design'] += ' Revision 11: build no local Serenity runtime for hosted Mac mode. Qualify a real hosted OAuth grant and pre-existing brain on each native host, linked to the same signed release and real first chat; record version/capability and revocation/reconnect evidence without tokens.'
+    elif package['name'] == 'qualification':
+        package['design'] += ' Revision 11: Mac release is blocked until a real browser sign-in selects and verifies the pre-existing hosted personal brain and the full Serenity semantic/backup gates pass with the genuine provider reply on both native architectures. An HTTP 200, OAuth login, empty recall or synthetic fixture is not first-chat proof.'

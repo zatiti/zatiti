@@ -1,5 +1,5 @@
 {
-  "revision": 10,
+  "revision": 11,
   "requirements": [
     {
       "requirement": "R1-002",
@@ -2490,6 +2490,41 @@
         "tests/integration",
         "tests/qualification"
       ]
+    },
+    {
+      "requirement": "R-MAC11-001",
+      "section": "MAC11",
+      "kind": "requirement",
+      "owner": "internal/connections",
+      "participants": [
+        "internal/platform",
+        "cmd/zatiti",
+        "apps/desktop",
+        "internal/adapters/serenity",
+        "internal/memory",
+        "tests/qualification"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R-MAC11-002",
+      "section": "MAC11",
+      "kind": "requirement",
+      "owner": "internal/adapters/serenity",
+      "participants": [
+        "internal/memory",
+        "internal/accounting",
+        "packaging",
+        "tests/qualification",
+        ".github/workflows"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
     }
   ],
   "acceptance_cases": [
@@ -3878,6 +3913,19 @@
         "cmd/zatiti",
         "apps/desktop",
         "internal/adapters/serenity"
+      ]
+    },
+    {
+      "id": "QUALIFICATION.macos_hosted_serenity_oauth",
+      "gate": "QUALIFICATION",
+      "scopes": [
+        "tests/qualification",
+        "internal/adapters/serenity",
+        "internal/connections",
+        "cmd/zatiti",
+        "apps/desktop",
+        "internal/platform",
+        "internal/memory"
       ]
     }
   ]

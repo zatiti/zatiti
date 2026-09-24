@@ -1,5 +1,5 @@
 {
-  "revision": 10,
+  "revision": 11,
   "$defs": {
     "Scope": {
       "type": "object",
@@ -1031,6 +1031,51 @@
         "adapter"
       ]
     },
+    "HostedMemoryGrant": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "issuer": {
+          "type": "string",
+          "maxLength": 8192
+        },
+        "resource": {
+          "type": "string",
+          "maxLength": 8192
+        },
+        "account_id": {
+          "type": "string",
+          "maxLength": 8192
+        },
+        "project_id": {
+          "type": "string",
+          "maxLength": 8192
+        },
+        "scopes": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "memory:read",
+              "memory:write"
+            ]
+          },
+          "maxItems": 2
+        },
+        "verified_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "issuer",
+        "resource",
+        "account_id",
+        "project_id",
+        "scopes",
+        "verified_at"
+      ]
+    },
     "Connection": {
       "type": "object",
       "additionalProperties": false,
@@ -1092,6 +1137,9 @@
         "valid_until": {
           "type": "string",
           "format": "date-time"
+        },
+        "hosted_memory_grant": {
+          "$ref": "#/$defs/HostedMemoryGrant"
         }
       },
       "required": [
@@ -6179,7 +6227,7 @@
       "additionalProperties": false,
       "properties": {
         "schema": {
-          "const": "zatiti.serenity/v1",
+          "const": "zatiti.serenity/v2",
           "type": "string"
         },
         "version": {
@@ -6195,7 +6243,14 @@
         "brain_mappings": {
           "type": "array",
           "items": {
-            "$ref": "#/$defs/Adapter_SerenityBrainMapping"
+            "oneOf": [
+              {
+                "$ref": "#/$defs/Adapter_SerenityBrainMapping"
+              },
+              {
+                "$ref": "#/$defs/Adapter_SerenityHostedBrainMapping"
+              }
+            ]
           },
           "minItems": 0,
           "maxItems": 4096
@@ -7704,6 +7759,37 @@
         "context_artifact",
         "max_output_tokens",
         "tool_contract_versions"
+      ],
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "Adapter_SerenityHostedBrainMapping": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "brain_id": {
+          "$ref": "#/$defs/Adapter_ID"
+        },
+        "hosted_project_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9]{16,64}$"
+        },
+        "connection_id": {
+          "$ref": "#/$defs/Adapter_ID"
+        },
+        "endpoint": {
+          "const": "https://serenity.sire.run/mcp",
+          "type": "string"
+        },
+        "classification": {
+          "$ref": "#/$defs/Adapter_Classification"
+        }
+      },
+      "required": [
+        "brain_id",
+        "hosted_project_id",
+        "connection_id",
+        "endpoint",
+        "classification"
       ],
       "$schema": "https://json-schema.org/draft/2020-12/schema"
     },

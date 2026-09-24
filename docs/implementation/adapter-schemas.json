@@ -2229,7 +2229,7 @@
       "additionalProperties": false,
       "properties": {
         "schema": {
-          "const": "zatiti.serenity/v1",
+          "const": "zatiti.serenity/v2",
           "type": "string"
         },
         "version": {
@@ -2245,7 +2245,14 @@
         "brain_mappings": {
           "type": "array",
           "items": {
-            "$ref": "#/$defs/SerenityBrainMapping"
+            "oneOf": [
+              {
+                "$ref": "#/$defs/SerenityBrainMapping"
+              },
+              {
+                "$ref": "#/$defs/SerenityHostedBrainMapping"
+              }
+            ]
           },
           "minItems": 0,
           "maxItems": 4096
@@ -3754,6 +3761,37 @@
         "context_artifact",
         "max_output_tokens",
         "tool_contract_versions"
+      ],
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "SerenityHostedBrainMapping": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "brain_id": {
+          "$ref": "#/$defs/ID"
+        },
+        "hosted_project_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9]{16,64}$"
+        },
+        "connection_id": {
+          "$ref": "#/$defs/ID"
+        },
+        "endpoint": {
+          "const": "https://serenity.sire.run/mcp",
+          "type": "string"
+        },
+        "classification": {
+          "$ref": "#/$defs/Classification"
+        }
+      },
+      "required": [
+        "brain_id",
+        "hosted_project_id",
+        "connection_id",
+        "endpoint",
+        "classification"
       ],
       "$schema": "https://json-schema.org/draft/2020-12/schema"
     }
