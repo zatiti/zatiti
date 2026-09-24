@@ -85,13 +85,13 @@ var operationSchemaBodies = map[string]opSchemas{
 	"_connections.discovery.record":  {schemaValidationRecordIn, schemaGetOut("Connection")},
 
 	// connection.*
-	"connection.archive": {schemaArchiveIn, schemaCreateOut("Connection")},
-	"connection.create":  {schemaCreateIn(schemaConnectionDef), schemaCreateOut("Connection")},
+	"connection.archive":  {schemaArchiveIn, schemaCreateOut("Connection")},
+	"connection.create":   {schemaCreateIn(schemaConnectionDef), schemaCreateOut("Connection")},
 	"connection.discover": {schemaRevokeIn, schemaGetOut("Job")},
-	"connection.get":     {schemaGetIn, schemaGetOut("Connection")},
-	"connection.list":    {schemaListIn, schemaListOut("Connection")},
-	"connection.revoke":  {schemaRevokeIn, schemaGetOut("Disposition")},
-	"connection.rotate":  {schemaRotateIn, schemaGetOut("Job")},
+	"connection.get":      {schemaGetIn, schemaGetOut("Connection")},
+	"connection.list":     {schemaListIn, schemaListOut("Connection")},
+	"connection.revoke":   {schemaRevokeIn, schemaGetOut("Disposition")},
+	"connection.rotate":   {schemaRotateIn, schemaGetOut("Job")},
 	"connection.setup.begin": {
 		schemaSetupBeginIn,
 		schemaSetupOut,

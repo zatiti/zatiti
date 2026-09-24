@@ -152,7 +152,7 @@ func mcpPeekMethod(body []byte, httpMethod string) string {
 }
 
 func (cs *mcpControlledServer) endpoint() string { return cs.httpSrv.URL }
-func (cs *mcpControlledServer) close()            { cs.httpSrv.Close() }
+func (cs *mcpControlledServer) close()           { cs.httpSrv.Close() }
 
 func (cs *mcpControlledServer) counts() map[string]int {
 	cs.mu.Lock()
@@ -343,9 +343,9 @@ func TestZ05MCPDiscoveryGrantsNothing(t *testing.T) {
 
 	var listEv struct {
 		Tools []struct {
-			Name                string          `json:"name"`
-			InputSchemaDigest   string          `json:"input_schema_digest"`
-			Annotations         json.RawMessage `json:"annotations"`
+			Name              string          `json:"name"`
+			InputSchemaDigest string          `json:"input_schema_digest"`
+			Annotations       json.RawMessage `json:"annotations"`
 		} `json:"tools"`
 	}
 	if err := json.Unmarshal(listObs.Evidence, &listEv); err != nil {
@@ -541,12 +541,12 @@ func TestZ05CallbackDiscoveryMCP(t *testing.T) {
 		"kind": "stdio", "command": "/usr/bin/false", "args": []string{},
 	})
 	profile := map[string]any{
-		"schema":           "zatiti.mcp/v1",
-		"transport":        json.RawMessage(transport),
-		"protocol_version": "2025-11-25",
-		"credential_kind":  "none",
-		"allowed_tools":    []string{"echo"},
-		"tool_call_cost":   map[string]any{"currency": "USD", "micro_units": 0},
+		"schema":             "zatiti.mcp/v1",
+		"transport":          json.RawMessage(transport),
+		"protocol_version":   "2025-11-25",
+		"credential_kind":    "none",
+		"allowed_tools":      []string{"echo"},
+		"tool_call_cost":     map[string]any{"currency": "USD", "micro_units": 0},
 		"max_request_bytes":  1 << 16,
 		"max_response_bytes": 1 << 16,
 		"timeout_seconds":    30,
@@ -672,10 +672,10 @@ func TestZ13MCPCredentialConfined(t *testing.T) {
 	stdioProfile := map[string]any{
 		"schema": "zatiti.mcp/v1", "transport": json.RawMessage(transport),
 		"protocol_version": "2025-11-25", "credential_kind": "none",
-		"allowed_tools": []string{"echo"},
-		"tool_call_cost": map[string]any{"currency": "USD", "micro_units": 0},
+		"allowed_tools":     []string{"echo"},
+		"tool_call_cost":    map[string]any{"currency": "USD", "micro_units": 0},
 		"max_request_bytes": 1 << 16, "max_response_bytes": 1 << 16, "timeout_seconds": 30,
-		"classifications": []string{"public"},
+		"classifications":     []string{"public"},
 		"capability_evidence": capabilityEvidence("qualification-mcp-stdio", sourceRevision(), "2025-11-25", []string{}, []string{"stdio"}),
 	}
 	_, err = mcpclient.New(contract.AdapterDependencies{

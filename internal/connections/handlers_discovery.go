@@ -194,10 +194,10 @@ func handleToolsList(ctx context.Context, s *Service, unit contract.Unit, inv co
 // discoveryEvidence is the owner-decoded subset of list_tools observation
 // evidence. Unknown keys ride along into storage inert.
 type discoveryEvidence struct {
-	Kind            string `json:"kind"`
-	SessionHandle   string `json:"session_handle"`
-	NextCursor      string `json:"next_cursor"`
-	PhysicalCall    struct {
+	Kind          string `json:"kind"`
+	SessionHandle string `json:"session_handle"`
+	NextCursor    string `json:"next_cursor"`
+	PhysicalCall  struct {
 		OperationID contract.ID `json:"operation_id"`
 	} `json:"physical_call"`
 	Tools []struct {
