@@ -23,9 +23,9 @@ type MacAssetSource interface {
 }
 
 // MacInstallVerifier must prove the signed installer package's Developer ID,
-// notarization, and binding to the two verified component archives. Revision 7
-// has not frozen the package payload layout or signing identity, so this
-// capability has no fabricated default implementation.
+// notarization, and binding to the two verified component archives. The
+// payload layout is frozen, but the native payload/BOM and signing checks are
+// not implemented yet, so this capability has no production implementation.
 type MacInstallVerifier interface {
 	Verify(context.Context, MacReleaseDescriptor, MacDownloadPlan, MacStagedAssets) error
 }
