@@ -247,6 +247,7 @@ type gateRow struct {
 type releaseReport struct {
 	GeneratedAt      time.Time         `json:"generated_at"`
 	Versions         map[string]string `json:"versions"`
+	MacRelease       *macReleaseHost   `json:"mac_release,omitempty"`
 	Cases            []record          `json:"cases"`
 	Gates            []gateRow         `json:"gates"`
 	ReleaseClaimable bool              `json:"release_claimable"`
@@ -259,6 +260,17 @@ var reportGates = []string{
 	"Z01", "Z02", "Z03", "Z04", "Z05", "Z06", "Z07", "Z08", "Z09", "Z10", "Z11",
 	"Z12", "Z13", "Z14", "Z15", "Z16", "Z17", "Z18", "Z19", "Z20", "Z21",
 	"JOURNEY", "QUALIFICATION",
+}
+
+var macReleaseMu sync.Mutex
+var verifiedMacRelease *macReleaseHost
+
+// publishMacRelease is called only after the linked live journey validates
+// every stage. A missing driver leaves the field absent, not an empty claim.
+func publishMacRelease(h macReleaseHost) {
+	macReleaseMu.Lock()
+	defer macReleaseMu.Unlock()
+	verifiedMacRelease = &h
 }
 
 func writeReleaseReport() (string, error) {
@@ -297,6 +309,9 @@ func writeReleaseReport() (string, error) {
 		GeneratedAt: time.Now().UTC(), Versions: baseVersions(), Cases: cases,
 		ReleaseClaimable: false,
 	}
+	macReleaseMu.Lock()
+	report.MacRelease = verifiedMacRelease
+	macReleaseMu.Unlock()
 	for _, g := range reportGates {
 		row := byGate[g]
 		report.Gates = append(report.Gates, *row)
