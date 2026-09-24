@@ -93,6 +93,26 @@ not patched locally.
   provider `mcp` is `open_session`. Effect classification of an mcp tool
   binding defaults to `external_mutation`; annotations change nothing.
 
+## Postiz endpoint shape and tonight's acceptance (verified live 2026-09-23, chief-operator 06:23Z + chief-architect probe)
+
+On our deployment the MCP endpoint lives under the backend path, not `/mcp`
+(which hits the frontend): the Bearer form is `https://post.sire.blog/api/mcp`
+and answers a placeholder `Authorization: Bearer <x>` with HTTP 401 "Invalid
+API Key or OAuth token", and a missing header with 401 "Missing Authorization
+header". The credential-in-path form `/api/mcp/<key>` also exists (400
+"Invalid API Key") and is exactly what this contract refuses as
+`capability_unsupported`: the fixture, the qualification profile and any
+default MUST use the Bearer form at `/api/mcp`. Routing already works through
+Cloudflare with no reverse-proxy change.
+
+No real key exists in the fleet; minting is David's action. Tonight's
+acceptance for this card is therefore: the adapter proven against
+`open_session`/`list_tools` toward `https://post.sire.blog/api/mcp` with a
+placeholder Bearer connection, where the 401 is recorded as a typed refusal
+(`physical_call.http_status` 401, disposition `failed`, `error_code` from the
+sanitized body, no credential bytes anywhere) and never as success or
+unknown. Real-key streaming end to end is the Z-M3 follow-on card.
+
 ## Implement in this order
 
 1. `internal/adapters/mcpclient`: `profile.go` (strict decode, capability
