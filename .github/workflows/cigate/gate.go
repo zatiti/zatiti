@@ -233,9 +233,13 @@ func runInputs(ctx context.Context, args []string, stdout, stderr io.Writer) err
 type qualificationReport struct {
 	Versions map[string]string `json:"versions"`
 	Cases    []struct {
-		Case   string `json:"case"`
-		Status string `json:"status"`
-		Reason string `json:"reason"`
+		Case     string                     `json:"case"`
+		Status   string                     `json:"status"`
+		Reason   string                     `json:"reason"`
+		Versions map[string]string          `json:"versions"`
+		Expected []string                   `json:"expected"`
+		Observed []string                   `json:"observed"`
+		Evidence map[string]json.RawMessage `json:"evidence"`
 	} `json:"cases"`
 	Gates []struct {
 		Gate   string `json:"gate"`
@@ -269,6 +273,10 @@ type qualificationVerdict struct {
 // different commit or a changed go.mod, so a stale report from an earlier
 // run or a different revision can never stand in for the checked-out tree.
 func evaluateQualificationEvidence(report qualificationReport, revision, goModDigest string, requiredGates []string) qualificationVerdict {
+	return evaluateQualificationEvidenceForPlatform(report, revision, goModDigest, requiredGates, nil, "")
+}
+
+func evaluateQualificationEvidenceForPlatform(report qualificationReport, revision, goModDigest string, requiredGates, requiredCases []string, platform string) qualificationVerdict {
 	v := qualificationVerdict{Schema: qualificationEvidenceSchema, Revision: revision, GoModSHA256: goModDigest, Blocking: []string{}}
 	if got := report.Versions["source_revision"]; got != revision {
 		v.Blocking = append(v.Blocking, fmt.Sprintf("stale evidence: report source revision %q does not match the checked-out %q", got, revision))
@@ -276,7 +284,21 @@ func evaluateQualificationEvidence(report qualificationReport, revision, goModDi
 	if got := report.Versions["module_root_go_mod"]; got != goModDigest {
 		v.Blocking = append(v.Blocking, fmt.Sprintf("stale evidence: report go.mod digest %q does not match the checked-out %q", got, goModDigest))
 	}
+	if platform != "" && report.Versions["platform"] != platform {
+		v.Blocking = append(v.Blocking, fmt.Sprintf("platform %q does not match required %q", report.Versions["platform"], platform))
+	}
+	byCase := map[string]int{}
 	for _, c := range report.Cases {
+		byCase[c.Case]++
+		if byCase[c.Case] > 1 {
+			v.Blocking = append(v.Blocking, fmt.Sprintf("case %s: duplicate evidence", c.Case))
+		}
+		if platform != "" && c.Versions["platform"] != platform {
+			v.Blocking = append(v.Blocking, fmt.Sprintf("case %s: platform %q does not match %q", c.Case, c.Versions["platform"], platform))
+		}
+		if platform != "" && (c.Versions["source_revision"] != revision || c.Versions["module_root_go_mod"] != goModDigest) {
+			v.Blocking = append(v.Blocking, fmt.Sprintf("case %s: stale source or module evidence", c.Case))
+		}
 		if c.Status == qualStatusPassed {
 			continue
 		}
@@ -285,6 +307,22 @@ func evaluateQualificationEvidence(report qualificationReport, revision, goModDi
 			msg += " (" + c.Reason + ")"
 		}
 		v.Blocking = append(v.Blocking, msg)
+	}
+	for _, want := range requiredCases {
+		if byCase[want] != 1 {
+			v.Blocking = append(v.Blocking, fmt.Sprintf("case %s: required case produced no unique evidence", want))
+		}
+		for _, c := range report.Cases {
+			if c.Case != want {
+				continue
+			}
+			if len(c.Expected) == 0 || len(c.Observed) == 0 || len(c.Evidence) == 0 {
+				v.Blocking = append(v.Blocking, fmt.Sprintf("case %s: missing expected, observed, or linked evidence", want))
+			}
+			if marker, ok := c.Evidence["synthetic"]; ok && string(marker) == "true" {
+				v.Blocking = append(v.Blocking, fmt.Sprintf("case %s: synthetic fixture cannot qualify the release", want))
+			}
+		}
 	}
 	byGate := map[string]string{}
 	for _, g := range report.Gates {
@@ -309,6 +347,8 @@ func runQualEvidence(_ context.Context, args []string, stdout, stderr io.Writer)
 	root := fs.String("root", ".", "repository checkout")
 	revision := fs.String("revision", os.Getenv("GITHUB_SHA"), "commit the evidence must have been generated from")
 	requireGate := fs.String("require-gate", "", "comma-separated gate names that must read passed_cases_only in the report")
+	requireCase := fs.String("require-case", "", "comma-separated case names that must have unique passed evidence")
+	platform := fs.String("platform", "", "required report and per-case GOOS/GOARCH platform")
 	out := fs.String("out", "", "verdict file to write")
 	if err := parseFlags(fs, args); err != nil {
 		return err
@@ -328,7 +368,7 @@ func runQualEvidence(_ context.Context, args []string, stdout, stderr io.Writer)
 	if err != nil {
 		return faultf(codePrerequisiteMissing, "hashing go.mod: %v", err)
 	}
-	v := evaluateQualificationEvidence(report, *revision, goModDigest, splitCSV(*requireGate))
+	v := evaluateQualificationEvidenceForPlatform(report, *revision, goModDigest, splitCSV(*requireGate), splitCSV(*requireCase), *platform)
 	if err := writeJSON(*out, v); err != nil {
 		return err
 	}

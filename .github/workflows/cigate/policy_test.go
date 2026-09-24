@@ -181,7 +181,9 @@ func TestPolicyRejectsMutations(t *testing.T) {
 
 		{"platform regression requirement dropped from the unit test step", ci, " -require-tests \"github.com/zatiti/zatiti/internal/platform#TestListenPrivateRefusesSymlinkedRunDirectory,github.com/zatiti/zatiti/internal/platform#TestBlobTamperedObjectFailsPublishOverExisting\" -out-dir \"$EVIDENCE\" -- -timeout 30m ./...", " -out-dir \"$EVIDENCE\" -- -timeout 30m ./...", false, "platform-regressions"},
 		{"one required platform regression test narrowed away", ci, ",github.com/zatiti/zatiti/internal/platform#TestBlobTamperedObjectFailsPublishOverExisting\" -out-dir \"$EVIDENCE\" -- -timeout 30m ./...", "\" -out-dir \"$EVIDENCE\" -- -timeout 30m ./...", false, "platform-regressions"},
-		{"qualification evidence enumeration step removed", rel, "      - name: Enforce qualification case enumeration and evidence freshness\n        run: go run ./.github/workflows/cigate qualevidence -report \"$EVIDENCE/qualification-cases/release-report.json\" -require-gate \"Z01,Z04,Z13,Z16,Z21,JOURNEY,QUALIFICATION\" -out \"$EVIDENCE/qualification-verdict.json\"\n", "", false, "release-gates"},
+		{"qualification evidence enumeration step removed", rel, "go run ./.github/workflows/cigate qualevidence \\\n", "echo removed \\\n", false, "release-gates"},
+		{"native release case omitted", rel, ",QUALIFICATION.macos_serenity_hard_gate", "", false, "release-cases"},
+		{"native platform evidence omitted", rel, `-platform "darwin/$QUALIFICATION_ARCH"`, `-platform "darwin/amd64"`, false, "release-cases"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -22,6 +22,21 @@ directories also include `LICENSE` and the dependency lock report, with
 `pubspec.lock` for the desktop. They are unsigned, lack a matched four-part
 release descriptor and installer package, and carry no notarization evidence.
 
+The rev9 qualification job runs independently on native Intel and Apple
+Silicon. `cigate qualevidence` requires unique passed records for
+`Z21.first_conversation`, `QUALIFICATION.macos_pkg_binding`,
+`QUALIFICATION.macos_gui_secret_helper`,
+`QUALIFICATION.macos_serenity_hard_gate`, and
+`QUALIFICATION.macos_bootstrap_entrypoint` on **each** architecture. It checks
+the source and dependency revision, host platform, and nonempty expected,
+observed, and linked evidence; an explicitly synthetic case cannot pass.
+These live rev9 cases are not implemented in `tests/qualification` yet, so the
+release verdict remains blocked. GitHub-hosted Mac runners have developer
+tools: a passing runner test by itself cannot prove the separate clean-host,
+signed/notarized package, hosted bootstrap, or real provider/Serenity gates.
+The qualification owner must provide and verify that evidence in those cases
+before the workflow can claim them. No workflow here signs or publishes assets.
+
 ## Validate locally
 
 Run these from the repository root. `go test ./...` does not match directories

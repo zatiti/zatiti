@@ -76,6 +76,16 @@ var requiredPlatformRegressionTests = []string{
 var supportedRunners = []string{"ubuntu-24.04", "macos-15", "macos-15-intel"}
 var requiredMacRunners = []string{"macos-15", "macos-15-intel"}
 
+// These are separate live rev9 release cases. The existing synthetic
+// distribution fixture cannot satisfy any of them by passing a broad gate.
+var requiredMacReleaseCases = []string{
+	"Z21.first_conversation",
+	"QUALIFICATION.macos_pkg_binding",
+	"QUALIFICATION.macos_gui_secret_helper",
+	"QUALIFICATION.macos_serenity_hard_gate",
+	"QUALIFICATION.macos_bootstrap_entrypoint",
+}
+
 const (
 	verdictJob       = "verdict"
 	flutterJob       = "flutter"
@@ -737,13 +747,24 @@ func (l *linter) checkReleaseGates(jobs *node) {
 		}
 		if g == qualificationJob {
 			var sawQualEvidence bool
+			var sawNativeArch bool
 			for _, st := range j.Value.get("steps").items() {
+				if run, _ := st.get("run").scalar(); strings.Contains(run, `echo "QUALIFICATION_ARCH=$arch" >> "$GITHUB_ENV"`) && strings.Contains(run, `case "$RUNNER_ARCH" in ARM64) arch=arm64 ;; X64) arch=amd64`) {
+					sawNativeArch = true
+				}
 				if run, _ := st.get("run").scalar(); strings.Contains(run, "cigate qualevidence") {
 					sawQualEvidence = true
+					want := `-require-case "` + strings.Join(requiredMacReleaseCases, ",") + `"`
+					if !strings.Contains(run, want) || !strings.Contains(run, `-platform "darwin/$QUALIFICATION_ARCH"`) {
+						l.add(st.Line, "release-cases", "qualification must require every live Mac release case and native platform evidence")
+					}
 				}
 			}
 			if !sawQualEvidence {
 				l.add(j.Line, "release-gates", "gate %s must enforce case enumeration and evidence freshness with \"cigate qualevidence\"", g)
+			}
+			if !sawNativeArch {
+				l.add(j.Line, "release-cases", "qualification must derive its evidence platform from the verified native runner architecture")
 			}
 		}
 	}
