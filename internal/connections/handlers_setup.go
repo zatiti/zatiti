@@ -105,6 +105,9 @@ func handleRotate(ctx context.Context, s *Service, unit contract.Unit, inv contr
 		return contract.Payload{}, staleVersion("connection %s version %d does not match expected version %d",
 			in.ID, row.Version, in.ExpectedVersion)
 	}
+	if row.Provider == "mcp" {
+		return contract.Payload{}, capabilityUnsupportedFault("generic MCP cannot attest same-account credential rotation; configure a separately reviewed connection")
+	}
 	job, err := s.createJob(ctx, unit, "connection.rotate", inv.Input)
 	if err != nil {
 		return contract.Payload{}, err
@@ -170,6 +173,13 @@ func handleValidatePublic(ctx context.Context, s *Service, unit contract.Unit, i
 		return contract.Payload{}, internalError(
 			"generated connection.validate action does not match the %s adapter schema: %v", toolName, verr)
 	}
+	if row.Provider == "mcp" {
+		job, err := s.createMCPProbe(ctx, unit, row, tool, "validate", action)
+		if err != nil {
+			return contract.Payload{}, err
+		}
+		return s.completed(jobOut{Resource: job})
+	}
 	probeInput, err := marshalData(struct {
 		Scope           wireScope       `json:"scope"`
 		ConnectionID    contract.ID     `json:"connection_id"`
@@ -211,18 +221,24 @@ func refuseInactive(row connectionRow) *contract.Fault {
 // action alongside it), so the controller replays the exact probe
 // parameters.
 func (s *Service) createJob(ctx context.Context, unit contract.Unit, operation string, input json.RawMessage) (wireJob, error) {
+	return s.createLinkedJob(ctx, unit, operation, input, "")
+}
+
+func (s *Service) createLinkedJob(ctx context.Context, unit contract.Unit, operation string, input json.RawMessage, operationID contract.ID) (wireJob, error) {
 	inRaw, err := marshalData(struct {
-		Scope     wireScope       `json:"scope"`
-		Owner     string          `json:"owner"`
-		Operation string          `json:"operation"`
-		Input     json.RawMessage `json:"input"`
-		SourceID  contract.ID     `json:"source_id"`
+		OperationID contract.ID     `json:"operation_id,omitempty"`
+		Scope       wireScope       `json:"scope"`
+		Owner       string          `json:"owner"`
+		Operation   string          `json:"operation"`
+		Input       json.RawMessage `json:"input"`
+		SourceID    contract.ID     `json:"source_id"`
 	}{
-		Scope:     scopeFromContract(unit.Scope()),
-		Owner:     ownerName,
-		Operation: operation,
-		Input:     input,
-		SourceID:  s.ids.New(),
+		OperationID: operationID,
+		Scope:       scopeFromContract(unit.Scope()),
+		Owner:       ownerName,
+		Operation:   operation,
+		Input:       input,
+		SourceID:    s.ids.New(),
 	})
 	if err != nil {
 		return wireJob{}, err

@@ -1,5 +1,5 @@
 {
-  "revision": 3,
+  "revision": 4,
   "requirements": [
     {
       "requirement": "R1-002",
@@ -1487,7 +1487,8 @@
         "internal/adapters/github",
         "internal/adapters/httpread",
         "internal/adapters/responses",
-        "internal/adapters/serenity"
+        "internal/adapters/serenity",
+        "internal/adapters/mcpclient"
       ],
       "verification": [
         "tests/integration",
@@ -1506,7 +1507,8 @@
         "internal/adapters/github",
         "internal/adapters/httpread",
         "internal/adapters/responses",
-        "internal/adapters/serenity"
+        "internal/adapters/serenity",
+        "internal/adapters/mcpclient"
       ],
       "verification": [
         "tests/integration",
@@ -1525,7 +1527,8 @@
         "internal/adapters/github",
         "internal/adapters/httpread",
         "internal/adapters/responses",
-        "internal/adapters/serenity"
+        "internal/adapters/serenity",
+        "internal/adapters/mcpclient"
       ],
       "verification": [
         "tests/integration",
@@ -1544,7 +1547,8 @@
         "internal/adapters/github",
         "internal/adapters/httpread",
         "internal/adapters/responses",
-        "internal/adapters/serenity"
+        "internal/adapters/serenity",
+        "internal/adapters/mcpclient"
       ],
       "verification": [
         "tests/integration",
@@ -1563,7 +1567,8 @@
         "internal/adapters/github",
         "internal/adapters/httpread",
         "internal/adapters/responses",
-        "internal/adapters/serenity"
+        "internal/adapters/serenity",
+        "internal/adapters/mcpclient"
       ],
       "verification": [
         "tests/integration",
@@ -1582,7 +1587,8 @@
         "internal/adapters/github",
         "internal/adapters/httpread",
         "internal/adapters/responses",
-        "internal/adapters/serenity"
+        "internal/adapters/serenity",
+        "internal/adapters/mcpclient"
       ],
       "verification": [
         "tests/integration",
@@ -1601,7 +1607,8 @@
         "internal/adapters/github",
         "internal/adapters/httpread",
         "internal/adapters/responses",
-        "internal/adapters/serenity"
+        "internal/adapters/serenity",
+        "internal/adapters/mcpclient"
       ],
       "verification": [
         "tests/integration",
@@ -2591,6 +2598,7 @@
         "internal/connections",
         "internal/effects",
         "internal/adapters/httpread",
+        "internal/adapters/mcpclient",
         "tests/integration"
       ]
     },
@@ -2642,6 +2650,7 @@
         "internal/adapters/responses",
         "internal/adapters/github",
         "internal/adapters/httpread",
+        "internal/adapters/mcpclient",
         "tests/integration"
       ]
     },
@@ -3728,6 +3737,64 @@
       "id": "P00.render_check_clean_offline",
       "gate": "P00",
       "scopes": [
+        "tests/integration"
+      ]
+    },
+    {
+      "id": "Z05.mcp_discovery_grants_nothing",
+      "gate": "Z05",
+      "scopes": [
+        "internal/connections",
+        "internal/policy",
+        "internal/adapters/mcpclient",
+        "tests/integration"
+      ]
+    },
+    {
+      "id": "Z06.mcp_one_request_per_call",
+      "gate": "Z06",
+      "scopes": [
+        "internal/effects",
+        "internal/controller",
+        "internal/adapters/mcpclient",
+        "tests/integration"
+      ]
+    },
+    {
+      "id": "Z08.mcp_lost_tool_call_response",
+      "gate": "Z08",
+      "scopes": [
+        "internal/effects",
+        "internal/adapters/mcpclient",
+        "tests/integration"
+      ]
+    },
+    {
+      "id": "Z13.mcp_credential_confined",
+      "gate": "Z13",
+      "scopes": [
+        "internal/adapters/mcpclient",
+        "internal/connections",
+        "tests/integration"
+      ]
+    },
+    {
+      "id": "Z05.mcp_server_requests_refused",
+      "gate": "Z05",
+      "scopes": [
+        "internal/adapters/mcpclient",
+        "tests/integration"
+      ]
+    },
+    {
+      "id": "Z05.mcp_governed_probe_and_catalog",
+      "gate": "Z05",
+      "scopes": [
+        "internal/connections",
+        "internal/effects",
+        "internal/execution",
+        "internal/controller",
+        "internal/adapters/mcpclient",
         "tests/integration"
       ]
     }

@@ -303,6 +303,7 @@
       "connections",
       "effects",
       "httpread",
+      "mcpclient",
       "integration"
     ],
     "setup": "A discovered tool or HTTP response advertises a callback, redirect, external server or subprocess.",
@@ -385,6 +386,7 @@
       "responses",
       "github",
       "httpread",
+      "mcpclient",
       "integration"
     ],
     "setup": "Qualified adapters use a provider simulator with transient errors, timeouts and connection resets.",
@@ -2139,6 +2141,106 @@
       "Both commands exit 0 with no RFC file read and no network call.",
       "render --check reports zero stale/missing generated files.",
       "All prior Z01-Z21 and JOURNEY/QUALIFICATION cases remain present and unweakened in the regenerated coverage.json."
+    ]
+  },
+  {
+    "id": "Z05.mcp_discovery_grants_nothing",
+    "gate": "Z05",
+    "owners": [
+      "connections",
+      "policy",
+      "mcpclient",
+      "integration"
+    ],
+    "setup": "A validated mcp connection whose server advertises tools A and B with read_only_hint true on B; the profile allowlist names A only and the worker binding names A.",
+    "action": "Run connection.discover, then have the worker propose call_tool for B, and call_tool for A with arguments that fail the pinned input schema.",
+    "expected": [
+      "Discovery records A and B with pinned schema digests and annotations but changes no binding, policy or classification.",
+      "call_tool for B is refused permission_denied before any request; the read_only_hint changes nothing.",
+      "call_tool for A with non-conforming arguments is refused invalid_input before any request and the pinned digest matches the recorded catalog."
+    ]
+  },
+  {
+    "id": "Z06.mcp_one_request_per_call",
+    "gate": "Z06",
+    "owners": [
+      "effects",
+      "controller",
+      "mcpclient",
+      "integration"
+    ],
+    "setup": "A controlled MCP server records every HTTP request; a session was opened by an admitted open_session effect.",
+    "action": "Dispatch one call_tool, one list_tools and one close_session attempt with zero control-reply allowance; then dispatch open_session against a fresh server. Repeat calls with explicit refusal-reply limits 1, 4 and 16 and excess server requests.",
+    "expected": [
+      "With zero control-reply allowance, call_tool, list_tools and close_session each produce exactly one primary HTTP request per claimed attempt; next_cursor is never followed by the adapter.",
+      "open_session produces at most the three handshake requests the pinned SDK makes (server/discover probe, initialize, initialized), every one listed in evidence.handshake in order; no GET listening stream is opened.",
+      "SDK retry and reconnect are disabled; a permitted retry is a new authorized recorded attempt.",
+      "Explicit bounded method-not-found replies are the only additional POSTs: limits 1, 4 and 16 allow at most 2, 5 and 17 total call exchanges respectively. Exhaustion aborts and evicts locally without cleanup requests.",
+      "Every dispatched reply has pre-send context and exchange evidence and consumes the declared per-reply cost bound; no hidden reply, retry or fabricated status is allowed."
+    ]
+  },
+  {
+    "id": "Z08.mcp_lost_tool_call_response",
+    "gate": "Z08",
+    "owners": [
+      "effects",
+      "mcpclient",
+      "integration"
+    ],
+    "setup": "The controlled server accepts a tools/call, applies its side effect, then stalls past the profile timeout or returns a body above max_response_bytes.",
+    "action": "Observe the attempt and request reconciliation.",
+    "expected": [
+      "The attempt is recorded outcome_unknown with request_sent yes and the staged request context retained; nothing is resent.",
+      "Reconcile returns capability_unsupported and the reservation stays until a separately admitted linked operation resolves it."
+    ]
+  },
+  {
+    "id": "Z13.mcp_credential_confined",
+    "gate": "Z13",
+    "owners": [
+      "mcpclient",
+      "connections",
+      "integration"
+    ],
+    "setup": "A bearer-credential mcp connection with a resolvable credential_ref; a profile naming credential_kind bearer.",
+    "action": "Dispatch open_session and call_tool; inspect the staged request record, evidence, faults, logs and the connection export. Then bind a profile whose endpoint carries the key in its path.",
+    "expected": [
+      "Credential bytes appear only in the Authorization header on the wire; the staged request record, evidence, faults, logs and export contain neither the bytes nor the raw Mcp-Session-Id.",
+      "The credential-in-path profile is refused capability_unsupported at construction; the OAuth code flow is likewise refused rather than improvised."
+    ]
+  },
+  {
+    "id": "Z05.mcp_server_requests_refused",
+    "gate": "Z05",
+    "owners": [
+      "mcpclient",
+      "integration"
+    ],
+    "setup": "The controlled server responds to a tools/call with a sampling/createMessage request, an elicitation request and a resource_link content item during the same response stream.",
+    "action": "Dispatch the call_tool attempt.",
+    "expected": [
+      "Each server-to-client request is answered method-not-found and named in refused_server_requests; no model call, no user prompt and no resource fetch happens.",
+      "The resource_link is recorded as an opaque reference in the staged tool_result; fetching it would require a separate governed read."
+    ]
+  },
+  {
+    "id": "Z05.mcp_governed_probe_and_catalog",
+    "gate": "Z05",
+    "owners": [
+      "connections",
+      "effects",
+      "execution",
+      "controller",
+      "mcpclient",
+      "integration"
+    ],
+    "setup": "An unverified MCP connection binds an installed synthetic profile; ordinary effect policy and accounting are configured.",
+    "action": "Prepare validation through its public owner operation, attempt a cloned public effect, record a real attempt observation, discover tools, then change the catalog after admitting a tool call and before claiming it.",
+    "expected": [
+      "Only the exact durable owner intent permits initial validation without prior freshness; its job links the governed effect.",
+      "Callbacks read the recorded observation for the exact operation and attempt; supplied JSON cannot invent validation or discovery truth.",
+      "Discovered tools expose the full pinned adapter envelope and nonzero configured cost bound, with explicit endpoint and connection bindings.",
+      "Claim rejects a changed catalog version before dispatch and does not consume the claim."
     ]
   }
 ]

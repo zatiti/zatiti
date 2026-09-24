@@ -3081,12 +3081,15 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   SKILL.md frontmatter (32 of 128 skills under ~/.agents/skills fail
   import today for exactly these three keys, confirmed by count
   2026-09-23) and add a cmd/zatiti bulk `import-dir` helper. Dispatched
-  now. Z-M2 (generic MCP connection adapter, a NEW internal/adapters/mcp
-  root) is BLOCKED, not dispatched: this repo's own rule is no new
-  ownership root or exported seam without a coordinated revision
-  (tools/specgen/model.py + packages.py, contracts.md, a new AGENTS.md)
-  -- routed to chief-architect for that design pass before any
-  implementation lane starts.
+  now. Z-M2 (generic MCP connection adapter) was BLOCKED on this repo's
+  rule that no new ownership root or exported seam ships without a
+  coordinated revision; chief-architect landed that revision 2026-09-24
+  (assignments/Z-M2.md; new root internal/adapters/mcpclient, adapter name
+  `mcp`, frozen profile/action/evidence schemas, connection.discover /
+  connection.tools / _connections.discovery.record on internal/connections,
+  contracts.md section "MCP client connection adapter"). Z-M2 is now
+  UNBLOCKED and dispatchable by chief-developer; it does not depend on
+  Z-M1.1 or Z-M1.2 (the Postiz end-to-end run, Z-M3, does).
 
 - 2026-09-24 -- Z-M2 update: chief-architect's coordinated revision landed
   as zatiti#67 (root `internal/adapters/mcpclient`, wire name `mcp`,

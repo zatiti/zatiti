@@ -178,6 +178,17 @@ func (c *Controller) dispatch(ctx, workCtx context.Context, sess *session, waiti
 // admit runs the admit and claim transactions for one operation and starts
 // its worker. It reports whether the worker now owns the slot.
 func (c *Controller) admit(ctx, workCtx context.Context, sess *session, op wireOperation, waiting map[contract.ID]wireJob) bool {
+	// A limited job scan is not proof that an explicit callback has no owner.
+	// Leave the operation unadmitted until its durable linked job is visible.
+	var callback wireCallbackRoute
+	if len(op.CallbackRoute) > 0 && json.Unmarshal(op.CallbackRoute, &callback) == nil && callback.Kind == "connection" {
+		job, found := waiting[op.ID]
+		if !found || job.Owner != ownerConnections || (job.Operation != "connection.validate" && job.Operation != "connection.discover") {
+			c.note(prerequisiteMissing("connection effect %s awaits its linked callback job", op.ID))
+			return false
+		}
+	}
+
 	e := entry{
 		ID:          string(contract.NewID()),
 		Kind:        kindEffect,

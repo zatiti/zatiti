@@ -320,3 +320,19 @@ func (s *Service) transitionTask(ctx context.Context, unit contract.Unit, taskID
 	}
 	return decodeResource[wireTask]("tasks transition", data)
 }
+
+// callConnectionsToolResolve discovers the current, owner-validated MCP pins.
+func (s *Service) callConnectionsToolResolve(ctx context.Context, unit contract.Unit, scope contract.Scope, toolID contract.ID) (wireConnection, wireTool, error) {
+	data, err := s.callPeer(ctx, unit, peerConnectionsToolResolve, map[string]any{"scope": scope, "tool_id": toolID})
+	if err != nil {
+		return wireConnection{}, wireTool{}, err
+	}
+	var body struct {
+		Connection wireConnection `json:"connection"`
+		Tool       wireTool       `json:"tool"`
+	}
+	if err := json.Unmarshal(data, &body); err != nil {
+		return wireConnection{}, wireTool{}, fmt.Errorf("execution: decode MCP tool resolution: %w", err)
+	}
+	return body.Connection, body.Tool, nil
+}

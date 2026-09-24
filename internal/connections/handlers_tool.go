@@ -118,11 +118,25 @@ func checkBinding(ctx context.Context, s *Service, unit contract.Unit, b wireBin
 			return internalError("tool contract lookup failed: %v", err)
 		}
 		if !found {
-			return notFound("unknown adapter %s", b.TargetID)
-		}
-		for _, d := range b.Destinations {
-			if !contains(tool.Destinations, d) {
-				return invalidInput("destination %s is outside tool %s contract destinations", d, tool.ID)
+			// Allow bindings that name a recorded MCP discovered-tool UUID.
+			// Destinations are checked at resolve against the connection;
+			// empty tool destinations skip the tool-side containment check.
+			discovered, ok, derr := s.findAnyMCPToolByID(ctx, unit, b.TargetID)
+			if derr != nil {
+				return internalError("mcp tool catalog lookup failed: %v", derr)
+			}
+			if !ok {
+				return notFound("unknown adapter %s", b.TargetID)
+			}
+			_ = discovered
+		} else {
+			for _, d := range b.Destinations {
+				if len(tool.Destinations) == 0 {
+					break
+				}
+				if !contains(tool.Destinations, d) {
+					return invalidInput("destination %s is outside tool %s contract destinations", d, tool.ID)
+				}
 			}
 		}
 	}

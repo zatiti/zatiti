@@ -645,7 +645,7 @@ func (s *Service) handleAdmit(ctx context.Context, unit contract.Unit, in admitI
 	if err != nil {
 		return contract.Outcome[operationResourceBody]{}, err
 	}
-	tool, conn, err := s.resolveDispatch(ctx, unit, action.Scope, action)
+	tool, conn, err := s.resolveDispatch(ctx, unit, action.Scope, action, o.ID)
 	if err != nil {
 		return contract.Outcome[operationResourceBody]{}, err
 	}
@@ -679,8 +679,13 @@ func (s *Service) handleAdmit(ctx context.Context, unit contract.Unit, in admitI
 
 // resolveDispatch resolves the validated connection and tool contract for one
 // action, refusing unvalidated or expired connections.
-func (s *Service) resolveDispatch(ctx context.Context, unit contract.Unit, scope wireScope, action wireAction) (wireTool, wireConnection, error) {
+func (s *Service) resolveDispatch(ctx context.Context, unit contract.Unit, scope wireScope, action wireAction, operationID contract.ID) (wireTool, wireConnection, error) {
+	raw, err := canonicalJSON(action)
+	if err != nil {
+		return wireTool{}, wireConnection{}, err
+	}
 	out, err := s.connectionsResolve(ctx, unit, connectionsResolveInput{
+		OperationID: operationID, Action: raw,
 		Scope:       scope,
 		Connection:  action.Connection,
 		Tool:        action.Tool,
@@ -689,12 +694,12 @@ func (s *Service) resolveDispatch(ctx context.Context, unit contract.Unit, scope
 	if err != nil {
 		return wireTool{}, wireConnection{}, err
 	}
-	if out.Connection.ValidationState != connStateValid {
+	if !out.ValidationIntent && out.Connection.ValidationState != connStateValid {
 		return wireTool{}, wireConnection{}, prerequisiteMissing(
 			"connection %s is %s, not validated for dispatch",
 			out.Connection.ID, out.Connection.ValidationState)
 	}
-	if out.Connection.ValidUntil != nil && s.now().After(*out.Connection.ValidUntil) {
+	if !out.ValidationIntent && out.Connection.ValidUntil != nil && s.now().After(*out.Connection.ValidUntil) {
 		return wireTool{}, wireConnection{}, prerequisiteMissing(
 			"connection %s validation expired at %s", out.Connection.ID, formatStamp(*out.Connection.ValidUntil))
 	}
@@ -820,6 +825,43 @@ func (s *Service) handleClaim(ctx context.Context, unit contract.Unit, in claimI
 			"attempt %s is %s and cannot be claimed", a.ID, a.State)
 	}
 	now := s.now()
+	if a.Adapter == "mcp" {
+		_, action, err := loadStoredAction(ctx, unit, o)
+		if err != nil {
+			return contract.Outcome[dispatchResourceBody]{}, err
+		}
+		if !action.ExpiresAt.After(now) || now.Before(action.NotBefore) {
+			return contract.Outcome[dispatchResourceBody]{}, prerequisiteMissing("MCP action timing no longer valid")
+		}
+		snapshot, err := s.configurationSnapshot(ctx, unit, configurationSnapshotInput{Scope: action.Scope})
+		if err != nil {
+			return contract.Outcome[dispatchResourceBody]{}, err
+		}
+		if snapshot.Resource.Revision != action.ConfigurationRevision {
+			return contract.Outcome[dispatchResourceBody]{}, staleVersion("MCP configuration changed before claim")
+		}
+		policy, err := s.policyDecision(ctx, unit, action.Scope, action)
+		if err != nil {
+			return contract.Outcome[dispatchResourceBody]{}, err
+		}
+		if policy.Decision == policyReview {
+			review, err := s.reviewsCheck(ctx, unit, reviewsCheckInput{Scope: action.Scope, ActionDigest: o.ActionDigest})
+			if err != nil {
+				return contract.Outcome[dispatchResourceBody]{}, err
+			}
+			if !review.Eligible || review.Decision == nil || review.Decision.Decision != decisionApprove {
+				return contract.Outcome[dispatchResourceBody]{}, reviewRequired("MCP claim review no longer eligible")
+			}
+		} else if policy.Decision != policyAllow {
+			return contract.Outcome[dispatchResourceBody]{}, permissionDenied("MCP claim policy no longer allows action")
+		}
+		if _, _, err = s.resolveDispatch(ctx, unit, action.Scope, action, o.ID); err != nil {
+			return contract.Outcome[dispatchResourceBody]{}, err
+		}
+		if err = s.requireArtifacts(ctx, unit, action.Scope, action.Content); err != nil {
+			return contract.Outcome[dispatchResourceBody]{}, err
+		}
+	}
 	if err := consumeClaim(ctx, unit, a.ID, now); err != nil {
 		return contract.Outcome[dispatchResourceBody]{}, err
 	}

@@ -3756,6 +3756,804 @@
         "tool_contract_versions"
       ],
       "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "MCPToolName": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_.-]{1,128}$",
+      "maxLength": 128,
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "MCPSessionHandle": {
+      "type": "string",
+      "description": "Adapter-local opaque handle for one open MCP session (never the raw Mcp-Session-Id, which stays inside the adapter). Scoped to the connection that opened it; unknown after a controller restart, which is reported as prerequisite_missing, never re-derived.",
+      "minLength": 1,
+      "maxLength": 256,
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "MCPToolAnnotations": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "title": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 256
+        },
+        "read_only_hint": {
+          "type": "boolean"
+        },
+        "destructive_hint": {
+          "type": "boolean"
+        },
+        "idempotent_hint": {
+          "type": "boolean"
+        },
+        "open_world_hint": {
+          "type": "boolean"
+        }
+      },
+      "required": [],
+      "description": "Server-declared hints copied verbatim for operator review. They are untrusted data and never change effect classification, policy, review or allowlist decisions.",
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "MCPDiscoveredTool": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/MCPToolName"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 256
+        },
+        "description": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 4096
+        },
+        "input_schema": {
+          "$ref": "#/$defs/InertSchema"
+        },
+        "input_schema_digest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "output_schema": {
+          "$ref": "#/$defs/InertSchema"
+        },
+        "annotations": {
+          "$ref": "#/$defs/MCPToolAnnotations"
+        }
+      },
+      "required": [
+        "name",
+        "input_schema",
+        "input_schema_digest"
+      ],
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "MCPStreamableHTTPTransport": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "streamable_http",
+          "type": "string"
+        },
+        "endpoint": {
+          "$ref": "#/$defs/HTTPSURL"
+        },
+        "allow_private_endpoint": {
+          "type": "boolean",
+          "description": "Explicit installation-authorized binding to a loopback/private/link-local destination. False refuses such a resolved address before dialing and binds validated dial addresses to prevent DNS rebinding, exactly as httpread does."
+        },
+        "max_redirects": {
+          "type": "integer",
+          "const": 0
+        }
+      },
+      "required": [
+        "kind",
+        "endpoint",
+        "allow_private_endpoint",
+        "max_redirects"
+      ],
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "MCPStdioTransport": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "stdio",
+          "type": "string"
+        },
+        "command": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096,
+          "description": "Absolute path of an installation-authorized executable. Not qualified in v1: a profile naming this transport fails capability_unsupported until a coordinated revision qualifies subprocess custody (environment scrubbing, working directory, signal/timeout semantics)."
+        },
+        "args": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 0,
+            "maxLength": 4096
+          },
+          "minItems": 0,
+          "maxItems": 64
+        }
+      },
+      "required": [
+        "kind",
+        "command",
+        "args"
+      ],
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "MCPClientProfile": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema": {
+          "const": "zatiti.mcp/v1",
+          "type": "string"
+        },
+        "transport": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/MCPStreamableHTTPTransport"
+            },
+            {
+              "$ref": "#/$defs/MCPStdioTransport"
+            }
+          ]
+        },
+        "protocol_version": {
+          "type": "string",
+          "enum": [
+            "2025-11-25",
+            "2026-07-28"
+          ],
+          "description": "The protocol version the server must negotiate. The pinned go-sdk client (v1.7.0) always probes SEP-2575 server/discover first and falls back to the legacy initialize handshake; a negotiated version other than this value fails open_session as capability_unsupported."
+        },
+        "credential_kind": {
+          "type": "string",
+          "enum": [
+            "bearer",
+            "none"
+          ],
+          "description": "bearer sends the resolved credential bytes only in the Authorization header. Credential-in-path (for example /mcp/:apiKey) and OAuth authorization-code flows are refused as capability_unsupported: the first would place the secret in the staged request record and server logs, the second has no frozen token-endpoint shape (cmd/zatiti/helper.go)."
+        },
+        "allowed_tools": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/MCPToolName"
+          },
+          "minItems": 0,
+          "maxItems": 256
+        },
+        "tool_call_cost": {
+          "$ref": "#/$defs/Money"
+        },
+        "max_request_bytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 16777216
+        },
+        "max_response_bytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 268435456
+        },
+        "timeout_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1800
+        },
+        "classifications": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Classification"
+          },
+          "minItems": 1,
+          "maxItems": 3
+        },
+        "capability_evidence": {
+          "$ref": "#/$defs/CapabilityEvidence"
+        },
+        "max_control_replies": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 16
+        },
+        "control_reply_cost": {
+          "$ref": "#/$defs/Money"
+        }
+      },
+      "required": [
+        "schema",
+        "transport",
+        "protocol_version",
+        "credential_kind",
+        "allowed_tools",
+        "tool_call_cost",
+        "max_request_bytes",
+        "max_response_bytes",
+        "timeout_seconds",
+        "classifications",
+        "capability_evidence"
+      ],
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "MCPOpenSession": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema": {
+          "const": "zatiti.mcp.action/v1",
+          "type": "string"
+        },
+        "kind": {
+          "const": "open_session",
+          "type": "string"
+        },
+        "client_name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "client_version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "control_reply_limit": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 16
+        },
+        "profile_digest": {
+          "$ref": "#/$defs/Digest"
+        }
+      },
+      "required": [
+        "schema",
+        "kind",
+        "client_name",
+        "client_version"
+      ],
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "MCPListTools": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema": {
+          "const": "zatiti.mcp.action/v1",
+          "type": "string"
+        },
+        "kind": {
+          "const": "list_tools",
+          "type": "string"
+        },
+        "session_handle": {
+          "$ref": "#/$defs/MCPSessionHandle"
+        },
+        "cursor": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 1024
+        },
+        "control_reply_limit": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 16
+        },
+        "profile_digest": {
+          "$ref": "#/$defs/Digest"
+        }
+      },
+      "required": [
+        "schema",
+        "kind",
+        "session_handle"
+      ],
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "MCPCallTool": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema": {
+          "const": "zatiti.mcp.action/v1",
+          "type": "string"
+        },
+        "kind": {
+          "const": "call_tool",
+          "type": "string"
+        },
+        "session_handle": {
+          "$ref": "#/$defs/MCPSessionHandle"
+        },
+        "tool": {
+          "$ref": "#/$defs/MCPToolName"
+        },
+        "arguments": {
+          "$ref": "#/$defs/ToolArguments"
+        },
+        "input_schema": {
+          "$ref": "#/$defs/InertSchema"
+        },
+        "input_schema_digest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "classification": {
+          "$ref": "#/$defs/Classification"
+        },
+        "control_reply_limit": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 16
+        },
+        "profile_digest": {
+          "$ref": "#/$defs/Digest"
+        }
+      },
+      "required": [
+        "schema",
+        "kind",
+        "session_handle",
+        "tool",
+        "arguments",
+        "input_schema",
+        "input_schema_digest",
+        "classification"
+      ],
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "MCPCloseSession": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema": {
+          "const": "zatiti.mcp.action/v1",
+          "type": "string"
+        },
+        "kind": {
+          "const": "close_session",
+          "type": "string"
+        },
+        "session_handle": {
+          "$ref": "#/$defs/MCPSessionHandle"
+        },
+        "control_reply_limit": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 16
+        },
+        "profile_digest": {
+          "$ref": "#/$defs/Digest"
+        }
+      },
+      "required": [
+        "schema",
+        "kind",
+        "session_handle"
+      ],
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "MCPClientParameters": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/MCPOpenSession"
+        },
+        {
+          "$ref": "#/$defs/MCPListTools"
+        },
+        {
+          "$ref": "#/$defs/MCPCallTool"
+        },
+        {
+          "$ref": "#/$defs/MCPCloseSession"
+        }
+      ],
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "MCPHandshakeExchange": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "message": {
+          "type": "string",
+          "enum": [
+            "server/discover",
+            "initialize",
+            "notifications/initialized"
+          ]
+        },
+        "http_status": {
+          "type": "integer",
+          "minimum": 100,
+          "maximum": 599
+        },
+        "request_sent": {
+          "type": "string",
+          "enum": [
+            "no",
+            "yes",
+            "unknown"
+          ]
+        }
+      },
+      "required": [
+        "message",
+        "request_sent"
+      ],
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "MCPContentSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "text": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65536
+        },
+        "image": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65536
+        },
+        "audio": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65536
+        },
+        "resource_link": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65536
+        },
+        "embedded_resource": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65536
+        }
+      },
+      "required": [
+        "text",
+        "image",
+        "audio",
+        "resource_link",
+        "embedded_resource"
+      ],
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "MCPClientEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema": {
+          "const": "zatiti.mcp.evidence/v1",
+          "type": "string"
+        },
+        "physical_call": {
+          "$ref": "#/$defs/MCPPhysicalCallEvidence"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "open_session",
+            "list_tools",
+            "call_tool",
+            "close_session"
+          ]
+        },
+        "session_handle": {
+          "$ref": "#/$defs/MCPSessionHandle"
+        },
+        "session_state": {
+          "type": "string",
+          "enum": [
+            "active",
+            "stateless",
+            "expired",
+            "closed",
+            "unknown"
+          ]
+        },
+        "handshake": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/MCPHandshakeExchange"
+          },
+          "minItems": 0,
+          "maxItems": 3
+        },
+        "server_name": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 256
+        },
+        "server_version": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 128
+        },
+        "protocol_version": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 64
+        },
+        "server_capabilities": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "minItems": 0,
+          "maxItems": 32
+        },
+        "tools": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/MCPDiscoveredTool"
+          },
+          "minItems": 0,
+          "maxItems": 256
+        },
+        "next_cursor": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 1024
+        },
+        "tool": {
+          "$ref": "#/$defs/MCPToolName"
+        },
+        "arguments_digest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "is_error": {
+          "type": "boolean"
+        },
+        "content_summary": {
+          "$ref": "#/$defs/MCPContentSummary"
+        },
+        "structured_content_digest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "refused_server_requests": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "minItems": 0,
+          "maxItems": 32
+        },
+        "usage": {
+          "$ref": "#/$defs/ProviderUsage"
+        },
+        "staged_outputs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/StagedOutput"
+          },
+          "minItems": 0,
+          "maxItems": 20
+        },
+        "output_artifacts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ArtifactRef"
+          },
+          "minItems": 0,
+          "maxItems": 20
+        },
+        "exchanges": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/MCPHTTPExchange"
+          },
+          "maxItems": 19
+        }
+      },
+      "required": [
+        "schema",
+        "physical_call",
+        "kind",
+        "session_state",
+        "refused_server_requests",
+        "usage",
+        "staged_outputs",
+        "output_artifacts",
+        "exchanges"
+      ],
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "MCPPhysicalCallEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "operation_id": {
+          "$ref": "#/$defs/ID"
+        },
+        "attempt_id": {
+          "$ref": "#/$defs/ID"
+        },
+        "account_identity": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "requested_destination": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "resolved_destination": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "profile_digest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "capability_evidence": {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        "started_at": {
+          "$ref": "#/$defs/UTC"
+        },
+        "finished_at": {
+          "$ref": "#/$defs/UTC"
+        },
+        "request_context": {
+          "$ref": "#/$defs/ArtifactLocator"
+        },
+        "request_sent": {
+          "type": "string",
+          "enum": [
+            "no",
+            "yes",
+            "unknown"
+          ]
+        },
+        "confirmation": {
+          "type": "string",
+          "enum": [
+            "authoritative_success",
+            "authoritative_failure",
+            "provider_accepted",
+            "authoritative_nonexecution",
+            "unknown"
+          ]
+        },
+        "http_status": {
+          "type": "integer",
+          "minimum": 100,
+          "maximum": 599
+        },
+        "provider_reference": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 1024
+        },
+        "error_code": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 128
+        },
+        "error_message": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 2048
+        },
+        "context_unavailable": {
+          "type": "string",
+          "enum": [
+            "staging_failed",
+            "request_rejected",
+            "cancelled_before_send"
+          ]
+        }
+      },
+      "required": [
+        "operation_id",
+        "attempt_id",
+        "account_identity",
+        "requested_destination",
+        "resolved_destination",
+        "profile_digest",
+        "capability_evidence",
+        "started_at",
+        "finished_at",
+        "request_sent",
+        "confirmation"
+      ],
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "allOf": [
+        {
+          "if": {
+            "required": [
+              "request_context"
+            ]
+          },
+          "then": {
+            "not": {
+              "required": [
+                "context_unavailable"
+              ]
+            }
+          },
+          "else": {
+            "properties": {
+              "request_sent": {
+                "const": "no"
+              }
+            },
+            "required": [
+              "context_unavailable"
+            ]
+          }
+        }
+      ]
+    },
+    "MCPHTTPExchange": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "enum": [
+            "main",
+            "handshake",
+            "control_reply"
+          ]
+        },
+        "method": {
+          "enum": [
+            "POST",
+            "DELETE"
+          ]
+        },
+        "rpc_method": {
+          "type": "string",
+          "maxLength": 256
+        },
+        "ordinal": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 19
+        },
+        "request_context": {
+          "$ref": "#/$defs/ArtifactLocator"
+        },
+        "request_sent": {
+          "enum": [
+            "no",
+            "yes",
+            "unknown"
+          ]
+        },
+        "http_status": {
+          "type": "integer",
+          "minimum": 100,
+          "maximum": 599
+        }
+      },
+      "required": [
+        "kind",
+        "method",
+        "ordinal",
+        "request_context",
+        "request_sent"
+      ]
     }
   },
   "adapter_mapping": {
@@ -3778,6 +4576,11 @@
       "profile": "SerenityProfile",
       "parameters": "SerenityParameters",
       "evidence": "SerenityEvidence"
+    },
+    "mcpclient": {
+      "profile": "MCPClientProfile",
+      "parameters": "MCPClientParameters",
+      "evidence": "MCPClientEvidence"
     }
   },
   "notes": [
@@ -3802,6 +4605,7 @@
     "VerificationResult.independent=true is necessary structure, not trust evidence: only the trusted runner may submit that result through its internal admission identity. Match task/attempt, acceptance digest, verifier identity/version/digest and request artifact before accepting. Passed requires all sealed expected checks observed as required; unavailable, interrupted, worker assertion and process exit zero alone cannot succeed a task. Manual acceptance uses the separate task operation and never fabricates an independent result.",
     "BackupManifest is inside an authenticated encrypted bundle; it never includes decrypting master keys. archive_entry values are normalized relative entries with no traversal, absolute paths, symlinks, duplicate/case collisions or devices. Verify database/artifact/brain digests and qualified revision exports before marking backup verified. Large manifests stream through bounded artifact IO, not public JSON request bodies.",
     "Restore starts paused under exclusive maintenance, validates installation binding and key prerequisites, and retains current recovery overlay before rewinding. Merge revocations, durable command identities, claimed/unknown effects, reservations and memory obligations monotonically via their owners; fail closed on conflict and retain the overlay. Overlay record artifacts must be included/pinned and encrypted. No database/brain rewind is represented as undoing an external effect.",
-    "Revision 3 splits ResponsesParameters/ResponsesEvidence by the kind discriminator into prepare_session (creates the provider conversation, returns session_handle, no model-visible content and no context_artifact) and model_step (names the persisted session_handle and sends context_artifact/max_output_tokens/tool_contract_versions). Each is exactly one physical call per Invoke; the adapter never performs both requests inside one Invoke. A prepare_session timeout after the request was sent leaves the session unknown, not absent, and must not be resent; a model_step timeout after bytes were sent is outcome_unknown and an empty item list is equally consistent with never ran and still running, so nonexecution is never assumed and no automatic fresh call follows."
+    "Revision 3 splits ResponsesParameters/ResponsesEvidence by the kind discriminator into prepare_session (creates the provider conversation, returns session_handle, no model-visible content and no context_artifact) and model_step (names the persisted session_handle and sends context_artifact/max_output_tokens/tool_contract_versions). Each is exactly one physical call per Invoke; the adapter never performs both requests inside one Invoke. A prepare_session timeout after the request was sent leaves the session unknown, not absent, and must not be resent; a model_step timeout after bytes were sent is outcome_unknown and an empty item list is equally consistent with never ran and still running, so nonexecution is never assumed and no automatic fresh call follows.",
+    "MCP client adapter (internal/adapters/mcpclient, adapter name mcp, coordinated revision 2026-09-24, dec-1256): open_session is the one declared exception to one-request-per-attempt, and it is bounded and recorded: the pinned go-sdk client sends at most three JSON-RPC messages over at most three HTTP requests (an optional SEP-2575 server/discover probe, then the legacy initialize request and notifications/initialized when the server does not answer discover), every one listed in evidence.handshake with request_sent and the actual http_status only when a response exists (a sent request with no response has no status), none carrying model-supplied content or causing an external effect. The adapter never hides the discover probe from evidence. list_tools, call_tool and close_session are exactly one request each; a tools/list page is one attempt and the adapter never follows next_cursor itself. Server-to-client requests (sampling, elicitation, roots, ping) are answered with a JSON-RPC method-not-found error and named in refused_server_requests; the adapter opens no GET listening stream and never calls resources, prompts or tasks. Discovered tools, schemas and annotations are untrusted data recorded through _connections.discovery.record; they grant no authority, and a call_tool is admitted only for a tool named in the profile allowed_tools, the connection's recorded discovery and the calling worker's binding permissions, with arguments validated against the pinned input_schema whose digest the action carries."
   ]
 }

@@ -1,5 +1,5 @@
 {
-  "revision": 3,
+  "revision": 4,
   "packages": [
     {
       "name": "contract",
@@ -460,6 +460,21 @@
       "constructor": ""
     },
     {
+      "name": "mcpclient",
+      "path": "internal/adapters/mcpclient",
+      "kind": "adapter",
+      "imports": [
+        "contract"
+      ],
+      "mission": "Qualified generic MCP client connection adapter (adapter name mcp; Postiz first).",
+      "design": "Revision 4 governs MCP probe intent/admission/callback provenance, composed full parameter schemas, claim-time catalog/profile/session rechecks, bounded separately costed refusal replies and faithful no-response/pre-send evidence; see the shared contract. Adapter name mcp; profile schema zatiti.mcp/v1 has transport (streamable_http with one exact https endpoint and max_redirects 0; stdio frozen but capability_unsupported until qualified), protocol_version 2025-11-25|2026-07-28 (the server must negotiate the profile value), credential_kind bearer|none, allowed_tools, tool_call_cost, max_request_bytes, max_response_bytes, timeout_seconds, classifications and capability evidence. Action kind open_session/list_tools/call_tool/close_session per the frozen MCPClientParameters; the endpoint is the profile's, never an action field. Resolve Dispatch.CredentialRef through Secrets outside transactions and place the bytes only in the Authorization header; the staged request record, evidence, errors and logs carry no credential (credential-in-path and OAuth code flows are capability_unsupported). open_session performs the handshake exactly as the pinned SDK Client.Connect does (an optional SEP-2575 server/discover probe, then the legacy initialize and notifications/initialized; at most three recorded HTTP requests, every one listed in evidence.handshake, the declared primary-handshake exception; separately bounded refusal replies are additional recorded exchanges) and keeps the go-sdk ClientSession in a bounded in-memory table keyed by an opaque MCPSessionHandle; a handle unknown after restart or expiry is prerequisite_missing, never re-derived. list_tools is one tools/list request for one page; call_tool is exactly one tools/call after validating arguments strictly against the pinned input_schema whose digest the action carries and checking the tool against profile allowed_tools; close_session is one DELETE. Use the official MCP Go SDK pinned in dependencies.lock.json with SDK retries and reconnects disabled. Timeout after bytes were sent is outcome_unknown; a response above max_response_bytes is outcome_unknown with error_code response_oversize; Reconcile is capability_unsupported (the protocol has no authoritative call lookup) and unknown stays unknown until a separately admitted linked operation resolves it. Answer server-to-client requests (sampling, elicitation, roots, ping) only within the explicit action/profile control-reply budget, with method-not-found; record refusals and dispatched exchanges, abort and locally evict on exhaustion; open no GET listening stream; never call resources, prompts or tasks; never fetch resource_link or embedded resource content (a fetch is a separate governed read). Tool result content is staged as tool_result under the action's classification; annotations are recorded as hints and change nothing. No hidden retry, redirect, preflight or fallback endpoint.",
+      "tests": "Controlled-server physical call counts, exact request/account/destination, timeout-after-success unknown, no hidden retries, bound enforcement, secret redaction, supported real profile/version qualification.",
+      "wave": 2,
+      "refs": [],
+      "boundary": "",
+      "constructor": ""
+    },
+    {
       "name": "serenity",
       "path": "internal/adapters/serenity",
       "kind": "adapter",
@@ -508,7 +523,8 @@
         "responses",
         "github",
         "httpread",
-        "serenity"
+        "serenity",
+        "mcpclient"
       ],
       "mission": "Assemble controller/CLI/MCP binary and local bootstrap/helper mechanics.",
       "design": "Own main.go and local entrypoint helpers only. Wire concrete modules to registry/app Ports, storage/platform, adapters/controller/server. Supply the installation database seam exactly as the shared contract states: define a private wrapper type whose only method is Backup(context.Context, io.Writer) error delegating to the opened contract.Database, and pass installation.WithDatabaseBackup(wrapper) to installation.New. Never pass the Database value itself, and give the capability to no other module, adapter, server or client. main delegates run(ctx,args,stdin,stdout,stderr) int for testability. Commands serve and mcp serve are transport mechanics; public operations come only from registry-generated CLI. Explicit config/profile selection outside model-visible operation arguments. serve owns always-on lock/scheduler; mcp serve uses existing controller and scoped client, no database writer. init and mcp serve --bootstrap call shared local initializer under one-time lock, secret helper local IO, return metadata and end bootstrap mode. No automatic launch of arbitrary client/harness. Configure slog redacted stderr/protected files, signals and bounded shutdown. Root dependencies and CI belong integration, not this scope.",
@@ -552,7 +568,8 @@
         "responses",
         "github",
         "httpread",
-        "serenity"
+        "serenity",
+        "mcpclient"
       ],
       "mission": "Own real cross-package fixtures, atomicity, transport parity and end-to-end journeys.",
       "design": "Implement package integration_test. Sole integration owner also has separately serialized root-file assignment for go.mod/go.sum, root build configuration and qualified dependency lock. Never dispatch that root assignment concurrently with child scopes. Establish go module/toolchain and exact library pins before dependent agents start; generate baseline contract package first. Dependency plan is a pinned lock report docs/implementation/dependencies.lock.json with module/version/sum/license, external service commit/protocol, qualified features/gaps and named test commands; this file is an explicit integration-owner exception to test write scope. Do not edit frozen prompts/contracts to make tests pass. Construct real SQLite controllers with controlled provider servers, binding installation.WithDatabaseBackup to a backup-only wrapper over the real storage Database exactly as cmd/zatiti does so backup/restore cases restore the actual bytes, fake clock and secure temporary stores; use actual CLI subprocesses and MCP client, not direct handler-only parity. Compare identical principal/state fixtures and normalize ONLY generated IDs/timestamps via explicit map; preserve permissions/versions/business events/outcome uncertainty. Drive all named acceptance cases and journeys, inject crash at transactional/provider boundaries, retain results and failure evidence. The desktop is the Flutter application at apps/desktop and is not a Go import: transport parity here includes a Go wire-level driver that exercises exactly what that client consumes over the real internal/server listener (request/result envelope, original-key replay after disconnect, command.get for unknown acknowledgment, cursor expiry with snapshot recovery, mutual-TLS principal mapping), so named cases shared with the desktop prove the controller side of its contract. Dart unit/widget tests live in apps/desktop; driving the built application lives in qualification. Record dependency changes through designated root owner, not all agents. All spec-only tests must be labeled planned until actually executed.",
@@ -572,7 +589,8 @@
         "responses",
         "github",
         "httpread",
-        "serenity"
+        "serenity",
+        "mcpclient"
       ],
       "mission": "Own executable external adapter, real Flutter desktop/platform/client qualification and release evidence.",
       "design": "Implement package qualification_test and controlled subprocess/GUI drivers in this root. Qualifications bind exact source/config/dependency/tool/profile/client/platform versions and expected/observed evidence. The desktop is the Flutter application at apps/desktop, not an importable Go package: qualify it by building the real application from a recorded source revision with the pinned Flutter toolchain and driving that built application (Flutter integration_test and/or OS accessibility automation launched as a controlled subprocess from this root) against an actual controller over the real Unix socket, plus the explicit mutual-TLS remote path. Never substitute a Go stand-in, a widget test, the design study's browser rendering or a WebView for the built client. Run first-release desktop onboarding/daily result/decision paths; verify UI against committed controller state read back through the Go client, not narration or screenshots alone. Record Flutter/Dart/plugin versions, build mode and platform with each result. A missing Flutter toolchain or display prerequisite reports not-run and blocks desktop release claims. Qualify macOS and Linux packaging (controller always-on, desktop closing, Serenity one writer/brain/key setup, secure helper, backup restore). Test actual named agent-client versions before advertising compatibility; MCP baseline with optional features disabled. Adapters qualify public APIs with explicit test accounts/operator-controlled safe destinations; scripts must not embed credentials or silently perform irreversible real publication. Unit fakes cannot stand in for real protocol capabilities. Missing credentials/platform prerequisites report not-run and block relevant release claims. Additional remote MCP, contained executor, Windows and providers are outside v1 scope.",

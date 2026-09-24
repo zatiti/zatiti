@@ -56,7 +56,7 @@ type opMeta struct {
 // catalog in schema order.
 var opMetas = []opMeta{
 	{id: opMetadata, visibility: "internal", mode: "query",
-		callers: []string{"execution", "tasks", "effects", "memory", "messaging", "skills", "installation"}},
+		callers: []string{"execution", "tasks", "effects", "memory", "messaging", "skills", "installation", "connections"}},
 	{id: opPublish, visibility: "internal", mode: "mutation",
 		callers: []string{"controller", "execution", "memory", "skills", "installation"}},
 

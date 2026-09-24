@@ -1,0 +1,109 @@
+package mcpclient
+
+import (
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"strings"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"github.com/zatiti/zatiti/internal/contract"
+)
+
+// This regression verifies that concurrent SDK reply POSTs remain inside the
+// explicitly authorized control budget and each has its own evidence.
+func TestIndependentParallelRefusalReplies(t *testing.T) {
+	const n = 16
+	srv := newControlledServer()
+	defer srv.close()
+	var replies atomic.Int32
+	all := make(chan struct{})
+	srv.onRequest = func(w http.ResponseWriter, r *http.Request, body []byte, method string) bool {
+		if method == "POST(unparsed)" {
+			if replies.Add(1) == n {
+				close(all)
+			}
+			select {
+			case <-all:
+			case <-r.Context().Done():
+				return true
+			}
+			w.Header().Set("Mcp-Session-Id", r.Header.Get("Mcp-Session-Id"))
+			w.WriteHeader(http.StatusAccepted)
+			return true
+		}
+		if method != "tools/call" {
+			return false
+		}
+		var rpc struct{ ID json.RawMessage }
+		_ = json.Unmarshal(body, &rpc)
+		w.Header().Set("Content-Type", "text/event-stream")
+		for i := 0; i < n; i++ {
+			_, _ = fmt.Fprintf(w, "event: message\ndata: {\"jsonrpc\":\"2.0\",\"id\":\"server-%d\",\"method\":\"ping\",\"params\":{}}\n\n", i)
+		}
+		w.(http.Flusher).Flush()
+		select {
+		case <-all:
+		case <-r.Context().Done():
+			return true
+		}
+		_, _ = fmt.Fprintf(w, "event: message\ndata: {\"jsonrpc\":\"2.0\",\"id\":%s,\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"done\"}]}}\n\n", rpc.ID)
+		return true
+	}
+	a := newTestAdapter(t, newFakeBlobStore(), nil, withControlReplyBudget(t, buildProfileJSON(t, srv.endpoint(), true, []string{"echo"}, []string{"public"}, "none"), 16, 0))
+	handle, _ := openSession(t, a, time.Second)
+	action := echoAction(t, handle)
+	action.ControlReplyLimit = 16
+	before := srv.total()
+	obs, err := a.Invoke(t.Context(), testDispatch(t, action, 3*time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("physical HTTP requests for one tool call with %d refusal replies: %d; server counts=%v", n, srv.total()-before, srv.counts())
+	if srv.counts()["DELETE"] != 0 {
+		t.Error("SDK cleanup sent an unadmitted DELETE during call_tool")
+	}
+	if replies.Load() != n {
+		t.Fatalf("only %d replies: %s", replies.Load(), obs.Evidence)
+	}
+	if obs.Disposition != contract.DispositionSucceeded {
+		t.Errorf("not succeeded: %s", obs.Evidence)
+	}
+	if strings.Count(string(obs.Evidence), `"ping"`) != n {
+		t.Errorf("refusals missing: %s", obs.Evidence)
+	}
+}
+
+// The asynchronous SDK cleanup timing is variable; verify the transport guard
+// directly as well so GET/DELETE refusal cannot pass merely by racing disarm.
+func TestToolCallTransportRefusesUnadmittedMethods(t *testing.T) {
+	for _, method := range []string{http.MethodGet, http.MethodDelete} {
+		t.Run(method, func(t *testing.T) {
+			blobs := newFakeBlobStore()
+			calls := 0
+			rt := &callRoundTripper{base: guardTestTransport(func(*http.Request) (*http.Response, error) {
+				calls++
+				return &http.Response{StatusCode: 200, Body: http.NoBody, Header: http.Header{}}, nil
+			}), maxRequestBytes: 1024, maxResponseBytes: 1024}
+			rt.arm(&callState{ctx: t.Context(), blobs: blobs, kind: kindCallTool})
+			request, err := http.NewRequestWithContext(t.Context(), method, "https://example.invalid/mcp", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			response, err := rt.RoundTrip(request)
+			if response != nil {
+				_ = response.Body.Close()
+			}
+			rt.disarm()
+			if err == nil || calls != 0 || len(blobs.stagedDocs()) != 0 {
+				t.Errorf("unadmitted %s reached staging/wire: calls=%d error=%v", method, calls, err)
+			}
+		})
+	}
+}
+
+type guardTestTransport func(*http.Request) (*http.Response, error)
+
+func (f guardTestTransport) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }

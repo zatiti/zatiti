@@ -13,6 +13,7 @@ import (
 
 	"github.com/zatiti/zatiti/internal/adapters/github"
 	"github.com/zatiti/zatiti/internal/adapters/httpread"
+	"github.com/zatiti/zatiti/internal/adapters/mcpclient"
 	"github.com/zatiti/zatiti/internal/adapters/responses"
 	"github.com/zatiti/zatiti/internal/adapters/serenity"
 	"github.com/zatiti/zatiti/internal/contract"
@@ -32,6 +33,7 @@ import (
 var adapterConstructors = map[string]func(contract.AdapterDependencies, json.RawMessage) (contract.Adapter, error){
 	"github":    github.New,
 	"httpread":  httpread.New,
+	"mcp":       mcpclient.New,
 	"responses": responses.New,
 	"serenity":  serenity.New,
 }
@@ -116,4 +118,28 @@ func adapterDependencies(h *installationHandle) contract.AdapterDependencies {
 		Clock:   h.clock,
 		Blobs:   h.plat.Blobs(),
 	}
+}
+
+// Read only the secret-free admission profile. The adapter constructor repeats
+// full validation at startup; digest-pinned actions refuse any intervening drift.
+func readMCPAdmissionProfile(dir string) (json.RawMessage, error) {
+	path := filepath.Join(dir, "mcp.json")
+	info, err := os.Lstat(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() || info.Size() > maxAdapterProfileBytes {
+		return nil, fmt.Errorf("MCP profile must be a bounded regular file")
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	if len(raw) > maxAdapterProfileBytes {
+		return nil, fmt.Errorf("MCP profile exceeds size bound")
+	}
+	return raw, nil
 }

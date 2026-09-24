@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/zatiti/zatiti/internal/contract"
@@ -321,7 +323,7 @@ func (s *Service) handleContextPrepare(ctx context.Context, unit contract.Unit, 
 	// also this turn's model-dispatch tool/connection identity.
 	toolBindingIDs := boundTargetIDs(snapshot.Bindings, worker.Bindings, "tool")
 	for _, targetID := range toolBindingIDs {
-		binding := findBinding(snapshot.Bindings, targetID, "tool")
+		binding := findSelectedBinding(snapshot.Bindings, worker.Bindings, targetID, "tool")
 		if binding == nil {
 			continue
 		}
@@ -329,21 +331,36 @@ func (s *Service) handleContextPrepare(ctx context.Context, unit contract.Unit, 
 		if len(binding.Destinations) > 0 {
 			destination = binding.Destinations[0]
 		}
-		if destination == "" {
-			continue
-		}
-		conn, tool, err := s.callConnectionsResolve(ctx, unit, t.Scope,
-			wireRef{ID: worker.Profile.ConnectionID, Version: defaultResolveVersion},
-			wireRef{ID: binding.TargetID, Version: defaultResolveVersion}, destination)
+		conn, tool, err := s.callConnectionsToolResolve(ctx, unit, t.Scope, binding.TargetID)
 		if err != nil {
-			// Unresolvable: the caller has not (yet) qualified this
-			// binding at the pinned version. Skip rather than fail the
-			// whole context -- a stale product-tool binding must never
-			// block chat/task progress the model does not need it for.
-			continue
+			var fault *contract.Fault
+			if !errors.As(err, &fault) || fault.Code != contract.CodeNotFound {
+				continue
+			}
+			conn, tool, err = s.callConnectionsResolve(ctx, unit, t.Scope,
+				wireRef{ID: worker.Profile.ConnectionID, Version: defaultResolveVersion},
+				wireRef{ID: binding.TargetID, Version: defaultResolveVersion}, destination)
+			if err != nil || tool.Adapter == "mcp" {
+				continue
+			}
+		} else {
+			connectionBinding := findSelectedBinding(snapshot.Bindings, worker.Bindings, conn.ID, "connection")
+			if tool.Adapter != "mcp" || conn.Provider != "mcp" || tool.ID != binding.TargetID || tool.Version < 1 || conn.Version < 1 || connectionBinding == nil || len(tool.Destinations) != 1 {
+				continue
+			}
+			destination = tool.Destinations[0]
+			if !slices.Contains(binding.Destinations, destination) || !slices.Contains(connectionBinding.Destinations, destination) || !slices.Contains(conn.Destinations, destination) {
+				continue
+			}
+		}
+
+		classification := ""
+		if tool.Adapter == "mcp" {
+			classification = "restricted"
 		}
 		recipe.Components = append(recipe.Components, contextComponent{
-			Kind: "tool", ToolID: tool.ID, ToolVersion: tool.Version,
+			Classification: classification,
+			Kind:           "tool", ToolID: tool.ID, ToolVersion: tool.Version,
 			ConnectionID: conn.ID, ConnectionVersion: conn.Version, AccountIdentity: conn.AccountIdentity,
 			Name: tool.Name, InputSchema: tool.InputSchema, OutputSchema: tool.OutputSchema,
 			Effect: tool.Effect, Destinations: tool.Destinations, BindingID: binding.ID,
@@ -416,16 +433,6 @@ func boundTargetIDs(bindings []wireBinding, workerBindingIDs []contract.ID, kind
 		}
 	}
 	return out
-}
-
-// findBinding locates the authorized binding of kind naming targetID.
-func findBinding(bindings []wireBinding, targetID contract.ID, kind string) *wireBinding {
-	for i := range bindings {
-		if bindings[i].Kind == kind && bindings[i].TargetID == targetID {
-			return &bindings[i]
-		}
-	}
-	return nil
 }
 
 // localDecisionTools are the sealed, always-available non-provider decision
@@ -758,4 +765,15 @@ func nonNilStrings(in []string) []string {
 		return []string{}
 	}
 	return in
+}
+
+// findSelectedBinding never substitutes another binding of the same target.
+func findSelectedBinding(bindings []wireBinding, selected []contract.ID, target contract.ID, kind string) *wireBinding {
+	for i := range bindings {
+		b := &bindings[i]
+		if b.Kind == kind && b.TargetID == target && slices.Contains(selected, b.ID) {
+			return b
+		}
+	}
+	return nil
 }

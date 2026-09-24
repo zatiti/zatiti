@@ -166,7 +166,7 @@ def main():
         parts.append('## Shared foundation contract\n\n'+common)
         parts.append('## Owned product requirements\n\n'+('\n\n'.join(f"### {r['id']} (source section {r['section']}; primary owner {r['owner']})\n\n{r['text']}" for r in selected) or 'This foundation/support scope fulfills the shared contract and the specific ownership/acceptance brief above.'))
         parts.append('## Exact operation and dependency schemas\n\n'+schemas_md(available,D))
-        if n in {'responses','github','httpread','serenity','execution','effects','controller','memory','installation','artifacts','connections','tasks','integration','qualification','zatiti'}:
+        if n in {'responses','github','httpread','serenity','mcpclient','execution','effects','controller','memory','installation','artifacts','connections','tasks','integration','qualification','zatiti'}:
             parts.append('## Local adapter, context, verifier and backup payloads\n\nThese local schemas freeze the handoff between execution, adapters and artifact publication. They do not assert upstream compatibility.\n\n'+ '\n'.join(adapter.get('notes',[]))+'\n\n```json\n'+compact({'$defs':adapter['definitions'],'adapter_mapping':adapter['adapter_mapping']})+'\n```\n')
         parts.append('## Named acceptance cases\n\nTests are implementation deliverables, not claims of already executed qualification. Retain expected/observed results, exact source/config/tool versions and failure evidence.\n')
         for a in cases:
