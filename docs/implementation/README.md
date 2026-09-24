@@ -2,7 +2,7 @@
 
 Revision 3. **Specification scaffold.** The packages below have been implemented against it (see the root README for current product status); no executed release qualification is claimed.
 
-36 disjoint implementation roots; 201 public operations; 91 internal owner methods; 144 source blocks with explicit ownership; 130 named acceptance cases covering Z01–Z21 and release journeys.
+37 disjoint implementation roots; 203 public operations; 92 internal owner methods; 144 source blocks with explicit ownership; 135 named acceptance cases covering Z01–Z21 and release journeys.
 
 Each root already contains a complete committed AGENTS.md: local mission, allowed imports, owned requirements, exact Go interfaces, incoming/outgoing operation schemas, persistence/recovery rules and named acceptance criteria. An agent can implement from that file without the RFC. Scope prompts intentionally repeat necessary contracts; do not edit generated copies independently.
 
@@ -50,6 +50,7 @@ Root dependency work and the lock report belong only to integration's serialized
 | [`internal/adapters/responses`](../../internal/adapters/responses/AGENTS.md) | adapter | 2 | Qualified hosted Responses model adapter. |
 | [`internal/adapters/github`](../../internal/adapters/github/AGENTS.md) | adapter | 2 | Qualified GitHub repository artifact/publication adapter. |
 | [`internal/adapters/httpread`](../../internal/adapters/httpread/AGENTS.md) | adapter | 2 | Qualified bounded public HTTP reads for research. |
+| [`internal/adapters/mcpclient`](../../internal/adapters/mcpclient/AGENTS.md) | adapter | 2 | Qualified generic MCP client connection adapter (adapter name mcp; Postiz first). |
 | [`internal/adapters/serenity`](../../internal/adapters/serenity/AGENTS.md) | adapter | 2 | Qualified public Serenity protocol/read-facade adapter and writer capability report. |
 | [`cmd/zatiti`](../../cmd/zatiti/AGENTS.md) | entrypoint | 3 | Assemble controller/CLI/MCP binary and local bootstrap/helper mechanics. |
 | [`tests/integration`](../../tests/integration/AGENTS.md) | verification | 4 | Own real cross-package fixtures, atomicity, transport parity and end-to-end journeys. |

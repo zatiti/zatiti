@@ -1229,7 +1229,8 @@
       "github",
       "httpread",
       "responses",
-      "serenity"
+      "serenity",
+      "mcpclient"
     ],
     "kind": "requirement",
     "text": "External reads, model disclosure and mutations use registered contracts. Separate immutable **action** (exact intent), **operation** (logical effect) and **attempt** (physical invocation). An action binds account identity, destination, content/media hashes, timing, preconditions, and relevant configuration/tool versions. Reviews bind this digest. A changed action requires a new review where policy requires one."
@@ -1245,7 +1246,8 @@
       "github",
       "httpread",
       "responses",
-      "serenity"
+      "serenity",
+      "mcpclient"
     ],
     "kind": "requirement",
     "text": "Operation states are `prepared`, `awaiting_review`, `ready`, `executing`, `awaiting_confirmation`, `outcome_unknown`, `succeeded`, `failed`, and unsent terminal states `denied`, `expired`, `cancelled`. An operation is unsent only if no earlier attempt can still take effect. Provider acceptance and confirmed completion are distinct observations."
@@ -1261,7 +1263,8 @@
       "github",
       "httpread",
       "responses",
-      "serenity"
+      "serenity",
+      "mcpclient"
     ],
     "kind": "requirement",
     "text": "Execution uses three short local transactions around a network call:"
@@ -1277,7 +1280,8 @@
       "github",
       "httpread",
       "responses",
-      "serenity"
+      "serenity",
+      "mcpclient"
     ],
     "kind": "requirement",
     "text": "1. **Admit:** validate current authority/review/preconditions, reserve all applicable budgets, create attempt and dispatch intent, and append evidence atomically.\n2. **Claim:** the trusted sender consumes an attempt-bound claim after checking current generation, revocation and expiry. Workers never receive a reusable dispatch credential.\n3. **Record:** after invocation, atomically store provider observations, outcome, settlement or retained uncertainty, and events. A failed record write does not authorize repeating the provider call."
@@ -1293,7 +1297,8 @@
       "github",
       "httpread",
       "responses",
-      "serenity"
+      "serenity",
+      "mcpclient"
     ],
     "kind": "requirement",
     "text": "Once dispatch is claimed, a crash or lost response can mean the provider acted. Recovery retains `outcome_unknown` and its reservation until supported evidence resolves it. An expired lease, timeout, cancellation, operator acknowledgement or eventually consistent not-found cannot establish non-execution. Revocation before claim prevents dispatch; revocation after claim cannot retract transmitted bytes."
@@ -1309,7 +1314,8 @@
       "github",
       "httpread",
       "responses",
-      "serenity"
+      "serenity",
+      "mcpclient"
     ],
     "kind": "requirement",
     "text": "Automatic mutation retries are disabled unless a qualified contract establishes request equivalence and safe idempotency within the provider's actual retention window, or authoritative non-execution. Each retry has current authorization and a separate attempt record. Disable hidden SDK retries that would bypass physical-call accounting. A failed retry cannot erase an earlier unknown attempt."
@@ -1325,7 +1331,8 @@
       "github",
       "httpread",
       "responses",
-      "serenity"
+      "serenity",
+      "mcpclient"
     ],
     "kind": "requirement",
     "text": "Reconciliation is a separately authorized, bounded read. Compensation and replacement are new linked operations with their own consequences and review, not a rewrite of the original outcome. Conflicting late evidence creates an explicit correction/dispute. The first GitHub adapter must bind repository, branch/head, exact change and relevant automation constraints; opening a pull request must not be treated as harmless when downstream automation can cause broader effects."

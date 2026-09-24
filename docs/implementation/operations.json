@@ -3088,6 +3088,74 @@
         "expected_version"
       ]
     },
+    "MCPDiscoveredTool": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "maxLength": 8192
+        },
+        "input_schema": {
+          "type": "object",
+          "description": "Inert JSON data bounded by the enclosing size limit; never executable authority."
+        },
+        "input_schema_digest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "discovered_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "discovery_operation_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "title": {
+          "type": "string",
+          "maxLength": 8192
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 8192
+        },
+        "output_schema": {
+          "type": "object",
+          "description": "Inert JSON data bounded by the enclosing size limit; never executable authority."
+        },
+        "annotations": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "title": {
+              "type": "string",
+              "maxLength": 8192
+            },
+            "read_only_hint": {
+              "type": "boolean"
+            },
+            "destructive_hint": {
+              "type": "boolean"
+            },
+            "idempotent_hint": {
+              "type": "boolean"
+            },
+            "open_world_hint": {
+              "type": "boolean"
+            }
+          },
+          "required": []
+        }
+      },
+      "required": [
+        "name",
+        "input_schema",
+        "input_schema_digest",
+        "discovered_at",
+        "discovery_operation_id"
+      ]
+    },
     "Change": {
       "oneOf": [
         {
@@ -7704,6 +7772,574 @@
         "context_artifact",
         "max_output_tokens",
         "tool_contract_versions"
+      ],
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "Adapter_MCPToolName": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_.-]{1,128}$",
+      "maxLength": 128,
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "Adapter_MCPSessionHandle": {
+      "type": "string",
+      "description": "Adapter-local opaque handle for one open MCP session (never the raw Mcp-Session-Id, which stays inside the adapter). Scoped to the connection that opened it; unknown after a controller restart, which is reported as prerequisite_missing, never re-derived.",
+      "minLength": 1,
+      "maxLength": 256,
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "Adapter_MCPToolAnnotations": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "title": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 256
+        },
+        "read_only_hint": {
+          "type": "boolean"
+        },
+        "destructive_hint": {
+          "type": "boolean"
+        },
+        "idempotent_hint": {
+          "type": "boolean"
+        },
+        "open_world_hint": {
+          "type": "boolean"
+        }
+      },
+      "required": [],
+      "description": "Server-declared hints copied verbatim for operator review. They are untrusted data and never change effect classification, policy, review or allowlist decisions.",
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "Adapter_MCPDiscoveredTool": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/Adapter_MCPToolName"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 256
+        },
+        "description": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 4096
+        },
+        "input_schema": {
+          "$ref": "#/$defs/Adapter_InertSchema"
+        },
+        "input_schema_digest": {
+          "$ref": "#/$defs/Adapter_Digest"
+        },
+        "output_schema": {
+          "$ref": "#/$defs/Adapter_InertSchema"
+        },
+        "annotations": {
+          "$ref": "#/$defs/Adapter_MCPToolAnnotations"
+        }
+      },
+      "required": [
+        "name",
+        "input_schema",
+        "input_schema_digest"
+      ],
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "Adapter_MCPStreamableHTTPTransport": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "streamable_http",
+          "type": "string"
+        },
+        "endpoint": {
+          "$ref": "#/$defs/Adapter_HTTPSURL"
+        },
+        "allow_private_endpoint": {
+          "type": "boolean",
+          "description": "Explicit installation-authorized binding to a loopback/private/link-local destination. False refuses such a resolved address before dialing and binds validated dial addresses to prevent DNS rebinding, exactly as httpread does."
+        },
+        "max_redirects": {
+          "type": "integer",
+          "const": 0
+        }
+      },
+      "required": [
+        "kind",
+        "endpoint",
+        "allow_private_endpoint",
+        "max_redirects"
+      ],
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "Adapter_MCPStdioTransport": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "stdio",
+          "type": "string"
+        },
+        "command": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096,
+          "description": "Absolute path of an installation-authorized executable. Not qualified in v1: a profile naming this transport fails capability_unsupported until a coordinated revision qualifies subprocess custody (environment scrubbing, working directory, signal/timeout semantics)."
+        },
+        "args": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 0,
+            "maxLength": 4096
+          },
+          "minItems": 0,
+          "maxItems": 64
+        }
+      },
+      "required": [
+        "kind",
+        "command",
+        "args"
+      ],
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "Adapter_MCPClientProfile": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema": {
+          "const": "zatiti.mcp/v1",
+          "type": "string"
+        },
+        "transport": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Adapter_MCPStreamableHTTPTransport"
+            },
+            {
+              "$ref": "#/$defs/Adapter_MCPStdioTransport"
+            }
+          ]
+        },
+        "protocol_version": {
+          "const": "2025-11-25",
+          "type": "string"
+        },
+        "credential_kind": {
+          "type": "string",
+          "enum": [
+            "bearer",
+            "none"
+          ],
+          "description": "bearer sends the resolved credential bytes only in the Authorization header. Credential-in-path (for example /mcp/:apiKey) and OAuth authorization-code flows are refused as capability_unsupported: the first would place the secret in the staged request record and server logs, the second has no frozen token-endpoint shape (cmd/zatiti/helper.go)."
+        },
+        "allowed_tools": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Adapter_MCPToolName"
+          },
+          "minItems": 0,
+          "maxItems": 256
+        },
+        "tool_call_cost": {
+          "$ref": "#/$defs/Adapter_Money"
+        },
+        "max_request_bytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 16777216
+        },
+        "max_response_bytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 268435456
+        },
+        "timeout_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1800
+        },
+        "classifications": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Adapter_Classification"
+          },
+          "minItems": 1,
+          "maxItems": 3
+        },
+        "capability_evidence": {
+          "$ref": "#/$defs/Adapter_CapabilityEvidence"
+        }
+      },
+      "required": [
+        "schema",
+        "transport",
+        "protocol_version",
+        "credential_kind",
+        "allowed_tools",
+        "tool_call_cost",
+        "max_request_bytes",
+        "max_response_bytes",
+        "timeout_seconds",
+        "classifications",
+        "capability_evidence"
+      ],
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "Adapter_MCPOpenSession": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema": {
+          "const": "zatiti.mcp.action/v1",
+          "type": "string"
+        },
+        "kind": {
+          "const": "open_session",
+          "type": "string"
+        },
+        "client_name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "client_version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        }
+      },
+      "required": [
+        "schema",
+        "kind",
+        "client_name",
+        "client_version"
+      ],
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "Adapter_MCPListTools": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema": {
+          "const": "zatiti.mcp.action/v1",
+          "type": "string"
+        },
+        "kind": {
+          "const": "list_tools",
+          "type": "string"
+        },
+        "session_handle": {
+          "$ref": "#/$defs/Adapter_MCPSessionHandle"
+        },
+        "cursor": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 1024
+        }
+      },
+      "required": [
+        "schema",
+        "kind",
+        "session_handle"
+      ],
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "Adapter_MCPCallTool": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema": {
+          "const": "zatiti.mcp.action/v1",
+          "type": "string"
+        },
+        "kind": {
+          "const": "call_tool",
+          "type": "string"
+        },
+        "session_handle": {
+          "$ref": "#/$defs/Adapter_MCPSessionHandle"
+        },
+        "tool": {
+          "$ref": "#/$defs/Adapter_MCPToolName"
+        },
+        "arguments": {
+          "$ref": "#/$defs/Adapter_ToolArguments"
+        },
+        "input_schema": {
+          "$ref": "#/$defs/Adapter_InertSchema"
+        },
+        "input_schema_digest": {
+          "$ref": "#/$defs/Adapter_Digest"
+        },
+        "classification": {
+          "$ref": "#/$defs/Adapter_Classification"
+        }
+      },
+      "required": [
+        "schema",
+        "kind",
+        "session_handle",
+        "tool",
+        "arguments",
+        "input_schema",
+        "input_schema_digest",
+        "classification"
+      ],
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "Adapter_MCPCloseSession": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema": {
+          "const": "zatiti.mcp.action/v1",
+          "type": "string"
+        },
+        "kind": {
+          "const": "close_session",
+          "type": "string"
+        },
+        "session_handle": {
+          "$ref": "#/$defs/Adapter_MCPSessionHandle"
+        }
+      },
+      "required": [
+        "schema",
+        "kind",
+        "session_handle"
+      ],
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "Adapter_MCPClientParameters": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/Adapter_MCPOpenSession"
+        },
+        {
+          "$ref": "#/$defs/Adapter_MCPListTools"
+        },
+        {
+          "$ref": "#/$defs/Adapter_MCPCallTool"
+        },
+        {
+          "$ref": "#/$defs/Adapter_MCPCloseSession"
+        }
+      ],
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "Adapter_MCPHandshakeExchange": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "message": {
+          "type": "string",
+          "enum": [
+            "initialize",
+            "notifications/initialized"
+          ]
+        },
+        "http_status": {
+          "type": "integer",
+          "minimum": 100,
+          "maximum": 599
+        },
+        "request_sent": {
+          "type": "string",
+          "enum": [
+            "no",
+            "yes",
+            "unknown"
+          ]
+        }
+      },
+      "required": [
+        "message",
+        "http_status",
+        "request_sent"
+      ],
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "Adapter_MCPContentSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "text": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65536
+        },
+        "image": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65536
+        },
+        "audio": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65536
+        },
+        "resource_link": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65536
+        },
+        "embedded_resource": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65536
+        }
+      },
+      "required": [
+        "text",
+        "image",
+        "audio",
+        "resource_link",
+        "embedded_resource"
+      ],
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "Adapter_MCPClientEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema": {
+          "const": "zatiti.mcp.evidence/v1",
+          "type": "string"
+        },
+        "physical_call": {
+          "$ref": "#/$defs/Adapter_PhysicalCallEvidence"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "open_session",
+            "list_tools",
+            "call_tool",
+            "close_session"
+          ]
+        },
+        "session_handle": {
+          "$ref": "#/$defs/Adapter_MCPSessionHandle"
+        },
+        "session_state": {
+          "type": "string",
+          "enum": [
+            "active",
+            "stateless",
+            "expired",
+            "closed",
+            "unknown"
+          ]
+        },
+        "handshake": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Adapter_MCPHandshakeExchange"
+          },
+          "minItems": 0,
+          "maxItems": 2
+        },
+        "server_name": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 256
+        },
+        "server_version": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 128
+        },
+        "protocol_version": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 64
+        },
+        "server_capabilities": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "minItems": 0,
+          "maxItems": 32
+        },
+        "tools": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Adapter_MCPDiscoveredTool"
+          },
+          "minItems": 0,
+          "maxItems": 256
+        },
+        "next_cursor": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 1024
+        },
+        "tool": {
+          "$ref": "#/$defs/Adapter_MCPToolName"
+        },
+        "arguments_digest": {
+          "$ref": "#/$defs/Adapter_Digest"
+        },
+        "is_error": {
+          "type": "boolean"
+        },
+        "content_summary": {
+          "$ref": "#/$defs/Adapter_MCPContentSummary"
+        },
+        "structured_content_digest": {
+          "$ref": "#/$defs/Adapter_Digest"
+        },
+        "refused_server_requests": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "minItems": 0,
+          "maxItems": 32
+        },
+        "usage": {
+          "$ref": "#/$defs/Adapter_ProviderUsage"
+        },
+        "staged_outputs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Adapter_StagedOutput"
+          },
+          "minItems": 0,
+          "maxItems": 2
+        },
+        "output_artifacts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Adapter_ArtifactRef"
+          },
+          "minItems": 0,
+          "maxItems": 2
+        }
+      },
+      "required": [
+        "schema",
+        "physical_call",
+        "kind",
+        "session_state",
+        "refused_server_requests",
+        "usage",
+        "staged_outputs",
+        "output_artifacts"
       ],
       "$schema": "https://json-schema.org/draft/2020-12/schema"
     },
@@ -14614,6 +15250,160 @@
       "mcp": "zatiti_connection_archive",
       "submission_key": true,
       "expected_version": true,
+      "callers": [],
+      "scope_required": [
+        "installation_id"
+      ]
+    },
+    {
+      "id": "connection.discover",
+      "version": 1,
+      "owner": "connections",
+      "visibility": "public",
+      "mode": "mutation",
+      "effect": "external_read",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "scope": {
+            "$ref": "#/$defs/Scope"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9223372036854775807
+          }
+        },
+        "required": [
+          "scope",
+          "id",
+          "expected_version"
+        ]
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "resource": {
+            "$ref": "#/$defs/Job"
+          }
+        },
+        "required": [
+          "resource"
+        ]
+      },
+      "behavior": "Admit a bounded, separately authorized tool-catalog read (adapter kind list_tools; provider mcp only, capability_unsupported for every other provider). Records the observed tool names, pinned input schemas, digests and server annotations through _connections.discovery.record. Discovery installs no authority: a discovered tool is callable only after an explicit binding names it and the profile allowlist permits it.",
+      "cli": [
+        "connection",
+        "discover"
+      ],
+      "mcp": "zatiti_connection_discover",
+      "submission_key": true,
+      "expected_version": true,
+      "callers": [],
+      "scope_required": [
+        "installation_id"
+      ]
+    },
+    {
+      "id": "connection.tools",
+      "version": 1,
+      "owner": "connections",
+      "visibility": "public",
+      "mode": "query",
+      "effect": "local",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "scope": {
+            "$ref": "#/$defs/Scope"
+          },
+          "cursor": {
+            "type": "string",
+            "maxLength": 8192
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200
+          },
+          "filter": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "state": {
+                "type": "string",
+                "maxLength": 8192
+              },
+              "key": {
+                "type": "string",
+                "maxLength": 8192
+              },
+              "parent_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "worker_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "task_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "organization_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "descendants": {
+                "type": "boolean"
+              },
+              "needs_you": {
+                "type": "boolean"
+              }
+            },
+            "required": []
+          },
+          "connection_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "scope",
+          "connection_id"
+        ]
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/MCPDiscoveredTool"
+            },
+            "maxItems": 500
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "behavior": "List the connection's recorded discovered tools with pinned schema digests under current authorization; never a live server call. Filters are structured exact-match fields (AND semantics); unsupported fields for this resource refuse invalid_input. Never interpolate filter strings as SQL.",
+      "cli": [
+        "connection",
+        "tools"
+      ],
+      "mcp": "zatiti_connection_tools",
+      "submission_key": false,
+      "expected_version": false,
       "callers": [],
       "scope_required": [
         "installation_id"
@@ -24440,6 +25230,59 @@
       "scope_required": [
         "installation_id"
       ]
+    },
+    {
+      "id": "_connections.discovery.record",
+      "version": 1,
+      "owner": "connections",
+      "visibility": "internal",
+      "mode": "mutation",
+      "effect": "local",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "connection_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9223372036854775807
+          },
+          "observation": {
+            "$ref": "#/$defs/Observation"
+          }
+        },
+        "required": [
+          "connection_id",
+          "expected_version",
+          "observation"
+        ]
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "resource": {
+            "$ref": "#/$defs/Connection"
+          }
+        },
+        "required": [
+          "resource"
+        ]
+      },
+      "behavior": "Record the observed MCP tool catalog page (names, pinned input schemas, digests, annotations) from actual list_tools evidence for the named connection; replaces the previous catalog for the names observed and marks tools absent from a complete catalog as stale. Annotations are hints, never classification or authority.",
+      "cli": [],
+      "mcp": null,
+      "submission_key": false,
+      "expected_version": true,
+      "callers": [
+        "effects",
+        "controller"
+      ],
+      "scope_required": []
     },
     {
       "id": "_connections.validation.record",

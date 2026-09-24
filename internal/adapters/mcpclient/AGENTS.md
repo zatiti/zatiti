@@ -1,18 +1,18 @@
-# Implementation assignment: `internal/adapters/serenity`
+# Implementation assignment: `internal/adapters/mcpclient`
 
 Generated specification revision 3; source digest `1c68fc9d3d58427b2cf78218997e0908c66ae30b6e4f2506acc37d4331926f0c`. This file is committed implementation context. Do not independently edit it. Everything required from the product specification and adjacent interfaces is embedded below; no RFC copy is required.
 
 ## Mission and scope
 
-Qualified public Serenity protocol/read-facade adapter and writer capability report.
+Qualified generic MCP client connection adapter (adapter name mcp; Postiz first).
 
-Write scope: **`internal/adapters/serenity/` only**, excluding this generated AGENTS.md. Go package name: `serenity`. Ownership kind: adapter; integration wave: 2.
+Write scope: **`internal/adapters/mcpclient/` only**, excluding this generated AGENTS.md. Go package name: `mcpclient`. Ownership kind: adapter; integration wave: 2.
 
 Allowed production imports from this repository: `github.com/zatiti/zatiti/internal/contract`. Tests may use interfaces/fakes defined locally and, once available, storage-backed temporary fixtures; integration owns cross-package tests. No sibling raw SQL. No root dependency edits except the integration exception stated in its own brief.
 
 ## Implementation decisions and acceptance focus
 
-Adapter name serenity; profile schema zatiti.serenity/v1 has exact version/commit, public endpoint/brain root mapping, writer ownership, supported operations, cost/disclosure enforcement profile, command status lookup semantics, freshness/index capability, timeout_seconds, max_bytes and backup revision protocol. During foundation integration inspect public upstream API and pin exact source/protocol; never invent a public method from name or import internal packages. Adapter action kind recall/remember/inspect/promote/retract/export_revision, brain_id and stable adapter_command_id plus bounded payload. Brain selected by memory owner authorization, adapter cannot widen query. Canonical writes only one writer per brain; exported Go facade only for compatible reads. Recall may call models and incur charges, so required bound/disclosure enforcement must be qualified before enabling. If actual API cannot provide safe command lookup after lost ack, retain unknown and require explicit reconciliation; do not claim idempotency. Preserve provenance/source/version/freshness in observations. Backup pins real brain revisions, handles Git/history and keys, restore paused pending writer/promotion obligations. Report unsupported guarantees honestly and gate release until required first-release modes qualified.
+Adapter name mcp; profile schema zatiti.mcp/v1 has transport (streamable_http with one exact https endpoint and max_redirects 0; stdio frozen but capability_unsupported until qualified), protocol_version 2025-11-25, credential_kind bearer|none, allowed_tools, tool_call_cost, max_request_bytes, max_response_bytes, timeout_seconds, classifications and capability evidence. Action kind open_session/list_tools/call_tool/close_session per the frozen MCPClientParameters; the endpoint is the profile's, never an action field. Resolve Dispatch.CredentialRef through Secrets outside transactions and place the bytes only in the Authorization header; the staged request record, evidence, errors and logs carry no credential (credential-in-path and OAuth code flows are capability_unsupported). open_session performs the initialize handshake (two recorded HTTP requests, listed in evidence.handshake, the one declared exception to one request per attempt) and keeps the go-sdk ClientSession in a bounded in-memory table keyed by an opaque MCPSessionHandle; a handle unknown after restart or expiry is prerequisite_missing, never re-derived. list_tools is one tools/list request for one page; call_tool is exactly one tools/call after validating arguments strictly against the pinned input_schema whose digest the action carries and checking the tool against profile allowed_tools; close_session is one DELETE. Use the official MCP Go SDK pinned in dependencies.lock.json with SDK retries and reconnects disabled. Timeout after bytes were sent is outcome_unknown; a response above max_response_bytes is outcome_unknown with error_code response_oversize; Reconcile is capability_unsupported (the protocol has no authoritative call lookup) and unknown stays unknown until a separately admitted linked operation resolves it. Answer every server-to-client request (sampling, elicitation, roots, ping) with method-not-found and record it in refused_server_requests; open no GET listening stream; never call resources, prompts or tasks; never fetch resource_link or embedded resource content (a fetch is a separate governed read). Tool result content is staged as tool_result under the action's classification; annotations are recorded as hints and change nothing. No hidden retry, redirect, preflight or fallback endpoint.
 
 Local proving focus: Controlled-server physical call counts, exact request/account/destination, timeout-after-success unknown, no hidden retries, bound enforcement, secret redaction, supported real profile/version qualification.
 
@@ -424,65 +424,6 @@ The checked-in `internal/adapters/responses` adapter created a provider conversa
 
 ## Owned product requirements
 
-### R3-002 (source section 3; primary owner storage)
-
-Ship a `zatiti` Go controller/CLI binary with CLI commands, `serve`, and `mcp serve`, plus a desktop client and a pinned Serenity integration. One always-on controller owns scheduling, admission, persistence, credential access, and recovery. It may run on the user's computer or an operator-controlled server; ongoing work requires that host to remain available. Closing the desktop client does not stop the controller. Optional local execution workers connect to that same owner; moving work between controllers is not a v1 feature.
-
-### R3-003 (source section 3; primary owner storage)
-
-Desktop, CLI, and MCP are clients of the controller's application services. MCP processes do not start separate schedulers or write the database directly. Local clients use a private Unix-domain socket; a remote desktop connection uses an explicitly configured authenticated TLS endpoint over the same versioned operation contract. Credentials remain in secure client storage and are not supplied as model-visible arguments. Reconnection reads snapshots and replayable events, and retries commands with their original submission keys. A disconnected desktop can display cached history and retain unsent drafts, but cannot claim a command, approval, or pause reached the controller until acknowledged.
-
-### R3-004 (source section 3; primary owner storage)
-
-The controller publishes a versioned API contract; a pinned Mint generation step may turn that contract into the MCP server shipped with Zatiti. Mint is a build-time adapter, not a second source of domain behavior. Serenity has a separate canonical memory store and one writer owner per brain; this revises the original single-binary-only deployment proposal. Its process packaging and lifecycle must be qualified with the desktop/controller distribution.
-
-### R3-005 (source section 3; primary owner storage)
-
-```mermaid
-flowchart TD
-  H[Human or coding agent] --> C[CLI]
-  U[Individual operator] --> UI[Desktop chat workspace]
-  UI --> A
-  H --> M[MCP stdio adapter]
-  C --> A[Authenticated local controller]
-  M --> A
-  A --> O[Shared operation catalog and application services]
-  O --> D[SQLite state and event outbox]
-  O --> F[Artifact store]
-  O --> R[Tasks and executors]
-  O --> B[Scoped Serenity memory adapter]
-  B --> S[Separate brains and single-writer services]
-  R --> G[Policy, reviews and reservations]
-  G --> T[Trusted provider adapters]
-  T --> P[Configured external services]
-```
-
-### R3-006 (source section 3; primary owner storage)
-
-| Area | Proposed implementation |
-|---|---|
-| Language | Supported stable Go toolchain, pinned in `go.mod` and CI |
-| CLI | Cobra for command structure; generated operation commands over shared schemas |
-| MCP | Generated from the versioned API contract with Mint, pinned and tested against the supported MCP protocol; explicit protocol and parity tests |
-| Client transport | Versioned HTTP/JSON over a private Unix-domain socket locally; authenticated TLS for explicitly configured remote desktop access |
-| State | SQLite in WAL mode, foreign keys enabled, bounded busy timeout, short explicit transactions; a pinned Go SQLite driver |
-| Artifacts | Content-addressed local files; encrypted sensitive content and integrity-checked metadata |
-| Credentials | OS secret store or explicitly provisioned headless secret source; encrypted database values reference an external master key |
-| Logs | Structured `slog` on stderr or protected files; bounded, redacted fields |
-| Tests | Go unit/integration suites, deterministic clocks and provider simulators, subprocess CLI/MCP conformance tests |
-
-### R3-007 (source section 3; primary owner storage)
-
-SQLite is selected to make a single-tenant installation usable without a database service. There is one controller writer and no shared network-filesystem database. An exclusive installation lock prevents a second controller from serving the same state directory. Startup advances a persisted controller generation; workers, dispatch claims, and leases bind that generation. Losing installation ownership stops admission. The supported deployment relies on local OS lock semantics; distributed fencing is not claimed.
-
-### R3-008 (source section 3; primary owner storage)
-
-The controller uses a single ordered write path with transaction-aware domain methods. Reads use consistent snapshots. No network or model call runs inside a retryable database transaction. State changes and their event/outbox entries commit together. Crash recovery reads durable state, not log text. Database contention returns a bounded retryable error rather than hanging a client indefinitely.
-
-### R3-009 (source section 3; primary owner storage)
-
-The database owns principals, grants, revisions, tasks, schedules, runs, attempts, operations, approvals, reservations, commands, events, artifact metadata, and recovery obligations. Definition JSON is canonicalized before hashing. Query projections are not a second hashing authority. Files are staged and hashed before metadata publication; unreferenced staging content is reclaimed later. A committed reference whose bytes are unavailable produces a visible artifact fault, never a successful result.
-
 ### R10-002 (source section 10; primary owner effects)
 
 External reads, model disclosure and mutations use registered contracts. Separate immutable **action** (exact intent), **operation** (logical effect) and **attempt** (physical invocation). An action binds account identity, destination, content/media hashes, timing, preconditions, and relevant configuration/tool versions. Reviews bind this digest. A changed action requires a new review where policy requires one.
@@ -512,42 +453,6 @@ Automatic mutation retries are disabled unless a qualified contract establishes 
 ### R10-008 (source section 10; primary owner effects)
 
 Reconciliation is a separately authorized, bounded read. Compensation and replacement are new linked operations with their own consequences and review, not a rewrite of the original outcome. Conflicting late evidence creates an explicit correction/dispute. The first GitHub adapter must bind repository, branch/head, exact change and relevant automation constraints; opening a pull request must not be treated as harmless when downstream automation can cause broader effects.
-
-### R15-002 (source section 15; primary owner memory)
-
-Serenity supplies accumulated knowledge; Zatiti owns execution state, authorization, acceptance, budgets, and recovery obligations. Use its public interfaces through a pinned adapter, without importing its internal packages or creating a competing canonical memory writer. The integration must qualify the pinned implementation rather than treating upstream documentation as proof of supported behavior.
-
-### R15-003 (source section 15; primary owner memory)
-
-Each worker has an individual brain, each organization has a shared brain, and the installation has a separate brain for deliberately shared cross-organizational knowledge. The personal chief's worker memory, the root organization's shared memory, and installation-wide memory remain distinct scopes even when one chief curates them. Separate brains are logical access boundaries enforced by Zatiti's bindings; they do not isolate data from the installation administrator or unrestricted same-user filesystem access.
-
-### R15-004 (source section 15; primary owner memory)
-
-Memory bindings explicitly name read, write, curate/promote, and retract permissions. Zatiti resolves the caller's current worker, task, project, organization ancestry, and grants before selecting brains to query. Filter before retrieval or model composition, not after unauthorized data has already reached a model. An organization brain contains only knowledge suitable for its authorized readers; restricted project information remains in a narrower bound brain or governed artifact. Parentage alone never grants read access to a child's private knowledge.
-
-### R15-005 (source section 15; primary owner memory)
-
-Organization chiefs automatically curate shared memory within their standing authority: reconcile evidence, retain useful lessons, identify contradictions, and promote suitable knowledge from permitted worker or child-organization sources. The personal chief curates installation-wide memory. Automatic curation is scoped work with budgets and evidence, not permission to read everything. Promotion is a new destination claim linked to source brain, claim/version, supporting artifact references, curator identity, and any redaction. It requires both source disclosure authority and destination write authority. Shared-memory writes that exceed that envelope wait for the appropriate decision.
-
-### R15-006 (source section 15; primary owner memory)
-
-Corrections and retractions propagate through recorded promotion lineage as durable reconciliation obligations. A promoted statement is not independent corroboration of its own source. Revocation blocks subsequent retrieval immediately; it cannot erase already disclosed context. Forget/retract operations distinguish removal from active recall from historical erasure, including copies in Git history, backups, and prior run artifacts. The UI must state that distinction when relevant.
-
-### R15-007 (source section 15; primary owner memory)
-
-The adapter provides memory recall, remember, inspect, promotion, and retraction operations through the shared registry and exposes their supported prerequisites and outcomes equally through CLI and MCP. Desktop memory controls and conversational requests call those same operations. Recalled results retain scope, source references, confidence, relevant versions, and freshness; each run stores the actual selected context as an artifact. Reads across brains are not presumed to be one atomic snapshot. A task requiring unavailable freshness waits or reports a prerequisite failure rather than silently treating stale context as current.
-
-### R15-008 (source section 15; primary owner memory)
-
-Serenity's exported Go read facade may serve compatible reads. Canonical writes go to exactly one writer owner per brain through the supported protocol. Its Recall path may invoke models and record spend: "read" does not imply no disclosure or no charge. Composition, embedding, extraction, and curation must obey Zatiti's provider disclosure rules and reservations; until the adapter can enforce a required bound, that execution mode is unavailable or explicitly advisory where policy permits. Serenity's remembered judgments and plan checks inform work but cannot override Zatiti policy or constitute task acceptance on their own.
-
-### R15-009 (source section 15; primary owner memory)
-
-Zatiti's SQLite transaction cannot atomically commit a Serenity write. Persist a submission intent and adapter command identity before dispatch, record the actual disposition afterward, and reconcile a lost acknowledgment without blindly repeating the write. Backup manifests pin the required brain revisions and key-recovery prerequisites alongside Zatiti state. Restore starts paused and reconciles pending memory writes and promotions before resuming curation. Availability failures remain visible; no failed memory operation is presented as remembered knowledge.
-
-### P00-006 (source section P00; primary owner effects)
-
-_effects.prepare accepts an optional callback_route (CallbackRoute: worker_turn/job/memory/skill/connection plus the relevant turn/step/job id) persisted alongside the immutable action and returned unmodified at claim as Dispatch.callback_route; adapters never receive it. The controller resolves callback routing exclusively from this persisted route, never by inserting an undeclared attempt_id into strict adapter parameters (Responses/GitHub/httpread/Serenity all reject unknown fields). _effects.record accepts an optional current_generation to resolve a stray attempt whose claim journal spans a controller-generation change: not_sent for an attempt never actually claimed under its recorded generation, outcome_unknown for one claimed but unconfirmed; the attempt is never silently dropped.
 ## Exact operation and dependency schemas
 
 No operation handlers are owned or called by this scope. Its Go interfaces are specified above.
@@ -588,95 +493,84 @@ MCP client adapter (internal/adapters/mcpclient, adapter name mcp, coordinated r
 
 Tests are implementation deliverables, not claims of already executed qualification. Retain expected/observed results, exact source/config/tool versions and failure evidence.
 
-### Z18.unauthorized_brain_not_queried — Z18
+### Z05.callback_discovery — Z05
 
-Setup: Instrumented brains include permitted worker/org brains and an unbound private descendant brain.
+Setup: A discovered tool or HTTP response advertises a callback, redirect, external server or subprocess.
 
-Action: Recall as a caller lacking the private brain binding.
-
-Expected:
-
-- The unauthorized brain receives zero read/model requests.
-- Filtering occurs before retrieval and model composition; hierarchy alone supplies no private-memory access.
-
-### Z18.chief_promotion_provenance — Z18
-
-Setup: A chief has explicit source read/disclosure and destination curate/write permissions under finite budgets.
-
-Action: Promote a suitable claim from worker or child-organization memory into shared memory.
+Action: Attempt to follow that behavior outside the registered reviewed destination/adapter contract.
 
 Expected:
 
-- The new destination claim links source brain, claim/version, supporting artifacts, curator identity and redaction.
-- Promotion is scoped admitted work; the copied claim is not independent corroboration of its source.
+- Discovery grants no execution or disclosure authority.
+- Unreviewed callbacks, destination changes and arbitrary external MCP/subprocess execution are refused.
 
-### Z18.promotion_correction — Z18
+### Z06.no_hidden_retries — Z06
 
-Setup: A source claim has several recorded promoted copies and one destination writer is unavailable.
+Setup: Qualified adapters use a provider simulator with transient errors, timeouts and connection resets.
 
-Action: Correct or retract the source, crash/restart and resume reconciliation.
-
-Expected:
-
-- Durable lineage obligations cover every affected promoted copy and survive restart.
-- Unavailable reconciliation remains visible; forget/retract distinguishes active recall removal from erasure of Git history, backups and previous run artifacts.
-
-### Z18.stale_index — Z18
-
-Setup: A permitted brain has an index behind the required source revision or a failed writer.
-
-Action: Recall for a task requiring current freshness and inspect memory status.
+Action: Invoke each adapter once under a contract that has not established safe retry.
 
 Expected:
 
-- Results report source/scope/version/confidence/freshness where available.
-- The task waits or receives a named prerequisite failure rather than silently treating stale content as current; failed writes are not presented as remembered knowledge.
+- The adapter performs exactly one physical request per claimed attempt.
+- SDK or transport mutation retries are disabled; any permitted retry receives a new authorized recorded attempt.
 
-### Z18.memory_write_unknown — Z18
+### Z05.mcp_discovery_grants_nothing — Z05
 
-Setup: A Serenity writer commits a command but its acknowledgement is lost; recall may also incur model charges.
+Setup: A validated mcp connection whose server advertises tools A and B with read_only_hint true on B; the profile allowlist names A only and the worker binding names A.
 
-Action: Recover the command and run recall under a hard disclosure/spend bound.
-
-Expected:
-
-- The prior persisted intent and adapter command identity are reconciled without blind repeat writing.
-- Exactly one canonical writer owns each brain; unsupported enforceable recall charge/disclosure bounds make that mode unavailable or explicitly advisory where policy permits.
-
-### QUALIFICATION.macos_distribution — QUALIFICATION
-
-Setup: Build the documented macOS release artifacts with pinned Go/dependency/protocol/service versions and licenses.
-
-Action: Install on a clean supported macOS host, bootstrap, run CLI/MCP/desktop journeys, stop/restart controller, back up/restore and uninstall according to documentation.
+Action: Run connection.discover, then have the worker propose call_tool for B, and call_tool for A with arguments that fail the pinned input schema.
 
 Expected:
 
-- Documented installation commands work from actual artifacts; private socket, secure-store and local-lock behavior are exercised.
-- Serenity process packaging and one-writer lifecycle work with the controller/desktop.
-- Release evidence identifies exact OS/architecture/artifact/source/tool versions and observed results; compile success is not platform qualification.
+- Discovery records A and B with pinned schema digests and annotations but changes no binding, policy or classification.
+- call_tool for B is refused permission_denied before any request; the read_only_hint changes nothing.
+- call_tool for A with non-conforming arguments is refused invalid_input before any request and the pinned digest matches the recorded catalog.
 
-### QUALIFICATION.linux_distribution — QUALIFICATION
+### Z06.mcp_one_request_per_call — Z06
 
-Setup: Build the documented Linux release artifacts with pinned dependencies and an explicitly provisioned supported secret source.
+Setup: A controlled MCP server records every HTTP request; a session was opened by an admitted open_session effect.
 
-Action: Install on a clean supported Linux host and run the same controller, CLI/MCP, desktop, restart and backup/restore journeys.
-
-Expected:
-
-- Documented artifact installation and headless/desktop credential prerequisites work without secret exposure.
-- Controller ownership, Serenity lifecycle and desktop continuation are exercised on Linux itself.
-- Advertised Linux targets match executed OS/architecture evidence; Windows support is not inferred.
-
-### QUALIFICATION.adapter_bounds — QUALIFICATION
-
-Setup: Pin public provider, GitHub, bounded HTTP and Serenity adapters with controlled fault simulators and authorized live qualification fixtures where required.
-
-Action: Exercise cost bounds, disclosure destinations, timeouts, retries, confirmations, repository-head checks, memory freshness and lost acknowledgements.
+Action: Dispatch one call_tool, one list_tools and one close_session attempt; then dispatch open_session against a fresh server.
 
 Expected:
 
-- Record exact adapter/source/protocol/profile versions and observed physical calls.
-- Unsupported hard caps, safe-idempotency windows, continuation/context guarantees or memory operations remain unavailable or explicitly advisory as permitted, never inferred from upstream claims.
+- call_tool, list_tools and close_session each produce exactly one HTTP request per claimed attempt; next_cursor is never followed by the adapter.
+- open_session produces exactly the two handshake requests, both listed in evidence.handshake; no GET listening stream is opened.
+- SDK retry and reconnect are disabled; a permitted retry is a new authorized recorded attempt.
+
+### Z08.mcp_lost_tool_call_response — Z08
+
+Setup: The controlled server accepts a tools/call, applies its side effect, then stalls past the profile timeout or returns a body above max_response_bytes.
+
+Action: Observe the attempt and request reconciliation.
+
+Expected:
+
+- The attempt is recorded outcome_unknown with request_sent yes and the staged request context retained; nothing is resent.
+- Reconcile returns capability_unsupported and the reservation stays until a separately admitted linked operation resolves it.
+
+### Z13.mcp_credential_confined — Z13
+
+Setup: A bearer-credential mcp connection with a resolvable credential_ref; a profile naming credential_kind bearer.
+
+Action: Dispatch open_session and call_tool; inspect the staged request record, evidence, faults, logs and the connection export. Then bind a profile whose endpoint carries the key in its path.
+
+Expected:
+
+- Credential bytes appear only in the Authorization header on the wire; the staged request record, evidence, faults, logs and export contain neither the bytes nor the raw Mcp-Session-Id.
+- The credential-in-path profile is refused capability_unsupported at construction; the OAuth code flow is likewise refused rather than improvised.
+
+### Z05.mcp_server_requests_refused — Z05
+
+Setup: The controlled server responds to a tools/call with a sampling/createMessage request, an elicitation request and a resource_link content item during the same response stream.
+
+Action: Dispatch the call_tool attempt.
+
+Expected:
+
+- Each server-to-client request is answered method-not-found and named in refused_server_requests; no model call, no user prompt and no resource fetch happens.
+- The resource_link is recorded as an opaque reference in the staged tool_result; fetching it would require a separate governed read.
 
 ## Delivery
 
