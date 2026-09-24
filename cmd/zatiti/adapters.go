@@ -13,6 +13,7 @@ import (
 
 	"github.com/zatiti/zatiti/internal/adapters/github"
 	"github.com/zatiti/zatiti/internal/adapters/httpread"
+	"github.com/zatiti/zatiti/internal/adapters/mcpclient"
 	"github.com/zatiti/zatiti/internal/adapters/responses"
 	"github.com/zatiti/zatiti/internal/adapters/serenity"
 	"github.com/zatiti/zatiti/internal/contract"
@@ -32,6 +33,7 @@ import (
 var adapterConstructors = map[string]func(contract.AdapterDependencies, json.RawMessage) (contract.Adapter, error){
 	"github":    github.New,
 	"httpread":  httpread.New,
+	"mcp":       mcpclient.New,
 	"responses": responses.New,
 	"serenity":  serenity.New,
 }
