@@ -542,3 +542,218 @@ func decodeCursor(s string) (cursorPayload, error) {
 	}
 	return p, nil
 }
+
+// mcpToolRow is one recorded MCP discovered-tool catalog entry.
+type mcpToolRow struct {
+	ConnectionID         contract.ID
+	Name                 string
+	Title                string
+	Description          string
+	InputSchema          json.RawMessage
+	InputSchemaDigest    string
+	OutputSchema         json.RawMessage // nil when the server omitted it
+	Annotations          json.RawMessage
+	DiscoveredAt         time.Time
+	DiscoveryOperationID contract.ID
+	Stale                bool
+}
+
+func (r mcpToolRow) wire() wireMCPDiscoveredTool {
+	out := wireMCPDiscoveredTool{
+		Name:                 r.Name,
+		Title:                r.Title,
+		Description:          r.Description,
+		InputSchema:          r.InputSchema,
+		InputSchemaDigest:    r.InputSchemaDigest,
+		DiscoveredAt:         r.DiscoveredAt,
+		DiscoveryOperationID: r.DiscoveryOperationID,
+	}
+	if len(r.OutputSchema) > 0 && string(r.OutputSchema) != "null" {
+		out.OutputSchema = r.OutputSchema
+	}
+	if len(r.Annotations) > 0 && string(r.Annotations) != "{}" && string(r.Annotations) != "null" {
+		out.Annotations = r.Annotations
+	}
+	return out
+}
+
+// upsertMCPTool inserts or replaces one discovered tool row for the
+// connection, clearing the stale bit so a re-advertised name is current.
+func (s *Service) upsertMCPTool(ctx context.Context, unit contract.Unit, r mcpToolRow) error {
+	outSchema := ""
+	if len(r.OutputSchema) > 0 && string(r.OutputSchema) != "null" {
+		outSchema = string(r.OutputSchema)
+	}
+	annotations := "{}"
+	if len(r.Annotations) > 0 {
+		annotations = string(r.Annotations)
+	}
+	_, err := unit.ExecContext(ctx, `
+		INSERT INTO connections_mcp_tools
+			(connection_id, name, title, description, input_schema, input_schema_digest,
+			 output_schema, annotations_json, discovered_at, discovery_operation_id, stale)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+		ON CONFLICT(connection_id, name) DO UPDATE SET
+			title = excluded.title,
+			description = excluded.description,
+			input_schema = excluded.input_schema,
+			input_schema_digest = excluded.input_schema_digest,
+			output_schema = excluded.output_schema,
+			annotations_json = excluded.annotations_json,
+			discovered_at = excluded.discovered_at,
+			discovery_operation_id = excluded.discovery_operation_id,
+			stale = 0`,
+		string(r.ConnectionID), r.Name, r.Title, r.Description,
+		string(r.InputSchema), r.InputSchemaDigest, nullIfEmpty(outSchema), annotations,
+		formatStamp(r.DiscoveredAt), string(r.DiscoveryOperationID))
+	if err != nil {
+		return fmt.Errorf("connections: upsert mcp tool: %w", err)
+	}
+	return nil
+}
+
+func nullIfEmpty(s string) any {
+	if s == "" {
+		return nil
+	}
+	return s
+}
+
+// markMCPToolsStaleExcept marks every tool for connectionID whose name is
+// not in keep as stale. A complete catalog page (no next_cursor) uses this
+// so tools the server no longer advertises stop resolving.
+func (s *Service) markMCPToolsStaleExcept(ctx context.Context, unit contract.Unit, connectionID contract.ID, keep []string) error {
+	keepSet := make(map[string]struct{}, len(keep))
+	for _, n := range keep {
+		keepSet[n] = struct{}{}
+	}
+	rows, err := unit.QueryContext(ctx, `
+		SELECT name FROM connections_mcp_tools WHERE connection_id = ? AND stale = 0`,
+		string(connectionID))
+	if err != nil {
+		return fmt.Errorf("connections: list mcp tools for stale mark: %w", err)
+	}
+	defer rows.Close()
+	var stale []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return fmt.Errorf("connections: scan mcp tool name: %w", err)
+		}
+		if _, ok := keepSet[name]; !ok {
+			stale = append(stale, name)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("connections: iterate mcp tools: %w", err)
+	}
+	for _, name := range stale {
+		if _, err := unit.ExecContext(ctx, `
+			UPDATE connections_mcp_tools SET stale = 1
+			WHERE connection_id = ? AND name = ?`, string(connectionID), name); err != nil {
+			return fmt.Errorf("connections: mark mcp tool stale: %w", err)
+		}
+	}
+	return nil
+}
+
+// loadMCPTool returns one non-stale discovered tool by name, if any.
+func (s *Service) loadMCPTool(ctx context.Context, unit contract.Unit, connectionID contract.ID, name string) (mcpToolRow, bool, error) {
+	row := unit.QueryRowContext(ctx, `
+		SELECT connection_id, name, title, description, input_schema, input_schema_digest,
+			output_schema, annotations_json, discovered_at, discovery_operation_id, stale
+		FROM connections_mcp_tools
+		WHERE connection_id = ? AND name = ? AND stale = 0`,
+		string(connectionID), name)
+	r, err := scanMCPTool(row.Scan)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return mcpToolRow{}, false, nil
+		}
+		return mcpToolRow{}, false, err
+	}
+	return r, true, nil
+}
+
+// listMCPToolsPage returns a name-ordered page of discovered tools for the
+// connection. includeStale controls whether stale rows appear (connection.tools
+// lists every recorded row so operators can see what went stale).
+func (s *Service) listMCPToolsPage(ctx context.Context, unit contract.Unit, connectionID contract.ID, offset, limit int) ([]mcpToolRow, error) {
+	rows, err := unit.QueryContext(ctx, `
+		SELECT connection_id, name, title, description, input_schema, input_schema_digest,
+			output_schema, annotations_json, discovered_at, discovery_operation_id, stale
+		FROM connections_mcp_tools
+		WHERE connection_id = ?
+		ORDER BY name ASC
+		LIMIT ? OFFSET ?`,
+		string(connectionID), limit, offset)
+	if err != nil {
+		return nil, fmt.Errorf("connections: list mcp tools: %w", err)
+	}
+	defer rows.Close()
+	var out []mcpToolRow
+	for rows.Next() {
+		r, serr := scanMCPTool(rows.Scan)
+		if serr != nil {
+			return nil, serr
+		}
+		out = append(out, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("connections: iterate mcp tools: %w", err)
+	}
+	return out, nil
+}
+
+func scanMCPTool(scan func(dest ...any) error) (mcpToolRow, error) {
+	var r mcpToolRow
+	var outSchema sql.NullString
+	var annotations, discoveredAt string
+	var staleInt int
+	var inputSchema string
+	if err := scan(&r.ConnectionID, &r.Name, &r.Title, &r.Description, &inputSchema,
+		&r.InputSchemaDigest, &outSchema, &annotations, &discoveredAt,
+		&r.DiscoveryOperationID, &staleInt); err != nil {
+		return mcpToolRow{}, err
+	}
+	r.InputSchema = json.RawMessage(inputSchema)
+	if outSchema.Valid {
+		r.OutputSchema = json.RawMessage(outSchema.String)
+	}
+	r.Annotations = json.RawMessage(annotations)
+	var err error
+	if r.DiscoveredAt, err = parseStamp(discoveredAt); err != nil {
+		return mcpToolRow{}, fmt.Errorf("connections: parse mcp tool discovered_at: %w", err)
+	}
+	r.Stale = staleInt != 0
+	return r, nil
+}
+
+// loadLatestSucceededSessionHandle returns the session_handle from the most
+// recent succeeded validation observation evidence for connectionID. Used by
+// connection.discover to build list_tools when the discover input itself
+// carries no session_handle (a frozen-schema gap reported as a contract
+// defect). An absent handle is ok=false, never an invented value.
+func (s *Service) loadLatestSucceededSessionHandle(ctx context.Context, unit contract.Unit, connectionID contract.ID) (string, bool, error) {
+	row := unit.QueryRowContext(ctx, `
+		SELECT evidence_json FROM connections_validations
+		WHERE connection_id = ? AND disposition = 'succeeded'
+		ORDER BY confirmed_at DESC LIMIT 1`, string(connectionID))
+	var evidence string
+	if err := row.Scan(&evidence); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", false, nil
+		}
+		return "", false, fmt.Errorf("connections: load latest validation evidence: %w", err)
+	}
+	var body struct {
+		SessionHandle string `json:"session_handle"`
+	}
+	if err := json.Unmarshal([]byte(evidence), &body); err != nil {
+		return "", false, nil
+	}
+	if body.SessionHandle == "" {
+		return "", false, nil
+	}
+	return body.SessionHandle, true, nil
+}

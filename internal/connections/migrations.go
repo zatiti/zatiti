@@ -168,6 +168,60 @@ VALUES
 // migrationV1 is the complete owned migration body: schema plus seed data.
 var migrationV1 = migrationV1Head + migrationV1Tail
 
+// migrationV2 adds the connections-private MCP discovery catalog, widens the
+// pending-probe kind check to admit connection.discover, and seeds the
+// mcp-probe built-in tool contract (id c6) that connection.validate and
+// connection.discover dispatch against. Additive: no existing column or
+// seeded row changes.
+const migrationV2Head = `
+CREATE TABLE connections_mcp_tools (
+    connection_id TEXT NOT NULL REFERENCES connections_connections(id),
+    name TEXT NOT NULL,
+    title TEXT NOT NULL DEFAULT '',
+    description TEXT NOT NULL DEFAULT '',
+    input_schema TEXT NOT NULL,
+    input_schema_digest TEXT NOT NULL,
+    output_schema TEXT,
+    annotations_json TEXT NOT NULL DEFAULT '{}',
+    discovered_at TEXT NOT NULL,
+    discovery_operation_id TEXT NOT NULL,
+    stale INTEGER NOT NULL DEFAULT 0 CHECK (stale IN (0, 1)),
+    PRIMARY KEY (connection_id, name)
+);
+CREATE INDEX connections_mcp_tools_connection_idx
+	ON connections_mcp_tools (connection_id, stale, name);
+
+CREATE TABLE connections_pending_probes_v2 (
+    connection_id TEXT PRIMARY KEY REFERENCES connections_connections(id),
+    job_id        TEXT NOT NULL,
+    job_version   INTEGER NOT NULL CHECK (job_version >= 1),
+    kind          TEXT NOT NULL CHECK (kind IN ('validate', 'rotate', 'discover')),
+    created_at    TEXT NOT NULL
+);
+INSERT INTO connections_pending_probes_v2
+	SELECT connection_id, job_id, job_version, kind, created_at
+	FROM connections_pending_probes;
+DROP TABLE connections_pending_probes;
+ALTER TABLE connections_pending_probes_v2 RENAME TO connections_pending_probes;
+`
+
+var migrationV2Tail = `
+INSERT INTO connections_contracts
+	(id, version, name, input_schema, output_schema, effect, destinations_json,
+	 credential_kind, cost_bound_json, timeout_seconds, idempotency,
+	 key_retention_seconds, confirmation, reconciliation, adapter, created_at, updated_at)
+VALUES
+	('0a000000-0000-4000-8000-0000000000c6', 1, '` + toolNameMCPProbe + `',
+	 '` + schemaMCPProbeIn + `',
+	 '` + schemaMCPProbeOut + `',
+	 'external_read', '[]', 'bearer',
+	 '{"currency":"USD","micro_units":0}', 60, 'authoritative_nonexecution', 0,
+	 'synchronous', 'none', 'mcp',
+	 '1970-01-01T00:00:00Z', '1970-01-01T00:00:00Z');
+`
+
+var migrationV2 = migrationV2Head + migrationV2Tail
+
 // Migrations returns the owned migration set. Bodies are pinned by digest so
 // storage refuses any later byte change.
 func connectionsMigrations() []contract.Migration {
@@ -176,6 +230,11 @@ func connectionsMigrations() []contract.Migration {
 		Version: 1,
 		SQL:     migrationV1,
 		SHA256:  contract.Digest(hashHex(migrationV1)),
+	}, {
+		Owner:   "connections",
+		Version: 2,
+		SQL:     migrationV2,
+		SHA256:  contract.Digest(hashHex(migrationV2)),
 	}}
 }
 
