@@ -74,3 +74,35 @@ func TestIndependentParallelRefusalReplies(t *testing.T) {
 		t.Errorf("refusals missing: %s", obs.Evidence)
 	}
 }
+
+// The asynchronous SDK cleanup timing is variable; verify the transport guard
+// directly as well so GET/DELETE refusal cannot pass merely by racing disarm.
+func TestToolCallTransportRefusesUnadmittedMethods(t *testing.T) {
+	for _, method := range []string{http.MethodGet, http.MethodDelete} {
+		t.Run(method, func(t *testing.T) {
+			blobs := newFakeBlobStore()
+			calls := 0
+			rt := &callRoundTripper{base: guardTestTransport(func(*http.Request) (*http.Response, error) {
+				calls++
+				return &http.Response{StatusCode: 200, Body: http.NoBody, Header: http.Header{}}, nil
+			}), maxRequestBytes: 1024, maxResponseBytes: 1024}
+			rt.arm(&callState{ctx: t.Context(), blobs: blobs, kind: kindCallTool})
+			request, err := http.NewRequestWithContext(t.Context(), method, "https://example.invalid/mcp", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			response, err := rt.RoundTrip(request)
+			if response != nil {
+				_ = response.Body.Close()
+			}
+			rt.disarm()
+			if err == nil || calls != 0 || len(blobs.stagedDocs()) != 0 {
+				t.Errorf("unadmitted %s reached staging/wire: calls=%d error=%v", method, calls, err)
+			}
+		})
+	}
+}
+
+type guardTestTransport func(*http.Request) (*http.Response, error)
+
+func (f guardTestTransport) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
