@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -24,8 +25,8 @@ type MacAssetSource interface {
 
 // MacInstallVerifier must prove the signed installer package's Developer ID,
 // notarization, and binding to the two verified component archives. The
-// payload layout is frozen, but the native payload/BOM and signing checks are
-// not implemented yet, so this capability has no production implementation.
+// payload layout is frozen, but Apple identity, notary and Gatekeeper checks
+// are not implemented yet, so this capability has no production implementation.
 type MacInstallVerifier interface {
 	Verify(context.Context, MacReleaseDescriptor, MacDownloadPlan, MacStagedAssets) error
 }
@@ -36,6 +37,40 @@ type MacInstallVerifier interface {
 type MacInstallRunner interface {
 	Installed(context.Context, MacReleaseDescriptor, string) (bool, error)
 	Install(context.Context, string) error
+}
+
+// MacInstalledInboxVerifier re-opens the three files installed under the
+// fixed current-user inbox. A package receipt is not verification evidence.
+type MacInstalledInboxVerifier interface {
+	VerifyInstalled(context.Context, string, MacReleaseDescriptor, MacDownloadPlan, MacPkgBinding) (MacStagedAssets, error)
+}
+
+// FileMacInstalledInboxVerifier is the protected local implementation.
+type FileMacInstalledInboxVerifier struct{}
+
+func (FileMacInstalledInboxVerifier) VerifyInstalled(ctx context.Context, home string, release MacReleaseDescriptor, plan MacDownloadPlan, binding MacPkgBinding) (MacStagedAssets, error) {
+	if err := ctx.Err(); err != nil {
+		return MacStagedAssets{}, err
+	}
+	assets, err := VerifyMacPkgInbox(home, binding, release, plan)
+	if err != nil {
+		return MacStagedAssets{}, err
+	}
+	if err := ctx.Err(); err != nil {
+		return MacStagedAssets{}, err
+	}
+	return assets, nil
+}
+
+type MacMasterKeyProvisioner interface {
+	Provision(context.Context, string) error
+}
+
+// MacReleaseActivator performs Apply from verified archives and audits the
+// active signed trees, helper and fixed launcher before fence advancement.
+type MacReleaseActivator interface {
+	Activate(context.Context, MacReleaseDescriptor, MacDownloadPlan, MacStagedAssets) error
+	Audit(context.Context, MacReleaseDescriptor, MacDownloadPlan) (bool, error)
 }
 
 // MacSequenceWatermark is protected local monotonic release state. The caller
@@ -53,14 +88,19 @@ type MacSequenceWatermark interface {
 type MacStagedAssets struct{ Controller, Desktop, Installer string }
 
 type MacBootstrapInput struct {
-	Delivery    []byte
-	Signature   MacDeliverySignature
-	TrustedKeys []ed25519.PublicKey
-	Now         time.Time
-	Source      MacAssetSource
-	Verifier    MacInstallVerifier
-	Runner      MacInstallRunner
-	Watermark   MacSequenceWatermark
+	Home          string
+	StateDir      string
+	Delivery      []byte
+	Signature     MacDeliverySignature
+	TrustedKeys   []ed25519.PublicKey
+	Now           time.Time
+	Source        MacAssetSource
+	Verifier      MacInstallVerifier
+	Runner        MacInstallRunner
+	InboxVerifier MacInstalledInboxVerifier
+	MasterKey     MacMasterKeyProvisioner
+	Activator     MacReleaseActivator
+	Watermark     MacSequenceWatermark
 	// NativeArch is for test seams. Production passes DetectNativeMacArch.
 	NativeArch func(context.Context) (string, error)
 }
@@ -70,8 +110,11 @@ type MacBootstrapInput struct {
 // directory. Nothing activates until every digest and the installer's
 // separately supplied native verification succeeds. Every exit cleans staging.
 func RunMacBootstrap(ctx context.Context, in MacBootstrapInput) error {
-	if in.Source == nil || in.Verifier == nil || in.Runner == nil || in.Watermark == nil || in.NativeArch == nil {
-		return errf(CodePrerequisiteMissing, "Mac bootstrap trust, installer or watermark capability is unavailable")
+	if in.Source == nil || in.Verifier == nil || in.Runner == nil || in.Watermark == nil || in.NativeArch == nil || in.InboxVerifier == nil || in.MasterKey == nil || in.Activator == nil {
+		return errf(CodePrerequisiteMissing, "Mac bootstrap trust, installer, inbox, master key, activation or watermark capability is unavailable")
+	}
+	if err := validateMacBootstrapPaths(in.Home, in.StateDir); err != nil {
+		return err
 	}
 	unlock, err := in.Watermark.Lock(ctx)
 	if err != nil {
@@ -106,29 +149,56 @@ func RunMacBootstrap(ctx context.Context, in MacBootstrapInput) error {
 	if d.ReleaseSequence < accepted.Sequence {
 		return errf(CodeVerificationFailed, "Mac delivery is older than the accepted release")
 	}
-	// A previous attempt may have installed successfully and failed only while
-	// saving its watermark. Inspect before downloading or invoking again.
-	if d.ReleaseSequence > accepted.Sequence {
-		installed, inspectErr := in.Runner.Installed(ctx, d.Release, arch)
-		if inspectErr != nil {
-			return errWrap(CodePrerequisiteMissing, "installed Mac release cannot be inspected", inspectErr)
-		}
-		if installed {
-			return in.Watermark.Advance(ctx, candidate)
-		}
-	}
 	if d.ReleaseSequence == accepted.Sequence {
 		if candidate.DeliverySHA256 != accepted.DeliverySHA256 {
 			return errf(CodeVerificationFailed, "Mac delivery sequence was already accepted with different signed metadata")
 		}
-		installed, err := in.Runner.Installed(ctx, d.Release, arch)
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := in.MasterKey.Provision(ctx, in.StateDir); err != nil {
+			return errWrap(CodePrerequisiteMissing, "Mac master key cannot be validated", err)
+		}
+		active, err := in.Activator.Audit(ctx, d.Release, plan)
 		if err != nil {
-			return errWrap(CodePrerequisiteMissing, "installed Mac release cannot be inspected", err)
+			return errWrap(CodeVerificationFailed, "accepted Mac release cannot be audited", err)
 		}
-		if installed {
-			return nil
+		if !active {
+			return errf(CodeVerificationFailed, "accepted Mac release is not active")
 		}
-		return errf(CodeVerificationFailed, "Mac delivery sequence was already accepted but installation is incomplete")
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		return nil
+	}
+	// A prior Apply may have succeeded just before watermark publication. The
+	// active-tree audit, never the package receipt or inert inbox, decides.
+	active, err := in.Activator.Audit(ctx, d.Release, plan)
+	if err != nil {
+		return errWrap(CodeVerificationFailed, "Mac active release cannot be audited", err)
+	}
+	if active {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := in.MasterKey.Provision(ctx, in.StateDir); err != nil {
+			return errWrap(CodePrerequisiteMissing, "Mac master key cannot be validated", err)
+		}
+		verified, err := in.Activator.Audit(ctx, d.Release, plan)
+		if err != nil {
+			return errWrap(CodeVerificationFailed, "Mac release changed during recovery audit", err)
+		}
+		if !verified {
+			return errf(CodeVerificationFailed, "Mac release changed during recovery audit")
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		return in.Watermark.Advance(ctx, candidate)
+	}
+	binding, err := NewMacPkgBinding(d.Release, plan)
+	if err != nil {
+		return err
 	}
 	dir, err := os.MkdirTemp("", "zatiti-mac-stage-*")
 	if err != nil {
@@ -160,15 +230,82 @@ func RunMacBootstrap(ctx context.Context, in MacBootstrapInput) error {
 	if err := in.Runner.Install(ctx, staged.Installer); err != nil {
 		return errWrap(CodePrerequisiteMissing, "Mac installer failed; inspect installation before retry", err)
 	}
-	installed, err := in.Runner.Installed(ctx, d.Release, arch)
-	if err != nil {
-		return errWrap(CodePrerequisiteMissing, "installed Mac release cannot be inspected", err)
+	if err := ctx.Err(); err != nil {
+		return err
 	}
-	if !installed {
-		return errf(CodeVerificationFailed, "Mac installer did not produce the signed release")
+	verifiedInbox, err := in.InboxVerifier.VerifyInstalled(ctx, in.Home, d.Release, plan, binding)
+	if err != nil {
+		return errWrap(CodeVerificationFailed, "installed Mac inbox differs from signed release", err)
+	}
+	inboxDir, err := MacPkgInboxPath(in.Home, binding)
+	if err != nil {
+		return err
+	}
+	if verifiedInbox.Controller != filepath.Join(inboxDir, "controller.tar.gz") || verifiedInbox.Desktop != filepath.Join(inboxDir, "desktop.tar.gz") || verifiedInbox.Installer != "" {
+		return errf(CodeVerificationFailed, "installed Mac inbox verifier returned unexpected paths")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := in.MasterKey.Provision(ctx, in.StateDir); err != nil {
+		return errWrap(CodePrerequisiteMissing, "Mac master key cannot be provisioned", err)
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := in.Activator.Activate(ctx, d.Release, plan, verifiedInbox); err != nil {
+		return errWrap(CodePrerequisiteMissing, "Mac release activation failed", err)
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	active, err = in.Activator.Audit(ctx, d.Release, plan)
+	if err != nil {
+		return errWrap(CodeVerificationFailed, "activated Mac release failed active-tree audit", err)
+	}
+	if !active {
+		return errf(CodeVerificationFailed, "activated Mac release failed active-tree audit")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 	if err := in.Watermark.Advance(ctx, candidate); err != nil {
 		return errWrap(CodePrerequisiteMissing, "Mac release watermark could not be saved; inspect installation before retry", err)
+	}
+	return nil
+}
+
+func validateMacBootstrapPaths(home, stateDir string) error {
+	current, err := user.Current()
+	if err != nil || current.HomeDir == "" {
+		return errf(CodePrerequisiteMissing, "current login home cannot be resolved")
+	}
+	if !cleanAbs(home) || home != current.HomeDir || !cleanAbs(stateDir) || stateDir != filepath.Join(home, "Library", "Application Support", "zatiti") {
+		return errf(CodeInvalidInput, "Mac bootstrap home or state directory differs from current user default")
+	}
+	resolved, err := filepath.EvalSymlinks(home)
+	if err != nil || resolved != home {
+		return errf(CodeInvalidInput, "Mac bootstrap home path traverses a symlink")
+	}
+	info, err := os.Stat(home)
+	if err != nil || !info.IsDir() || !acceptedOwned(info) {
+		return errf(CodeInvalidInput, "Mac bootstrap home is not owned by current user")
+	}
+	if err := validateMacStatePath(home); err != nil {
+		return err
+	}
+	return nil
+}
+
+func validateMacStatePath(home string) error {
+	for _, p := range []string{filepath.Join(home, "Library"), filepath.Join(home, "Library", "Application Support"), filepath.Join(home, "Library", "Application Support", "zatiti")} {
+		info, err := os.Lstat(p)
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil || !info.IsDir() || !acceptedOwned(info) {
+			return errf(CodeInvalidInput, "Mac bootstrap state path is unsafe")
+		}
 	}
 	return nil
 }
