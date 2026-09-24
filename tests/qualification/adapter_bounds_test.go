@@ -477,12 +477,12 @@ func TestAdapterBoundsSerenity(t *testing.T) {
 	var outward atomic.Int32
 	probe := probeTransport{n: &outward}
 	brain := contract.NewID()
-	evidence := capabilityEvidence("zatiti-serenity-adapter/1", "f5a5154e1c4d808e10b495fca3bd50d842f0aa92", "memory_verbs/1+mcp/2025-11-25", []string{}, []string{"no operation is dispatchable at this pin; see PROTOCOL.md"})
-	enforcement := capabilityEvidence("zatiti-serenity-adapter/1", "f5a5154e1c4d808e10b495fca3bd50d842f0aa92", "memory_verbs/1+mcp/2025-11-25", []string{}, []string{"unsupported"})
+	evidence := capabilityEvidence("zatiti-serenity-adapter/1", "b4febdf7bbc0d3c33f9939c79099dc64cce89e84", "memory_verbs/1+mcp/2025-11-25", []string{}, []string{"no operation is dispatchable at this pin; see PROTOCOL.md"})
+	enforcement := capabilityEvidence("zatiti-serenity-adapter/1", "b4febdf7bbc0d3c33f9939c79099dc64cce89e84", "memory_verbs/1+mcp/2025-11-25", []string{}, []string{"unsupported"})
 	profile := bindProfile(t, map[string]any{
 		"schema":  "zatiti.serenity/v1",
-		"version": "v0.1.1-240-gf5a5154",
-		"commit":  "f5a5154e1c4d808e10b495fca3bd50d842f0aa92",
+		"version": "v0.1.10-hosted-candidate",
+		"commit":  "b4febdf7bbc0d3c33f9939c79099dc64cce89e84",
 		"brain_mappings": []map[string]any{{
 			"brain_id": string(brain), "endpoint": "https://serenity.invalid/mcp", "root_ref": "brain:qualification",
 			"writer_owner": "qualification-writer", "classification": "internal",
