@@ -3088,6 +3088,32 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   -- routed to chief-architect for that design pass before any
   implementation lane starts.
 
+- 2026-09-24 -- Z-M2 update: chief-architect's coordinated revision landed
+  as zatiti#67 (root `internal/adapters/mcpclient`, wire name `mcp`,
+  assignments/Z-M2.md, dec-1256/dec-1258); chief-developer_z-m2's
+  implementation lane is running stacked on that branch, not merging
+  ahead of #67. One real contract defect found and fixed in #67 itself
+  (commit b6fe041) before implementation needed a workaround: go-sdk
+  v1.7.0's `Client.Connect` makes three physical HTTP requests for
+  open_session (a SEP-2575 `server/discover` probe first, then legacy
+  `initialize`+`notifications/initialized` against a 2025-11-25-only
+  server), not two -- MCPHandshakeExchange/MCPClientEvidence.handshake now
+  allow maxItems 3, MCPClientProfile.protocol_version is an enum of
+  `2025-11-25 | 2026-07-28`, and Z06.mcp_one_request_per_call reads "at
+  most three requests, every one recorded, the discover probe never
+  omitted from evidence."
+- 2026-09-24 -- Z-M3 (Postiz binding, blocked on Z-M2 landing) fact for
+  whoever mints its task card: Postiz's MCP endpoint through our own nginx
+  is `https://post.sire.blog/api/mcp/<key>`, NOT `/mcp/<key>` (that path
+  hits the frontend and 307s to /auth) -- verified by chief-operator via
+  Cloudflare, keyless POSTs of initialize/tools/list to
+  `/api/mcp/placeholder` return a real 400 "Invalid API Key" from the
+  Postiz backend, which is the routing proof; no foundation proxy change
+  needed. post.sire.blog was down 19 days, back as of 2026-09-24 06:23Z.
+  No public API key exists yet -- David's to mint. Use the `/api/mcp`
+  path in Z-M3's task note, any fixture, and the adapter's
+  allowed-destination example.
+
 ## Blocked
 
 - 2026-09-10 — internal/adapters/responses and internal/adapters/serenity:
