@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
@@ -9,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -318,6 +320,101 @@ func TestHelperIntentRejectsSymlinkAndPermissiveFile(t *testing.T) {
 	}
 }
 
+func TestHelperBeginIntentIsBoundBeforeAmbiguousDispatch(t *testing.T) {
+	root := t.TempDir()
+	store, err := newHelperIntentStore(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	installationID, connectionID := contract.NewID(), contract.NewID()
+	beginCalls := 0
+	op := &fakeOperator{fn: func(_ context.Context, operation string, req contract.Request) (contract.Result, error) {
+		switch operation {
+		case "connection.get":
+			return contract.Result{Payload: contract.Payload{Status: contract.StatusCompleted, Data: mustJSON(t, map[string]any{"resource": map[string]any{"version": 1, "account_identity": "acct"}})}}, nil
+		case "command.get":
+			return contract.Result{Payload: contract.Payload{Status: contract.StatusFailed, Error: &contract.Fault{Code: contract.CodeNotFound}}}, nil
+		case "connection.setup.begin":
+			beginCalls++
+			intent, err := store.read(string(connectionID))
+			if err != nil || intent == nil {
+				t.Fatalf("intent before begin: %+v %v", intent, err)
+			}
+			if got := helperMutationDigest(operation, req.SubmissionKey, req.Input); got != intent.BeginRequestSHA256 {
+				t.Fatal("begin request was not durably bound before dispatch")
+			}
+			return contract.Result{}, errors.New("response lost")
+		default:
+			t.Fatalf("unexpected %s", operation)
+			return contract.Result{}, nil
+		}
+	}}
+	if _, _, _, err := helperPrepareLocked(context.Background(), store, op, newFakeSecretStore(), installationID, connectionID); err == nil {
+		t.Fatal("ambiguous begin claimed success")
+	}
+	intent, err := store.read(string(connectionID))
+	if err != nil || intent == nil {
+		t.Fatalf("read pending: %+v %v", intent, err)
+	}
+	intent.ConnectionVersion++
+	if err := store.write(*intent); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, err := helperPrepareLocked(context.Background(), store, op, newFakeSecretStore(), installationID, connectionID); err == nil || !strings.Contains(err.Error(), "request changed") {
+		t.Fatalf("changed request should fail before replay: %v", err)
+	}
+	if beginCalls != 1 {
+		t.Fatalf("begin calls after changed request: %d", beginCalls)
+	}
+}
+
+func TestHelperIntentRejectsPartialPhases(t *testing.T) {
+	store, err := newHelperIntentStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	intent := helperIntent{Schema: helperIntentSchema, InstallationID: string(contract.NewID()), ConnectionID: string(contract.NewID()), ConnectionVersion: 1,
+		AccountIdentity: "acct", BeginKey: "begin", CompleteKey: "complete", CredentialName: "connections/credential/" + string(contract.NewID())}
+	raw, err := helperBeginRequest(intent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	intent.BeginRequestSHA256 = helperMutationDigest("connection.setup.begin", intent.BeginKey, raw)
+	if err := store.write(intent); err != nil {
+		t.Fatal(err)
+	}
+	for _, mutate := range []func(*helperIntent){
+		func(i *helperIntent) { i.ChallengeVersion = 1 },
+		func(i *helperIntent) { i.CredentialRef = "opaque-ref" },
+		func(i *helperIntent) { i.CompleteRequestSHA256 = strings.Repeat("a", 64) },
+		func(i *helperIntent) { i.BeginRequestSHA256 = "malformed" },
+	} {
+		broken := intent
+		mutate(&broken)
+		if err := store.write(broken); err == nil {
+			t.Fatalf("partial intent accepted: %+v", broken)
+		}
+	}
+	path, err := store.path(intent.ConnectionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	good, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	duplicate := bytes.Replace(good, []byte(`"schema":"zatiti.helper_intent/v1"`), []byte(`"schema":"zatiti.helper_intent/v1","schema":"zatiti.helper_intent/v1"`), 1)
+	if bytes.Equal(duplicate, good) {
+		t.Fatal("fixture did not add duplicate field")
+	}
+	if err := os.WriteFile(path, duplicate, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.read(intent.ConnectionID); err == nil {
+		t.Fatal("duplicate field was accepted")
+	}
+}
+
 type countingSecrets struct {
 	*fakeSecretStore
 	puts int
@@ -357,6 +454,14 @@ func TestHelperUnknownCompletionReconcilesWithoutSecondCredentialWrite(t *testin
 		case "connection.setup.complete":
 			if req.SubmissionKey == "" || req.SubmissionKey == beginKey {
 				t.Fatal("missing or reused completion key")
+			}
+			pendingStore, err := newHelperIntentStore(root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			pending, err := pendingStore.read(string(connectionID))
+			if err != nil || pending == nil || pending.CompleteRequestSHA256 != helperMutationDigest(operation, req.SubmissionKey, req.Input) {
+				t.Fatalf("complete request not durably bound before dispatch: %+v %v", pending, err)
 			}
 			completeKey = req.SubmissionKey
 			completeCalls++
@@ -401,6 +506,54 @@ func TestHelperUnknownCompletionReconcilesWithoutSecondCredentialWrite(t *testin
 	}
 }
 
+func TestHelperRejectsChangedReceiptAfterAmbiguousCompletion(t *testing.T) {
+	root := t.TempDir()
+	secrets := newFakeSecretStore()
+	installationID, connectionID, challengeID := contract.NewID(), contract.NewID(), contract.NewID()
+	expires := time.Now().UTC().Add(time.Hour).Truncate(time.Second)
+	completeCalls := 0
+	op := &fakeOperator{fn: func(_ context.Context, operation string, req contract.Request) (contract.Result, error) {
+		switch operation {
+		case "connection.get":
+			return contract.Result{Payload: contract.Payload{Status: contract.StatusCompleted, Data: mustJSON(t, map[string]any{"resource": map[string]any{"version": 1, "account_identity": "acct"}})}}, nil
+		case "command.get":
+			return contract.Result{Payload: contract.Payload{Status: contract.StatusFailed, Error: &contract.Fault{Code: contract.CodeNotFound}}}, nil
+		case "connection.setup.begin":
+			return contract.Result{Payload: contract.Payload{Status: contract.StatusCompleted, Data: mustJSON(t, map[string]any{"resource": map[string]any{"id": challengeID, "version": 1, "expires_at": expires}})}}, nil
+		case "connection.setup.status":
+			return contract.Result{Payload: contract.Payload{Status: contract.StatusCompleted, Data: mustJSON(t, map[string]any{"resource": map[string]any{"id": challengeID, "version": 1, "connection_id": connectionID, "state": "external_action_required", "expires_at": expires}})}}, nil
+		case "connection.setup.complete":
+			completeCalls++
+			return contract.Result{}, errors.New("response lost before acceptance is known")
+		default:
+			t.Fatalf("unexpected %s", operation)
+			return contract.Result{}, nil
+		}
+	}}
+	if err := runHelperEngine(context.Background(), root, op, secrets, strings.NewReader("synthetic-key\n"), io.Discard, installationID, connectionID); err == nil {
+		t.Fatal("ambiguous completion claimed success")
+	}
+	store, err := newHelperIntentStore(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pending, err := store.read(string(connectionID))
+	if err != nil || pending == nil || pending.CompleteRequestSHA256 == "" {
+		t.Fatalf("missing bound completion: %+v %v", pending, err)
+	}
+	keyRef := secrets.names[helperReceiptKeyRef]
+	if keyRef == "" {
+		t.Fatal("no receipt key")
+	}
+	secrets.store[keyRef] = bytes.Repeat([]byte{0x5a}, len(secrets.store[keyRef]))
+	if err := runHelperEngine(context.Background(), root, op, secrets, strings.NewReader("different-key\n"), io.Discard, installationID, connectionID); err == nil || !strings.Contains(err.Error(), "request changed") {
+		t.Fatalf("changed receipt should block same-key replay: %v", err)
+	}
+	if completeCalls != 1 {
+		t.Fatalf("completion replayed with changed receipt: %d", completeCalls)
+	}
+}
+
 func TestHelperResumesCrashAfterPutBeforeIntentReference(t *testing.T) {
 	root := t.TempDir()
 	store, err := newHelperIntentStore(root)
@@ -411,6 +564,11 @@ func TestHelperResumesCrashAfterPutBeforeIntentReference(t *testing.T) {
 	installationID, connectionID, challengeID := contract.NewID(), contract.NewID(), contract.NewID()
 	expires := time.Now().UTC().Add(time.Hour).Truncate(time.Second)
 	intent := helperIntent{Schema: helperIntentSchema, InstallationID: string(installationID), ConnectionID: string(connectionID), ConnectionVersion: 1, AccountIdentity: "acct", BeginKey: "begin-key", ChallengeID: string(challengeID), ChallengeVersion: 1, ExpiresAt: expires, CredentialName: "connections/credential/" + string(contract.NewID()), CompleteKey: "complete-key"}
+	beginRaw, err := helperBeginRequest(intent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	intent.BeginRequestSHA256 = helperMutationDigest("connection.setup.begin", intent.BeginKey, beginRaw)
 	if err := store.write(intent); err != nil {
 		t.Fatal(err)
 	}

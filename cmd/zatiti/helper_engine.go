@@ -65,6 +65,33 @@ func runHelperEngine(ctx context.Context, stateDir string, op contract.Operator,
 	if intent.CredentialRef == "" {
 		return errors.New("stored credential has no opaque reference")
 	}
+	key, err := ensureHelperReceiptKey(ctx, secrets)
+	if err != nil {
+		return err
+	}
+	receipt, receiptErr := mintHelperReceipt(key, helperPayload{
+		ChallengeID: contract.ID(intent.ChallengeID), CredentialRef: intent.CredentialRef,
+		AccountIdentity: intent.AccountIdentity, ExpiresAt: intent.ExpiresAt,
+	})
+	zero(key)
+	if receiptErr != nil {
+		return receiptErr
+	}
+	completeRaw, err := json.Marshal(map[string]any{
+		"scope": scope, "challenge_id": intent.ChallengeID, "expected_version": intent.ChallengeVersion, "helper_ref": receipt,
+	})
+	if err != nil {
+		return err
+	}
+	digest := helperMutationDigest("connection.setup.complete", intent.CompleteKey, completeRaw)
+	if intent.CompleteRequestSHA256 == "" {
+		intent.CompleteRequestSHA256 = digest
+		if err := store.write(*intent); err != nil {
+			return fmt.Errorf("saving exact setup.complete intent: %w", err)
+		}
+	} else if intent.CompleteRequestSHA256 != digest {
+		return errors.New("setup.complete request changed while pending; repair is required")
+	}
 	res, found, err := helperCommandLookup(ctx, op, installationID, "connection.setup.complete", intent.CompleteKey)
 	if err != nil {
 		return fmt.Errorf("reconciling setup.complete: %w", err)
@@ -74,21 +101,26 @@ func runHelperEngine(ctx context.Context, stateDir string, op contract.Operator,
 			return errors.New("retained setup.complete is not completed; repair is required")
 		}
 	} else {
-		key, err := ensureHelperReceiptKey(ctx, secrets)
-		if err != nil {
-			return err
+		// A lost command acknowledgement can race command.get visibility. The
+		// challenge and effective connection are authoritative before replay.
+		status, statusErr := helperChallenge(ctx, op, installationID, contract.ID(intent.ChallengeID))
+		if statusErr != nil {
+			return fmt.Errorf("reconciling setup status before replay: %w", statusErr)
 		}
-		receipt, receiptErr := mintHelperReceipt(key, helperPayload{
-			ChallengeID: contract.ID(intent.ChallengeID), CredentialRef: intent.CredentialRef,
-			AccountIdentity: intent.AccountIdentity, ExpiresAt: intent.ExpiresAt,
-		})
-		zero(key)
-		if receiptErr != nil {
-			return receiptErr
+		if status.State == "completed" {
+			current, currentErr := helperConnection(ctx, op, installationID, connectionID)
+			if currentErr != nil || current.CredentialRef != intent.CredentialRef {
+				return errors.New("completed setup does not match pending credential; repair is required")
+			}
+			if err := store.remove(string(connectionID)); err != nil {
+				return err
+			}
+			return nil
 		}
-		if _, err := callOperation(ctx, op, "connection.setup.complete", map[string]any{
-			"scope": scope, "challenge_id": intent.ChallengeID, "expected_version": intent.ChallengeVersion, "helper_ref": receipt,
-		}, intent.CompleteKey); err != nil {
+		if status.State != "external_action_required" || status.Version != intent.ChallengeVersion || !status.ExpiresAt.Equal(intent.ExpiresAt) || !status.ExpiresAt.After(time.Now()) {
+			return errors.New("setup status changed before completion replay; repair is required")
+		}
+		if _, err := callOperationRaw(ctx, op, "connection.setup.complete", completeRaw, intent.CompleteKey); err != nil {
 			return fmt.Errorf("connection.setup.complete needs reconciliation with its original submission key: %w", err)
 		}
 	}

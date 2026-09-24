@@ -28,10 +28,20 @@ func helperPrepareLocked(ctx context.Context, store helperIntentStore, op contra
 	if intent == nil {
 		intent = &helperIntent{Schema: helperIntentSchema, InstallationID: string(installationID), ConnectionID: string(connectionID), ConnectionVersion: conn.Version, AccountIdentity: conn.AccountIdentity,
 			BeginKey: "helper-begin/" + string(contract.NewID()), CompleteKey: "helper-complete/" + string(contract.NewID()), CredentialName: "connections/credential/" + string(contract.NewID())}
+		beginRaw, err := helperBeginRequest(*intent)
+		if err != nil {
+			return nil, helperConnectionRecord{}, false, err
+		}
+		intent.BeginRequestSHA256 = helperMutationDigest("connection.setup.begin", intent.BeginKey, beginRaw)
 		if err := store.write(*intent); err != nil {
 			return nil, helperConnectionRecord{}, false, fmt.Errorf("saving helper begin intent: %w", err)
 		}
-	} else if intent.AccountIdentity != conn.AccountIdentity && conn.CredentialRef != intent.CredentialRef {
+	}
+	beginRaw, err := helperBeginRequest(*intent)
+	if err != nil || helperMutationDigest("connection.setup.begin", intent.BeginKey, beginRaw) != intent.BeginRequestSHA256 {
+		return nil, helperConnectionRecord{}, false, errors.New("setup.begin request changed while pending; repair is required")
+	}
+	if intent.AccountIdentity != conn.AccountIdentity && conn.CredentialRef != intent.CredentialRef {
 		return nil, helperConnectionRecord{}, false, errors.New("connection account changed while setup was pending; repair is required")
 	}
 	if intent.ChallengeID == "" {
@@ -43,7 +53,7 @@ func helperPrepareLocked(ctx context.Context, store helperIntentStore, op contra
 			if conn.Version != intent.ConnectionVersion {
 				return nil, helperConnectionRecord{}, false, errors.New("connection changed before setup.begin could be confirmed; repair is required")
 			}
-			res, err = callOperation(ctx, op, "connection.setup.begin", map[string]any{"scope": map[string]any{"installation_id": installationID}, "connection_id": connectionID, "expected_version": intent.ConnectionVersion, "method": "store_reference"}, intent.BeginKey)
+			res, err = callOperationRaw(ctx, op, "connection.setup.begin", beginRaw, intent.BeginKey)
 			if err != nil {
 				return nil, helperConnectionRecord{}, false, fmt.Errorf("connection.setup.begin needs reconciliation with its original submission key: %w", err)
 			}
@@ -85,5 +95,12 @@ func helperPrepareLocked(ctx context.Context, store helperIntentStore, op contra
 	if challenge.State != "external_action_required" || challenge.Version != intent.ChallengeVersion || !challenge.ExpiresAt.Equal(intent.ExpiresAt) || !challenge.ExpiresAt.After(time.Now()) {
 		return nil, helperConnectionRecord{}, false, errors.New("setup challenge is pending or changed; inspect authoritative status before retrying")
 	}
+	if conn.Version != intent.ConnectionVersion || conn.AccountIdentity != intent.AccountIdentity {
+		return nil, helperConnectionRecord{}, false, errors.New("connection identity or version changed while setup was pending; repair is required")
+	}
 	return intent, conn, false, nil
+}
+
+func helperBeginRequest(intent helperIntent) ([]byte, error) {
+	return json.Marshal(map[string]any{"scope": map[string]any{"installation_id": intent.InstallationID}, "connection_id": intent.ConnectionID, "expected_version": intent.ConnectionVersion, "method": "store_reference"})
 }

@@ -265,6 +265,10 @@ func callOperation(ctx context.Context, op contract.Operator, operation string, 
 	if err != nil {
 		return contract.Result{}, fmt.Errorf("encoding request input: %w", err)
 	}
+	return callOperationRaw(ctx, op, operation, raw, submissionKey)
+}
+
+func callOperationRaw(ctx context.Context, op contract.Operator, operation string, raw []byte, submissionKey string) (contract.Result, error) {
 	res, err := op.Call(ctx, operation, contract.Request{Schema: contract.SchemaRequest, SubmissionKey: submissionKey, Input: raw})
 	if err != nil {
 		return contract.Result{}, err
