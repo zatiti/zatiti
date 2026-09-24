@@ -19,26 +19,48 @@ import (
 // installed host. No supplied JSON, screenshot, or synthetic fixture can
 // promote the latter into a passed case.
 func TestNativeMacRelease(t *testing.T) {
-	for _, arch := range []string{"amd64", "arm64"} {
-		t.Run(arch, func(t *testing.T) {
-			t.Run("signed_artifacts", func(t *testing.T) { qualifyNativeMacArtifacts(t, arch) })
-			t.Run("installed_pkg_bootstrap", func(t *testing.T) {
-				c := beginCase(t, "MAC."+arch+".installed_pkg_bootstrap", "QUALIFICATION",
-					"clean native host installs the verified per-user pkg through the signed bootstrap; inbox and active trees bind to the signed release; LaunchAgent survives client close and upgrade")
-				c.notRun("a controlled clean-host installation/upgrade driver with pkg inbox, active-tree, LaunchAgent and crash/rerun observations is not implemented in this harness")
-			})
-			t.Run("helper_keychain", func(t *testing.T) {
-				c := beginCase(t, "MAC."+arch+".helper_keychain", "QUALIFICATION",
-					"signed Runner launches the helper with IDs only; Keychain owner/master ACL works across upgrade; cancel, unknown acknowledgement, crash and rerun retain one challenge and no secret in public data")
-				c.notRun("a signed installed Runner/helper and controlled GUI/Keychain crash-recovery driver with a disposable credential are required")
-			})
-			t.Run("serenity_provider_first_chat", func(t *testing.T) {
-				c := beginCase(t, "MAC."+arch+".serenity_provider_first_chat", "QUALIFICATION",
-					"real provider first chief reply is committed and displayed; Serenity public protocol, one writer per brain, scoped recall, command reconciliation, cost/disclosure bounds and backup revisions are observed")
-				c.notRun("a real provider account, qualified Serenity service and native UI/controller evidence driver are required; a simulated reply or screenshot cannot prove this gate")
-			})
-		})
+	arch, reason := nativeMacCaseArch(runtime.GOOS, runtime.GOARCH, nativeMacHardwareArch)
+	if reason != "" {
+		c := beginCase(t, "MAC.native_host_prerequisite", "QUALIFICATION", "qualification executes as a native process on a Mac host")
+		c.notRun("%s", reason)
 	}
+	t.Run(arch, func(t *testing.T) {
+		t.Run("signed_artifacts", func(t *testing.T) { qualifyNativeMacArtifacts(t, arch) })
+		t.Run("installed_pkg_bootstrap", func(t *testing.T) {
+			c := beginCase(t, "MAC."+arch+".installed_pkg_bootstrap", "QUALIFICATION",
+				"clean native host installs the verified per-user pkg through the signed bootstrap; inbox and active trees bind to the signed release; LaunchAgent survives client close and upgrade")
+			c.notRun("a controlled clean-host installation/upgrade driver with pkg inbox, active-tree, LaunchAgent and crash/rerun observations is not implemented in this harness")
+		})
+		t.Run("helper_keychain", func(t *testing.T) {
+			c := beginCase(t, "MAC."+arch+".helper_keychain", "QUALIFICATION",
+				"signed Runner launches the helper with IDs only; Keychain owner/master ACL works across upgrade; cancel, unknown acknowledgement, crash and rerun retain one challenge and no secret in public data")
+			c.notRun("a signed installed Runner/helper and controlled GUI/Keychain crash-recovery driver with a disposable credential are required")
+		})
+		t.Run("serenity_provider_first_chat", func(t *testing.T) {
+			c := beginCase(t, "MAC."+arch+".serenity_provider_first_chat", "QUALIFICATION",
+				"real provider first chief reply is committed and displayed; Serenity public protocol, one writer per brain, scoped recall, command reconciliation, cost/disclosure bounds and backup revisions are observed")
+			c.notRun("a real provider account, qualified Serenity service and native UI/controller evidence driver are required; a simulated reply or screenshot cannot prove this gate")
+		})
+	})
+}
+
+// nativeMacCaseArch chooses only the architecture physically executing this
+// run. The other Mac architecture must submit its own independent report.
+func nativeMacCaseArch(goos, processArch string, detect func() (string, error)) (string, string) {
+	if goos != "darwin" {
+		return "", "requires a native macOS host"
+	}
+	hardware, err := detect()
+	if err != nil {
+		return "", "native Mac hardware architecture is unavailable: " + err.Error()
+	}
+	if hardware != "amd64" && hardware != "arm64" {
+		return "", "native Mac hardware architecture is unsupported"
+	}
+	if processArch != hardware {
+		return "", fmt.Sprintf("requires a native %s process; observed %s (Rosetta or cross-architecture execution cannot qualify)", hardware, processArch)
+	}
+	return hardware, ""
 }
 
 func qualifyNativeMacArtifacts(t *testing.T, arch string) {
