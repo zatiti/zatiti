@@ -3104,15 +3104,19 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   omitted from evidence."
 - 2026-09-24 -- Z-M3 (Postiz binding, blocked on Z-M2 landing) fact for
   whoever mints its task card: Postiz's MCP endpoint through our own nginx
-  is `https://post.sire.blog/api/mcp/<key>`, NOT `/mcp/<key>` (that path
-  hits the frontend and 307s to /auth) -- verified by chief-operator via
-  Cloudflare, keyless POSTs of initialize/tools/list to
-  `/api/mcp/placeholder` return a real 400 "Invalid API Key" from the
-  Postiz backend, which is the routing proof; no foundation proxy change
-  needed. post.sire.blog was down 19 days, back as of 2026-09-24 06:23Z.
-  No public API key exists yet -- David's to mint. Use the `/api/mcp`
-  path in Z-M3's task note, any fixture, and the adapter's
-  allowed-destination example.
+  is `https://post.sire.blog/api/mcp` (NOT `/mcp`, which hits the frontend
+  and 307s to /auth) using `Authorization: Bearer`, verified live by
+  chief-architect (a placeholder Bearer header returns 401 "Invalid API
+  Key or OAuth token"). Postiz ALSO exposes a `/api/mcp/<key>`
+  credential-in-path form -- do NOT use it as the fixture/default: it is
+  exactly the shape the frozen mcpclient contract refuses as
+  `capability_unsupported` (credential in URL, not in the connection's
+  held credential). post.sire.blog was down 19 days, back as of
+  2026-09-24 06:23Z (chief-operator, via Cloudflare). No public API key
+  exists yet -- David mints it at the 08:00 sync; Z-M2's own tonight
+  acceptance runs a placeholder Bearer token against `/api/mcp` and
+  records the resulting 401 as a typed refusal, never success. Real-key
+  streaming is Z-M3's.
 
 ## Blocked
 
