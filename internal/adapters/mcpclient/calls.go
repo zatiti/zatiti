@@ -25,7 +25,9 @@ func (a *Adapter) doOpenSession(ctx context.Context, dispatch contract.Dispatch,
 	})
 	client.AddReceivingMiddleware(refusalMiddleware(rt))
 
-	state := &callState{kind: kindOpenSession, ctx: ctx, blobs: a.deps.Blobs, secret: secret}
+	state := a.newCallState(ctx, kindOpenSession, secret, in.ControlReplyLimit, "")
+	defer state.cancel()
+	ctx = state.ctx
 	rt.arm(state)
 	transport := &mcp.StreamableClientTransport{
 		Endpoint:             a.profile.Endpoint,
@@ -35,12 +37,18 @@ func (a *Adapter) doOpenSession(ctx context.Context, dispatch contract.Dispatch,
 	}
 	session, connErr := client.Connect(ctx, transport, nil)
 	rt.disarm()
+	if connErr == nil && state.aborted() != "" {
+		if session != nil {
+			_ = session.Close()
+		}
+		connErr = internalError("mcpclient: handshake was aborted")
+	}
 	finished := a.deps.Clock.Now()
 
 	physical := a.newPhysicalCall(dispatch, pinnedAddr, started)
 	physical.FinishedAt = finished
 	if _, locator, ok := firstStaged(state.captured); ok {
-		physical.RequestContext = locator
+		physical.RequestContext = &locator
 	}
 	handshake := buildHandshake(state.captured)
 
@@ -75,7 +83,8 @@ func (a *Adapter) doOpenSession(ctx context.Context, dispatch contract.Dispatch,
 	handle, err := a.sessions.add(&sessionEntry{credentialRef: dispatch.CredentialRef, session: session, roundTripper: rt, stateless: session.ID() == ""})
 	if err != nil {
 		_ = session.Close()
-		return contract.Observation{}, err
+		outcome := attemptOutcome{requestSent: primaryRequestSent(state.captured), confirmation: "authoritative_failure", httpStatus: int64(lastStatus(state.captured)), errorCode: "session_limit_exceeded", errorMessage: "local session table is full; the completed handshake was not retained"}
+		return a.observeOpenSessionFailure(physical, outcome, handshake, state, finished)
 	}
 
 	physical.RequestSent = "yes"
@@ -96,7 +105,7 @@ func (a *Adapter) doOpenSession(ctx context.Context, dispatch contract.Dispatch,
 		SessionState:          sessionState,
 		Handshake:             handshake,
 		RefusedServerRequests: state.refused,
-		Usage:                 a.attemptUsage(),
+		Usage:                 a.attemptUsage(state),
 	}
 	if init := session.InitializeResult(); init != nil {
 		ev.ProtocolVersion = init.ProtocolVersion
@@ -134,7 +143,7 @@ func (a *Adapter) observeOpenSessionFailure(physical wirePhysicalCallEvidence, o
 		SessionState:          "unknown",
 		Handshake:             handshake,
 		RefusedServerRequests: state.refused,
-		Usage:                 a.attemptUsage(),
+		Usage:                 a.attemptUsage(state),
 	}
 	if staged, _, ok := firstStaged(state.captured); ok {
 		ev.StagedOutputs = []wireStagedOutput{staged}
@@ -170,26 +179,32 @@ func (a *Adapter) doListTools(ctx context.Context, dispatch contract.Dispatch, s
 	}
 
 	started := a.deps.Clock.Now()
-	state := &callState{kind: kindListTools, ctx: ctx, blobs: a.deps.Blobs, secret: secret}
+	state := a.newCallState(ctx, kindListTools, secret, in.ControlReplyLimit, "")
+	defer state.cancel()
+	ctx = state.ctx
 	entry.roundTripper.arm(state)
 	result, err := entry.session.ListTools(ctx, &mcp.ListToolsParams{Cursor: in.Cursor})
-	entry.roundTripper.disarm()
+	a.finishSessionCall(entry, in.SessionHandle, state)
 	finished := a.deps.Clock.Now()
 
 	physical := a.newPhysicalCall(dispatch, pinnedAddr, started)
 	physical.FinishedAt = finished
 	if _, locator, ok := firstStaged(state.captured); ok {
-		physical.RequestContext = locator
+		physical.RequestContext = &locator
 	}
 
 	sessionState := "active"
 	if entry.stateless {
 		sessionState = "stateless"
 	}
+	if state.aborted() != "" || state.ctx.Err() != nil {
+		sessionState = "closed"
+	}
 
 	if err != nil {
 		outcome := classifyAttemptError(err, state)
 		if outcome.sessionGone {
+			_ = entry.session.Close() // disarmed: local cleanup cannot send DELETE
 			a.sessions.remove(in.SessionHandle)
 			sessionState = "expired"
 		}
@@ -219,7 +234,7 @@ func (a *Adapter) doListTools(ctx context.Context, dispatch contract.Dispatch, s
 		Tools:                 tools,
 		NextCursor:            result.NextCursor,
 		RefusedServerRequests: state.refused,
-		Usage:                 a.attemptUsage(),
+		Usage:                 a.attemptUsage(state),
 	}
 	if staged, _, ok := firstStaged(state.captured); ok {
 		ev.StagedOutputs = []wireStagedOutput{staged}
@@ -267,26 +282,32 @@ func (a *Adapter) doCallTool(ctx context.Context, dispatch contract.Dispatch, se
 	}
 
 	started := a.deps.Clock.Now()
-	state := &callState{kind: kindCallTool, ctx: ctx, blobs: a.deps.Blobs, secret: secret, classification: in.Classification}
+	state := a.newCallState(ctx, kindCallTool, secret, in.ControlReplyLimit, in.Classification)
+	defer state.cancel()
+	ctx = state.ctx
 	entry.roundTripper.arm(state)
 	result, err := entry.session.CallTool(ctx, &mcp.CallToolParams{Name: in.Tool, Arguments: json.RawMessage(in.Arguments)})
-	entry.roundTripper.disarm()
+	a.finishSessionCall(entry, in.SessionHandle, state)
 	finished := a.deps.Clock.Now()
 
 	physical := a.newPhysicalCall(dispatch, pinnedAddr, started)
 	physical.FinishedAt = finished
 	if _, locator, ok := firstStaged(state.captured); ok {
-		physical.RequestContext = locator
+		physical.RequestContext = &locator
 	}
 
 	sessionState := "active"
 	if entry.stateless {
 		sessionState = "stateless"
 	}
+	if state.aborted() != "" || state.ctx.Err() != nil {
+		sessionState = "closed"
+	}
 
 	if err != nil {
 		outcome := classifyAttemptError(err, state)
 		if outcome.sessionGone {
+			_ = entry.session.Close() // disarmed: local cleanup cannot send DELETE
 			a.sessions.remove(in.SessionHandle)
 			sessionState = "expired"
 		}
@@ -315,7 +336,7 @@ func (a *Adapter) doCallTool(ctx context.Context, dispatch contract.Dispatch, se
 		IsError:               result.IsError,
 		ContentSummary:        &summary,
 		RefusedServerRequests: state.refused,
-		Usage:                 a.attemptUsage(),
+		Usage:                 a.attemptUsage(state),
 	}
 
 	resultDoc, merr := json.Marshal(struct {
@@ -383,7 +404,7 @@ func (a *Adapter) observeCallToolFailure(physical wirePhysicalCallEvidence, outc
 		Tool:                  in.Tool,
 		ArgumentsDigest:       contract.Hash(canonicalOrRaw(in.Arguments)),
 		RefusedServerRequests: state.refused,
-		Usage:                 a.attemptUsage(),
+		Usage:                 a.attemptUsage(state),
 	}
 	if staged, _, ok := firstStaged(state.captured); ok {
 		ev.StagedOutputs = []wireStagedOutput{staged}
@@ -421,7 +442,9 @@ func (a *Adapter) doCloseSession(ctx context.Context, dispatch contract.Dispatch
 	defer a.sessions.remove(in.SessionHandle)
 
 	started := a.deps.Clock.Now()
-	state := &callState{kind: kindCloseSession, ctx: ctx, blobs: a.deps.Blobs, secret: secret}
+	state := a.newCallState(ctx, kindCloseSession, secret, in.ControlReplyLimit, "")
+	defer state.cancel()
+	ctx = state.ctx
 	entry.roundTripper.arm(state)
 	var closeErr error
 	if entry.stateless {
@@ -449,7 +472,7 @@ func (a *Adapter) doCloseSession(ctx context.Context, dispatch contract.Dispatch
 	physical := a.newPhysicalCall(dispatch, pinnedAddr, started)
 	physical.FinishedAt = finished
 	if _, locator, ok := firstStaged(state.captured); ok {
-		physical.RequestContext = locator
+		physical.RequestContext = &locator
 	}
 
 	sessionState := "closed"
@@ -471,7 +494,7 @@ func (a *Adapter) doCloseSession(ctx context.Context, dispatch contract.Dispatch
 	}
 	ev := wireMCPEvidence{
 		PhysicalCall: physical, Kind: kindCloseSession, SessionHandle: in.SessionHandle,
-		SessionState: sessionState, RefusedServerRequests: state.refused, Usage: a.attemptUsage(),
+		SessionState: sessionState, RefusedServerRequests: state.refused, Usage: a.attemptUsage(state),
 	}
 	if staged, _, ok := firstStaged(state.captured); ok {
 		ev.StagedOutputs = []wireStagedOutput{staged}
@@ -499,7 +522,7 @@ func (a *Adapter) observeSimpleFailure(physical wirePhysicalCallEvidence, outcom
 
 	ev := wireMCPEvidence{
 		PhysicalCall: physical, Kind: kind, SessionHandle: sessionHandle,
-		SessionState: sessionState, RefusedServerRequests: state.refused, Usage: a.attemptUsage(),
+		SessionState: sessionState, RefusedServerRequests: state.refused, Usage: a.attemptUsage(state),
 	}
 	if staged, _, ok := firstStaged(state.captured); ok {
 		ev.StagedOutputs = []wireStagedOutput{staged}
@@ -538,21 +561,15 @@ var handshakeMessages = map[string]bool{
 	"notifications/initialized": true,
 }
 
-// buildHandshake filters captured physical requests down to the at-most-
-// three handshake messages the frozen MCPHandshakeExchange schema can
-// represent, in the order sent. A captured request that never received a
-// response (status 0, e.g. a stall) is omitted: the schema requires a real
-// HTTP status on every entry.
+// buildHandshake retains every declared handshake request, including attempts
+// with no HTTP response. A missing status is unknown, never fabricated or dropped.
 func buildHandshake(captured []capturedRequest) []wireHandshakeExchange {
 	out := make([]wireHandshakeExchange, 0, 3)
 	for _, c := range captured {
-		if c.status == 0 {
-			continue
-		}
 		if !handshakeMessages[c.rpcMethod] {
 			continue
 		}
-		out = append(out, wireHandshakeExchange{Message: c.rpcMethod, HTTPStatus: int64(c.status), RequestSent: "yes"})
+		out = append(out, wireHandshakeExchange{Message: c.rpcMethod, HTTPStatus: int64(c.status), RequestSent: c.requestSent})
 		if len(out) == 3 {
 			break
 		}
@@ -561,10 +578,12 @@ func buildHandshake(captured []capturedRequest) []wireHandshakeExchange {
 }
 
 func lastStatus(captured []capturedRequest) int {
-	if len(captured) == 0 {
-		return 0
+	for i := len(captured) - 1; i >= 0; i-- {
+		if captured[i].class != "control_reply" {
+			return captured[i].status
+		}
 	}
-	return captured[len(captured)-1].status
+	return 0
 }
 
 // serverCapabilityNames flattens the SDK's ServerCapabilities struct into

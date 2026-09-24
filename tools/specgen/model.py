@@ -3,7 +3,7 @@ from copy import deepcopy
 
 # Specification revision. Bump with every coordinated contract revision; the renderer
 # refuses to render unless contracts.md names the same revision in its title.
-REVISION=3
+REVISION = 4
 
 S={'type':'string','maxLength':8192}
 ID={'type':'string','format':'uuid'}
@@ -546,6 +546,20 @@ internal('restore.overlay','installation',obj(job_id=ID),obj(artifact=ref('Artif
  'Return the published, sealed recovery-overlay artifact installation.restore already registered against this restore job, so the controller can resolve and merge it after the database swap. The reference is read before the swap, while the caller\'s own application is still valid, and names bytes the artifacts owner already published; this operation performs no IO, decrypts nothing and returns not_found for a job with no registered overlay rather than guessing one.',
  ['controller'],mode='query')
 
+# Revision 4: serialized Z-M2 governed MCP integration.
+D['MCPDiscoveredTool']['properties'].update(id=ID,version=VER)
+D['MCPDiscoveredTool']['required'] += ['id','version']
+for operation in OPS:
+    if operation['id']=='_connections.resolve':
+        operation['input_schema']['properties'].update(operation_id=ID,action=ref('Action'))
+        operation['output_schema']['properties']['validation_intent']=BOOL
+        operation['behavior'] += ' MCP admission and claim pass the exact immutable Action and operation_id. A non-fresh connection resolves only for an owner-created, pending validation intent matching the exact operation, action digest, connection version and open_session action; identity alone never exempts freshness. The returned validation_intent is owner-verified, not caller authority. Enforce profile/account/destination/schema/cost/session/catalog pins at admission and claim.'
+    if operation['id'] in ('_connections.validation.record','_connections.discovery.record'):
+        operation['input_schema']['properties'].update(operation_id=ID,attempt_id=ID)
+        operation['behavior'] += ' MCP callbacks require operation_id and attempt_id; read the actual recorded observation through _effects.callback.evidence and match the immutable owner intent. Duplicate exact delivery is idempotent; foreign, stale or unrelated callbacks never complete another job or mutate freshness.'
+internal('tool.resolve','connections',obj(scope=ref('Scope'),tool_id=ID),obj(connection=ref('Connection'),tool=ref('Tool')),'Resolve only an existing MCP catalog identity to its owning fresh connection and exact composed Tool. No wildcard dispatch: this is context lookup, and execution must require explicitly selected tool and connection bindings with intersecting destinations. Return not_found for non-MCP identities.',['execution','configuration'],mode='query')
+internal('callback.evidence','effects',obj(operation_id=ID,attempt_id=ID),obj(action=ref('Action'),observation=ref('Observation'),generation=VER),'Return the unique recorded physical observation of the exact attempt under this operation and installation, plus immutable action and attempt generation. Missing or contradictory observations refuse. Connections uses owner-held evidence rather than caller-supplied provider JSON.',['connections'],mode='query')
+
 # scope_required must be computed last, after every add() call above: it was
 # previously computed mid-file (once, by iterating OPS at that point), so
 # every operation added afterward -- 23 of them, including several
@@ -569,3 +583,9 @@ for _o in OPS:
         _o['scope_required']=[]
     else:
         _o['scope_required']=['installation_id'] if 'scope' in _o['input_schema'].get('required',[]) else []
+
+
+# Revision 4: callbacks verify published artifacts against recorded staged evidence.
+for _op in OPS:
+    if _op["id"] == "_artifacts.metadata" and "connections" not in _op["callers"]:
+        _op["callers"].append("connections")

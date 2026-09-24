@@ -65,6 +65,8 @@ type wireMCPProfile struct {
 	ProtocolVersion    string                 `json:"protocol_version"`
 	CredentialKind     string                 `json:"credential_kind"`
 	AllowedTools       []string               `json:"allowed_tools"`
+	MaxControlReplies  int64                  `json:"max_control_replies,omitempty"`
+	ControlReplyCost   *wireMoney             `json:"control_reply_cost,omitempty"`
 	ToolCallCost       wireMoney              `json:"tool_call_cost"`
 	MaxRequestBytes    int64                  `json:"max_request_bytes"`
 	MaxResponseBytes   int64                  `json:"max_response_bytes"`
@@ -83,20 +85,26 @@ type wireActionKind struct {
 }
 
 type wireOpenSession struct {
-	Schema        string `json:"schema"`
-	Kind          string `json:"kind"` // open_session
-	ClientName    string `json:"client_name"`
-	ClientVersion string `json:"client_version"`
+	ProfileDigest     contract.Digest `json:"profile_digest,omitempty"`
+	ControlReplyLimit int64           `json:"control_reply_limit,omitempty"`
+	Schema            string          `json:"schema"`
+	Kind              string          `json:"kind"` // open_session
+	ClientName        string          `json:"client_name"`
+	ClientVersion     string          `json:"client_version"`
 }
 
 type wireListTools struct {
-	Schema        string `json:"schema"`
-	Kind          string `json:"kind"` // list_tools
-	SessionHandle string `json:"session_handle"`
-	Cursor        string `json:"cursor,omitempty"`
+	ProfileDigest     contract.Digest `json:"profile_digest,omitempty"`
+	ControlReplyLimit int64           `json:"control_reply_limit,omitempty"`
+	Schema            string          `json:"schema"`
+	Kind              string          `json:"kind"` // list_tools
+	SessionHandle     string          `json:"session_handle"`
+	Cursor            string          `json:"cursor,omitempty"`
 }
 
 type wireCallTool struct {
+	ProfileDigest     contract.Digest `json:"profile_digest,omitempty"`
+	ControlReplyLimit int64           `json:"control_reply_limit,omitempty"`
 	Schema            string          `json:"schema"`
 	Kind              string          `json:"kind"` // call_tool
 	SessionHandle     string          `json:"session_handle"`
@@ -108,30 +116,33 @@ type wireCallTool struct {
 }
 
 type wireCloseSession struct {
-	Schema        string `json:"schema"`
-	Kind          string `json:"kind"` // close_session
-	SessionHandle string `json:"session_handle"`
+	ProfileDigest     contract.Digest `json:"profile_digest,omitempty"`
+	ControlReplyLimit int64           `json:"control_reply_limit,omitempty"`
+	Schema            string          `json:"schema"`
+	Kind              string          `json:"kind"` // close_session
+	SessionHandle     string          `json:"session_handle"`
 }
 
 // ---------- evidence (Observation.Evidence) body ----------
 
 type wirePhysicalCallEvidence struct {
-	OperationID          contract.ID       `json:"operation_id"`
-	AttemptID            contract.ID       `json:"attempt_id"`
-	AccountIdentity      string            `json:"account_identity"`
-	RequestedDestination string            `json:"requested_destination"`
-	ResolvedDestination  string            `json:"resolved_destination"`
-	ProfileDigest        contract.Digest   `json:"profile_digest"`
-	CapabilityEvidence   wireArtifactRef   `json:"capability_evidence"`
-	StartedAt            time.Time         `json:"started_at"`
-	FinishedAt           time.Time         `json:"finished_at"`
-	RequestContext       wireStagedLocator `json:"request_context"`
-	RequestSent          string            `json:"request_sent"`
-	Confirmation         string            `json:"confirmation"`
-	HTTPStatus           int64             `json:"http_status,omitempty"`
-	ProviderReference    string            `json:"provider_reference,omitempty"`
-	ErrorCode            string            `json:"error_code,omitempty"`
-	ErrorMessage         string            `json:"error_message,omitempty"`
+	OperationID          contract.ID        `json:"operation_id"`
+	AttemptID            contract.ID        `json:"attempt_id"`
+	AccountIdentity      string             `json:"account_identity"`
+	RequestedDestination string             `json:"requested_destination"`
+	ResolvedDestination  string             `json:"resolved_destination"`
+	ProfileDigest        contract.Digest    `json:"profile_digest"`
+	CapabilityEvidence   wireArtifactRef    `json:"capability_evidence"`
+	StartedAt            time.Time          `json:"started_at"`
+	FinishedAt           time.Time          `json:"finished_at"`
+	RequestContext       *wireStagedLocator `json:"request_context,omitempty"`
+	ContextUnavailable   string             `json:"context_unavailable,omitempty"`
+	RequestSent          string             `json:"request_sent"`
+	Confirmation         string             `json:"confirmation"`
+	HTTPStatus           int64              `json:"http_status,omitempty"`
+	ProviderReference    string             `json:"provider_reference,omitempty"`
+	ErrorCode            string             `json:"error_code,omitempty"`
+	ErrorMessage         string             `json:"error_message,omitempty"`
 }
 
 type wireRationalRate struct {
@@ -181,7 +192,7 @@ type wireStagedLocator struct {
 // frozen contract declares for open_session.
 type wireHandshakeExchange struct {
 	Message     string `json:"message"` // initialize | notifications/initialized
-	HTTPStatus  int64  `json:"http_status"`
+	HTTPStatus  int64  `json:"http_status,omitempty"`
 	RequestSent string `json:"request_sent"` // no | yes | unknown
 }
 
@@ -217,7 +228,18 @@ type wireContentSummary struct {
 	EmbeddedResource int64 `json:"embedded_resource"`
 }
 
+type wireHTTPExchange struct {
+	Kind           string            `json:"kind"`
+	Method         string            `json:"method"`
+	RPCMethod      string            `json:"rpc_method,omitempty"`
+	Ordinal        int64             `json:"ordinal"`
+	RequestContext wireStagedLocator `json:"request_context"`
+	RequestSent    string            `json:"request_sent"`
+	HTTPStatus     int64             `json:"http_status,omitempty"`
+}
+
 type wireMCPEvidence struct {
+	Exchanges               []wireHTTPExchange       `json:"exchanges"`
 	Schema                  string                   `json:"schema"`
 	PhysicalCall            wirePhysicalCallEvidence `json:"physical_call"`
 	Kind                    string                   `json:"kind"`

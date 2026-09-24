@@ -81,14 +81,17 @@ func (s *seqIDs) New() contract.ID {
 // it echoes the caller's state/result onto the Job resource, exactly what a
 // package-scoped test can assert without a real job.get.
 type fakePorts struct {
-	mu    sync.Mutex
-	calls []contract.Invocation
-	next  int
-	fail  map[string]*contract.Fault
+	prepared     map[contract.ID]json.RawMessage
+	observed     map[contract.ID]wireObservation
+	lastPrepared contract.ID
+	mu           sync.Mutex
+	calls        []contract.Invocation
+	next         int
+	fail         map[string]*contract.Fault
 }
 
 func newFakePorts() *fakePorts {
-	return &fakePorts{fail: map[string]*contract.Fault{}}
+	return &fakePorts{fail: map[string]*contract.Fault{}, prepared: map[contract.ID]json.RawMessage{}, observed: map[contract.ID]wireObservation{}}
 }
 
 func (p *fakePorts) Call(ctx context.Context, unit contract.Unit, inv contract.Invocation) (contract.Payload, error) {
@@ -101,6 +104,29 @@ func (p *fakePorts) Call(ctx context.Context, unit contract.Unit, inv contract.I
 	}
 	var body any
 	switch inv.Operation {
+	case "_configuration.snapshot":
+		body = map[string]any{"resource": map[string]any{"revision": 5}}
+	case "_effects.prepare":
+		var in struct {
+			Action json.RawMessage `json:"action"`
+		}
+		if err := json.Unmarshal(inv.Input, &in); err != nil {
+			return contract.Payload{}, err
+		}
+		p.next++
+		id := contract.ID(fmt.Sprintf("f0000000-0000-4000-8000-%012d", p.next))
+		p.prepared[id] = in.Action
+		p.lastPrepared = id
+		body = map[string]any{"resource": map[string]any{"id": id, "version": 1}}
+	case "_effects.callback.evidence":
+		var in struct {
+			OperationID contract.ID `json:"operation_id"`
+		}
+		if err := json.Unmarshal(inv.Input, &in); err != nil {
+			return contract.Payload{}, err
+		}
+		body = map[string]any{"action": p.prepared[in.OperationID], "observation": p.observed[in.OperationID], "generation": unit.Generation()}
+
 	case "_configuration.stage":
 		var in struct {
 			Scope   wireScope    `json:"scope"`

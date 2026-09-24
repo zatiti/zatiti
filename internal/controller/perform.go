@@ -49,6 +49,13 @@ func (c *Controller) observe(ctx context.Context, adapter contract.Adapter, d co
 			obs = c.unestablished(bound, "adapter_panic", "the adapter panicked during the call")
 		}
 	}()
+	if d.Adapter == "mcp" {
+		var action wireAction
+		if err := json.Unmarshal(d.Action, &action); err != nil || len(action.Parameters) == 0 {
+			return c.unestablished(bound, "invalid_mcp_dispatch", "governed MCP dispatch has no pinned parameters")
+		}
+		d.Action = action.Parameters
+	}
 	got, err := adapter.Invoke(ctx, d)
 	if err != nil {
 		code := "adapter_error"

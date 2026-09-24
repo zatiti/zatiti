@@ -1,5 +1,5 @@
 {
-  "revision": 3,
+  "revision": 4,
   "requirements": [
     {
       "requirement": "R1-002",
@@ -3782,6 +3782,18 @@
       "id": "Z05.mcp_server_requests_refused",
       "gate": "Z05",
       "scopes": [
+        "internal/adapters/mcpclient",
+        "tests/integration"
+      ]
+    },
+    {
+      "id": "Z05.mcp_governed_probe_and_catalog",
+      "gate": "Z05",
+      "scopes": [
+        "internal/connections",
+        "internal/effects",
+        "internal/execution",
+        "internal/controller",
         "internal/adapters/mcpclient",
         "tests/integration"
       ]

@@ -1,8 +1,8 @@
 # Package implementation specification
 
-Revision 3. **Specification scaffold.** The packages below have been implemented against it (see the root README for current product status); no executed release qualification is claimed.
+Revision 4. **Specification scaffold.** The packages below have been implemented against it (see the root README for current product status); no executed release qualification is claimed.
 
-37 disjoint implementation roots; 203 public operations; 92 internal owner methods; 144 source blocks with explicit ownership; 135 named acceptance cases covering Z01–Z21 and release journeys.
+37 disjoint implementation roots; 203 public operations; 94 internal owner methods; 144 source blocks with explicit ownership; 136 named acceptance cases covering Z01–Z21 and release journeys.
 
 Each root already contains a complete committed AGENTS.md: local mission, allowed imports, owned requirements, exact Go interfaces, incoming/outgoing operation schemas, persistence/recovery rules and named acceptance criteria. An agent can implement from that file without the RFC. Scope prompts intentionally repeat necessary contracts; do not edit generated copies independently.
 

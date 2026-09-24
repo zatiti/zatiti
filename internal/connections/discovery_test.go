@@ -12,7 +12,11 @@ import (
 const toolIDMCPProbe = contract.ID("0a000000-0000-4000-8000-0000000000c6")
 
 func schemaDigest(raw string) string {
-	sum := sha256.Sum256([]byte(raw))
+	canonical, err := contract.Canonicalize([]byte(raw))
+	if err != nil {
+		panic(err)
+	}
+	sum := sha256.Sum256(canonical)
 	return hex.EncodeToString(sum[:])
 }
 
@@ -25,23 +29,12 @@ func seedMCPConnection(t *testing.T, env *testEnv) wireConnection {
 		w.Destinations = []string{"https://mcp.example.test/"}
 		w.AllowedScopes = []string{"mcp:tools"}
 		w.AccountIdentity = "credential:mcp-test-ref"
+		w.CredentialRef = "mcp-test-ref"
 	})
-	evidence, err := json.Marshal(map[string]any{
-		"account_identity": conn.AccountIdentity,
-		"allowed_scopes":   conn.AllowedScopes,
-		"session_handle":   "sess-test-handle-1",
-		"kind":             "open_session",
-	})
-	if err != nil {
-		t.Fatalf("marshal validation evidence: %v", err)
-	}
-	env.mustOK("_connections.validation.record", validationRecordIn{
-		ConnectionID: conn.ID, ExpectedVersion: conn.Version,
-		Observation: wireObservation{
-			Disposition: obsSucceeded, Evidence: evidence,
-			Usage: &wireUsage{Currency: "USD", Advisory: true},
-		},
-	})
+	conn.CredentialRef = "mcp-test-ref"
+	installMCPFixtureProfile(env)
+	env.mustOK("connection.validate", connValidateIn{Scope: env.scope, ID: conn.ID, ExpectedVersion: conn.Version})
+	completeMCPFixture(t, env, conn, "validate", map[string]any{"kind": "open_session", "session_handle": "sess-test-handle-1"})
 	conn.Version = 2
 	conn.ValidationState = connStateValid
 	return conn
@@ -49,23 +42,8 @@ func seedMCPConnection(t *testing.T, env *testEnv) wireConnection {
 
 func recordDiscovery(t *testing.T, env *testEnv, conn wireConnection, tools []map[string]any, nextCursor string) {
 	t.Helper()
-	evidence, err := json.Marshal(map[string]any{
-		"kind":           "list_tools",
-		"session_handle": "sess-test-handle-1",
-		"next_cursor":    nextCursor,
-		"physical_call":  map[string]any{"operation_id": string(env.ids.New())},
-		"tools":          tools,
-	})
-	if err != nil {
-		t.Fatalf("marshal discovery evidence: %v", err)
-	}
-	env.mustOK("_connections.discovery.record", validationRecordIn{
-		ConnectionID: conn.ID, ExpectedVersion: conn.Version,
-		Observation: wireObservation{
-			Disposition: obsSucceeded, Evidence: evidence,
-			Usage: &wireUsage{Currency: "USD", Advisory: true},
-		},
-	})
+	env.mustOK("connection.discover", connValidateIn{Scope: env.scope, ID: conn.ID, ExpectedVersion: conn.Version})
+	completeMCPFixture(t, env, conn, "discover", map[string]any{"kind": "list_tools", "session_handle": "sess-test-handle-1", "next_cursor": nextCursor, "tools": tools})
 }
 
 func TestDiscoverRefusesNonMCPProvider(t *testing.T) {
@@ -102,6 +80,7 @@ func TestDiscoverAdmitsListToolsJob(t *testing.T) {
 		t.Fatalf("admitted job operation %q", out.Resource.Operation)
 	}
 	calls := env.ports.callsOf("_execution.job.create")
+	calls = calls[1:] // initial validation is now a real governed job too
 	if len(calls) != 1 {
 		t.Fatalf("discover made %d job.create calls, want 1", len(calls))
 	}
@@ -222,9 +201,16 @@ func TestResolveComposesDiscoveredMCPTool(t *testing.T) {
 	if out.Tool.Effect != "external_mutation" || out.Tool.Adapter != "mcp" {
 		t.Fatalf("composed effect/adapter %+v", out.Tool)
 	}
-	if string(out.Tool.InputSchema) != schemaA {
-		t.Fatalf("composed schema %s, want pinned %s", out.Tool.InputSchema, schemaA)
+	if err := contract.ValidateSchema(out.Tool.InputSchema, json.RawMessage(`{"q":"hello"}`)); err == nil {
+		t.Fatal("raw unpinned arguments unexpectedly accepted")
 	}
+	var doc map[string]any
+	env.decode(out.Tool.InputSchema, &doc)
+	props := doc["properties"].(map[string]any)
+	if props["input_schema_digest"].(map[string]any)["const"] != digest {
+		t.Fatal("schema digest not pinned")
+	}
+
 	if len(out.Tool.Destinations) != 1 || out.Tool.Destinations[0] != "https://mcp.example.test/" {
 		t.Fatalf("composed destinations %v", out.Tool.Destinations)
 	}
@@ -283,8 +269,11 @@ func TestDiscoveryMarksAbsentToolsStale(t *testing.T) {
 
 func TestMCPValidateUsesOpenSession(t *testing.T) {
 	env := newEnv(t)
+	installMCPFixtureProfile(env)
 	conn := env.seedConnection(func(w *wireConnection) {
 		w.Provider = "mcp"
+		w.CredentialRef = "mcp-test-ref"
+		w.AccountIdentity = "credential:mcp-test-ref"
 		w.Destinations = []string{"https://mcp.example.test/"}
 	})
 	payload := env.mustOK("connection.validate", connValidateIn{
@@ -311,4 +300,21 @@ func TestMCPValidateUsesOpenSession(t *testing.T) {
 	if action.Kind != "open_session" {
 		t.Fatalf("mcp validate action kind %q, want open_session", action.Kind)
 	}
+}
+
+func installMCPFixtureProfile(env *testEnv) {
+	env.svc.mcpProfile = &MCPProfile{Digest: contract.Hash([]byte("fixture-profile")), Endpoint: "https://mcp.example.test/", CredentialKind: "bearer", Cost: wireMoney{Currency: "USD", MicroUnits: 7}, TimeoutSeconds: 30, AllowedTools: []string{"alpha", "beta"}}
+}
+func completeMCPFixture(t *testing.T, env *testEnv, conn wireConnection, kind string, ev map[string]any) {
+	t.Helper()
+	op := env.ports.lastPrepared
+	attempt := env.ids.New()
+	ev["physical_call"] = map[string]any{"operation_id": op, "attempt_id": attempt, "account_identity": conn.AccountIdentity, "profile_digest": env.svc.mcpProfile.Digest, "requested_destination": env.svc.mcpProfile.Endpoint}
+	raw, err := json.Marshal(ev)
+	if err != nil {
+		t.Fatal(err)
+	}
+	obs := wireObservation{Disposition: obsSucceeded, Evidence: raw, Usage: &wireUsage{Currency: "USD"}}
+	env.ports.observed[op] = obs
+	env.mustOK("_connections."+map[string]string{"validate": "validation", "discover": "discovery"}[kind]+".record", map[string]any{"connection_id": conn.ID, "expected_version": conn.Version, "operation_id": op, "attempt_id": attempt, "observation": obs})
 }

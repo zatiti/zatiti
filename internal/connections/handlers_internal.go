@@ -230,10 +230,12 @@ func stampOrNull(t *time.Time) any {
 // admit the destination.
 func handleResolve(ctx context.Context, s *Service, unit contract.Unit, inv contract.Invocation) (contract.Payload, error) {
 	in, err := decodeInto[struct {
-		Scope       wireScope `json:"scope"`
-		Connection  wireRef   `json:"connection"`
-		Tool        wireRef   `json:"tool"`
-		Destination string    `json:"destination"`
+		OperationID contract.ID     `json:"operation_id,omitempty"`
+		Action      json.RawMessage `json:"action,omitempty"`
+		Scope       wireScope       `json:"scope"`
+		Connection  wireRef         `json:"connection"`
+		Tool        wireRef         `json:"tool"`
+		Destination string          `json:"destination"`
 	}](s, "_connections.resolve", inv.Input)
 	if err != nil {
 		return contract.Payload{}, err
@@ -258,22 +260,31 @@ func handleResolve(ctx context.Context, s *Service, unit contract.Unit, inv cont
 	if row.LifecycleState != connLifecycleActive {
 		return contract.Payload{}, prerequisiteMissing("connection %s is archived and cannot dispatch", row.ID)
 	}
-	switch row.ValidationState {
-	case connStateValid:
-		if row.ValidUntil != nil && !row.ValidUntil.After(s.clock.Now()) {
-			return contract.Payload{}, prerequisiteMissing("connection %s validation expired at %s",
-				row.ID, formatStamp(*row.ValidUntil))
+	validationIntent := false
+	if row.Provider == "mcp" && row.ValidationState != connStateRevoked {
+		validationIntent, err = s.matchingMCPIntent(ctx, unit, row, in.OperationID, in.Action, "validate")
+		if err != nil {
+			return contract.Payload{}, err
 		}
-	case connStateUnverified:
-		return contract.Payload{}, prerequisiteMissing("connection %s has never been validated", row.ID)
-	case connStateExpired:
-		return contract.Payload{}, prerequisiteMissing("connection %s validation expired", row.ID)
-	case connStateInvalid:
-		return contract.Payload{}, prerequisiteMissing("connection %s validation failed", row.ID)
-	case connStateRevoked:
-		return contract.Payload{}, prerequisiteMissing("connection %s is revoked", row.ID)
-	default:
-		return contract.Payload{}, internalError("connection %s carries unknown validation state %q", row.ID, row.ValidationState)
+	}
+	if !validationIntent {
+		switch row.ValidationState {
+		case connStateValid:
+			if row.ValidUntil != nil && !row.ValidUntil.After(s.clock.Now()) {
+				return contract.Payload{}, prerequisiteMissing("connection %s validation expired at %s",
+					row.ID, formatStamp(*row.ValidUntil))
+			}
+		case connStateUnverified:
+			return contract.Payload{}, prerequisiteMissing("connection %s has never been validated", row.ID)
+		case connStateExpired:
+			return contract.Payload{}, prerequisiteMissing("connection %s validation expired", row.ID)
+		case connStateInvalid:
+			return contract.Payload{}, prerequisiteMissing("connection %s validation failed", row.ID)
+		case connStateRevoked:
+			return contract.Payload{}, prerequisiteMissing("connection %s is revoked", row.ID)
+		default:
+			return contract.Payload{}, internalError("connection %s carries unknown validation state %q", row.ID, row.ValidationState)
+		}
 	}
 	tool, found, terr := s.loadContract(ctx, unit, in.Tool.ID)
 	if terr != nil {
@@ -296,8 +307,8 @@ func handleResolve(ctx context.Context, s *Service, unit contract.Unit, inv cont
 		if !ok {
 			return contract.Payload{}, notFound("tool %s is unknown", in.Tool.ID)
 		}
-		if in.Tool.Version != 1 {
-			return contract.Payload{}, staleVersion("tool %s is at version 1; dispatch pinned version %d",
+		if in.Tool.Version != discovered.Version {
+			return contract.Payload{}, staleVersion("tool %s catalog version changed; dispatch pinned version %d",
 				in.Tool.ID, in.Tool.Version)
 		}
 		probe, pfound, perr := s.loadContractByName(ctx, unit, toolNameMCPProbe)
@@ -307,7 +318,10 @@ func handleResolve(ctx context.Context, s *Service, unit contract.Unit, inv cont
 		if !pfound {
 			return contract.Payload{}, internalError("built-in tool %q is not seeded", toolNameMCPProbe)
 		}
-		composed = composeMCPTool(probe, discovered, row.Destinations)
+		composed, err = s.composeMCPTool(ctx, unit, probe, discovered, row)
+		if err != nil {
+			return contract.Payload{}, err
+		}
 	}
 	// Empty tool Destinations skip the tool-side containment check (mcp-probe
 	// and composed MCP tools inherit destinations from the connection only).
@@ -319,10 +333,25 @@ func handleResolve(ctx context.Context, s *Service, unit contract.Unit, inv cont
 		return contract.Payload{}, permissionDenied(
 			"connection %s is not bound to destination %s", row.ID, in.Destination)
 	}
+	if row.Provider == "mcp" {
+		if err = s.mcpConnection(row); err != nil {
+			return contract.Payload{}, err
+		}
+		if found {
+			composed.CostBound = s.mcpProfile.bound()
+			composed.TimeoutSeconds = s.mcpProfile.TimeoutSeconds
+		}
+		if len(in.Action) > 0 {
+			if err = s.checkMCPAction(ctx, unit, row, in.Action, composed, in.OperationID, validationIntent); err != nil {
+				return contract.Payload{}, err
+			}
+		}
+	}
 	return s.completed(struct {
-		Connection wireConnection `json:"connection"`
-		Tool       wireTool       `json:"tool"`
-	}{Connection: row.wire(), Tool: composed})
+		Connection       wireConnection `json:"connection"`
+		Tool             wireTool       `json:"tool"`
+		ValidationIntent bool           `json:"validation_intent,omitempty"`
+	}{Connection: row.wire(), Tool: composed, ValidationIntent: validationIntent})
 }
 
 // contains reports whether v is present in vs.
@@ -474,6 +503,8 @@ type evidenceBody struct {
 // state change. Account substitution inside evidence refuses outright.
 func handleValidationRecord(ctx context.Context, s *Service, unit contract.Unit, inv contract.Invocation) (contract.Payload, error) {
 	in, err := decodeInto[struct {
+		OperationID     contract.ID     `json:"operation_id,omitempty"`
+		AttemptID       contract.ID     `json:"attempt_id,omitempty"`
 		ConnectionID    contract.ID     `json:"connection_id"`
 		ExpectedVersion int64           `json:"expected_version"`
 		Observation     wireObservation `json:"observation"`
@@ -487,6 +518,16 @@ func handleValidationRecord(ctx context.Context, s *Service, unit contract.Unit,
 	}
 	if !found || row.Scope.InstallationID != unit.Scope().InstallationID {
 		return contract.Payload{}, notFound("connection %s is unknown in this installation", in.ConnectionID)
+	}
+	if row.Provider == "mcp" {
+		observation, replay, err := s.verifiedMCPCallback(ctx, unit, row, in.OperationID, in.AttemptID, "validate", in.Observation)
+		if err != nil {
+			return contract.Payload{}, err
+		}
+		if replay {
+			return s.completed(resourceOut{Resource: row.wire()})
+		}
+		in.Observation = observation
 	}
 	if row.Version != in.ExpectedVersion {
 		return contract.Payload{}, staleVersion("connection %s version %d does not match expected version %d",
@@ -583,7 +624,7 @@ func handleValidationRecord(ctx context.Context, s *Service, unit contract.Unit,
 			} else {
 				jobState = "failed"
 			}
-		case obsFailed:
+		case obsFailed, obsNotSent:
 			jobState = "failed"
 		case obsUnknown:
 			jobState = "outcome_unknown"

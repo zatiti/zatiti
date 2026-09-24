@@ -1,6 +1,6 @@
 # Z-M2 — Generic MCP client connection adapter (`internal/adapters/mcpclient`, adapter name `mcp`)
 
-Status: dispatchable (coordinated revision landed with this card). Priority: P1. Owner: `internal/adapters/mcpclient` (new root) + `internal/connections` (three new operations) + `cmd/zatiti` (constructor registration only) + `tests/qualification` (controlled-server qualification).
+Status: integrated revision 4 candidate; independent review and required CI pending. Priority: P1. Owner: `internal/adapters/mcpclient` (new root) + `internal/connections` (three new operations) + `cmd/zatiti` (constructor registration only) + `tests/qualification` (controlled-server qualification).
 
 This is a coding assignment, not evidence that its behavior exists. Founder
 ruling dec-1256 (hq `designs/2026-09-23-marketer-org-on-zatiti.md`, row
@@ -59,7 +59,7 @@ not patched locally.
   `classifications`, `capability_evidence` (digest check with the field
   omitted, as the other adapters do).
 - **Actions** (`kind`-discriminated): `open_session` (initialize handshake:
-  exactly two HTTP requests, both in `evidence.handshake`; the one declared
+  at most three distinct primary HTTP requests, all in `evidence.handshake`; a declared
   exception to one request per attempt), `list_tools` (one `tools/list`
   page; never follow `next_cursor`), `call_tool` (one `tools/call` after
   allowlist + pinned-schema validation of arguments + classification
@@ -74,7 +74,7 @@ not patched locally.
   request context (purpose `context`) for every disposition including
   not_sent/unknown; tool result staged once as purpose `tool_result` under
   the action's classification; `refused_server_requests` lists every
-  server-to-client request answered method-not-found; resource links are
+  server-to-client request answered method-not-found only within the explicit admitted control-reply allowance; exhaustion aborts the session; resource links are
   opaque references, never fetched.
 - **Unknowns**: timeout after bytes sent, lost response, or a body above
   `max_response_bytes` (`error_code: response_oversize`) → `unknown`,
@@ -114,7 +114,7 @@ reverse-proxy change.
 Transport facts, all representable in the frozen seam:
 - Postiz echoes whatever `protocolVersion` the client offers. go-sdk
   `Connect`'s fallback `initialize` offers `2025-11-25`, so a profile with
-  `protocol_version: 2025-11-25` negotiates cleanly; evidence records the
+  `protocol_version: 2025-11-25 or 2026-07-28` negotiates cleanly; evidence records the
   negotiated value.
 - Replies are `application/json` even when `text/event-stream` is
   accepted; the SDK's streamable HTTP client handles both, the adapter
@@ -192,3 +192,12 @@ changed, exact commands run with observed results, the controlled-server
 request counts, and any contract defect found with its affected-dependency
 list. Postiz against `post.sire.blog/mcp` is Z-M3, not this card. No
 publishing or deployment is authorized by this card.
+
+Revision 4 integrated acceptance additionally requires the governed probe intent, exact recorded callback provenance, full composed schema/profile/session pins, claim-time catalog rejection, all physical exchanges and bounded separately costed refusal replies described in docs/implementation/contracts.md. Tests without callbacks cannot qualify the control-reply count.
+
+
+## Integrated landing handoff (revision 4)
+
+The serialized landing candidate combines the contract revision and implementation from PRs #67/#69; those PRs remain untouched while this candidate is reviewed. The delegated integration owner may amend authored specification inputs and affected owner seams, regenerate prompts, and validate the consolidated branch. This supersedes the child-package-only write limits above for this integration assignment alone.
+
+Review the complete main-to-candidate diff, including the previous adapter safe fixes. Required review targets: exact durable probe intent and linked callback; full discovered-tool envelope and catalog/profile/session pins; claim-time freshness and policy checks; pre-send contexts and no-response handshake evidence; explicit bounded per-reply cost/evidence; verified publication mappings; missing-job deferral. Initial stdio and generic same-account credential rotation remain capability_unsupported. Synthetic tests do not qualify Postiz, live publishing, deployment, or a release. Only the parent landing owner may merge after independent review and required checks.

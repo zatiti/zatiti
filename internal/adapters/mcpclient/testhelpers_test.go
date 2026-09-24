@@ -266,3 +266,28 @@ func decodeEvidence(t *testing.T, obs contract.Observation) wireMCPEvidence {
 	}
 	return ev
 }
+
+// withControlReplyBudget explicitly authorizes bounded protocol-refusal traffic
+// in a synthetic profile; ordinary profile builders continue to default to zero.
+func withControlReplyBudget(t *testing.T, raw json.RawMessage, limit int64, cost int64) json.RawMessage {
+	t.Helper()
+	var profile wireMCPProfile
+	if err := json.Unmarshal(raw, &profile); err != nil {
+		t.Fatal(err)
+	}
+	profile.MaxControlReplies = limit
+	profile.ControlReplyCost = &wireMoney{Currency: profile.ToolCallCost.Currency, MicroUnits: cost}
+	updated, err := json.Marshal(profile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	profile.CapabilityEvidence.ProfileDigest, err = profileDigestWithoutCapabilityEvidence(updated)
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated, err = json.Marshal(profile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return updated
+}

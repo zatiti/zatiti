@@ -23,10 +23,8 @@ func mcpDiscoveredToolID(connectionID contract.ID, name string) contract.ID {
 }
 
 // buildDiscoveryAction generates the exact list_tools adapter action
-// connection.discover admits. The frozen discover input carries no
-// session_handle (a contract defect: affected callers are connection.discover
-// and the controller probe path); the handle is taken from the most recent
-// succeeded validation observation for this connection. Absent handle =>
+// connection.discover admits. The owner supplies the session handle from
+// its current profile/version/generation-bound validation record. Absent handle =>
 // prerequisite_missing, never an invented value.
 func buildDiscoveryAction(sessionHandle string) (json.RawMessage, *contract.Fault) {
 	if sessionHandle == "" {
@@ -74,7 +72,8 @@ func handleDiscoverPublic(ctx context.Context, s *Service, unit contract.Unit, i
 			"connection.discover is supported only for provider mcp; connection %s has provider %q",
 			row.ID, row.Provider)
 	}
-	handle, ok, herr := s.loadLatestSucceededSessionHandle(ctx, unit, row.ID)
+	handle, herr := s.activeMCPSession(ctx, unit, row)
+	ok := handle != ""
 	if herr != nil {
 		return contract.Payload{}, herr
 	}
@@ -98,24 +97,11 @@ func handleDiscoverPublic(ctx context.Context, s *Service, unit contract.Unit, i
 		return contract.Payload{}, internalError(
 			"generated connection.discover action does not match the %s adapter schema: %v", toolNameMCPProbe, verr)
 	}
-	probeInput, err := marshalData(struct {
-		Scope           wireScope       `json:"scope"`
-		ConnectionID    contract.ID     `json:"connection_id"`
-		ExpectedVersion int64           `json:"expected_version"`
-		Tool            wireRef         `json:"tool"`
-		Action          json.RawMessage `json:"action"`
-	}{Scope: in.Scope, ConnectionID: in.ID, ExpectedVersion: in.ExpectedVersion,
-		Tool: wireRef{ID: tool.ID, Version: tool.Version}, Action: action})
-	if err != nil {
-		return contract.Payload{}, err
+	if row.ValidationState != connStateValid || row.ValidUntil == nil || !row.ValidUntil.After(s.clock.Now()) {
+		return contract.Payload{}, prerequisiteMissing("discovery requires fresh validation")
 	}
-	job, err := s.createJob(ctx, unit, "connection.discover", probeInput)
+	job, err := s.createMCPProbe(ctx, unit, row, tool, "discover", action)
 	if err != nil {
-		return contract.Payload{}, err
-	}
-	if err := s.recordPendingProbe(ctx, unit, pendingProbeRow{
-		ConnectionID: row.ID, JobID: job.ID, JobVersion: job.Version, Kind: "discover",
-	}, s.clock.Now()); err != nil {
 		return contract.Payload{}, err
 	}
 	return s.completed(jobOut{Resource: job})
@@ -217,6 +203,8 @@ type discoveryEvidence struct {
 // state. Completes the pending discover job when disposition is terminal.
 func handleDiscoveryRecord(ctx context.Context, s *Service, unit contract.Unit, inv contract.Invocation) (contract.Payload, error) {
 	in, err := decodeInto[struct {
+		OperationID     contract.ID     `json:"operation_id,omitempty"`
+		AttemptID       contract.ID     `json:"attempt_id,omitempty"`
 		ConnectionID    contract.ID     `json:"connection_id"`
 		ExpectedVersion int64           `json:"expected_version"`
 		Observation     wireObservation `json:"observation"`
@@ -230,6 +218,19 @@ func handleDiscoveryRecord(ctx context.Context, s *Service, unit contract.Unit, 
 	}
 	if !found || row.Scope.InstallationID != unit.Scope().InstallationID {
 		return contract.Payload{}, notFound("connection %s is unknown in this installation", in.ConnectionID)
+	}
+	if row.Provider != "mcp" {
+		return contract.Payload{}, capabilityUnsupportedFault("discovery recording requires MCP provider")
+	}
+	if row.Provider == "mcp" {
+		observation, replay, err := s.verifiedMCPCallback(ctx, unit, row, in.OperationID, in.AttemptID, "discover", in.Observation)
+		if err != nil {
+			return contract.Payload{}, err
+		}
+		if replay {
+			return s.completed(resourceOut{Resource: row.wire()})
+		}
+		in.Observation = observation
 	}
 	if row.Version != in.ExpectedVersion {
 		return contract.Payload{}, staleVersion("connection %s version %d does not match expected version %d",
@@ -247,7 +248,7 @@ func handleDiscoveryRecord(ctx context.Context, s *Service, unit contract.Unit, 
 	}
 	opID := ev.PhysicalCall.OperationID
 	if opID == "" {
-		opID = s.ids.New()
+		return contract.Payload{}, permissionDenied("discovery requires a recorded operation identity")
 	}
 	switch in.Observation.Disposition {
 	case obsSucceeded:
@@ -256,10 +257,32 @@ func handleDiscoveryRecord(ctx context.Context, s *Service, unit contract.Unit, 
 				"discovery.record expects list_tools evidence; got kind %q", ev.Kind)
 		}
 		names := make([]string, 0, len(ev.Tools))
+		seen := map[string]bool{}
+		if len(ev.Tools) > 256 {
+			return contract.Payload{}, invalidInput("MCP catalog page exceeds bound")
+		}
 		for _, t := range ev.Tools {
 			if t.Name == "" || len(t.InputSchema) == 0 || t.InputSchemaDigest == "" {
 				return contract.Payload{}, invalidInput(
 					"discovered tool is missing required name, input_schema or input_schema_digest")
+			}
+			if seen[t.Name] {
+				return contract.Payload{}, invalidInput("duplicate MCP catalog tool")
+			}
+			seen[t.Name] = true
+			canonical, err := contract.Canonicalize(t.InputSchema)
+			if err != nil {
+				return contract.Payload{}, invalidInput("invalid MCP schema JSON")
+			}
+			if string(contract.Hash(canonical)) != t.InputSchemaDigest {
+				return contract.Payload{}, verificationFailed("MCP schema digest does not match recorded schema")
+			}
+			var shape any
+			if err = json.Unmarshal(t.InputSchema, &shape); err != nil {
+				return contract.Payload{}, err
+			}
+			if err = relocateMCPSchema(shape); err != nil {
+				return contract.Payload{}, err
 			}
 			r := mcpToolRow{
 				ConnectionID:         row.ID,
@@ -303,7 +326,7 @@ func handleDiscoveryRecord(ctx context.Context, s *Service, unit contract.Unit, 
 		switch in.Observation.Disposition {
 		case obsSucceeded:
 			jobState = "succeeded"
-		case obsFailed:
+		case obsFailed, obsNotSent:
 			jobState = "failed"
 		case obsUnknown:
 			jobState = "outcome_unknown"
@@ -332,30 +355,6 @@ func handleDiscoveryRecord(ctx context.Context, s *Service, unit contract.Unit, 
 // MCP binding: pinned discovered schema/digest under the mcp adapter, with
 // effect defaulting to external_mutation. Destinations come from the
 // connection (mcp-probe's seeded destinations are empty).
-func composeMCPTool(probe contractRow, discovered mcpToolRow, destinations []string) wireTool {
-	outSchema := json.RawMessage(`{}`)
-	if len(discovered.OutputSchema) > 0 && string(discovered.OutputSchema) != "null" {
-		outSchema = discovered.OutputSchema
-	}
-	return wireTool{
-		ID:                  mcpDiscoveredToolID(discovered.ConnectionID, discovered.Name),
-		Version:             1,
-		Name:                discovered.Name,
-		InputSchema:         discovered.InputSchema,
-		OutputSchema:        outSchema,
-		Effect:              "external_mutation",
-		Destinations:        append([]string(nil), destinations...),
-		CredentialKind:      probe.CredentialKind,
-		CostBound:           probe.CostBound,
-		TimeoutSeconds:      probe.TimeoutSeconds,
-		Idempotency:         "none",
-		KeyRetentionSeconds: 0,
-		Confirmation:        "synchronous",
-		Reconciliation:      "none",
-		Adapter:             "mcp",
-	}
-}
-
 // findMCPToolByID scans non-stale catalog rows for connectionID whose
 // deterministic identity equals toolID.
 func (s *Service) findMCPToolByID(ctx context.Context, unit contract.Unit, connectionID, toolID contract.ID) (mcpToolRow, bool, error) {
@@ -380,7 +379,7 @@ func (s *Service) findMCPToolByID(ctx context.Context, unit contract.Unit, conne
 func (s *Service) findAnyMCPToolByID(ctx context.Context, unit contract.Unit, toolID contract.ID) (result mcpToolRow, found bool, retErr error) {
 	rows, err := unit.QueryContext(ctx, `
 		SELECT connection_id, name, title, description, input_schema, input_schema_digest,
-			output_schema, annotations_json, discovered_at, discovery_operation_id, stale
+			output_schema, annotations_json, discovered_at, discovery_operation_id, stale, catalog_version
 		FROM connections_mcp_tools
 		WHERE stale = 0`)
 	if err != nil {

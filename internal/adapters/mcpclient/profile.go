@@ -3,6 +3,7 @@ package mcpclient
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/url"
 	"path"
 	"strconv"
@@ -28,6 +29,8 @@ type mcpProfile struct {
 	ProtocolVersion      string
 	CredentialKind       string // bearer | none
 	AllowedTools         map[string]bool
+	MaxControlReplies    int64
+	ControlReplyCost     wireMoney
 	ToolCallCost         wireMoney
 	MaxRequestBytes      int64
 	MaxResponseBytes     int64
@@ -89,6 +92,23 @@ func loadProfile(raw json.RawMessage) (*mcpProfile, error) {
 		return nil, err
 	}
 
+	if w.MaxControlReplies < 0 || w.MaxControlReplies > 16 {
+		return nil, invalidInput("mcp max_control_replies must be between zero and sixteen")
+	}
+	controlCost := wireMoney{Currency: w.ToolCallCost.Currency}
+	if w.ControlReplyCost != nil {
+		controlCost = *w.ControlReplyCost
+	}
+	if w.MaxControlReplies > 0 && w.ControlReplyCost == nil {
+		return nil, invalidInput("mcp control_reply_cost is required when control replies are enabled")
+	}
+	if controlCost.Currency != w.ToolCallCost.Currency || controlCost.MicroUnits < 0 {
+		return nil, invalidInput("mcp control_reply_cost must be nonnegative in the tool_call_cost currency")
+	}
+	if w.MaxControlReplies > 0 && controlCost.MicroUnits > (math.MaxInt64-w.ToolCallCost.MicroUnits)/w.MaxControlReplies {
+		return nil, invalidInput("mcp bounded control reply cost overflows accounting")
+	}
+
 	tools := make(map[string]bool, len(w.AllowedTools))
 	for _, t := range w.AllowedTools {
 		tools[t] = true
@@ -104,6 +124,8 @@ func loadProfile(raw json.RawMessage) (*mcpProfile, error) {
 		ProtocolVersion:      w.ProtocolVersion,
 		CredentialKind:       w.CredentialKind,
 		AllowedTools:         tools,
+		MaxControlReplies:    w.MaxControlReplies,
+		ControlReplyCost:     controlCost,
 		ToolCallCost:         w.ToolCallCost,
 		MaxRequestBytes:      w.MaxRequestBytes,
 		MaxResponseBytes:     w.MaxResponseBytes,

@@ -320,8 +320,8 @@ func TestCallTool_Stall_LostResponse_Unknown(t *testing.T) {
 		t.Errorf("expected the call to give up near its deadline, took %s", elapsed)
 	}
 	ev := decodeEvidence(t, obs)
-	if ev.PhysicalCall.RequestSent != "yes" {
-		t.Errorf("expected request_sent=yes (the tool call was sent before it stalled), got %q", ev.PhysicalCall.RequestSent)
+	if ev.PhysicalCall.RequestSent != "unknown" {
+		t.Errorf("expected request_sent=unknown because no HTTP response was observed, got %q", ev.PhysicalCall.RequestSent)
 	}
 
 	// No second Invoke: this test calls Invoke exactly once above. Confirm
@@ -395,13 +395,14 @@ func TestCallTool_ServerRequestsRefused_ResultStillHonest(t *testing.T) {
 
 	blobs := newFakeBlobStore()
 	profile := buildProfileJSON(t, srv.endpoint(), true, []string{"server-requests"}, []string{"public"}, "none")
+	profile = withControlReplyBudget(t, profile, 4, 0)
 	a := newTestAdapter(t, blobs, newFakeSecrets(testCredentialRef, []byte(testToken)), profile)
 
 	handle, _ := openSession(t, a, 10*time.Second)
 
 	schema, digest := inputSchemaFor(t, nil)
 	args, _ := json.Marshal(map[string]any{})
-	dispatch := testDispatch(t, wireCallTool{
+	dispatch := testDispatch(t, wireCallTool{ControlReplyLimit: 4,
 		Schema: "zatiti.mcp.action/v1", Kind: kindCallTool, SessionHandle: handle,
 		Tool: "server-requests", Arguments: args, InputSchema: schema, InputSchemaDigest: digest, Classification: "public",
 	}, 10*time.Second)

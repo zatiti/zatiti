@@ -235,8 +235,22 @@ func connectionsMigrations() []contract.Migration {
 		Version: 2,
 		SQL:     migrationV2,
 		SHA256:  contract.Digest(hashHex(migrationV2)),
-	}}
+	}, {Owner: "connections", Version: 3, SQL: migrationV3, SHA256: contract.Digest(hashHex(migrationV3))}}
 }
+
+const migrationV3 = `
+CREATE TABLE connections_mcp_intents (
+ operation_id TEXT PRIMARY KEY,
+ connection_id TEXT NOT NULL,
+ connection_version INTEGER NOT NULL,
+ action_digest TEXT NOT NULL,
+ kind TEXT NOT NULL CHECK(kind IN ('validate','discover')),
+ job_id TEXT NOT NULL UNIQUE,
+ completed_attempt TEXT NOT NULL DEFAULT ''
+);
+CREATE TABLE connections_mcp_sessions (connection_id TEXT PRIMARY KEY, connection_version INTEGER NOT NULL, profile_digest TEXT NOT NULL, generation INTEGER NOT NULL, session_handle TEXT NOT NULL);
+ALTER TABLE connections_mcp_tools ADD COLUMN catalog_version INTEGER NOT NULL DEFAULT 1;
+`
 
 // hashHex returns the lowercase SHA-256 hex digest of s.
 func hashHex(s string) string {

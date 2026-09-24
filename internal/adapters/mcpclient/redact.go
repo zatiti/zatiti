@@ -84,6 +84,37 @@ func (s *callState) containsSensitive(doc []byte) bool {
 }
 
 func (a *Adapter) buildSafeEvidence(ev *wireMCPEvidence, state *callState) (json.RawMessage, json.RawMessage, error) {
+	// Publish every staged request, not merely the first primary request.
+	outputs := make([]wireStagedOutput, 0, len(state.captured)+1)
+	ev.Exchanges = make([]wireHTTPExchange, 0, len(state.captured))
+	for i, request := range state.captured {
+		outputs = append(outputs, request.staged)
+		ev.Exchanges = append(ev.Exchanges, wireHTTPExchange{Kind: request.class, Method: request.httpMethod, RPCMethod: request.rpcMethod, Ordinal: int64(i + 1), RequestContext: request.locator, RequestSent: request.requestSent, HTTPStatus: int64(request.status)})
+	}
+	for _, output := range ev.StagedOutputs {
+		if output.Purpose != "context" {
+			outputs = append(outputs, output)
+		}
+	}
+	ev.StagedOutputs = outputs
+	if ev.PhysicalCall.RequestContext == nil {
+		ev.PhysicalCall.RequestSent = "no"
+		state.mu.Lock()
+		reason := state.contextUnavailable
+		state.mu.Unlock()
+		if reason == "" {
+			reason = "request_rejected"
+			if state.ctx.Err() != nil {
+				reason = "cancelled_before_send"
+			}
+		}
+		ev.PhysicalCall.ContextUnavailable = reason
+	}
+	if code := state.aborted(); code != "" && ev.PhysicalCall.ErrorCode == "" {
+		ev.PhysicalCall.ErrorCode = code
+		ev.PhysicalCall.ErrorMessage = "MCP exchange aborted; no request was retried"
+	}
+
 	ev.PhysicalCall.ErrorMessage = truncateText(state.scrub(ev.PhysicalCall.ErrorMessage), 2048)
 	// Catalog and server metadata are provider-controlled. Suppress confidential
 	// material without rewriting schemas or claiming a modified schema was observed.

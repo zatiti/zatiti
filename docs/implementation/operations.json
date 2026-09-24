@@ -1,5 +1,5 @@
 {
-  "revision": 3,
+  "revision": 4,
   "$defs": {
     "Scope": {
       "type": "object",
@@ -3146,6 +3146,15 @@
             }
           },
           "required": []
+        },
+        "id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9223372036854775807
         }
       },
       "required": [
@@ -3153,7 +3162,9 @@
         "input_schema",
         "input_schema_digest",
         "discovered_at",
-        "discovery_operation_id"
+        "discovery_operation_id",
+        "id",
+        "version"
       ]
     },
     "Change": {
@@ -7981,6 +7992,14 @@
         },
         "capability_evidence": {
           "$ref": "#/$defs/Adapter_CapabilityEvidence"
+        },
+        "max_control_replies": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 16
+        },
+        "control_reply_cost": {
+          "$ref": "#/$defs/Adapter_Money"
         }
       },
       "required": [
@@ -8019,6 +8038,14 @@
           "type": "string",
           "minLength": 1,
           "maxLength": 128
+        },
+        "control_reply_limit": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 16
+        },
+        "profile_digest": {
+          "$ref": "#/$defs/Adapter_Digest"
         }
       },
       "required": [
@@ -8048,6 +8075,14 @@
           "type": "string",
           "minLength": 0,
           "maxLength": 1024
+        },
+        "control_reply_limit": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 16
+        },
+        "profile_digest": {
+          "$ref": "#/$defs/Adapter_Digest"
         }
       },
       "required": [
@@ -8086,6 +8121,14 @@
         },
         "classification": {
           "$ref": "#/$defs/Adapter_Classification"
+        },
+        "control_reply_limit": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 16
+        },
+        "profile_digest": {
+          "$ref": "#/$defs/Adapter_Digest"
         }
       },
       "required": [
@@ -8114,6 +8157,14 @@
         },
         "session_handle": {
           "$ref": "#/$defs/Adapter_MCPSessionHandle"
+        },
+        "control_reply_limit": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 16
+        },
+        "profile_digest": {
+          "$ref": "#/$defs/Adapter_Digest"
         }
       },
       "required": [
@@ -8168,7 +8219,6 @@
       },
       "required": [
         "message",
-        "http_status",
         "request_sent"
       ],
       "$schema": "https://json-schema.org/draft/2020-12/schema"
@@ -8221,7 +8271,7 @@
           "type": "string"
         },
         "physical_call": {
-          "$ref": "#/$defs/Adapter_PhysicalCallEvidence"
+          "$ref": "#/$defs/Adapter_MCPPhysicalCallEvidence"
         },
         "kind": {
           "type": "string",
@@ -8325,7 +8375,7 @@
             "$ref": "#/$defs/Adapter_StagedOutput"
           },
           "minItems": 0,
-          "maxItems": 2
+          "maxItems": 20
         },
         "output_artifacts": {
           "type": "array",
@@ -8333,7 +8383,14 @@
             "$ref": "#/$defs/Adapter_ArtifactRef"
           },
           "minItems": 0,
-          "maxItems": 2
+          "maxItems": 20
+        },
+        "exchanges": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Adapter_MCPHTTPExchange"
+          },
+          "maxItems": 19
         }
       },
       "required": [
@@ -8344,9 +8401,188 @@
         "refused_server_requests",
         "usage",
         "staged_outputs",
-        "output_artifacts"
+        "output_artifacts",
+        "exchanges"
       ],
       "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "Adapter_MCPPhysicalCallEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "operation_id": {
+          "$ref": "#/$defs/Adapter_ID"
+        },
+        "attempt_id": {
+          "$ref": "#/$defs/Adapter_ID"
+        },
+        "account_identity": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "requested_destination": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "resolved_destination": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "profile_digest": {
+          "$ref": "#/$defs/Adapter_Digest"
+        },
+        "capability_evidence": {
+          "$ref": "#/$defs/Adapter_ArtifactRef"
+        },
+        "started_at": {
+          "$ref": "#/$defs/Adapter_UTC"
+        },
+        "finished_at": {
+          "$ref": "#/$defs/Adapter_UTC"
+        },
+        "request_context": {
+          "$ref": "#/$defs/Adapter_ArtifactLocator"
+        },
+        "request_sent": {
+          "type": "string",
+          "enum": [
+            "no",
+            "yes",
+            "unknown"
+          ]
+        },
+        "confirmation": {
+          "type": "string",
+          "enum": [
+            "authoritative_success",
+            "authoritative_failure",
+            "provider_accepted",
+            "authoritative_nonexecution",
+            "unknown"
+          ]
+        },
+        "http_status": {
+          "type": "integer",
+          "minimum": 100,
+          "maximum": 599
+        },
+        "provider_reference": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 1024
+        },
+        "error_code": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 128
+        },
+        "error_message": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 2048
+        },
+        "context_unavailable": {
+          "type": "string",
+          "enum": [
+            "staging_failed",
+            "request_rejected",
+            "cancelled_before_send"
+          ]
+        }
+      },
+      "required": [
+        "operation_id",
+        "attempt_id",
+        "account_identity",
+        "requested_destination",
+        "resolved_destination",
+        "profile_digest",
+        "capability_evidence",
+        "started_at",
+        "finished_at",
+        "request_sent",
+        "confirmation"
+      ],
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "allOf": [
+        {
+          "if": {
+            "required": [
+              "request_context"
+            ]
+          },
+          "then": {
+            "not": {
+              "required": [
+                "context_unavailable"
+              ]
+            }
+          },
+          "else": {
+            "properties": {
+              "request_sent": {
+                "const": "no"
+              }
+            },
+            "required": [
+              "context_unavailable"
+            ]
+          }
+        }
+      ]
+    },
+    "Adapter_MCPHTTPExchange": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "enum": [
+            "main",
+            "handshake",
+            "control_reply"
+          ]
+        },
+        "method": {
+          "enum": [
+            "POST",
+            "DELETE"
+          ]
+        },
+        "rpc_method": {
+          "type": "string",
+          "maxLength": 256
+        },
+        "ordinal": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 19
+        },
+        "request_context": {
+          "$ref": "#/$defs/Adapter_ArtifactLocator"
+        },
+        "request_sent": {
+          "enum": [
+            "no",
+            "yes",
+            "unknown"
+          ]
+        },
+        "http_status": {
+          "type": "integer",
+          "minimum": 100,
+          "maximum": 599
+        }
+      },
+      "required": [
+        "kind",
+        "method",
+        "ordinal",
+        "request_context",
+        "request_sent"
+      ]
     },
     "Fault": {
       "type": "object",
@@ -25207,6 +25443,13 @@
           "destination": {
             "type": "string",
             "maxLength": 8192
+          },
+          "operation_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "action": {
+            "$ref": "#/$defs/Action"
           }
         },
         "required": [
@@ -25225,6 +25468,9 @@
           },
           "tool": {
             "$ref": "#/$defs/Tool"
+          },
+          "validation_intent": {
+            "type": "boolean"
           }
         },
         "required": [
@@ -25232,7 +25478,7 @@
           "tool"
         ]
       },
-      "behavior": "Resolve exact validated account/tool/destination/binding and current revocation/freshness; return opaque credential reference only to trusted dispatcher.",
+      "behavior": "Resolve exact validated account/tool/destination/binding and current revocation/freshness; return opaque credential reference only to trusted dispatcher. MCP admission and claim pass the exact immutable Action and operation_id. A non-fresh connection resolves only for an owner-created, pending validation intent matching the exact operation, action digest, connection version and open_session action; identity alone never exempts freshness. The returned validation_intent is owner-verified, not caller authority. Enforce profile/account/destination/schema/cost/session/catalog pins at admission and claim.",
       "cli": [],
       "mcp": null,
       "submission_key": false,
@@ -25270,6 +25516,14 @@
           },
           "observation": {
             "$ref": "#/$defs/Observation"
+          },
+          "operation_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "attempt_id": {
+            "type": "string",
+            "format": "uuid"
           }
         },
         "required": [
@@ -25290,7 +25544,7 @@
           "resource"
         ]
       },
-      "behavior": "Record the observed MCP tool catalog page (names, pinned input schemas, digests, annotations) from actual list_tools evidence for the named connection; replaces the previous catalog for the names observed and marks tools absent from a complete catalog as stale. Annotations are hints, never classification or authority.",
+      "behavior": "Record the observed MCP tool catalog page (names, pinned input schemas, digests, annotations) from actual list_tools evidence for the named connection; replaces the previous catalog for the names observed and marks tools absent from a complete catalog as stale. Annotations are hints, never classification or authority. MCP callbacks require operation_id and attempt_id; read the actual recorded observation through _effects.callback.evidence and match the immutable owner intent. Duplicate exact delivery is idempotent; foreign, stale or unrelated callbacks never complete another job or mutate freshness.",
       "cli": [],
       "mcp": null,
       "submission_key": false,
@@ -25323,6 +25577,14 @@
           },
           "observation": {
             "$ref": "#/$defs/Observation"
+          },
+          "operation_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "attempt_id": {
+            "type": "string",
+            "format": "uuid"
           }
         },
         "required": [
@@ -25343,7 +25605,7 @@
           "resource"
         ]
       },
-      "behavior": "Record authorized probe identity/scopes/freshness and invalidation without accepting account substitution.",
+      "behavior": "Record authorized probe identity/scopes/freshness and invalidation without accepting account substitution. MCP callbacks require operation_id and attempt_id; read the actual recorded observation through _effects.callback.evidence and match the immutable owner intent. Duplicate exact delivery is idempotent; foreign, stale or unrelated callbacks never complete another job or mutate freshness.",
       "cli": [],
       "mcp": null,
       "submission_key": false,
@@ -26647,7 +26909,8 @@
         "memory",
         "messaging",
         "skills",
-        "installation"
+        "installation",
+        "connections"
       ],
       "scope_required": [
         "installation_id"
@@ -29074,6 +29337,116 @@
       "expected_version": false,
       "callers": [
         "controller"
+      ],
+      "scope_required": []
+    },
+    {
+      "id": "_connections.tool.resolve",
+      "version": 1,
+      "owner": "connections",
+      "visibility": "internal",
+      "mode": "query",
+      "effect": "local",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "scope": {
+            "$ref": "#/$defs/Scope"
+          },
+          "tool_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "scope",
+          "tool_id"
+        ]
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "connection": {
+            "$ref": "#/$defs/Connection"
+          },
+          "tool": {
+            "$ref": "#/$defs/Tool"
+          }
+        },
+        "required": [
+          "connection",
+          "tool"
+        ]
+      },
+      "behavior": "Resolve only an existing MCP catalog identity to its owning fresh connection and exact composed Tool. No wildcard dispatch: this is context lookup, and execution must require explicitly selected tool and connection bindings with intersecting destinations. Return not_found for non-MCP identities.",
+      "cli": [],
+      "mcp": null,
+      "submission_key": false,
+      "expected_version": false,
+      "callers": [
+        "execution",
+        "configuration"
+      ],
+      "scope_required": [
+        "installation_id"
+      ]
+    },
+    {
+      "id": "_effects.callback.evidence",
+      "version": 1,
+      "owner": "effects",
+      "visibility": "internal",
+      "mode": "query",
+      "effect": "local",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "attempt_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "operation_id",
+          "attempt_id"
+        ]
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "$ref": "#/$defs/Action"
+          },
+          "observation": {
+            "$ref": "#/$defs/Observation"
+          },
+          "generation": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9223372036854775807
+          }
+        },
+        "required": [
+          "action",
+          "observation",
+          "generation"
+        ]
+      },
+      "behavior": "Return the unique recorded physical observation of the exact attempt under this operation and installation, plus immutable action and attempt generation. Missing or contradictory observations refuse. Connections uses owner-held evidence rather than caller-supplied provider JSON.",
+      "cli": [],
+      "mcp": null,
+      "submission_key": false,
+      "expected_version": false,
+      "callers": [
+        "connections"
       ],
       "scope_required": []
     }

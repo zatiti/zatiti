@@ -252,6 +252,8 @@ const (
 // operations catalog. Annotations stay inert JSON tips; they never change
 // effect classification.
 type wireMCPDiscoveredTool struct {
+	ID                   contract.ID     `json:"id"`
+	Version              int64           `json:"version"`
 	Name                 string          `json:"name"`
 	InputSchema          json.RawMessage `json:"input_schema"`
 	InputSchemaDigest    string          `json:"input_schema_digest"`

@@ -119,3 +119,27 @@ func adapterDependencies(h *installationHandle) contract.AdapterDependencies {
 		Blobs:   h.plat.Blobs(),
 	}
 }
+
+// Read only the secret-free admission profile. The adapter constructor repeats
+// full validation at startup; digest-pinned actions refuse any intervening drift.
+func readMCPAdmissionProfile(dir string) (json.RawMessage, error) {
+	path := filepath.Join(dir, "mcp.json")
+	info, err := os.Lstat(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() || info.Size() > maxAdapterProfileBytes {
+		return nil, fmt.Errorf("MCP profile must be a bounded regular file")
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	if len(raw) > maxAdapterProfileBytes {
+		return nil, fmt.Errorf("MCP profile exceeds size bound")
+	}
+	return raw, nil
+}

@@ -75,3 +75,31 @@ func decodeAction(raw json.RawMessage) (*action, error) {
 	}
 	return act, nil
 }
+
+func (a *action) controlReplyLimit() int64 {
+	switch a.Kind {
+	case kindOpenSession:
+		return a.OpenSession.ControlReplyLimit
+	case kindListTools:
+		return a.ListTools.ControlReplyLimit
+	case kindCallTool:
+		return a.CallTool.ControlReplyLimit
+	case kindCloseSession:
+		return a.CloseSession.ControlReplyLimit
+	}
+	return 0
+}
+
+func (a *action) profileDigest() contract.Digest {
+	switch a.Kind {
+	case kindOpenSession:
+		return a.OpenSession.ProfileDigest
+	case kindListTools:
+		return a.ListTools.ProfileDigest
+	case kindCallTool:
+		return a.CallTool.ProfileDigest
+	case kindCloseSession:
+		return a.CloseSession.ProfileDigest
+	}
+	return ""
+}

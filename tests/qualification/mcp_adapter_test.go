@@ -202,16 +202,18 @@ func mcpBindProfile(t *testing.T, endpoint string, allowPrivate bool, allowedToo
 		maxResponseBytes = 1 << 16
 	}
 	profile := map[string]any{
-		"schema":             "zatiti.mcp/v1",
-		"transport":          json.RawMessage(transport),
-		"protocol_version":   "2025-11-25",
-		"credential_kind":    credentialKind,
-		"allowed_tools":      allowedTools,
-		"tool_call_cost":     map[string]any{"currency": "USD", "micro_units": 0},
-		"max_request_bytes":  1 << 16,
-		"max_response_bytes": maxResponseBytes,
-		"timeout_seconds":    30,
-		"classifications":    classifications,
+		"schema":              "zatiti.mcp/v1",
+		"transport":           json.RawMessage(transport),
+		"protocol_version":    "2025-11-25",
+		"credential_kind":     credentialKind,
+		"allowed_tools":       allowedTools,
+		"max_control_replies": 16,
+		"control_reply_cost":  map[string]any{"currency": "USD", "micro_units": 0},
+		"tool_call_cost":      map[string]any{"currency": "USD", "micro_units": 0},
+		"max_request_bytes":   1 << 16,
+		"max_response_bytes":  maxResponseBytes,
+		"timeout_seconds":     30,
+		"classifications":     classifications,
 		"capability_evidence": capabilityEvidence(
 			"qualification-mcp", sourceRevision(), "2025-11-25",
 			[]string{"open_session", "list_tools", "call_tool", "close_session"},
@@ -576,7 +578,7 @@ func TestZ05CallbackDiscoveryMCP(t *testing.T) {
 
 func TestZ08MCPLostToolCallResponse(t *testing.T) {
 	c := beginCase(t, "Z08.mcp_lost_tool_call_response", "Z08",
-		"Attempt is recorded outcome_unknown with request_sent yes and staged request context retained; nothing is resent.",
+		"Attempt is recorded outcome_unknown with request_sent unknown and staged request context retained; nothing is resent.",
 		"Reconcile returns capability_unsupported and the reservation stays until a separately admitted linked operation resolves it.")
 	c.version("adapter_source_revision", sourceRevision())
 	c.version("adapter_root", "mcp")
@@ -609,13 +611,13 @@ func TestZ08MCPLostToolCallResponse(t *testing.T) {
 	if err := json.Unmarshal(obs.Evidence, &ev); err != nil {
 		c.fail("decode evidence: %v", err)
 	}
-	if ev.PhysicalCall.RequestSent != "yes" {
-		c.fail("expected request_sent=yes, got %q", ev.PhysicalCall.RequestSent)
+	if ev.PhysicalCall.RequestSent != "unknown" {
+		c.fail("expected request_sent=unknown, got %q", ev.PhysicalCall.RequestSent)
 	}
 	if got := srv.counts()["tools/call"]; got != 1 {
 		c.fail("expected exactly one tools/call (no resend), got %d", got)
 	}
-	c.observe("stall → unknown, request_sent=yes, tools/call count=1")
+	c.observe("stall → unknown, request_sent=unknown, tools/call count=1")
 
 	_, err = a.Reconcile(t.Context(), mcpDispatch(t, map[string]any{
 		"schema": "zatiti.mcp.action/v1", "kind": "call_tool", "session_handle": handle,
@@ -707,10 +709,12 @@ func TestZ05MCPServerRequestsRefused(t *testing.T) {
 	a := mcpNewAdapter(t, srv.httpSrv.Client(), blobs, secrets, profile)
 	handle, _ := mcpOpenSession(t, a, mcpQualCredRef, 10*time.Second)
 
+	before := srv.total()
 	schema, digest := mcpInputSchema(t)
 	obs, err := a.Invoke(t.Context(), mcpDispatch(t, map[string]any{
 		"schema": "zatiti.mcp.action/v1", "kind": "call_tool", "session_handle": handle,
-		"tool": "server-requests", "arguments": json.RawMessage(`{}`),
+		"control_reply_limit": 4,
+		"tool":                "server-requests", "arguments": json.RawMessage(`{}`),
 		"input_schema": schema, "input_schema_digest": string(digest), "classification": "public",
 	}, mcpQualCredRef, time.Now().UTC().Add(10*time.Second)))
 	if err != nil {
@@ -719,12 +723,19 @@ func TestZ05MCPServerRequestsRefused(t *testing.T) {
 	if obs.Disposition != contract.DispositionSucceeded {
 		c.fail("expected succeeded despite refused server requests, got %s", obs.Disposition)
 	}
+	if got := srv.total() - before; got != 5 {
+		c.fail("expected exactly one tools/call plus four refusal POSTs, got %d", got)
+	}
 	var ev struct {
-		IsError               bool     `json:"is_error"`
-		RefusedServerRequests []string `json:"refused_server_requests"`
+		Exchanges             []json.RawMessage `json:"exchanges"`
+		IsError               bool              `json:"is_error"`
+		RefusedServerRequests []string          `json:"refused_server_requests"`
 	}
 	if err := json.Unmarshal(obs.Evidence, &ev); err != nil {
 		c.fail("decode evidence: %v", err)
+	}
+	if len(ev.Exchanges) != 5 {
+		c.fail("all five physical requests must be evidenced, got %d", len(ev.Exchanges))
 	}
 	if ev.IsError {
 		c.fail("expected is_error false")

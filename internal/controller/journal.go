@@ -128,7 +128,8 @@ const (
 type route struct {
 	// Owner is "", "execution", "execution_proposal", "memory" or
 	// "connections".
-	Owner string `json:"owner,omitempty"`
+	Owner     string `json:"owner,omitempty"`
+	ProbeKind string `json:"probe_kind,omitempty"`
 	// AttemptID is the execution attempt a model effect belongs to.
 	AttemptID contract.ID `json:"attempt_id,omitempty"`
 	// JobID is the network job waiting on the operation.

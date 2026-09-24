@@ -2170,11 +2170,13 @@
       "integration"
     ],
     "setup": "A controlled MCP server records every HTTP request; a session was opened by an admitted open_session effect.",
-    "action": "Dispatch one call_tool, one list_tools and one close_session attempt; then dispatch open_session against a fresh server.",
+    "action": "Dispatch one call_tool, one list_tools and one close_session attempt with zero control-reply allowance; then dispatch open_session against a fresh server. Repeat calls with explicit refusal-reply limits 1, 4 and 16 and excess server requests.",
     "expected": [
-      "call_tool, list_tools and close_session each produce exactly one HTTP request per claimed attempt; next_cursor is never followed by the adapter.",
+      "With zero control-reply allowance, call_tool, list_tools and close_session each produce exactly one primary HTTP request per claimed attempt; next_cursor is never followed by the adapter.",
       "open_session produces at most the three handshake requests the pinned SDK makes (server/discover probe, initialize, initialized), every one listed in evidence.handshake in order; no GET listening stream is opened.",
-      "SDK retry and reconnect are disabled; a permitted retry is a new authorized recorded attempt."
+      "SDK retry and reconnect are disabled; a permitted retry is a new authorized recorded attempt.",
+      "Explicit bounded method-not-found replies are the only additional POSTs: limits 1, 4 and 16 allow at most 2, 5 and 17 total call exchanges respectively. Exhaustion aborts and evicts locally without cleanup requests.",
+      "Every dispatched reply has pre-send context and exchange evidence and consumes the declared per-reply cost bound; no hidden reply, retry or fabricated status is allowed."
     ]
   },
   {
@@ -2219,6 +2221,26 @@
     "expected": [
       "Each server-to-client request is answered method-not-found and named in refused_server_requests; no model call, no user prompt and no resource fetch happens.",
       "The resource_link is recorded as an opaque reference in the staged tool_result; fetching it would require a separate governed read."
+    ]
+  },
+  {
+    "id": "Z05.mcp_governed_probe_and_catalog",
+    "gate": "Z05",
+    "owners": [
+      "connections",
+      "effects",
+      "execution",
+      "controller",
+      "mcpclient",
+      "integration"
+    ],
+    "setup": "An unverified MCP connection binds an installed synthetic profile; ordinary effect policy and accounting are configured.",
+    "action": "Prepare validation through its public owner operation, attempt a cloned public effect, record a real attempt observation, discover tools, then change the catalog after admitting a tool call and before claiming it.",
+    "expected": [
+      "Only the exact durable owner intent permits initial validation without prior freshness; its job links the governed effect.",
+      "Callbacks read the recorded observation for the exact operation and attempt; supplied JSON cannot invent validation or discovery truth.",
+      "Discovered tools expose the full pinned adapter envelope and nonzero configured cost bound, with explicit endpoint and connection bindings.",
+      "Claim rejects a changed catalog version before dispatch and does not consume the claim."
     ]
   }
 ]

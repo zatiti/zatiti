@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -86,26 +87,32 @@ var moduleOrder = []string{
 // jobs.go (buildJobRunners) turns this into the controller.JobRunner map
 // Collaborators.Jobs requires, keyed by the frozen owner/operation job
 // kinds each of these owners actually implements (landedJobKinds).
-func modules(router *application.PortRouter, clock contract.Clock, ids contract.IDSource, secrets contract.SecretStore, blobs contract.BlobStore, backup contract.DatabaseBackup) ([]contract.Module, *identity.Service, map[string]contract.LocalJobRunner, error) {
+func modules(router *application.PortRouter, clock contract.Clock, ids contract.IDSource, secrets contract.SecretStore, blobs contract.BlobStore, backup contract.DatabaseBackup, mcpProfiles ...json.RawMessage) ([]contract.Module, *identity.Service, map[string]contract.LocalJobRunner, error) {
 	deps := func(owner string) contract.Dependencies {
 		return contract.Dependencies{Clock: clock, IDs: ids, Ports: router.For(owner), Secrets: secrets, Blobs: blobs}
 	}
 	constructors := map[string]func(contract.Dependencies) (contract.Module, error){
 		"configuration": func(d contract.Dependencies) (contract.Module, error) { return configuration.New(d) },
 		"skills":        func(d contract.Dependencies) (contract.Module, error) { return skills.New(d) },
-		"connections":   func(d contract.Dependencies) (contract.Module, error) { return connections.New(d) },
-		"policy":        func(d contract.Dependencies) (contract.Module, error) { return policy.New(d) },
-		"reviews":       func(d contract.Dependencies) (contract.Module, error) { return reviews.New(d) },
-		"accounting":    func(d contract.Dependencies) (contract.Module, error) { return accounting.New(d) },
-		"tasks":         func(d contract.Dependencies) (contract.Module, error) { return tasks.New(d) },
-		"scheduling":    func(d contract.Dependencies) (contract.Module, error) { return scheduling.New(d) },
-		"messaging":     func(d contract.Dependencies) (contract.Module, error) { return messaging.New(d) },
-		"execution":     func(d contract.Dependencies) (contract.Module, error) { return execution.New(d) },
-		"effects":       func(d contract.Dependencies) (contract.Module, error) { return effects.New(d) },
-		"memory":        func(d contract.Dependencies) (contract.Module, error) { return memory.New(d) },
-		"artifacts":     func(d contract.Dependencies) (contract.Module, error) { return artifacts.New(d) },
-		"evidence":      func(d contract.Dependencies) (contract.Module, error) { return evidence.New(d) },
-		"installation":  func(d contract.Dependencies) (contract.Module, error) { return bindInstallationBackup(d, backup) },
+		"connections": func(d contract.Dependencies) (contract.Module, error) {
+			var raw json.RawMessage
+			if len(mcpProfiles) > 0 {
+				raw = mcpProfiles[0]
+			}
+			return connections.NewWithMCPProfile(d, raw)
+		},
+		"policy":       func(d contract.Dependencies) (contract.Module, error) { return policy.New(d) },
+		"reviews":      func(d contract.Dependencies) (contract.Module, error) { return reviews.New(d) },
+		"accounting":   func(d contract.Dependencies) (contract.Module, error) { return accounting.New(d) },
+		"tasks":        func(d contract.Dependencies) (contract.Module, error) { return tasks.New(d) },
+		"scheduling":   func(d contract.Dependencies) (contract.Module, error) { return scheduling.New(d) },
+		"messaging":    func(d contract.Dependencies) (contract.Module, error) { return messaging.New(d) },
+		"execution":    func(d contract.Dependencies) (contract.Module, error) { return execution.New(d) },
+		"effects":      func(d contract.Dependencies) (contract.Module, error) { return effects.New(d) },
+		"memory":       func(d contract.Dependencies) (contract.Module, error) { return memory.New(d) },
+		"artifacts":    func(d contract.Dependencies) (contract.Module, error) { return artifacts.New(d) },
+		"evidence":     func(d contract.Dependencies) (contract.Module, error) { return evidence.New(d) },
+		"installation": func(d contract.Dependencies) (contract.Module, error) { return bindInstallationBackup(d, backup) },
 	}
 	idn, err := identity.New(deps("identity"))
 	if err != nil {
@@ -284,7 +291,11 @@ func (h *installationHandle) assemble(ctx context.Context) error {
 	h.db = db
 
 	router := application.NewPorts()
-	mods, idn, jobRunners, err := modules(router, h.clock, randomIDs{}, h.secrets, h.plat.Blobs(), databaseBackup{db: h.db})
+	profile, err := readMCPAdmissionProfile(h.cfg.adaptersDir())
+	if err != nil {
+		return err
+	}
+	mods, idn, jobRunners, err := modules(router, h.clock, randomIDs{}, h.secrets, h.plat.Blobs(), databaseBackup{db: h.db}, profile)
 	if err != nil {
 		return err
 	}

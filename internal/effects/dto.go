@@ -9,9 +9,7 @@ import (
 
 // Wire DTOs. JSON is snake_case and unknown fields are rejected at the
 // decode boundary before these types are filled. Output schemas describe
-// Payload.Data, not the result envelope. Peer payloads are decoded with
-// plain Unmarshal into the fields this package consumes, matching the
-// scheduling module's trusted-peer convention; bytes that must survive
+// Payload.Data, not the result envelope. Peer payloads are strictly decoded into their known contract fields; bytes that must survive
 // verbatim (actions, evidence, parameters) stay json.RawMessage.
 
 // wireScope mirrors $defs/Scope.
@@ -224,19 +222,30 @@ type wireReservation struct {
 // wirePrincipal decodes the trusted _identity.authority payload fields this
 // package acts on.
 type wirePrincipal struct {
+	Version int64       `json:"version"`
+	Kind    string      `json:"kind"`
+	Name    string      `json:"name"`
+	Scope   wireScope   `json:"scope"`
 	ID      contract.ID `json:"id"`
 	Revoked bool        `json:"revoked"`
 }
 
 // wireAuthority decodes _identity.authority output.
 type wireAuthority struct {
-	Principal    wirePrincipal `json:"principal"`
-	Restrictions []string      `json:"restrictions"`
+	Grants       []json.RawMessage `json:"grants"`
+	Principal    wirePrincipal     `json:"principal"`
+	Restrictions []string          `json:"restrictions"`
 }
 
 // wireConnection decodes the _connections.resolve connection fields this
 // package dispatches with.
 type wireConnection struct {
+	Scope           wireScope   `json:"scope"`
+	Provider        string      `json:"provider"`
+	AccountIdentity string      `json:"account_identity"`
+	Destinations    []string    `json:"destinations"`
+	AllowedScopes   []string    `json:"allowed_scopes"`
+	ValidatedAt     *time.Time  `json:"validated_at,omitempty"`
 	ID              contract.ID `json:"id"`
 	Version         int64       `json:"version"`
 	CredentialRef   string      `json:"credential_ref"`
@@ -247,20 +256,28 @@ type wireConnection struct {
 // wireTool decodes the _connections.resolve tool fields this package uses
 // to classify and bound dispatch.
 type wireTool struct {
-	ID             contract.ID `json:"id"`
-	Version        int64       `json:"version"`
-	Name           string      `json:"name"`
-	Effect         string      `json:"effect"`
-	CostBound      wireMoney   `json:"cost_bound"`
-	TimeoutSeconds int64       `json:"timeout_seconds"`
-	Idempotency    string      `json:"idempotency"`
-	Adapter        string      `json:"adapter"`
+	InputSchema         json.RawMessage `json:"input_schema"`
+	OutputSchema        json.RawMessage `json:"output_schema"`
+	Destinations        []string        `json:"destinations"`
+	CredentialKind      string          `json:"credential_kind"`
+	KeyRetentionSeconds int64           `json:"key_retention_seconds"`
+	Confirmation        string          `json:"confirmation"`
+	Reconciliation      string          `json:"reconciliation"`
+	ID                  contract.ID     `json:"id"`
+	Version             int64           `json:"version"`
+	Name                string          `json:"name"`
+	Effect              string          `json:"effect"`
+	CostBound           wireMoney       `json:"cost_bound"`
+	TimeoutSeconds      int64           `json:"timeout_seconds"`
+	Idempotency         string          `json:"idempotency"`
+	Adapter             string          `json:"adapter"`
 }
 
 // resolveBody decodes _connections.resolve output.
 type resolveBody struct {
-	Connection wireConnection `json:"connection"`
-	Tool       wireTool       `json:"tool"`
+	ValidationIntent bool           `json:"validation_intent,omitempty"`
+	Connection       wireConnection `json:"connection"`
+	Tool             wireTool       `json:"tool"`
 }
 
 // authorityBody decodes _identity.authority output.
@@ -318,8 +335,12 @@ type wireArtifactState struct {
 // checks.
 type snapshotBody struct {
 	Resource struct {
-		Scope    wireScope `json:"scope"`
-		Revision int64     `json:"revision"`
+		Scope     wireScope         `json:"scope"`
+		Revision  int64             `json:"revision"`
+		Ancestors []json.RawMessage `json:"ancestors"`
+		Bindings  []json.RawMessage `json:"bindings"`
+		Worker    json.RawMessage   `json:"worker,omitempty"`
+		Project   json.RawMessage   `json:"project,omitempty"`
 	} `json:"resource"`
 }
 
@@ -478,10 +499,12 @@ type accountingInspectInput struct {
 }
 
 type connectionsResolveInput struct {
-	Scope       wireScope `json:"scope"`
-	Connection  wireRef   `json:"connection"`
-	Tool        wireRef   `json:"tool"`
-	Destination string    `json:"destination"`
+	OperationID contract.ID     `json:"operation_id,omitempty"`
+	Action      json.RawMessage `json:"action,omitempty"`
+	Scope       wireScope       `json:"scope"`
+	Connection  wireRef         `json:"connection"`
+	Tool        wireRef         `json:"tool"`
+	Destination string          `json:"destination"`
 }
 
 type connectionsValidationRecordInput struct {

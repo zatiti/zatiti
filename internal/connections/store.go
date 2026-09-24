@@ -545,6 +545,7 @@ func decodeCursor(s string) (cursorPayload, error) {
 
 // mcpToolRow is one recorded MCP discovered-tool catalog entry.
 type mcpToolRow struct {
+	Version              int64
 	ConnectionID         contract.ID
 	Name                 string
 	Title                string
@@ -560,6 +561,7 @@ type mcpToolRow struct {
 
 func (r mcpToolRow) wire() wireMCPDiscoveredTool {
 	out := wireMCPDiscoveredTool{
+		ID: mcpDiscoveredToolID(r.ConnectionID, r.Name), Version: r.Version,
 		Name:                 r.Name,
 		Title:                r.Title,
 		Description:          r.Description,
@@ -594,7 +596,8 @@ func (s *Service) upsertMCPTool(ctx context.Context, unit contract.Unit, r mcpTo
 			 output_schema, annotations_json, discovered_at, discovery_operation_id, stale)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
 		ON CONFLICT(connection_id, name) DO UPDATE SET
-			title = excluded.title,
+			catalog_version = connections_mcp_tools.catalog_version + 1,
+ title = excluded.title,
 			description = excluded.description,
 			input_schema = excluded.input_schema,
 			input_schema_digest = excluded.input_schema_digest,
@@ -666,7 +669,7 @@ func (s *Service) markMCPToolsStaleExcept(ctx context.Context, unit contract.Uni
 func (s *Service) listMCPToolsPage(ctx context.Context, unit contract.Unit, connectionID contract.ID, offset, limit int) (result []mcpToolRow, retErr error) {
 	rows, err := unit.QueryContext(ctx, `
 		SELECT connection_id, name, title, description, input_schema, input_schema_digest,
-			output_schema, annotations_json, discovered_at, discovery_operation_id, stale
+			output_schema, annotations_json, discovered_at, discovery_operation_id, stale, catalog_version
 		FROM connections_mcp_tools
 		WHERE connection_id = ?
 		ORDER BY name ASC
@@ -702,7 +705,7 @@ func scanMCPTool(scan func(dest ...any) error) (mcpToolRow, error) {
 	var inputSchema string
 	if err := scan(&r.ConnectionID, &r.Name, &r.Title, &r.Description, &inputSchema,
 		&r.InputSchemaDigest, &outSchema, &annotations, &discoveredAt,
-		&r.DiscoveryOperationID, &staleInt); err != nil {
+		&r.DiscoveryOperationID, &staleInt, &r.Version); err != nil {
 		return mcpToolRow{}, err
 	}
 	r.InputSchema = json.RawMessage(inputSchema)
@@ -716,33 +719,4 @@ func scanMCPTool(scan func(dest ...any) error) (mcpToolRow, error) {
 	}
 	r.Stale = staleInt != 0
 	return r, nil
-}
-
-// loadLatestSucceededSessionHandle returns the session_handle from the most
-// recent succeeded validation observation evidence for connectionID. Used by
-// connection.discover to build list_tools when the discover input itself
-// carries no session_handle (a frozen-schema gap reported as a contract
-// defect). An absent handle is ok=false, never an invented value.
-func (s *Service) loadLatestSucceededSessionHandle(ctx context.Context, unit contract.Unit, connectionID contract.ID) (string, bool, error) {
-	row := unit.QueryRowContext(ctx, `
-		SELECT evidence_json FROM connections_validations
-		WHERE connection_id = ? AND disposition = 'succeeded'
-		ORDER BY confirmed_at DESC LIMIT 1`, string(connectionID))
-	var evidence string
-	if err := row.Scan(&evidence); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return "", false, nil
-		}
-		return "", false, fmt.Errorf("connections: load latest validation evidence: %w", err)
-	}
-	var body struct {
-		SessionHandle string `json:"session_handle"`
-	}
-	if err := json.Unmarshal([]byte(evidence), &body); err != nil {
-		return "", false, nil
-	}
-	if body.SessionHandle == "" {
-		return "", false, nil
-	}
-	return body.SessionHandle, true, nil
 }

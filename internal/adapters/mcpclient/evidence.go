@@ -76,11 +76,13 @@ func (e *errRedirectRefused) Error() string {
 // after the round trip completes, since the RoundTripper itself does not
 // know the eventual disposition).
 type capturedRequest struct {
-	rpcMethod  string
-	httpMethod string
-	staged     wireStagedOutput
-	locator    wireStagedLocator
-	status     int
+	class       string
+	requestSent string
+	rpcMethod   string
+	httpMethod  string
+	staged      wireStagedOutput
+	locator     wireStagedLocator
+	status      int
 }
 
 // callState is the per-Invoke-call context a callRoundTripper needs: the
@@ -92,16 +94,22 @@ type capturedRequest struct {
 // call_tool/close_session calls); arm/disarm bracket each such call so a
 // RoundTrip always attributes its staging and captures to the right one.
 type callState struct {
-	mu             sync.Mutex     // protects sessionIDs while SDK reply requests overlap
-	requests       sync.WaitGroup // registered under round-tripper mutex before disarm
-	ctx            context.Context
-	blobs          contract.BlobStore
-	secret         []byte
-	sessionIDs     []string
-	kind           string
-	classification string
-	captured       []capturedRequest
-	refused        []string
+	mu                 sync.Mutex     // protects sessionIDs while SDK reply requests overlap
+	requests           sync.WaitGroup // registered under round-tripper mutex before disarm
+	ctx                context.Context
+	blobs              contract.BlobStore
+	secret             []byte
+	sessionIDs         []string
+	cancel             context.CancelFunc
+	controlReplyLimit  int64
+	controlReplies     int64           // protected by round-tripper mutex
+	primarySeen        map[string]bool // protected by round-tripper mutex
+	abortCode          string          // protected by mu
+	contextUnavailable string          // protected by mu
+	kind               string
+	classification     string
+	captured           []capturedRequest
+	refused            []string
 
 	// oversize is set directly by boundedBody.Read the instant a response
 	// body crosses max_response_bytes. The go-sdk's own SSE stream reader
@@ -162,11 +170,18 @@ func (rt *callRoundTripper) disarm() {
 // middleware itself; there is simply no attempt to attribute it to.
 func (rt *callRoundTripper) recordRefusal(method string) {
 	rt.mu.Lock()
-	defer rt.mu.Unlock()
-	if rt.current == nil {
+	state := rt.current
+	if state == nil {
+		rt.mu.Unlock()
 		return
 	}
-	rt.current.refused = append(rt.current.refused, method)
+	if len(state.refused) >= 32 {
+		rt.mu.Unlock()
+		state.abort("control_reply_limit_exceeded")
+		return
+	}
+	state.refused = append(state.refused, truncateText(state.scrub(method), 128))
+	rt.mu.Unlock()
 }
 
 func (rt *callRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -184,10 +199,18 @@ func (rt *callRoundTripper) RoundTrip(req *http.Request) (*http.Response, error)
 	// SDK cleanup can call DELETE after a malformed protocol response. Only
 	// the separately admitted close_session action may terminate a session.
 	if req.Method != http.MethodPost && (req.Method != http.MethodDelete || state.kind != kindCloseSession) {
+		state.unavailable("request_rejected")
+		state.abort("request_not_admitted")
 		return nil, internalError("mcpclient: SDK attempted an HTTP method outside the admitted action")
 	}
 	if state.kind == kindCloseSession && req.Method != http.MethodDelete {
+		state.unavailable("request_rejected")
+		state.abort("request_not_admitted")
 		return nil, internalError("mcpclient: close_session may only send DELETE")
+	}
+	if err := state.ctx.Err(); err != nil {
+		state.unavailable("cancelled_before_send")
+		return nil, err
 	}
 	req = req.Clone(state.ctx)
 	req.GetBody = nil // never allow net/http to replay a request
@@ -206,10 +229,24 @@ func (rt *callRoundTripper) RoundTrip(req *http.Request) (*http.Response, error)
 		req.ContentLength = int64(len(bodyBytes))
 	}
 	if int64(len(bodyBytes)) > rt.maxRequestBytes {
+		state.unavailable("request_rejected")
+		state.abort("request_oversize")
 		return nil, &errRequestOversize{size: int64(len(bodyBytes)), bound: rt.maxRequestBytes}
 	}
 
 	rpcMethod := peekRPCMethod(bodyBytes)
+	rt.mu.Lock()
+	class, admitErr := state.requestClass(req.Method, bodyBytes)
+	rt.mu.Unlock()
+	if admitErr != nil {
+		state.unavailable("request_rejected")
+		code := "request_not_admitted"
+		if f, ok := admitErr.(*contract.Fault); ok && f.Code == "control_reply_limit_exceeded" {
+			code = f.Code
+		}
+		state.abort(code)
+		return nil, admitErr
+	}
 
 	permitted := http.Header{}
 	for name, values := range req.Header {
@@ -221,6 +258,8 @@ func (rt *callRoundTripper) RoundTrip(req *http.Request) (*http.Response, error)
 
 	staged, locator, err := stageRequestRecord(state.ctx, state.blobs, state, req.Method, req.URL.String(), permitted, bodyBytes)
 	if err != nil {
+		state.unavailable("staging_failed")
+		state.abort("staging_failed")
 		return nil, err
 	}
 
@@ -229,20 +268,28 @@ func (rt *callRoundTripper) RoundTrip(req *http.Request) (*http.Response, error)
 	}
 	rt.mu.Lock()
 	captureIndex := len(state.captured)
-	state.captured = append(state.captured, capturedRequest{rpcMethod: rpcMethod, httpMethod: req.Method, staged: staged, locator: locator})
+	state.captured = append(state.captured, capturedRequest{class: class, requestSent: "no", rpcMethod: rpcMethod, httpMethod: req.Method, staged: staged, locator: locator})
 	rt.mu.Unlock()
 
 	if len(state.secret) > 0 {
 		req.Header.Set("Authorization", "Bearer "+string(state.secret))
 	}
 
+	if err := state.ctx.Err(); err != nil {
+		return nil, err
+	}
+	rt.mu.Lock()
+	state.captured[captureIndex].requestSent = "unknown"
+	rt.mu.Unlock()
 	resp, doErr := rt.base.RoundTrip(req)
 	if doErr != nil {
+		state.abort("transport_error")
 		return nil, doErr
 	}
 
 	rt.mu.Lock()
 	state.captured[captureIndex].status = resp.StatusCode
+	state.captured[captureIndex].requestSent = "yes"
 	rt.mu.Unlock()
 
 	if id := resp.Header.Get("Mcp-Session-Id"); id != "" {
@@ -370,8 +417,14 @@ func stageRequestRecord(ctx context.Context, blobs contract.BlobStore, state *ca
 
 // attemptUsage retains the configured bounded estimate, including zero, for
 // every attempted operation. Unknown outcomes retain the same liability.
-func (a *Adapter) attemptUsage() wireProviderUsage {
-	return wireProviderUsage{Accounting: wireUsage{Currency: a.profile.ToolCallCost.Currency, Estimated: a.profile.ToolCallCost.MicroUnits}, Billing: "bounded_estimate"}
+func (a *Adapter) attemptUsage(state *callState) wireProviderUsage {
+	cost := a.profile.ToolCallCost.MicroUnits
+	for _, request := range state.captured {
+		if request.class == "control_reply" && request.requestSent != "no" {
+			cost += a.profile.ControlReplyCost.MicroUnits
+		}
+	}
+	return wireProviderUsage{Accounting: wireUsage{Currency: a.profile.ToolCallCost.Currency, Estimated: cost}, Billing: "bounded_estimate"}
 }
 
 // stageToolResult stages the tool call's raw content/structured content as

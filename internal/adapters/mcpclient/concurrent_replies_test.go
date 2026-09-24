@@ -12,9 +12,8 @@ import (
 	"github.com/zatiti/zatiti/internal/contract"
 )
 
-// This regression verifies SDK reply concurrency and evidence attribution.
-// The observed reply POSTs remain a frozen one-request-contract blocker; this
-// test does not qualify request-count compliance.
+// This regression verifies that concurrent SDK reply POSTs remain inside the
+// explicitly authorized control budget and each has its own evidence.
 func TestIndependentParallelRefusalReplies(t *testing.T) {
 	const n = 16
 	srv := newControlledServer()
@@ -31,7 +30,7 @@ func TestIndependentParallelRefusalReplies(t *testing.T) {
 			case <-r.Context().Done():
 				return true
 			}
-			w.Header().Set("Mcp-Session-Id", "refusal-response-session")
+			w.Header().Set("Mcp-Session-Id", r.Header.Get("Mcp-Session-Id"))
 			w.WriteHeader(http.StatusAccepted)
 			return true
 		}
@@ -53,10 +52,12 @@ func TestIndependentParallelRefusalReplies(t *testing.T) {
 		_, _ = fmt.Fprintf(w, "event: message\ndata: {\"jsonrpc\":\"2.0\",\"id\":%s,\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"done\"}]}}\n\n", rpc.ID)
 		return true
 	}
-	a := newTestAdapter(t, newFakeBlobStore(), nil, buildProfileJSON(t, srv.endpoint(), true, []string{"echo"}, []string{"public"}, "none"))
+	a := newTestAdapter(t, newFakeBlobStore(), nil, withControlReplyBudget(t, buildProfileJSON(t, srv.endpoint(), true, []string{"echo"}, []string{"public"}, "none"), 16, 0))
 	handle, _ := openSession(t, a, time.Second)
+	action := echoAction(t, handle)
+	action.ControlReplyLimit = 16
 	before := srv.total()
-	obs, err := a.Invoke(t.Context(), testDispatch(t, echoAction(t, handle), 3*time.Second))
+	obs, err := a.Invoke(t.Context(), testDispatch(t, action, 3*time.Second))
 	if err != nil {
 		t.Fatal(err)
 	}

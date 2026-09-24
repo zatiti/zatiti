@@ -40,9 +40,11 @@ func TestIndependentSessionIDReflectedInRPCReply(t *testing.T) {
 		return true
 	}
 	blobs := newFakeBlobStore()
-	a := newTestAdapter(t, blobs, nil, buildProfileJSON(t, srv.endpoint(), true, []string{"echo"}, []string{"public"}, "none"))
+	a := newTestAdapter(t, blobs, nil, withControlReplyBudget(t, buildProfileJSON(t, srv.endpoint(), true, []string{"echo"}, []string{"public"}, "none"), 1, 0))
 	handle, _ := openSession(t, a, time.Second)
-	_, err := a.Invoke(t.Context(), testDispatch(t, echoAction(t, handle), time.Second))
+	action := echoAction(t, handle)
+	action.ControlReplyLimit = 1
+	_, err := a.Invoke(t.Context(), testDispatch(t, action, time.Second))
 	if err != nil {
 		t.Fatal(err)
 	}

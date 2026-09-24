@@ -34,7 +34,7 @@ const (
 
 	schemaSetupStatusIn = `{"type":"object","additionalProperties":false,"properties":{"scope":{"$ref":"#/$defs/Scope"},"challenge_id":{"type":"string","format":"uuid"}},"required":["scope","challenge_id"]}`
 
-	schemaValidationRecordIn = `{"type":"object","additionalProperties":false,"properties":{"connection_id":{"type":"string","format":"uuid"},"expected_version":{"type":"integer","minimum":1,"maximum":9223372036854775807},"observation":{"$ref":"#/$defs/Observation"}},"required":["connection_id","expected_version","observation"]}`
+	schemaValidationRecordIn = `{"type":"object","additionalProperties":false,"properties":{"connection_id":{"type":"string","format":"uuid"},"expected_version":{"type":"integer","minimum":1,"maximum":9223372036854775807},"observation":{"$ref":"#/$defs/Observation"},"operation_id":{"type":"string","format":"uuid"},"attempt_id":{"type":"string","format":"uuid"}},"required":["connection_id","expected_version","observation"]}`
 
 	// schemaToolsIn mirrors connection.list's paging shape and adds the
 	// required connection_id pin; filters refuse as unsupported at the handler.
@@ -77,9 +77,10 @@ type opSchemas struct {
 // operationSchemaBodies holds every operation catalog entry exactly as the
 // assignment embeds it. Internal operations precede public ones.
 var operationSchemaBodies = map[string]opSchemas{
+	"_connections.tool.resolve": {`{"type":"object","additionalProperties":false,"properties":{"scope":{"$ref":"#/$defs/Scope"},"tool_id":{"type":"string","format":"uuid"}},"required":["scope","tool_id"]}`, `{"type":"object","additionalProperties":false,"properties":{"connection":{"$ref":"#/$defs/Connection"},"tool":{"$ref":"#/$defs/Tool"}},"required":["connection","tool"]}`},
 	// Internal operations.
 	"_connections.activate":          {schemaCandidateIn, schemaActivateOut},
-	"_connections.resolve":           {`{"type":"object","additionalProperties":false,"properties":{"scope":{"$ref":"#/$defs/Scope"},"connection":{"$ref":"#/$defs/Ref"},"tool":{"$ref":"#/$defs/Ref"},"destination":{"type":"string","maxLength":8192}},"required":["scope","connection","tool","destination"]}`, `{"type":"object","additionalProperties":false,"properties":{"connection":{"$ref":"#/$defs/Connection"},"tool":{"$ref":"#/$defs/Tool"}},"required":["connection","tool"]}`},
+	"_connections.resolve":           {`{"type":"object","additionalProperties":false,"properties":{"scope":{"$ref":"#/$defs/Scope"},"connection":{"$ref":"#/$defs/Ref"},"tool":{"$ref":"#/$defs/Ref"},"destination":{"type":"string","maxLength":8192},"operation_id":{"type":"string","format":"uuid"},"action":{"$ref":"#/$defs/Action"}},"required":["scope","connection","tool","destination"]}`, `{"type":"object","additionalProperties":false,"properties":{"connection":{"$ref":"#/$defs/Connection"},"tool":{"$ref":"#/$defs/Tool"},"validation_intent":{"type":"boolean"}},"required":["connection","tool"]}`},
 	"_connections.validate":          {schemaCandidateIn, schemaValidateOut},
 	"_connections.validation.record": {schemaValidationRecordIn, schemaGetOut("Connection")},
 	"_connections.discovery.record":  {schemaValidationRecordIn, schemaGetOut("Connection")},

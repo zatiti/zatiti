@@ -29,6 +29,7 @@ type opMeta struct {
 // the public catalog in schema order. Caller allowlists are the exact sets
 // declared by the implementation assignment.
 var opMetas = []opMeta{
+	{id: "_connections.tool.resolve", visibility: "internal", mode: "query", effect: "local", callers: []string{"execution", "configuration"}},
 	// Internal operations.
 	{id: "_connections.activate", visibility: "internal", mode: "mutation", effect: "local",
 		callers: []string{"configuration", "application"}},
@@ -88,6 +89,7 @@ var opMetas = []opMeta{
 // connection definitions, validation freshness and credential setup
 // challenges.
 type Service struct {
+	mcpProfile  *MCPProfile
 	clock       contract.Clock
 	ids         contract.IDSource
 	ports       contract.Ports
@@ -197,6 +199,7 @@ var handlers = map[string]handlerFunc{
 	"_connections.validate":          handleValidate,
 	"_connections.validation.record": handleValidationRecord,
 	"_connections.discovery.record":  handleDiscoveryRecord,
+	"_connections.tool.resolve":      handleMCPToolResolve,
 
 	"connection.archive":        handleArchive,
 	"connection.create":         handleCreate,

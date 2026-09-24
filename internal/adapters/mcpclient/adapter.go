@@ -149,6 +149,13 @@ func (a *Adapter) call(ctx context.Context, dispatch contract.Dispatch) (contrac
 		return contract.Observation{}, err
 	}
 
+	if digest := act.profileDigest(); digest != "" && digest != a.profile.Digest {
+		return contract.Observation{}, permissionDenied("mcp action profile_digest does not match the installed profile")
+	}
+	if limit := act.controlReplyLimit(); limit < 0 || limit > a.profile.MaxControlReplies || limit > 16 {
+		return contract.Observation{}, permissionDenied("mcp action control_reply_limit exceeds the configured bound")
+	}
+
 	var handle string
 	switch act.Kind {
 	case kindListTools:
@@ -400,9 +407,17 @@ func classifyAttemptError(err error, state *callState) attemptOutcome {
 			msg = err.Error()
 		}
 		return attemptOutcome{
-			requestSent: "yes", confirmation: "unknown",
+			requestSent: primaryRequestSent(captured), confirmation: "unknown",
 			errorCode: "response_oversize", errorMessage: msg, oversize: true,
 		}
+	}
+	if code := state.aborted(); code != "" {
+		sent := primaryRequestSent(captured)
+		confirmation := "unknown"
+		if sent == "no" {
+			confirmation = "authoritative_nonexecution"
+		}
+		return attemptOutcome{requestSent: sent, confirmation: confirmation, errorCode: code, errorMessage: "MCP exchange aborted; no request was retried"}
 	}
 	if errors.Is(err, mcp.ErrSessionMissing) {
 		return attemptOutcome{
@@ -418,7 +433,7 @@ func classifyAttemptError(err error, state *callState) attemptOutcome {
 	if len(captured) == 0 {
 		return attemptOutcome{requestSent: "no", confirmation: "authoritative_nonexecution", errorCode: "transport_error", errorMessage: truncateText(err.Error(), 2048)}
 	}
-	return attemptOutcome{requestSent: "yes", confirmation: "unknown", errorCode: "transport_error", errorMessage: truncateText(err.Error(), 2048)}
+	return attemptOutcome{requestSent: primaryRequestSent(captured), confirmation: "unknown", errorCode: "transport_error", errorMessage: truncateText(err.Error(), 2048)}
 }
 
 // firstStaged returns the staged request record for the first captured

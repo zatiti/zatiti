@@ -48,7 +48,7 @@ func (c *Controller) routeFor(operation contract.ID, op wireOperation, action wi
 		case ownerMemory:
 			return &route{Owner: ownerMemory, JobID: job.ID}
 		case ownerConnections:
-			return &route{Owner: ownerConnections, JobID: job.ID, Connection: action.Connection}
+			return &route{Owner: ownerConnections, JobID: job.ID, Connection: action.Connection, ProbeKind: job.Operation}
 		}
 	}
 	if len(op.CallbackRoute) > 0 {
@@ -138,7 +138,12 @@ func (c *Controller) deliver(ctx context.Context, sess *session, e *entry) {
 		})
 	case ownerConnections:
 		err = c.write(func() error {
-			return c.call(ctx, sess, "_connections.validation.record", validationRecordInput{
+			operation := "_connections.validation.record"
+			if e.Route.ProbeKind == "connection.discover" {
+				operation = "_connections.discovery.record"
+			}
+			return c.call(ctx, sess, operation, validationRecordInput{
+				OperationID: e.OperationID, AttemptID: e.AttemptID,
 				ConnectionID:    e.Route.Connection.ID,
 				ExpectedVersion: e.Route.Connection.Version,
 				Observation:     normalized,
