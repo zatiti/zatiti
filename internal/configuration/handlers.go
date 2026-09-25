@@ -81,14 +81,16 @@ type bindingDefIn struct {
 }
 
 type profileDefIn struct {
-	Executor            string      `json:"executor"`
-	Model               string      `json:"model"`
-	ConnectionID        contract.ID `json:"connection_id"`
-	ProviderDestination string      `json:"provider_destination"`
-	Capabilities        []string    `json:"capabilities"`
-	CostBound           wireMoney   `json:"cost_bound"`
-	Classification      string      `json:"classification"`
-	ContextCapture      string      `json:"context_capture"`
+	Executor            string          `json:"executor"`
+	Model               string          `json:"model"`
+	ConnectionID        contract.ID     `json:"connection_id"`
+	ProviderDestination string          `json:"provider_destination"`
+	Capabilities        []string        `json:"capabilities"`
+	CostBound           wireMoney       `json:"cost_bound"`
+	Classification      string          `json:"classification"`
+	ContextCapture      string          `json:"context_capture"`
+	AdapterProfile      json.RawMessage `json:"adapter_profile,omitempty"`
+	ConnectionVersion   int64           `json:"connection_version,omitempty"`
 }
 
 type orgDefCreateIn struct {
@@ -464,7 +466,7 @@ const (
 	projectColumns = "id, version, installation_id, organization_id, key, name, repositories_json, bindings_json, classification, limits_json, extensions_json, state, created_at, updated_at"
 	workerColumns  = "id, version, installation_id, organization_id, key, name, purpose, instructions, skill_versions_json, bindings_json, profile_json, limits_json, extensions_json, state, created_at, updated_at"
 	bindingColumns = "id, version, installation_id, scope_json, kind, target_id, permissions_json, source_scope_json, destinations_json, state, created_at, updated_at"
-	profileColumns = "id, version, installation_id, executor, model, connection_id, provider_destination, capabilities_json, cost_bound_json, classification, context_capture, state, created_at, updated_at"
+	profileColumns = "id, version, installation_id, executor, model, connection_id, provider_destination, capabilities_json, cost_bound_json, classification, context_capture, adapter_profile_json, connection_version, state, created_at, updated_at"
 )
 
 // ---------- typed create / update / archive ----------
@@ -516,7 +518,8 @@ func handleCreateResource(kind string) handlerFunc {
 				ID: s.ids.New(), Version: 1, Executor: in.Definition.Executor, Model: in.Definition.Model,
 				ConnectionID: in.Definition.ConnectionID, ProviderDestination: in.Definition.ProviderDestination,
 				Capabilities: stringsOrEmpty(in.Definition.Capabilities), CostBound: in.Definition.CostBound,
-				Classification: in.Definition.Classification, ContextCapture: in.Definition.ContextCapture,
+				Classification: in.Definition.Classification, ContextCapture: in.Definition.ContextCapture, AdapterProfile: in.Definition.AdapterProfile,
+				ConnectionVersion: in.Definition.ConnectionVersion,
 			}
 			change = wireChange{Kind: kind, Action: actionCreate, ID: def.ID, Definition: rawDef(def)}
 			resource, scope, draftID = def, in.Scope, in.DraftID
@@ -623,6 +626,7 @@ func handleUpdateResource(kind string) handlerFunc {
 				ProviderDestination: in.Definition.ProviderDestination,
 				Capabilities:        stringsOrEmpty(in.Definition.Capabilities), CostBound: in.Definition.CostBound,
 				Classification: in.Definition.Classification, ContextCapture: in.Definition.ContextCapture,
+				AdapterProfile: in.Definition.AdapterProfile, ConnectionVersion: in.Definition.ConnectionVersion,
 			}
 			change = wireChange{Kind: kind, Action: actionUpdate, ID: in.ID,
 				ExpectedVersion: in.ExpectedVersion, Definition: rawDef(def)}

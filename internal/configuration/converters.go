@@ -203,7 +203,14 @@ func profileDef(r *profileRow) wireExecutionProfile {
 		ID: r.ID, Version: r.Version, Executor: r.Executor, Model: r.Model,
 		ConnectionID: r.ConnectionID, ProviderDestination: r.ProviderDestination,
 		Capabilities: r.Capabilities, Classification: r.Classification,
-		ContextCapture: r.ContextCapture,
+		ContextCapture: r.ContextCapture, AdapterProfile: json.RawMessage(r.AdapterProfileJSON),
+		ConnectionVersion: r.ConnectionVersion,
+	}
+	if r.AdapterProfileJSON == "" {
+		def.AdapterProfile = nil
+	}
+	if r.ConnectionVersion == 0 {
+		def.ConnectionVersion = 0
 	}
 	if r.CostBoundJSON != "" {
 		var money wireMoney

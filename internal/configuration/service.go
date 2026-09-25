@@ -46,6 +46,8 @@ var opMetas = []opMeta{
 		callers: []string{"controller", "application"}},
 	{id: "_configuration.export.record", visibility: "internal", mode: "mutation", submission: false, expectedVersion: true,
 		callers: []string{"controller"}},
+	{id: "_configuration.execution_profile.resolve", visibility: "internal", mode: "query", submission: false,
+		callers: []string{"execution", "effects"}},
 	{id: "_configuration.snapshot", visibility: "internal", mode: "query", submission: false,
 		callers: internalCallersSnapshot},
 	{id: "_configuration.stage", visibility: "internal", mode: "mutation", submission: false,
@@ -240,13 +242,14 @@ type handlerFunc func(ctx context.Context, s *Service, unit contract.Unit, inv c
 
 // handlers is the strict dispatch table; every registered operation has one.
 var handlers = map[string]handlerFunc{
-	"_configuration.activate":       handleActivate,
-	"_configuration.bootstrap":      handleBootstrap,
-	"_configuration.export.prepare": handleExportPrepare,
-	"_configuration.export.record":  handleExportRecord,
-	"_configuration.snapshot":       handleSnapshot,
-	"_configuration.stage":          handleStage,
-	"_configuration.validate":       handleValidate,
+	"_configuration.activate":                  handleActivate,
+	"_configuration.bootstrap":                 handleBootstrap,
+	"_configuration.export.prepare":            handleExportPrepare,
+	"_configuration.export.record":             handleExportRecord,
+	"_configuration.execution_profile.resolve": handleResolveExecutionProfile,
+	"_configuration.snapshot":                  handleSnapshot,
+	"_configuration.stage":                     handleStage,
+	"_configuration.validate":                  handleValidate,
 
 	"binding.archive": handleArchive("binding"),
 	"binding.create":  handleCreateResource("binding"),

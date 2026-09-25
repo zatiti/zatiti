@@ -466,9 +466,13 @@ func (s *Service) applyProfileChange(ctx context.Context, unit contract.Unit, c 
 			Model: def.Model, ConnectionID: def.ConnectionID, ProviderDestination: def.ProviderDestination,
 			Capabilities: def.Capabilities, CostBoundJSON: marshalJSON(def.CostBound),
 			Classification: def.Classification, ContextCapture: def.ContextCapture,
+			AdapterProfileJSON: string(def.AdapterProfile), ConnectionVersion: def.ConnectionVersion,
 			State: stateActive, CreatedAt: now, UpdatedAt: now,
 		}
 		if err := insertProfile(ctx, unit, row); err != nil {
+			return "", "", err
+		}
+		if err := insertProfileVersion(ctx, unit, row); err != nil {
 			return "", "", err
 		}
 		return "", marshalJSON(def), nil
@@ -494,6 +498,8 @@ func (s *Service) applyProfileChange(ctx context.Context, unit contract.Unit, c 
 		row.CostBoundJSON = marshalJSON(def.CostBound)
 		row.Classification = def.Classification
 		row.ContextCapture = def.ContextCapture
+		row.AdapterProfileJSON = string(def.AdapterProfile)
+		row.ConnectionVersion = def.ConnectionVersion
 	case actionArchive:
 		row.State = stateArchived
 	case actionDelete:
@@ -501,6 +507,9 @@ func (s *Service) applyProfileChange(ctx context.Context, unit contract.Unit, c 
 	row.Version = c.ExpectedVersion + 1
 	row.UpdatedAt = now
 	if err := writeProfile(ctx, unit, row); err != nil {
+		return "", "", err
+	}
+	if err := insertProfileVersion(ctx, unit, row); err != nil {
 		return "", "", err
 	}
 	if c.Action == actionDelete {

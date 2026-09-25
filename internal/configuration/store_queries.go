@@ -276,10 +276,10 @@ func deleteBinding(ctx context.Context, unit contract.Unit, id contract.ID) erro
 func insertProfile(ctx context.Context, unit contract.Unit, r *profileRow) error {
 	capabilities := marshalJSON(r.Capabilities)
 	_, err := unit.ExecContext(ctx,
-		"INSERT INTO configuration_execution_profiles (id, version, installation_id, executor, model, connection_id, provider_destination, capabilities_json, cost_bound_json, classification, context_capture, state, created_at, updated_at) "+
-			"VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+		"INSERT INTO configuration_execution_profiles (id, version, installation_id, executor, model, connection_id, provider_destination, capabilities_json, cost_bound_json, classification, context_capture, adapter_profile_json, connection_version, state, created_at, updated_at) "+
+			"VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
 		r.ID, r.Version, r.InstallationID, r.Executor, r.Model, r.ConnectionID, r.ProviderDestination,
-		jsonOrArray(capabilities), r.CostBoundJSON, r.Classification, r.ContextCapture, r.State,
+		jsonOrArray(capabilities), r.CostBoundJSON, r.Classification, r.ContextCapture, jsonOrNull(r.AdapterProfileJSON), nullableVersion(r.ConnectionVersion), r.State,
 		r.CreatedAt.Format(timeLayout), r.UpdatedAt.Format(timeLayout))
 	return err
 }
@@ -288,9 +288,9 @@ func insertProfile(ctx context.Context, unit contract.Unit, r *profileRow) error
 func writeProfile(ctx context.Context, unit contract.Unit, r *profileRow) error {
 	capabilities := marshalJSON(r.Capabilities)
 	_, err := unit.ExecContext(ctx,
-		"UPDATE configuration_execution_profiles SET version = ?, executor = ?, model = ?, connection_id = ?, provider_destination = ?, capabilities_json = ?, cost_bound_json = ?, classification = ?, context_capture = ?, state = ?, updated_at = ? WHERE id = ? AND installation_id = ?",
+		"UPDATE configuration_execution_profiles SET version = ?, executor = ?, model = ?, connection_id = ?, provider_destination = ?, capabilities_json = ?, cost_bound_json = ?, classification = ?, context_capture = ?, adapter_profile_json = ?, connection_version = ?, state = ?, updated_at = ? WHERE id = ? AND installation_id = ?",
 		r.Version, r.Executor, r.Model, r.ConnectionID, r.ProviderDestination,
-		jsonOrArray(capabilities), r.CostBoundJSON, r.Classification, r.ContextCapture, r.State,
+		jsonOrArray(capabilities), r.CostBoundJSON, r.Classification, r.ContextCapture, jsonOrNull(r.AdapterProfileJSON), nullableVersion(r.ConnectionVersion), r.State,
 		r.UpdatedAt.Format(timeLayout), r.ID, r.InstallationID)
 	return err
 }
@@ -698,4 +698,22 @@ func marshalDecisionReqs(reqs []wireDecisionRequirement) (string, error) {
 		return "", internalError("decision encoding failed")
 	}
 	return string(raw), nil
+}
+
+func nullableVersion(v int64) any {
+	if v <= 0 {
+		return nil
+	}
+	return v
+}
+
+// fetchProfileVersionByID returns one immutable execution-profile snapshot.
+func fetchProfileVersionByID(ctx context.Context, unit contract.Unit, install, id contract.ID, version int64) (*profileRow, error) {
+	return scanProfile(unit.QueryRowContext(ctx, "SELECT id, version, installation_id, executor, model, connection_id, provider_destination, capabilities_json, cost_bound_json, classification, context_capture, adapter_profile_json, connection_version, state, created_at, updated_at FROM configuration_execution_profile_versions WHERE installation_id = ? AND id = ? AND version = ?", install, id, version))
+}
+
+// insertProfileVersion records a definition snapshot once; historical rows are never updated.
+func insertProfileVersion(ctx context.Context, unit contract.Unit, r *profileRow) error {
+	_, err := unit.ExecContext(ctx, "INSERT INTO configuration_execution_profile_versions (id, version, installation_id, executor, model, connection_id, provider_destination, capabilities_json, cost_bound_json, classification, context_capture, adapter_profile_json, connection_version, state, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", r.ID, r.Version, r.InstallationID, r.Executor, r.Model, r.ConnectionID, r.ProviderDestination, jsonOrArray(marshalJSON(r.Capabilities)), r.CostBoundJSON, r.Classification, r.ContextCapture, jsonOrNull(r.AdapterProfileJSON), nullableVersion(r.ConnectionVersion), r.State, r.CreatedAt.Format(timeLayout), r.UpdatedAt.Format(timeLayout))
+	return err
 }
