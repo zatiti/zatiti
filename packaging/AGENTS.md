@@ -1,6 +1,6 @@
 # Implementation assignment: `packaging`
 
-Generated specification revision 11; source digest `6b42c206cb4879bf4557a29ef565c2de51e2c2ad259ba1a70113aeb7f5fbec85`. This file is committed implementation context. Do not independently edit it. Everything required from the product specification and adjacent interfaces is embedded below; no RFC copy is required.
+Generated specification revision 12; source digest `835f0622199660a7b90674e1e0557ca713d5abff0a60b93ab74ed9cab04b178a`. This file is committed implementation context. Do not independently edit it. Everything required from the product specification and adjacent interfaces is embedded below; no RFC copy is required.
 
 ## Mission and scope
 
@@ -24,7 +24,7 @@ Outgoing owner calls: none; use only declared Go dependency interfaces. Each exa
 
 ## Shared foundation contract
 
-# Frozen implementation contract, revision 11
+# Frozen implementation contract, revision 12
 
 These decisions complete the product specification and bind every scope. Report contradictions with an affected-dependency list and proposed coordinated revision; do not change another owner's interface locally.
 
@@ -445,6 +445,23 @@ The checked-in `internal/adapters/responses` adapter created a provider conversa
 ## Local decision tool schemas (revision 3)
 
 `ReplyProposal { text }`, `ClarifyProposal { question }`, `ReportOutputsProposal { bindings: [{name, artifact}] }` and `CycleDecisionProposal { decision: continue|wait|escalate|done, reason, next_wake? }` are frozen in `docs/implementation/operations.json`'s `$defs` (via `tools/specgen/model.py`) as `LocalDecisionTool`, a `oneOf` over the four. They are the sealed names/inputs contract-proposals.md section 4 requires before P16 interprets model output: execution-local proposals the context builder registers as non-provider tool definitions, never routed through a `connections.Tool`/adapter and never given a provider operation mapping. A final `reply` alone may complete a chat turn; it never implicitly fulfills a task's required outputs, which only `report_outputs` (bound through `_tasks.evidence.record`) can do.
+
+
+## Revision 12 — provider profile and stateless turn contracts
+
+`zatiti.responses/v1`, `zatiti.responses.action/v1`, and `zatiti.responses.evidence/v1` remain immutable compatibility schemas. New profiles use `zatiti.responses/v2`; actions and evidence use `/v2`. The V2 profile requires `provider` (`openai`, `openrouter`, `experiential`) and `session_mode` (`provider_conversation`, `stateless`) and a strict provider-specific `routing` object, while retaining endpoint, model, connection, token/byte/time limits, currency, rates, enforcement and capability evidence. OpenAI uses `provider_conversation`; OpenRouter and Experiential use `stateless`. Provider and protocol revision must agree. Fixed provider endpoint presets cannot be overridden by model strings or arbitrary routing keys.
+
+V2 action branches are discriminated by `session_mode`: conversation mode requires a nonempty provider-issued `session_handle`; stateless mode forbids both `session_handle` and `continuation_reference`. Optional `session_id` is a bounded controller-generated grouping label with no prompt or secret material. `prepare_session` exists only for conversation mode. V2 evidence carries the same mode distinction. Every adapter invocation remains exactly one physical request; unknown outcomes are never retried. V1 persisted profile/action/evidence remains decodable for replay and recovery.
+
+Hosted `ExecutionProfile` gains optional-on-read `adapter_profile` and `connection_version`; legacy profiles remain readable but require explicit import/resolution before new hosted dispatch. Editable new profiles require both. The nested profile must agree with legacy model, connection, destination and cost fields. Immutable profile versions are retained for pending work; capability evidence binds the canonical digest of the complete adapter profile, so changing any model, route, endpoint, rate or bound invalidates it. `Action.execution_profile` is an optional exact VersionRef. Trusted `Dispatch.adapter_profile` is optional raw JSON populated only by Effects from `_configuration.execution_profile.resolve`; public callers cannot inject it. Effects persists the exact secret-free profile with the operation and returns it on claim/reconciliation, then rechecks current connection authority before send. Historical work never resolves a newer worker selection.
+
+The controller assembly dependency struct gains a required `Context contract.ContextPerformer` field for hosted context work; it does not widen the common domain `contract.Dependencies`. The trusted context seam is `ContextPlan {ID, TurnID, ExpectedVersion, Generation, Refs []ArtifactRef, ConfigurationRevision, ByteBound, TokenBound}` and `ContextPerformer.PerformContext(ctx, plan) (json.RawMessage, error)`. Execution implements it by reading the persisted immutable recipe, building, validating and staging the complete context outside a write Unit. `_execution.context.commit` performs current-authority/generation/reference checks and publication bookkeeping. Controller receives this injected capability; there is no model-callable context IO operation.
+
+`_execution.turn.observation` is a controller-only mutation with input `{turn_id, step_index, operation_id, observation}` and output `WorkerTurn`. It authenticates the persisted effects callback route, fences the turn generation/step and deduplicates by operation ID. Task-bound compatibility may share the logic, while task success continues to require its verifier.
+
+`model.provider.list` is an authenticated scoped query owned by connections. It returns the fixed OpenAI/OpenRouter/Experiential IDs, display names, endpoint presets, supported session mode and API-key setup mode. It performs no catalog request. Saving uses the existing configuration draft/validate/plan/apply flow; provider credential validation is a separate bounded `connection.validate` job and does not qualify a model/route profile.
+
+Normalized provider usage may include requested and served model IDs, serving provider, provider request ID, and exact source decimal cost evidence. Convert decimal USD to integer micro-units with checked integer/rational arithmetic and upward rounding, preserving the original decimal. No floating point is permitted. Missing, invalid or overflowing cost, disputed route, or unpriced BYOK upstream cost stays unknown/advisory; a gateway platform cost of zero is not evidence of zero upstream charge.
 
 ## Owned product requirements
 

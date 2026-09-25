@@ -2067,5 +2067,23 @@
     ],
     "kind": "requirement",
     "text": "The hosted Serenity mode is the first Mac release memory target and needs no bundled Serenity process/read facade. Its public authenticated interface must expose verifiable build/capabilities, selected grant/brain identity, full scoped claim and lineage semantics, authoritative write disposition, enforceable per-call cost/disclosure bounds, and immutable brain revision/export/recovery evidence. The free tier and account quota do not substitute for these guarantees. Both native clean-host runs must use the selected pre-existing personal brain and observe a real memory effect and provider reply through the linked signed release; any unavailable capability blocks release."
+  },
+  {
+    "id": "R12-PROVIDER-CONTRACTS",
+    "section": "provider model revision 12",
+    "owner": "configuration",
+    "participants": [
+      "connections",
+      "effects",
+      "execution",
+      "accounting",
+      "controller",
+      "responses",
+      "desktop",
+      "integration",
+      "qualification"
+    ],
+    "kind": "requirement",
+    "text": "Revision 12 freezes strict Responses v2 provider/session schemas for OpenAI conversation mode and stateless OpenRouter/Experiential gateway modes; immutable v1 schemas remain readable. Hosted execution profiles pin a complete secret-free adapter profile and exact connection version. Effects persists that exact profile with every operation and returns it during claim/reconciliation. Controller injects execution-owned context performance and records turn observations without task fabrication. Provider metadata is a fixed local query. Provider cost evidence preserves exact source decimal and converts to integer micro-units with checked arithmetic and upward rounding; unknown/unpriced BYOK cost remains advisory."
   }
 ]

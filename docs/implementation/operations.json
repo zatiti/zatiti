@@ -1,5 +1,5 @@
 {
-  "revision": 11,
+  "revision": 12,
   "$defs": {
     "Scope": {
       "type": "object",
@@ -621,6 +621,116 @@
         "classification"
       ]
     },
+    "ProviderDescriptor": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "enum": [
+            "openai",
+            "openrouter",
+            "experiential"
+          ]
+        },
+        "display_name": {
+          "type": "string",
+          "maxLength": 8192
+        },
+        "default_endpoint": {
+          "type": "string",
+          "maxLength": 8192
+        },
+        "session_mode": {
+          "type": "string",
+          "enum": [
+            "provider_conversation",
+            "stateless"
+          ]
+        },
+        "credential_setup": {
+          "type": "string",
+          "enum": [
+            "api_key"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "display_name",
+        "default_endpoint",
+        "session_mode",
+        "credential_setup"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "id": {
+                "const": "openai"
+              }
+            },
+            "required": [
+              "id"
+            ]
+          },
+          "then": {
+            "properties": {
+              "default_endpoint": {
+                "const": "https://api.openai.com/v1/responses"
+              },
+              "session_mode": {
+                "const": "provider_conversation"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "id": {
+                "const": "openrouter"
+              }
+            },
+            "required": [
+              "id"
+            ]
+          },
+          "then": {
+            "properties": {
+              "default_endpoint": {
+                "const": "https://openrouter.ai/api/v1/responses"
+              },
+              "session_mode": {
+                "const": "stateless"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "id": {
+                "const": "experiential"
+              }
+            },
+            "required": [
+              "id"
+            ]
+          },
+          "then": {
+            "properties": {
+              "default_endpoint": {
+                "const": "https://api.experientiallabs.ai/v1/responses"
+              },
+              "session_mode": {
+                "const": "stateless"
+              }
+            }
+          }
+        }
+      ]
+    },
     "ExecutionProfile": {
       "type": "object",
       "additionalProperties": false,
@@ -679,6 +789,14 @@
             "partial",
             "advisory"
           ]
+        },
+        "adapter_profile": {
+          "$ref": "#/$defs/ResponsesProfile"
+        },
+        "connection_version": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9223372036854775807
         }
       },
       "required": [
@@ -1944,6 +2062,9 @@
         },
         "cost_bound": {
           "$ref": "#/$defs/Money"
+        },
+        "execution_profile": {
+          "$ref": "#/$defs/Ref"
         }
       },
       "required": [
@@ -3870,6 +3991,10 @@
           "type": "string",
           "maxLength": 8192
         },
+        "adapter_profile": {
+          "type": "object",
+          "description": "Inert JSON data bounded by the enclosing size limit; never executable authority."
+        },
         "callback_route": {
           "$ref": "#/$defs/CallbackRoute"
         }
@@ -4538,6 +4663,45 @@
           "type": "string",
           "minLength": 0,
           "maxLength": 1024
+        },
+        "requested_model": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "served_model": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "serving_provider": {
+          "type": "string",
+          "enum": [
+            "openai",
+            "openrouter",
+            "experiential"
+          ]
+        },
+        "provider_request_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "source_cost_decimal": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,18})?$",
+          "maxLength": 64
+        },
+        "source_cost_currency": {
+          "$ref": "#/$defs/Adapter_Currency"
+        },
+        "source_cost_kind": {
+          "type": "string",
+          "enum": [
+            "provider_billed",
+            "gateway_platform",
+            "upstream_estimate"
+          ]
         }
       },
       "required": [
@@ -7793,6 +7957,681 @@
       ],
       "$schema": "https://json-schema.org/draft/2020-12/schema"
     },
+    "Adapter_ResponsesProfileV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema": {
+          "const": "zatiti.responses/v2",
+          "type": "string"
+        },
+        "endpoint": {
+          "$ref": "#/$defs/Adapter_HTTPSURL"
+        },
+        "model": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "connection_id": {
+          "$ref": "#/$defs/Adapter_ID"
+        },
+        "max_input_tokens": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10000000
+        },
+        "max_output_tokens": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000000
+        },
+        "max_response_bytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 268435456
+        },
+        "timeout_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1800
+        },
+        "currency": {
+          "$ref": "#/$defs/Adapter_Currency"
+        },
+        "input_rate": {
+          "$ref": "#/$defs/Adapter_RationalRate"
+        },
+        "output_rate": {
+          "$ref": "#/$defs/Adapter_RationalRate"
+        },
+        "enforcement": {
+          "$ref": "#/$defs/Adapter_BoundEnforcement"
+        },
+        "capability_evidence": {
+          "$ref": "#/$defs/Adapter_CapabilityEvidence"
+        },
+        "provider": {
+          "type": "string",
+          "enum": [
+            "openai",
+            "openrouter",
+            "experiential"
+          ]
+        },
+        "session_mode": {
+          "type": "string",
+          "enum": [
+            "provider_conversation",
+            "stateless"
+          ]
+        },
+        "routing": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "schema",
+        "endpoint",
+        "model",
+        "connection_id",
+        "max_input_tokens",
+        "max_output_tokens",
+        "max_response_bytes",
+        "timeout_seconds",
+        "currency",
+        "input_rate",
+        "output_rate",
+        "enforcement",
+        "capability_evidence",
+        "provider",
+        "session_mode",
+        "routing"
+      ],
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "provider": {
+                "const": "openai"
+              }
+            },
+            "required": [
+              "provider"
+            ]
+          },
+          "then": {
+            "properties": {
+              "session_mode": {
+                "const": "provider_conversation"
+              },
+              "routing": {
+                "maxProperties": 0
+              },
+              "endpoint": {
+                "const": "https://api.openai.com/v1/responses",
+                "type": "string"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "provider": {
+                "const": "openrouter"
+              }
+            },
+            "required": [
+              "provider"
+            ]
+          },
+          "then": {
+            "properties": {
+              "session_mode": {
+                "const": "stateless"
+              },
+              "routing": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "only": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128
+                    },
+                    "minItems": 1,
+                    "maxItems": 16
+                  },
+                  "allow_fallbacks": {
+                    "const": false,
+                    "type": "boolean"
+                  },
+                  "require_parameters": {
+                    "const": true,
+                    "type": "boolean"
+                  },
+                  "privacy": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "no_training",
+                        "data_policy",
+                        "zero_retention"
+                      ]
+                    },
+                    "minItems": 0,
+                    "maxItems": 8
+                  },
+                  "price_ceiling": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "currency": {
+                        "const": "USD",
+                        "type": "string"
+                      },
+                      "input_per_million": {
+                        "type": "string",
+                        "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,18})?$",
+                        "maxLength": 64
+                      },
+                      "output_per_million": {
+                        "type": "string",
+                        "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,18})?$",
+                        "maxLength": 64
+                      }
+                    },
+                    "required": [
+                      "currency",
+                      "input_per_million",
+                      "output_per_million"
+                    ]
+                  }
+                },
+                "required": [
+                  "only",
+                  "allow_fallbacks",
+                  "require_parameters"
+                ]
+              },
+              "endpoint": {
+                "const": "https://openrouter.ai/api/v1/responses",
+                "type": "string"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "provider": {
+                "const": "experiential"
+              }
+            },
+            "required": [
+              "provider"
+            ]
+          },
+          "then": {
+            "properties": {
+              "session_mode": {
+                "const": "stateless"
+              },
+              "routing": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "gateway": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "retry": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                          "max_attempts_per_route": {
+                            "const": 1,
+                            "type": "integer"
+                          },
+                          "max_total_attempts": {
+                            "const": 1,
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "max_attempts_per_route",
+                          "max_total_attempts"
+                        ]
+                      },
+                      "backoff": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                          "type": {
+                            "const": "none",
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "type"
+                        ]
+                      },
+                      "routing": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                          "allow_fallbacks": {
+                            "const": false,
+                            "type": "boolean"
+                          }
+                        },
+                        "required": [
+                          "allow_fallbacks"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "retry",
+                      "backoff",
+                      "routing"
+                    ]
+                  },
+                  "route_id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256
+                  },
+                  "privacy": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "no_training",
+                        "data_policy",
+                        "zero_retention"
+                      ]
+                    },
+                    "minItems": 0,
+                    "maxItems": 8
+                  }
+                },
+                "required": [
+                  "gateway"
+                ]
+              },
+              "endpoint": {
+                "const": "https://api.experientiallabs.ai/v1/responses",
+                "type": "string"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "Adapter_ResponsesPrepareSessionParametersV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema": {
+          "const": "zatiti.responses.action/v2",
+          "type": "string"
+        },
+        "kind": {
+          "const": "prepare_session",
+          "type": "string"
+        },
+        "session_mode": {
+          "type": "string",
+          "enum": [
+            "provider_conversation",
+            "stateless"
+          ],
+          "const": "provider_conversation"
+        },
+        "session_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        }
+      },
+      "required": [
+        "schema",
+        "kind",
+        "session_mode"
+      ]
+    },
+    "Adapter_ResponsesModelStepParametersV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema": {
+          "const": "zatiti.responses.action/v2",
+          "type": "string"
+        },
+        "kind": {
+          "const": "model_step",
+          "type": "string"
+        },
+        "session_mode": {
+          "type": "string",
+          "enum": [
+            "provider_conversation",
+            "stateless"
+          ]
+        },
+        "session_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "context_artifact": {
+          "$ref": "#/$defs/Adapter_ArtifactRef"
+        },
+        "max_output_tokens": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000000
+        },
+        "tool_contract_versions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Adapter_VersionRef"
+          },
+          "minItems": 0,
+          "maxItems": 256
+        },
+        "session_handle": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "continuation_reference": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        }
+      },
+      "required": [
+        "schema",
+        "kind",
+        "session_mode",
+        "context_artifact",
+        "max_output_tokens",
+        "tool_contract_versions"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "session_mode": {
+                "const": "provider_conversation"
+              }
+            },
+            "required": [
+              "session_mode"
+            ]
+          },
+          "then": {
+            "required": [
+              "session_handle"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "session_mode": {
+                "const": "stateless"
+              }
+            },
+            "required": [
+              "session_mode"
+            ]
+          },
+          "then": {
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "session_handle"
+                  ]
+                },
+                {
+                  "required": [
+                    "continuation_reference"
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "Adapter_ResponsesParametersV2": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/Adapter_ResponsesPrepareSessionParametersV2"
+        },
+        {
+          "$ref": "#/$defs/Adapter_ResponsesModelStepParametersV2"
+        }
+      ]
+    },
+    "Adapter_ResponsesEvidenceV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema": {
+          "const": "zatiti.responses.evidence/v2",
+          "type": "string"
+        },
+        "physical_call": {
+          "$ref": "#/$defs/Adapter_PhysicalCallEvidence"
+        },
+        "session_handle": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "response_id": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 1024
+        },
+        "output": {
+          "$ref": "#/$defs/Adapter_ModelOutput"
+        },
+        "staged_outputs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Adapter_StagedOutput"
+          },
+          "minItems": 0,
+          "maxItems": 256
+        },
+        "output_artifacts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Adapter_ArtifactRef"
+          },
+          "minItems": 0,
+          "maxItems": 256
+        },
+        "session_mode": {
+          "type": "string",
+          "enum": [
+            "provider_conversation",
+            "stateless"
+          ]
+        },
+        "session_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        }
+      },
+      "required": [
+        "schema",
+        "physical_call",
+        "staged_outputs",
+        "session_mode"
+      ],
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "session_mode": {
+                "const": "provider_conversation"
+              }
+            },
+            "required": [
+              "session_mode"
+            ]
+          },
+          "then": {
+            "required": [
+              "session_handle"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "session_mode": {
+                "const": "stateless"
+              }
+            },
+            "required": [
+              "session_mode"
+            ]
+          },
+          "then": {
+            "not": {
+              "required": [
+                "session_handle"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "Adapter_ProviderDescriptor": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "enum": [
+            "openai",
+            "openrouter",
+            "experiential"
+          ]
+        },
+        "display_name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "default_endpoint": {
+          "$ref": "#/$defs/Adapter_HTTPSURL"
+        },
+        "session_mode": {
+          "type": "string",
+          "enum": [
+            "provider_conversation",
+            "stateless"
+          ]
+        },
+        "credential_setup": {
+          "const": "api_key",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "display_name",
+        "default_endpoint",
+        "session_mode",
+        "credential_setup"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "id": {
+                "const": "openai"
+              }
+            },
+            "required": [
+              "id"
+            ]
+          },
+          "then": {
+            "properties": {
+              "default_endpoint": {
+                "const": "https://api.openai.com/v1/responses",
+                "type": "string"
+              },
+              "session_mode": {
+                "const": "provider_conversation"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "id": {
+                "const": "openrouter"
+              }
+            },
+            "required": [
+              "id"
+            ]
+          },
+          "then": {
+            "properties": {
+              "default_endpoint": {
+                "const": "https://openrouter.ai/api/v1/responses",
+                "type": "string"
+              },
+              "session_mode": {
+                "const": "stateless"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "id": {
+                "const": "experiential"
+              }
+            },
+            "required": [
+              "id"
+            ]
+          },
+          "then": {
+            "properties": {
+              "default_endpoint": {
+                "const": "https://api.experientiallabs.ai/v1/responses",
+                "type": "string"
+              },
+              "session_mode": {
+                "const": "stateless"
+              }
+            }
+          }
+        }
+      ]
+    },
     "Fault": {
       "type": "object",
       "additionalProperties": false,
@@ -8525,6 +9364,562 @@
         "id",
         "version",
         "principal_id"
+      ]
+    },
+    "ResponsesCapabilityEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "artifact": {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        "adapter_version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "source_revision": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "protocol_revision": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "profile_digest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "qualified_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "capabilities": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "minItems": 0,
+          "maxItems": 128
+        },
+        "limitations": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048
+          },
+          "minItems": 0,
+          "maxItems": 128
+        }
+      },
+      "required": [
+        "artifact",
+        "adapter_version",
+        "source_revision",
+        "protocol_revision",
+        "profile_digest",
+        "qualified_at",
+        "capabilities",
+        "limitations"
+      ]
+    },
+    "ResponsesRate": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "numerator_micro_units": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
+        "denominator_units": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9223372036854775807
+        },
+        "unit": {
+          "type": "string",
+          "enum": [
+            "input_token",
+            "output_token",
+            "request",
+            "byte",
+            "second"
+          ]
+        }
+      },
+      "required": [
+        "numerator_micro_units",
+        "denominator_units",
+        "unit"
+      ]
+    },
+    "ResponsesEnforcement": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "cost": {
+          "type": "string",
+          "enum": [
+            "enforced",
+            "advisory",
+            "unsupported"
+          ]
+        },
+        "disclosure": {
+          "type": "string",
+          "enum": [
+            "enforced",
+            "advisory",
+            "unsupported"
+          ]
+        },
+        "maximum_cost": {
+          "$ref": "#/$defs/Money"
+        },
+        "provider_destinations": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "uri",
+            "pattern": "^https://",
+            "maxLength": 2048
+          },
+          "minItems": 0,
+          "maxItems": 64
+        }
+      },
+      "required": [
+        "cost",
+        "disclosure",
+        "maximum_cost",
+        "provider_destinations"
+      ]
+    },
+    "ResponsesRoutingOpenRouter": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "only": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 8192
+          },
+          "minItems": 1,
+          "maxItems": 16
+        },
+        "allow_fallbacks": {
+          "const": false,
+          "type": "boolean"
+        },
+        "require_parameters": {
+          "const": true,
+          "type": "boolean"
+        },
+        "price_ceiling": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "currency": {
+              "const": "USD",
+              "type": "string"
+            },
+            "input_per_million": {
+              "type": "string",
+              "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,18})?$",
+              "maxLength": 64
+            },
+            "output_per_million": {
+              "type": "string",
+              "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,18})?$",
+              "maxLength": 64
+            }
+          },
+          "required": [
+            "currency",
+            "input_per_million",
+            "output_per_million"
+          ]
+        },
+        "privacy": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "no_training",
+              "data_policy",
+              "zero_retention"
+            ]
+          },
+          "maxItems": 8
+        }
+      },
+      "required": [
+        "only",
+        "allow_fallbacks",
+        "require_parameters"
+      ]
+    },
+    "ResponsesRoutingExperiential": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "gateway": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "retry": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "max_attempts_per_route": {
+                  "const": 1,
+                  "type": "integer"
+                },
+                "max_total_attempts": {
+                  "const": 1,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "max_attempts_per_route",
+                "max_total_attempts"
+              ]
+            },
+            "backoff": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "type": {
+                  "const": "none",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type"
+              ]
+            },
+            "routing": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "allow_fallbacks": {
+                  "const": false,
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "allow_fallbacks"
+              ]
+            }
+          },
+          "required": [
+            "retry",
+            "backoff",
+            "routing"
+          ]
+        },
+        "route_id": {
+          "type": "string",
+          "maxLength": 8192
+        },
+        "privacy": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "no_training",
+              "data_policy",
+              "zero_retention"
+            ]
+          },
+          "maxItems": 8
+        }
+      },
+      "required": [
+        "gateway"
+      ]
+    },
+    "ResponsesProfileV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema": {
+          "const": "zatiti.responses/v1",
+          "type": "string"
+        },
+        "endpoint": {
+          "type": "string",
+          "format": "uri",
+          "pattern": "^https://",
+          "maxLength": 2048
+        },
+        "model": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "connection_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "max_input_tokens": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10000000
+        },
+        "max_output_tokens": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000000
+        },
+        "max_response_bytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 268435456
+        },
+        "timeout_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1800
+        },
+        "currency": {
+          "type": "string",
+          "pattern": "^[A-Z]{3}$"
+        },
+        "input_rate": {
+          "$ref": "#/$defs/ResponsesRate"
+        },
+        "output_rate": {
+          "$ref": "#/$defs/ResponsesRate"
+        },
+        "enforcement": {
+          "$ref": "#/$defs/ResponsesEnforcement"
+        },
+        "capability_evidence": {
+          "$ref": "#/$defs/ResponsesCapabilityEvidence"
+        }
+      },
+      "required": [
+        "schema",
+        "endpoint",
+        "model",
+        "connection_id",
+        "max_input_tokens",
+        "max_output_tokens",
+        "max_response_bytes",
+        "timeout_seconds",
+        "currency",
+        "input_rate",
+        "output_rate",
+        "enforcement",
+        "capability_evidence"
+      ]
+    },
+    "ResponsesProfileV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema": {
+          "const": "zatiti.responses/v2",
+          "type": "string"
+        },
+        "endpoint": {
+          "type": "string",
+          "format": "uri",
+          "pattern": "^https://",
+          "maxLength": 2048
+        },
+        "model": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "connection_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "max_input_tokens": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10000000
+        },
+        "max_output_tokens": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000000
+        },
+        "max_response_bytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 268435456
+        },
+        "timeout_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1800
+        },
+        "currency": {
+          "type": "string",
+          "pattern": "^[A-Z]{3}$"
+        },
+        "input_rate": {
+          "$ref": "#/$defs/ResponsesRate"
+        },
+        "output_rate": {
+          "$ref": "#/$defs/ResponsesRate"
+        },
+        "enforcement": {
+          "$ref": "#/$defs/ResponsesEnforcement"
+        },
+        "capability_evidence": {
+          "$ref": "#/$defs/ResponsesCapabilityEvidence"
+        },
+        "provider": {
+          "type": "string",
+          "enum": [
+            "openai",
+            "openrouter",
+            "experiential"
+          ]
+        },
+        "session_mode": {
+          "type": "string",
+          "enum": [
+            "provider_conversation",
+            "stateless"
+          ]
+        },
+        "routing": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {},
+              "required": []
+            },
+            {
+              "$ref": "#/$defs/ResponsesRoutingOpenRouter"
+            },
+            {
+              "$ref": "#/$defs/ResponsesRoutingExperiential"
+            }
+          ]
+        }
+      },
+      "required": [
+        "schema",
+        "endpoint",
+        "model",
+        "connection_id",
+        "max_input_tokens",
+        "max_output_tokens",
+        "max_response_bytes",
+        "timeout_seconds",
+        "currency",
+        "input_rate",
+        "output_rate",
+        "enforcement",
+        "capability_evidence",
+        "provider",
+        "session_mode",
+        "routing"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "provider": {
+                "const": "openai"
+              }
+            },
+            "required": [
+              "provider"
+            ]
+          },
+          "then": {
+            "properties": {
+              "session_mode": {
+                "const": "provider_conversation"
+              },
+              "endpoint": {
+                "const": "https://api.openai.com/v1/responses"
+              },
+              "routing": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {},
+                "required": []
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "provider": {
+                "const": "openrouter"
+              }
+            },
+            "required": [
+              "provider"
+            ]
+          },
+          "then": {
+            "properties": {
+              "session_mode": {
+                "const": "stateless"
+              },
+              "endpoint": {
+                "const": "https://openrouter.ai/api/v1/responses"
+              },
+              "routing": {
+                "$ref": "#/$defs/ResponsesRoutingOpenRouter"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "provider": {
+                "const": "experiential"
+              }
+            },
+            "required": [
+              "provider"
+            ]
+          },
+          "then": {
+            "properties": {
+              "session_mode": {
+                "const": "stateless"
+              },
+              "endpoint": {
+                "const": "https://api.experientiallabs.ai/v1/responses"
+              },
+              "routing": {
+                "$ref": "#/$defs/ResponsesRoutingExperiential"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "ResponsesProfile": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/ResponsesProfileV1"
+        },
+        {
+          "$ref": "#/$defs/ResponsesProfileV2"
+        }
       ]
     }
   },
@@ -12095,6 +13490,14 @@
                   "partial",
                   "advisory"
                 ]
+              },
+              "adapter_profile": {
+                "$ref": "#/$defs/ResponsesProfile"
+              },
+              "connection_version": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9223372036854775807
               }
             },
             "required": [
@@ -12362,6 +13765,14 @@
                   "partial",
                   "advisory"
                 ]
+              },
+              "adapter_profile": {
+                "$ref": "#/$defs/ResponsesProfile"
+              },
+              "connection_version": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9223372036854775807
               }
             },
             "required": [
@@ -25179,6 +26590,9 @@
           },
           "callback_route": {
             "$ref": "#/$defs/CallbackRoute"
+          },
+          "execution_profile": {
+            "$ref": "#/$defs/Ref"
           }
         },
         "required": [
@@ -25199,7 +26613,7 @@
           "resource"
         ]
       },
-      "behavior": "Persist immutable action and logical effect for hosted steps/memory/probes/evaluation; required decisions produce awaiting_review. No physical call here. callback_route is an explicit controller-owned routing reference (worker turn/step or job id), persisted alongside the action and returned at claim; adapters never receive it. The controller resolves callback routing from this persisted route, never by inserting an undeclared attempt_id into strict adapter parameters.",
+      "behavior": "Persist immutable action and logical effect for hosted steps/memory/probes/evaluation; required decisions produce awaiting_review. No physical call here. callback_route is an explicit controller-owned routing reference (worker turn/step or job id), persisted alongside the action and returned at claim; adapters never receive it. The controller resolves callback routing from this persisted route, never by inserting an undeclared attempt_id into strict adapter parameters. Hosted model actions pin an exact execution_profile VersionRef. Resolve and persist its strict secret-free adapter_profile during preparation; claims and reconciliation return the same historical profile. Recheck current connection version, credential and authority before send. Public inputs cannot inject Dispatch.adapter_profile.",
       "cli": [],
       "mcp": null,
       "submission_key": false,
@@ -26851,7 +28265,7 @@
           "resource"
         ]
       },
-      "behavior": "Build a versioned immutable context plan naming exact authorized refs, versions and byte/token bounds inside the transaction; no IO, no provider call and no bytes read here.",
+      "behavior": "Build a versioned immutable context plan naming exact authorized refs, versions and byte/token bounds inside the transaction; no IO, no provider call and no bytes read here. The matching trusted ContextPerformer receives the resulting ContextPlan outside a write Unit; _execution.context.commit alone publishes after generation, authority and referenced-version checks.",
       "cli": [],
       "mcp": null,
       "submission_key": false,
@@ -28294,6 +29708,161 @@
         ]
       },
       "behavior": "Return the published, sealed recovery-overlay artifact installation.restore already registered against this restore job, so the controller can resolve and merge it after the database swap. The reference is read before the swap, while the caller's own application is still valid, and names bytes the artifacts owner already published; this operation performs no IO, decrypts nothing and returns not_found for a job with no registered overlay rather than guessing one.",
+      "cli": [],
+      "mcp": null,
+      "submission_key": false,
+      "expected_version": false,
+      "callers": [
+        "controller"
+      ],
+      "scope_required": []
+    },
+    {
+      "id": "model.provider.list",
+      "version": 1,
+      "owner": "connections",
+      "visibility": "public",
+      "mode": "query",
+      "effect": "local",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "scope": {
+            "$ref": "#/$defs/Scope"
+          }
+        },
+        "required": [
+          "scope"
+        ]
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/ProviderDescriptor"
+            },
+            "maxItems": 3
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "behavior": "Return the fixed supported provider presets and endpoints; no network/catalog request, credentials, or account identity. Provider validation is a separate bounded connection.validate job.",
+      "cli": [
+        "model",
+        "provider",
+        "list"
+      ],
+      "mcp": "zatiti_model_provider_list",
+      "submission_key": false,
+      "expected_version": false,
+      "callers": [],
+      "scope_required": [
+        "installation_id"
+      ]
+    },
+    {
+      "id": "_configuration.execution_profile.resolve",
+      "version": 1,
+      "owner": "configuration",
+      "visibility": "internal",
+      "mode": "query",
+      "effect": "local",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "scope": {
+            "$ref": "#/$defs/Scope"
+          },
+          "profile": {
+            "$ref": "#/$defs/Ref"
+          }
+        },
+        "required": [
+          "scope",
+          "profile"
+        ]
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "resource": {
+            "$ref": "#/$defs/ExecutionProfile"
+          }
+        },
+        "required": [
+          "resource"
+        ]
+      },
+      "behavior": "Resolve the exact immutable hosted execution-profile version under current scoped authority, including its validated secret-free adapter_profile and connection version. Never substitute the latest worker setting.",
+      "cli": [],
+      "mcp": null,
+      "submission_key": false,
+      "expected_version": false,
+      "callers": [
+        "execution",
+        "effects"
+      ],
+      "scope_required": [
+        "installation_id"
+      ]
+    },
+    {
+      "id": "_execution.turn.observation",
+      "version": 1,
+      "owner": "execution",
+      "visibility": "internal",
+      "mode": "mutation",
+      "effect": "local",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "turn_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "step_index": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9223372036854775807
+          },
+          "operation_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "observation": {
+            "type": "object",
+            "description": "Inert JSON data bounded by the enclosing size limit; never executable authority."
+          }
+        },
+        "required": [
+          "turn_id",
+          "step_index",
+          "operation_id",
+          "observation"
+        ]
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "resource": {
+            "$ref": "#/$defs/WorkerTurn"
+          }
+        },
+        "required": [
+          "resource"
+        ]
+      },
+      "behavior": "Authenticate the persisted effects callback route, fence turn generation and step, and idempotently record the model observation by operation ID. Chat has no task or fabricated Attempt; task compatibility delegates while task success still requires verification.",
       "cli": [],
       "mcp": null,
       "submission_key": false,

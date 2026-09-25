@@ -3,7 +3,7 @@ from copy import deepcopy
 
 # Specification revision. Bump with every coordinated contract revision; the renderer
 # refuses to render unless contracts.md names the same revision in its title.
-REVISION=11
+REVISION=12
 
 S={'type':'string','maxLength':8192}
 ID={'type':'string','format':'uuid'}
@@ -36,7 +36,13 @@ D['Credential']=obj(id=ID,version=VER,principal_id=ID,store_ref=S,revoked=BOOL,*
 D['Organization']=obj(id=ID,version=VER,key=S,name=S,chief_id=ID,**{'parent_id?':ID,'limits?':ref('Limits'),'extensions?':JSON})
 D['Team']=obj(id=ID,version=VER,organization_id=ID,key=S,name=S,worker_ids=arr(ID),**{'extensions?':JSON})
 D['Project']=obj(id=ID,version=VER,organization_id=ID,key=S,name=S,repositories=arr(S),bindings=arr(ID),classification=enum('internal','public','restricted'),**{'limits?':ref('Limits'),'extensions?':JSON})
-D['ExecutionProfile']=obj(id=ID,version=VER,executor=enum('hosted','cooperative'),model=S,connection_id=ID,provider_destination=S,capabilities=arr(S),cost_bound=ref('Money'),classification=enum('internal','public','restricted'),context_capture=enum('complete','partial','advisory'))
+D['ProviderDescriptor']=obj(id=enum('openai','openrouter','experiential'),display_name=S,default_endpoint=S,session_mode=enum('provider_conversation','stateless'),credential_setup=enum('api_key'))
+D['ProviderDescriptor']['allOf']=[
+ {'if':{'properties':{'id':{'const':'openai'}},'required':['id']},'then':{'properties':{'default_endpoint':{'const':'https://api.openai.com/v1/responses'},'session_mode':{'const':'provider_conversation'}}}},
+ {'if':{'properties':{'id':{'const':'openrouter'}},'required':['id']},'then':{'properties':{'default_endpoint':{'const':'https://openrouter.ai/api/v1/responses'},'session_mode':{'const':'stateless'}}}},
+ {'if':{'properties':{'id':{'const':'experiential'}},'required':['id']},'then':{'properties':{'default_endpoint':{'const':'https://api.experientiallabs.ai/v1/responses'},'session_mode':{'const':'stateless'}}}}
+]
+D['ExecutionProfile']=obj(id=ID,version=VER,executor=enum('hosted','cooperative'),model=S,connection_id=ID,provider_destination=S,capabilities=arr(S),cost_bound=ref('Money'),classification=enum('internal','public','restricted'),context_capture=enum('complete','partial','advisory'),**{'adapter_profile?':ref('ResponsesProfile'),'connection_version?':VER})
 D['Worker']=obj(id=ID,version=VER,organization_id=ID,key=S,name=S,purpose=S,instructions=S,skill_versions=arr(ref('Ref')),bindings=arr(ID),profile=ref('ExecutionProfile'),limits=ref('Limits'),**{'extensions?':JSON})
 D['Binding']=obj(id=ID,version=VER,scope=ref('Scope'),kind=enum('tool','skill','connection','worker','repository','reporting','memory'),target_id=ID,permissions=arr(S),**{'source_scope?':ref('Scope'),'destinations?':arr(S)})
 D['Skill']=obj(id=ID,version=VER,name=S,instruction_artifact=ref('ArtifactRef'),content_digest=DIG,input_schema=JSON,output_schema=JSON,requirements=arr(S),dependencies=arr(ref('Ref')),source=S,license=S,evaluation_refs=arr(ID),diagnostics=arr(ref('Diagnostic')))
@@ -53,7 +59,7 @@ D['Schedule']=obj(id=ID,version=VER,scope=ref('Scope'),task_template=ref('Task')
 D['Responsibility']=obj(id=ID,version=VER,scope=ref('Scope'),worker_id=ID,outcome=S,signals=arr(S),triggers=arr(S),reasoning_policy=S,min_interval_seconds=VER,cycle_limits=ref('Limits'),aggregate_limits=ref('Limits'),pause_conditions=arr(S),escalation_conditions=arr(S),acceptance=ref('Acceptance'),paused=BOOL,**{'next_wake?':TIME})
 D['Run']=obj(id=ID,version=VER,task_id=ID,configuration_revision=VER,input_versions=arr(ref('Ref')),state=enum('ready','running','waiting','verifying','succeeded','failed','cancelled'),attempt_ids=arr(ID))
 D['Attempt']=obj(id=ID,version=VER,run_id=ID,worker_id=ID,executor=enum('hosted','cooperative'),generation=VER,lease_id=ID,lease_expires_at=TIME,last_heartbeat=TIME,reservation_id=ID,state=enum('claimed','running','waiting','reported','fenced','stopped','failed'),capabilities=arr(S),**{'context_artifact?':ref('ArtifactRef'),'recovery_reason?':S})
-D['Action']=obj(scope=ref('Scope'),tool=ref('Ref'),connection=ref('Ref'),account_identity=S,destination=S,content=arr(ref('ArtifactRef')),not_before=TIME,expires_at=TIME,preconditions=JSON,configuration_revision=VER,parameters=JSON,cost_bound=ref('Money'))
+D['Action']=obj(scope=ref('Scope'),tool=ref('Ref'),connection=ref('Ref'),account_identity=S,destination=S,content=arr(ref('ArtifactRef')),not_before=TIME,expires_at=TIME,preconditions=JSON,configuration_revision=VER,parameters=JSON,cost_bound=ref('Money'),**{'execution_profile?':ref('Ref')})
 D['Operation']=obj(id=ID,version=VER,action=ref('Action'),action_digest=DIG,state=enum('prepared','awaiting_review','ready','executing','awaiting_confirmation','outcome_unknown','succeeded','failed','denied','expired','cancelled'),attempt_ids=arr(ID),**{'linked_operation_id?':ID,'relationship?':enum('retry','reconciliation','compensation','replacement')})
 D['Review']=obj(id=ID,version=VER,scope=ref('Scope'),action_digest=DIG,preview=ref('Action'),requirement=ref('DecisionRequirement'),proposer_id=ID,state=enum('pending','approved','rejected','expired','invalidated'),**{'decision_id?':ID})
 D['Decision']=obj(id=ID,review_id=ID,review_version=VER,action_digest=DIG,reviewer_id=ID,decision=enum('approve','reject'),at=TIME,reason=S)
@@ -240,7 +246,7 @@ D['Validation']=obj(diagnostics=arr(ref('Diagnostic')),requirements=arr(ref('Req
 D['Authority']=obj(principal=ref('Principal'),grants=arr(ref('Grant')),restrictions=arr(S))
 D['ScopeSnapshot']=obj(scope=ref('Scope'),revision=VER,ancestors=arr(ref('Organization')),bindings=arr(ref('Binding')),**{'worker?':ref('Worker'),'project?':ref('Project')})
 D['PolicyResult']=obj(decision=enum('allow','deny','review','prerequisite_missing'),reasons=arr(S),requirements=arr(ref('DecisionRequirement')))
-D['Dispatch']=obj(operation_id=ID,attempt_id=ID,generation=VER,adapter=S,action=ref('Action'),credential_ref=S,deadline=TIME,**{'provider_key?':S})
+D['Dispatch']=obj(operation_id=ID,attempt_id=ID,generation=VER,adapter=S,action=ref('Action'),credential_ref=S,deadline=TIME,**{'provider_key?':S,'adapter_profile?':JSON})
 D['Observation']=obj(disposition=enum('succeeded','failed','accepted','unknown','not_sent'),evidence=JSON,usage=ref('Usage'),**{'provider_reference?':S,'confirmed_at?':TIME})
 D['Wake']=obj(id=ID,scope=ref('Scope'),source_id=ID,occurrence_key=S,due_at=TIME,condition_version=VER)
 D['Context']=obj(attempt_id=ID,artifact=ref('ArtifactRef'),configuration_revision=VER,source_artifacts=arr(ref('ArtifactRef')),capture=enum('complete','partial','advisory'))
@@ -542,6 +548,40 @@ internal('revocations','identity',fields(SC),obj(revocations=arr(ref('Revocation
 internal('restore.overlay','installation',obj(job_id=ID),obj(artifact=ref('ArtifactRef'),size=INT),
  'Return the published, sealed recovery-overlay artifact installation.restore already registered against this restore job, so the controller can resolve and merge it after the database swap. The reference is read before the swap, while the caller\'s own application is still valid, and names bytes the artifacts owner already published; this operation performs no IO, decrypts nothing and returns not_found for a job with no registered overlay rather than guessing one.',
  ['controller'],mode='query')
+
+
+
+# Strict operation-catalog mirror of adapter-schemas ResponsesProfile v1/v2.
+_RSPSTR={'type':'string','minLength':1,'maxLength':128}
+D['ResponsesCapabilityEvidence']=obj(artifact=ref('ArtifactRef'),adapter_version=_RSPSTR,source_revision=_RSPSTR,protocol_revision=_RSPSTR,profile_digest=DIG,qualified_at=TIME,capabilities={'type':'array','items':_RSPSTR,'minItems':0,'maxItems':128},limitations={'type':'array','items':{'type':'string','minLength':1,'maxLength':2048},'minItems':0,'maxItems':128})
+D['ResponsesRate']=obj(numerator_micro_units=INT,denominator_units=VER,unit=enum('input_token','output_token','request','byte','second'))
+D['ResponsesEnforcement']=obj(cost=enum('enforced','advisory','unsupported'),disclosure=enum('enforced','advisory','unsupported'),maximum_cost=ref('Money'),provider_destinations={'type':'array','items':{'type':'string','format':'uri','pattern':'^https://','maxLength':2048},'minItems':0,'maxItems':64})
+D['ResponsesRoutingOpenRouter']=obj(only={'type':'array','items':S,'minItems':1,'maxItems':16},allow_fallbacks={'const':False,'type':'boolean'},require_parameters={'const':True,'type':'boolean'},**{'price_ceiling?':obj(currency={'const':'USD','type':'string'},input_per_million={'type':'string','pattern':'^(0|[1-9][0-9]*)(\\.[0-9]{1,18})?$','maxLength':64},output_per_million={'type':'string','pattern':'^(0|[1-9][0-9]*)(\\.[0-9]{1,18})?$','maxLength':64}),'privacy?':arr(enum('no_training','data_policy','zero_retention'),8)})
+D['ResponsesRoutingExperiential']=obj(gateway=obj(retry=obj(max_attempts_per_route={'const':1,'type':'integer'},max_total_attempts={'const':1,'type':'integer'}),backoff=obj(type={'const':'none','type':'string'}),routing=obj(allow_fallbacks={'const':False,'type':'boolean'})),**{'route_id?':S,'privacy?':arr(enum('no_training','data_policy','zero_retention'),8)})
+_D_RESPONSES_COMMON=dict(endpoint={'type':'string','format':'uri','pattern':'^https://','maxLength':2048},model={'type':'string','minLength':1,'maxLength':256},connection_id=ID,max_input_tokens={'type':'integer','minimum':1,'maximum':10000000},max_output_tokens={'type':'integer','minimum':1,'maximum':1000000},max_response_bytes={'type':'integer','minimum':1,'maximum':268435456},timeout_seconds={'type':'integer','minimum':1,'maximum':1800},currency={'type':'string','pattern':'^[A-Z]{3}$'},input_rate=ref('ResponsesRate'),output_rate=ref('ResponsesRate'),enforcement=ref('ResponsesEnforcement'),capability_evidence=ref('ResponsesCapabilityEvidence'))
+D['ResponsesProfileV1']=obj(schema={'const':'zatiti.responses/v1','type':'string'},**_D_RESPONSES_COMMON)
+D['ResponsesProfileV2']=obj(schema={'const':'zatiti.responses/v2','type':'string'},**_D_RESPONSES_COMMON,provider=enum('openai','openrouter','experiential'),session_mode=enum('provider_conversation','stateless'),routing={'oneOf':[obj(),ref('ResponsesRoutingOpenRouter'),ref('ResponsesRoutingExperiential')]})
+D['ResponsesProfileV2']['allOf']=[{'if':{'properties':{'provider':{'const':'openai'}},'required':['provider']},'then':{'properties':{'session_mode':{'const':'provider_conversation'},'endpoint':{'const':'https://api.openai.com/v1/responses'},'routing':obj()}}},{'if':{'properties':{'provider':{'const':'openrouter'}},'required':['provider']},'then':{'properties':{'session_mode':{'const':'stateless'},'endpoint':{'const':'https://openrouter.ai/api/v1/responses'},'routing':ref('ResponsesRoutingOpenRouter')}}},{'if':{'properties':{'provider':{'const':'experiential'}},'required':['provider']},'then':{'properties':{'session_mode':{'const':'stateless'},'endpoint':{'const':'https://api.experientiallabs.ai/v1/responses'},'routing':ref('ResponsesRoutingExperiential')}}}]
+D['ResponsesProfile']= {'oneOf':[ref('ResponsesProfileV1'),ref('ResponsesProfileV2')]}
+
+# --- Revision 12: versioned provider profiles and stateless turn dispatch ---
+D['ContextPlan']=obj(id=ID,turn_id=ID,expected_version=VER,generation=VER,refs=arr(ref('ArtifactRef')),configuration_revision=VER,byte_bound=INT,token_bound=INT)
+D['ProviderDescriptor']=obj(id=enum('openai','openrouter','experiential'),display_name=S,default_endpoint=S,session_mode=enum('provider_conversation','stateless'),credential_setup=enum('api_key'))
+D['ProviderDescriptor']['allOf']=[
+ {'if':{'properties':{'id':{'const':'openai'}},'required':['id']},'then':{'properties':{'default_endpoint':{'const':'https://api.openai.com/v1/responses'},'session_mode':{'const':'provider_conversation'}}}},
+ {'if':{'properties':{'id':{'const':'openrouter'}},'required':['id']},'then':{'properties':{'default_endpoint':{'const':'https://openrouter.ai/api/v1/responses'},'session_mode':{'const':'stateless'}}}},
+ {'if':{'properties':{'id':{'const':'experiential'}},'required':['id']},'then':{'properties':{'default_endpoint':{'const':'https://api.experientiallabs.ai/v1/responses'},'session_mode':{'const':'stateless'}}}}
+]
+add('model.provider.list','connections',fields(SC),obj(items=arr(ref('ProviderDescriptor'),3)),'Return the fixed supported provider presets and endpoints; no network/catalog request, credentials, or account identity. Provider validation is a separate bounded connection.validate job.',mode='query')
+internal('execution_profile.resolve','configuration',obj(scope=ref('Scope'),profile=ref('Ref')),one('ExecutionProfile'),'Resolve the exact immutable hosted execution-profile version under current scoped authority, including its validated secret-free adapter_profile and connection version. Never substitute the latest worker setting.',['execution','effects'],mode='query')
+internal('turn.observation','execution',obj(turn_id=ID,step_index=INT,operation_id=ID,observation=JSON),one('WorkerTurn'),'Authenticate the persisted effects callback route, fence turn generation and step, and idempotently record the model observation by operation ID. Chat has no task or fabricated Attempt; task compatibility delegates while task success still requires verification.',['controller'])
+for o in OPS:
+    if o['id']=='_effects.prepare':
+        o['input_schema']['properties']['execution_profile']=ref('Ref')
+        o['behavior']+=' Hosted model actions pin an exact execution_profile VersionRef. Resolve and persist its strict secret-free adapter_profile during preparation; claims and reconciliation return the same historical profile. Recheck current connection version, credential and authority before send. Public inputs cannot inject Dispatch.adapter_profile.'
+    if o['id']=='_execution.context.prepare':
+        o['behavior']+=' The matching trusted ContextPerformer receives the resulting ContextPlan outside a write Unit; _execution.context.commit alone publishes after generation, authority and referenced-version checks.'
+
 
 # scope_required must be computed last, after every add() call above: it was
 # previously computed mid-file (once, by iterating OPS at that point), so

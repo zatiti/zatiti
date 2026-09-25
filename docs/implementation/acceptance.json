@@ -2249,5 +2249,113 @@
       "The personal chief uses the selected pre-existing hosted brain, while unrelated scopes cannot read it; revocation and account/project substitution fail closed.",
       "Real hosted capability, command-status, spend/disclosure and immutable backup-revision evidence is required before the first-chat gate passes."
     ]
+  },
+  {
+    "id": "P12.responses_v1_recovery",
+    "gate": "Z18",
+    "owners": [
+      "configuration",
+      "connections",
+      "effects",
+      "execution",
+      "accounting",
+      "controller",
+      "integration"
+    ],
+    "setup": "A persisted v1 profile/action/evidence fixture is replayed under revision 12.",
+    "action": "Exercise the revision 12 contract with synthetic immutable fixtures.",
+    "expected": [
+      "Strict v1 decoding succeeds unchanged and preserves its original evidence."
+    ]
+  },
+  {
+    "id": "P12.stateless_action",
+    "gate": "Z18",
+    "owners": [
+      "configuration",
+      "connections",
+      "effects",
+      "execution",
+      "accounting",
+      "controller",
+      "integration"
+    ],
+    "setup": "A stateless OpenRouter or Experiential action includes a continuation/session handle or omits required context.",
+    "action": "Exercise the revision 12 contract with synthetic immutable fixtures.",
+    "expected": [
+      "Strict schema rejects session_handle and continuation_reference in stateless mode, and rejects missing context or output bounds."
+    ]
+  },
+  {
+    "id": "P12.pinned_profile_recovery",
+    "gate": "Z18",
+    "owners": [
+      "configuration",
+      "connections",
+      "effects",
+      "execution",
+      "accounting",
+      "controller",
+      "integration"
+    ],
+    "setup": "A worker profile changes after an operation was prepared.",
+    "action": "Exercise the revision 12 contract with synthetic immutable fixtures.",
+    "expected": [
+      "Claim and reconciliation return the exact historical adapter profile and connection version; no latest profile is substituted."
+    ]
+  },
+  {
+    "id": "P12.turn_without_task",
+    "gate": "Z18",
+    "owners": [
+      "configuration",
+      "connections",
+      "effects",
+      "execution",
+      "accounting",
+      "controller",
+      "integration"
+    ],
+    "setup": "A chief chat model response is observed with no task or Attempt.",
+    "action": "Exercise the revision 12 contract with synthetic immutable fixtures.",
+    "expected": [
+      "The controller-only callback records the fenced WorkerTurn observation idempotently by operation ID."
+    ]
+  },
+  {
+    "id": "P12.provider_metadata",
+    "gate": "Z18",
+    "owners": [
+      "configuration",
+      "connections",
+      "effects",
+      "execution",
+      "accounting",
+      "controller",
+      "integration"
+    ],
+    "setup": "An authenticated client queries supported model providers.",
+    "action": "Exercise the revision 12 contract with synthetic immutable fixtures.",
+    "expected": [
+      "The fixed three provider presets and their session modes are returned without network access or credential/account claims."
+    ]
+  },
+  {
+    "id": "P12.exact_cost",
+    "gate": "Z18",
+    "owners": [
+      "configuration",
+      "connections",
+      "effects",
+      "execution",
+      "accounting",
+      "controller",
+      "integration"
+    ],
+    "setup": "Provider cost is absent, malformed, overflowing, fractional at micro-unit precision, or from BYOK upstream.",
+    "action": "Exercise the revision 12 contract with synthetic immutable fixtures.",
+    "expected": [
+      "Checked decimal arithmetic rounds upward; invalid/overflow/unpriced costs remain unknown/advisory and source decimal evidence is retained."
+    ]
   }
 ]

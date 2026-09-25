@@ -1,5 +1,5 @@
 {
-  "revision": 11,
+  "revision": 12,
   "requirements": [
     {
       "requirement": "R1-002",
@@ -2525,6 +2525,27 @@
         "tests/integration",
         "tests/qualification"
       ]
+    },
+    {
+      "requirement": "R12-PROVIDER-CONTRACTS",
+      "section": "provider model revision 12",
+      "kind": "requirement",
+      "owner": "internal/configuration",
+      "participants": [
+        "internal/connections",
+        "internal/effects",
+        "internal/execution",
+        "internal/accounting",
+        "internal/controller",
+        "internal/adapters/responses",
+        "apps/desktop",
+        "tests/integration",
+        "tests/qualification"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
     }
   ],
   "acceptance_cases": [
@@ -3926,6 +3947,84 @@
         "apps/desktop",
         "internal/platform",
         "internal/memory"
+      ]
+    },
+    {
+      "id": "P12.responses_v1_recovery",
+      "gate": "Z18",
+      "scopes": [
+        "internal/configuration",
+        "internal/connections",
+        "internal/effects",
+        "internal/execution",
+        "internal/accounting",
+        "internal/controller",
+        "tests/integration"
+      ]
+    },
+    {
+      "id": "P12.stateless_action",
+      "gate": "Z18",
+      "scopes": [
+        "internal/configuration",
+        "internal/connections",
+        "internal/effects",
+        "internal/execution",
+        "internal/accounting",
+        "internal/controller",
+        "tests/integration"
+      ]
+    },
+    {
+      "id": "P12.pinned_profile_recovery",
+      "gate": "Z18",
+      "scopes": [
+        "internal/configuration",
+        "internal/connections",
+        "internal/effects",
+        "internal/execution",
+        "internal/accounting",
+        "internal/controller",
+        "tests/integration"
+      ]
+    },
+    {
+      "id": "P12.turn_without_task",
+      "gate": "Z18",
+      "scopes": [
+        "internal/configuration",
+        "internal/connections",
+        "internal/effects",
+        "internal/execution",
+        "internal/accounting",
+        "internal/controller",
+        "tests/integration"
+      ]
+    },
+    {
+      "id": "P12.provider_metadata",
+      "gate": "Z18",
+      "scopes": [
+        "internal/configuration",
+        "internal/connections",
+        "internal/effects",
+        "internal/execution",
+        "internal/accounting",
+        "internal/controller",
+        "tests/integration"
+      ]
+    },
+    {
+      "id": "P12.exact_cost",
+      "gate": "Z18",
+      "scopes": [
+        "internal/configuration",
+        "internal/connections",
+        "internal/effects",
+        "internal/execution",
+        "internal/accounting",
+        "internal/controller",
+        "tests/integration"
       ]
     }
   ]
