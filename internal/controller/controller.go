@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"sync"
 	"sync/atomic"
@@ -69,18 +70,25 @@ type Collaborators struct {
 	// restore job observed without it is recorded failed with
 	// prerequisite_missing, never guessed at.
 	RestoreLifecycle RestoreLifecycle
+	// ResponsesAdapterFactory constructs an adapter from the exact, trusted
+	// secret-free profile pinned on a claimed dispatch. Assembly supplies this
+	// closure so controller does not import an adapter package.
+	ResponsesAdapterFactory func(json.RawMessage) (contract.Adapter, error)
+	// Context performs execution's persisted context recipe outside a Unit.
+	Context contract.ContextPerformer
 }
 
 // Controller owns one controller lifetime: the scheduler loop, adapter
 // dispatch, durable background work and recovery coordination.
 type Controller struct {
-	cfg      Config
-	app      *application.Application
-	db       contract.Database
-	own      contract.Ownership
-	adapters map[string]contract.Adapter
-	clock    contract.Clock
-	log      *slog.Logger
+	cfg             Config
+	app             *application.Application
+	db              contract.Database
+	own             contract.Ownership
+	adapters        map[string]contract.Adapter
+	profileAdapters map[contract.Digest]contract.Adapter
+	clock           contract.Clock
+	log             *slog.Logger
 
 	mu     sync.Mutex
 	deps   Collaborators
@@ -145,6 +153,7 @@ type Controller struct {
 	turnAttempts  map[contract.ID]contract.ID
 	attemptTurns  map[contract.ID]turnRouteInfo
 	turnProposals map[contract.ID]turnProposalRef
+	turnInfos     map[contract.ID]turnRouteInfo
 
 	// afterTick lets tests observe loop progress without sleeping.
 	afterTick func(n int64)
@@ -258,6 +267,7 @@ func New(
 		db:               db,
 		own:              own,
 		adapters:         registered,
+		profileAdapters:  map[contract.Digest]contract.Adapter{},
 		clock:            clock,
 		log:              slog.Default().With("component", "controller"),
 		stopCh:           make(chan struct{}),
@@ -272,6 +282,7 @@ func New(
 		turnAttempts:     map[contract.ID]contract.ID{},
 		attemptTurns:     map[contract.ID]turnRouteInfo{},
 		turnProposals:    map[contract.ID]turnProposalRef{},
+		turnInfos:        map[contract.ID]turnRouteInfo{},
 	}, nil
 }
 

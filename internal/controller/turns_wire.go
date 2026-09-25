@@ -178,6 +178,13 @@ type contextCommitInput struct {
 	StagedContext   wireArtifactLocator `json:"staged_context"`
 }
 
+type turnObservationInput struct {
+	TurnID      contract.ID          `json:"turn_id"`
+	StepIndex   int64                `json:"step_index"`
+	OperationID contract.ID          `json:"operation_id"`
+	Observation contract.Observation `json:"observation"`
+}
+
 type proposalPrepareInput struct {
 	TurnID          contract.ID `json:"turn_id"`
 	StepIndex       int64       `json:"step_index"`

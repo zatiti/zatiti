@@ -174,9 +174,9 @@ func (c *Controller) admitReconciliation(ctx, workCtx context.Context, sess *ses
 		return false
 	}
 	d := claimed.Resource
-	adapter, ok := c.adapters[d.Adapter]
-	if !ok {
-		return c.unsentReconcile(ctx, sess, e, capabilityUnsupported("adapter %q is not registered with this controller", d.Adapter))
+	adapter, err := c.adapterForDispatch(d)
+	if err != nil {
+		return c.unsentReconcile(ctx, sess, e, faultOf(err))
 	}
 	if !d.Deadline.IsZero() && !c.now().Before(d.Deadline) {
 		return c.unsentReconcile(ctx, sess, e, conflictFault("reconciliation dispatch deadline of attempt %s passed before the adapter was invoked", e.AttemptID))

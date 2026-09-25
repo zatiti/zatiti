@@ -1,7 +1,6 @@
 package controller
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -18,36 +17,9 @@ import (
 // generic effect pipeline (tick.go/deliver.go, extended below), and
 // independent verification through the real contract.Verifier.
 //
-// One of the two out-of-authority contract gaps this phase originally
-// found is now closed; the other remains and is reported as a controller
-// obligation (never silently dropped, never worked around by inventing a
-// seam this package has no authority to add):
-//
-//  1. CLOSED (execution-dispatch-model-step, the same-day P22 gap fix):
-//     _effects.prepare's caller allowlist (internal/effects/service.go,
-//     opMetas[opPrepare].callers) never included "controller", so nothing
-//     this package called could itself dispatch a model_step (or
-//     prepare_session) effect for a committed, model_pending turn. Closed
-//     the way this file's own original comment named as more consistent
-//     with prepareModelEffect/interpretExternalTool: execution's own
-//     _execution.context.commit handler now chains internally to
-//     _effects.prepare the moment it commits a turn to model_pending, no
-//     allowlist change needed. A model_pending turn therefore now always
-//     has an outstanding dispatched effect (visible via
-//     outstandingTurnEffects) unless its plan carries no resolved
-//     responses-adapter tool component (a worker with no hosted model
-//     connection configured) -- stalledModelDispatch below only reports
-//     that narrower remaining case, never a turn whose dispatch is
-//     legitimately in flight.
-//  2. A message/responsibility-triggered turn carries no attempt_id (only
-//     a task-triggered turn gets one, via _execution.enqueue's automatic
-//     turn admission); _execution.observation's frozen input schema
-//     requires attempt_id. Now that gap 1 is closed, this is live: a bare
-//     chat turn still has no schema-valid path to receive its own model
-//     response, so execution's own dispatch deliberately never fires for
-//     it (gated on AttemptID != "") rather than dispatching into a dead
-//     end -- already flagged as an out-of-scope contract gap at P16's
-//     landing (docs/roadmap.md, 2026-09-21).
+// Complete context construction and publication belong to execution's
+// injected ContextPerformer. Missing assembly capability stays an explicit
+// prerequisite; this package never fabricates a partial model context.
 
 // Controller obligation kinds this phase reports.
 const (
@@ -62,30 +34,6 @@ const (
 	// controller could not execute.
 	obligationVerification = "verification"
 )
-
-// contextDocumentSchema names the minimal, honest document the controller
-// itself assembles and publishes as a turn's committed context artifact.
-// _execution.context.commit's own handler (turn_ops.go, handleContextCommit)
-// never reads or validates the staged bytes' content -- it only checks that
-// the plan's pinned refs and configuration revision are still current and
-// that the caller supplied a published (not merely staged) artifact -- so
-// this is a legitimate, schema-honest choice given what the wire ContextPlan
-// actually exposes (refs, byte/token bounds, configuration revision), not a
-// reproduction of execution's own private zatiti.context/v1 transcript
-// (context_build.go's contextRecipe/contextComponent, and the stageContext/
-// buildResponsesModelStepAction functions that fold it into one, are
-// unexported, keyed to execution's own unexported row types, and never
-// wired to any operation or exported constructor a sibling package could
-// call -- see the report for why reproducing that exact private format here
-// would itself be inventing a seam, not implementing one).
-const contextDocumentSchema = "zatiti.controller.context-plan/v1"
-
-type contextDocument struct {
-	Schema                string         `json:"schema"`
-	TurnID                contract.ID    `json:"turn_id"`
-	ConfigurationRevision int64          `json:"configuration_revision"`
-	Refs                  []wireArtifact `json:"refs"`
-}
 
 // turnRouteInfo is what the controller remembers, between discovering a
 // model_pending turn's own attempt and later delivering that model step's
@@ -164,13 +112,14 @@ func (c *Controller) driveWorkItems(ctx, workCtx context.Context, sess *session)
 	// any worker_turn-callback-routed effect delivery.
 	c.turnsMu.Lock()
 	for _, item := range out.Items {
-		if item.Turn.AttemptID == "" {
-			continue
-		}
-		c.turnAttempts[item.Turn.ID] = item.Turn.AttemptID
-		c.attemptTurns[item.Turn.AttemptID] = turnRouteInfo{
+		info := turnRouteInfo{
 			TurnID: item.Turn.ID, StepIndex: item.Turn.StepsUsed, Version: item.Turn.Version,
 			WorkerID: item.Turn.WorkerID, Scope: item.Turn.Scope,
+		}
+		c.turnInfos[item.Turn.ID] = info
+		if item.Turn.AttemptID != "" {
+			c.turnAttempts[item.Turn.ID] = item.Turn.AttemptID
+			c.attemptTurns[item.Turn.AttemptID] = info
 		}
 	}
 	c.turnsMu.Unlock()
@@ -261,11 +210,17 @@ func (c *Controller) claimTurnWork(ctx context.Context, sess *session, item wire
 		c.note(err)
 		return
 	}
-	if claimed.Item.Turn.AttemptID != "" {
-		c.turnsMu.Lock()
-		c.turnAttempts[claimed.Item.Turn.ID] = claimed.Item.Turn.AttemptID
-		c.turnsMu.Unlock()
+	c.turnsMu.Lock()
+	info := turnRouteInfo{
+		TurnID: claimed.Item.Turn.ID, StepIndex: claimed.Item.Turn.StepsUsed, Version: claimed.Item.Turn.Version,
+		WorkerID: claimed.Item.Turn.WorkerID, Scope: claimed.Item.Turn.Scope,
 	}
+	c.turnInfos[claimed.Item.Turn.ID] = info
+	if claimed.Item.Turn.AttemptID != "" {
+		c.turnAttempts[claimed.Item.Turn.ID] = claimed.Item.Turn.AttemptID
+		c.attemptTurns[claimed.Item.Turn.AttemptID] = info
+	}
+	c.turnsMu.Unlock()
 }
 
 // advanceContext builds a fresh context plan for a freshly-claimed turn and
@@ -339,16 +294,16 @@ func (c *Controller) stageAndCommit(ctx, workCtx context.Context, sess *session,
 	c.commitStagedContext(ctx, sess, e)
 }
 
-// stageContextArtifact builds, stages and publishes the context document
-// outside any transaction, journaling nothing itself -- the caller journals
-// the result once staging is durable.
+// stageContextArtifact delegates the immutable plan to execution's real
+// context performer, outside a Unit. Execution returns only after the full
+// context has been staged and published; a staged locator is not acceptable
+// to _execution.context.commit.
 func (c *Controller) stageContextArtifact(ctx context.Context, sess *session, e entry) (wireArtifact, bool) {
 	c.mu.Lock()
-	blobs := c.deps.Blobs
+	performer := c.deps.Context
 	c.mu.Unlock()
-	if blobs == nil {
-		f := prerequisiteMissing(
-			"no blob store is attached; turn %s's context cannot be staged and published", e.TurnID)
+	if performer == nil {
+		f := prerequisiteMissing("execution context performer is not attached; turn %s context remains pending", e.TurnID)
 		c.note(f)
 		c.oblige(obligationPublication, e.TurnID, f)
 		return wireArtifact{}, false
@@ -357,52 +312,32 @@ func (c *Controller) stageContextArtifact(ctx context.Context, sess *session, e 
 		c.note(internalFault("journal entry for turn %s reached context staging without a plan", e.TurnID))
 		return wireArtifact{}, false
 	}
-	doc, err := json.Marshal(contextDocument{
-		Schema: contextDocumentSchema, TurnID: e.TurnID,
-		ConfigurationRevision: e.Plan.ConfigurationRevision, Refs: nonNilArtifacts(e.Plan.Refs),
-	})
-	if err != nil {
-		c.note(internalFault("turn %s's context document could not be encoded", e.TurnID))
-		return wireArtifact{}, false
+	refs := make([]contract.ArtifactRef, len(e.Plan.Refs))
+	for i, ref := range e.Plan.Refs {
+		refs[i] = contract.ArtifactRef{ID: ref.ID, Digest: ref.Digest}
 	}
-	if int64(len(doc)) > e.Plan.ByteBound && e.Plan.ByteBound > 0 {
-		f := capabilityUnsupported("turn %s's context document is %d bytes, exceeding the plan's %d byte bound",
-			e.TurnID, len(doc), e.Plan.ByteBound)
-		c.oblige(obligationPublication, e.TurnID, f)
-		return wireArtifact{}, false
+	plan := contract.ContextPlan{
+		ID: e.Plan.ID, TurnID: e.Plan.TurnID, ExpectedVersion: contract.Version(e.Plan.ExpectedVersion),
+		Generation: contract.Version(e.Plan.Generation), Refs: refs,
+		ConfigurationRevision: contract.Version(e.Plan.ConfigurationRevision),
+		ByteBound:             e.Plan.ByteBound, TokenBound: e.Plan.TokenBound,
 	}
-	stagingRef, digest, size, err := blobs.Stage(ctx, bytes.NewReader(doc), int64(len(doc)))
+	raw, err := performer.PerformContext(ctx, plan)
 	if err != nil {
-		f := unavailable("turn %s's context could not be staged: %v", e.TurnID, err)
+		f := unavailable("turn %s context performance failed: %v", e.TurnID, err)
 		c.note(f)
 		c.oblige(obligationPublication, e.TurnID, f)
 		return wireArtifact{}, false
 	}
-	_ = size
-	if err := blobs.Publish(ctx, stagingRef, digest); err != nil {
-		f := unavailable("turn %s's context could not be published: %v", e.TurnID, err)
+	var locator wireArtifactLocator
+	if err := contract.DecodeStrict(raw, &locator); err != nil || locator.Kind != "artifact" || locator.Artifact == nil {
+		f := capabilityUnsupported("execution context performer returned an invalid or unpublished artifact locator for turn %s", e.TurnID)
 		c.note(f)
 		c.oblige(obligationPublication, e.TurnID, f)
-		return wireArtifact{}, false
-	}
-	scope := sess.scope
-	if e.Scope != nil {
-		scope = *e.Scope
-	}
-	var published artifactOutput
-	err = c.write(func() error {
-		return c.call(ctx, sess, "_artifacts.publish", artifactsPublishInput{
-			Scope: scope, Digest: digest, Size: int64(len(doc)), MediaType: "application/json",
-			Classification: "internal", Encrypted: true,
-		}, &published)
-	})
-	if err != nil {
-		c.note(err)
-		c.oblige(obligationPublication, e.TurnID, faultOf(err))
 		return wireArtifact{}, false
 	}
 	c.resolve(obligationPublication, e.TurnID)
-	return wireArtifact{ID: published.Resource.ID, Digest: published.Resource.Digest}, true
+	return *locator.Artifact, true
 }
 
 // commitStagedContext commits an already-published context artifact.
@@ -474,6 +409,10 @@ func (c *Controller) stalledModelDispatch(sess *session, turn wireWorkerTurn) {
 func (c *Controller) observeTurnDelivery(ctx context.Context, sess *session, e *entry, normalized contract.Observation) {
 	c.turnsMu.Lock()
 	info, ok := c.attemptTurns[e.Route.AttemptID]
+	if e.Route.TurnID != "" {
+		info, ok = c.turnInfos[e.Route.TurnID]
+		info.StepIndex = e.Route.StepIndex
+	}
 	c.turnsMu.Unlock()
 	if !ok {
 		return

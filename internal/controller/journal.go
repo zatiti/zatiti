@@ -138,6 +138,10 @@ type route struct {
 	// ProposalID names the WorkerTurn proposal (owner execution_proposal)
 	// this effect's outcome completes.
 	ProposalID string `json:"proposal_id,omitempty"`
+	// TurnID/StepIndex route a chat turn without a task Attempt through the
+	// execution-owned turn observation boundary.
+	TurnID    contract.ID `json:"turn_id,omitempty"`
+	StepIndex int64       `json:"step_index,omitempty"`
 }
 
 // turnProposalRef is what the controller remembers about one prepared

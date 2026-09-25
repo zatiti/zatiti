@@ -19,6 +19,7 @@ const (
 	// (P16 interpretExternalTool), not a fresh model step, and the owner's
 	// turn/proposal record -- not an attempt -- is what advances.
 	ownerExecutionProposal = "execution_proposal"
+	ownerExecutionTurn     = "execution_turn"
 )
 
 // stagedOutput mirrors the adapter StagedOutput handoff: bytes an adapter
@@ -88,7 +89,15 @@ func (c *Controller) routeWorkerTurn(operation contract.ID, cb wireCallbackRoute
 		return &route{Owner: ownerExecutionProposal, ProposalID: ref.ProposalID}
 	}
 	if attemptID, ok := c.turnAttempts[cb.TurnID]; ok {
-		return &route{Owner: ownerExecution, AttemptID: attemptID}
+		info := c.turnInfos[cb.TurnID]
+		step := info.StepIndex
+		if cb.StepIndex != nil {
+			step = *cb.StepIndex
+		}
+		return &route{Owner: ownerExecution, AttemptID: attemptID, TurnID: cb.TurnID, StepIndex: step}
+	}
+	if _, ok := c.turnInfos[cb.TurnID]; ok && cb.StepIndex != nil {
+		return &route{Owner: ownerExecutionTurn, TurnID: cb.TurnID, StepIndex: *cb.StepIndex}
 	}
 	return nil
 }
@@ -114,6 +123,16 @@ func (c *Controller) deliver(ctx context.Context, sess *session, e *entry) {
 		err = c.write(func() error {
 			return c.call(ctx, sess, "_execution.observation", executionObservationInput{
 				AttemptID: e.Route.AttemptID, OperationID: e.OperationID, Observation: normalized,
+			}, nil)
+		})
+		if err == nil {
+			c.observeTurnDelivery(ctx, sess, e, normalized)
+		}
+	case ownerExecutionTurn:
+		err = c.write(func() error {
+			return c.call(ctx, sess, "_execution.turn.observation", turnObservationInput{
+				TurnID: e.Route.TurnID, StepIndex: e.Route.StepIndex,
+				OperationID: e.OperationID, Observation: normalized,
 			}, nil)
 		})
 		if err == nil {
