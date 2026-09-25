@@ -21,6 +21,10 @@ const (
 // profile. Every provider-specific value the adapter uses -- endpoint,
 // model, prices, bounds -- is read from here; none has a default.
 type responsesProfile struct {
+	Version            string
+	Provider           string
+	SessionMode        string
+	Routing            json.RawMessage
 	Endpoint           string
 	Model              string
 	ConnectionID       contract.ID
@@ -62,6 +66,9 @@ func (p *responsesProfile) protocolProfile() protocolProfile {
 		Model:          p.Model,
 		MaxInputTokens: p.MaxInputTokens,
 		Capabilities:   p.CapabilityEvidence.Capabilities,
+		Provider:       p.Provider,
+		SessionMode:    p.SessionMode,
+		Routing:        p.Routing,
 	}
 }
 
@@ -73,16 +80,37 @@ func (p *responsesProfile) protocolProfile() protocolProfile {
 // currency agreement, a credential-free endpoint inside the declared
 // disclosure destinations, and enforceable cost/disclosure bounds.
 func loadProfile(raw json.RawMessage) (*responsesProfile, error) {
+	var head struct {
+		Schema string `json:"schema"`
+	}
+	if err := json.Unmarshal(raw, &head); err != nil {
+		return nil, invalidInput("responses profile must be a JSON object")
+	}
 	schema, err := profileSchema()
+	var v2 wireResponsesProfileV2
+	if head.Schema == "zatiti.responses/v2" {
+		schema, err = profileSchemaV2()
+	}
 	if err != nil {
 		return nil, internalError("responses profile schema composition failed: %v", err)
 	}
 	if err := contract.ValidateSchema(schema, raw); err != nil {
-		return nil, invalidInput("responses profile does not match the zatiti.responses/v1 schema: %v", err)
+		return nil, invalidInput("responses profile does not match the %s schema: %v", head.Schema, err)
 	}
 	var w wireResponsesProfile
-	if err := contract.DecodeStrict(raw, &w); err != nil {
+	var provider, sessionMode string
+	var routing json.RawMessage
+	if head.Schema == "zatiti.responses/v2" {
+		if err := contract.DecodeStrict(raw, &v2); err != nil {
+			return nil, invalidInput("responses v2 profile decode failed: %v", err)
+		}
+		w = wireResponsesProfile{Schema: v2.Schema, Endpoint: v2.Endpoint, Model: v2.Model, ConnectionID: v2.ConnectionID, MaxInputTokens: v2.MaxInputTokens, MaxOutputTokens: v2.MaxOutputTokens, MaxResponseBytes: v2.MaxResponseBytes, TimeoutSeconds: v2.TimeoutSeconds, Currency: v2.Currency, InputRate: v2.InputRate, OutputRate: v2.OutputRate, Enforcement: v2.Enforcement, CapabilityEvidence: v2.CapabilityEvidence}
+		provider, sessionMode, routing = v2.Provider, v2.SessionMode, v2.Routing
+	} else if err := contract.DecodeStrict(raw, &w); err != nil {
 		return nil, invalidInput("responses profile decode failed: %v", err)
+	}
+	if head.Schema != "zatiti.responses/v1" && head.Schema != "zatiti.responses/v2" {
+		return nil, invalidInput("unsupported Responses profile schema %q", head.Schema)
 	}
 
 	digest, err := profileDigestWithoutCapabilityEvidence(raw)
@@ -116,6 +144,11 @@ func loadProfile(raw json.RawMessage) (*responsesProfile, error) {
 	if w.Enforcement.Disclosure == enforcementUnsupported {
 		return nil, capabilityUnsupported("responses profile declares disclosure bounds unsupported; a model step requires enforced or explicitly advisory disclosure bounds")
 	}
+	if head.Schema == "zatiti.responses/v2" {
+		if err := validateV2Pricing(provider, sessionMode, routing, w); err != nil {
+			return nil, err
+		}
+	}
 
 	endpoint, err := parseEndpoint(w.Endpoint)
 	if err != nil {
@@ -138,6 +171,7 @@ func loadProfile(raw json.RawMessage) (*responsesProfile, error) {
 	}
 
 	return &responsesProfile{
+		Version: head.Schema, Provider: provider, SessionMode: sessionMode, Routing: routing,
 		Endpoint:           w.Endpoint,
 		Model:              w.Model,
 		ConnectionID:       w.ConnectionID,

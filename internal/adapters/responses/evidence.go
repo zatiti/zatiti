@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"math/big"
 	"slices"
 	"strings"
 
@@ -121,12 +122,19 @@ func stageBytes(ctx context.Context, blobs contract.BlobStore, data []byte, medi
 
 // usageInput is what is known about one attempt's charge.
 type usageInput struct {
-	Bounds         admittedBounds
-	Sent           bool                // false only when the request provably never left
-	Reported       *protocolTokenUsage // the provider's own usage report, if any
-	Unpriceable    bool                // the reported tokens carry a price the profile's rates do not cover
-	NoCharge       bool                // the qualified contract establishes no charge
-	UsageReference string
+	Bounds             admittedBounds
+	Sent               bool                // false only when the request provably never left
+	Reported           *protocolTokenUsage // the provider's own usage report, if any
+	Unpriceable        bool                // the reported tokens carry a price the profile's rates do not cover
+	NoCharge           bool                // the qualified contract establishes no charge
+	UsageReference     string
+	RequestedModel     string
+	ServedModel        string
+	ServingProvider    string
+	ProviderRequestID  string
+	SourceCostDecimal  string
+	SourceCostCurrency string
+	SourceCostKind     string
 }
 
 // usageFor builds the ProviderUsage for one attempt. The profile's rates
@@ -139,12 +147,43 @@ func (p *responsesProfile) usageFor(in usageInput) wireProviderUsage {
 		InputRate:              &inRate,
 		OutputRate:             &outRate,
 		ProviderUsageReference: in.UsageReference,
+		RequestedModel:         in.RequestedModel,
+		ServedModel:            in.ServedModel,
+		ServingProvider:        in.ServingProvider,
+		ProviderRequestID:      in.ProviderRequestID,
+		SourceCostDecimal:      in.SourceCostDecimal,
+		SourceCostCurrency:     in.SourceCostCurrency,
+		SourceCostKind:         in.SourceCostKind,
 	}
 	switch {
 	case !in.Sent || in.NoCharge:
 		usage.Billing = "no_charge"
 		usage.Accounting.Advisory = false
 	case in.Reported != nil:
+		if p.Provider == "experiential" {
+			usage.Billing = "advisory"
+			usage.Accounting.Advisory = true
+			usage.Accounting.Unknown = in.Bounds.WorstCase
+			inTok, outTok := in.Reported.InputTokens, in.Reported.OutputTokens
+			usage.InputTokens, usage.OutputTokens = &inTok, &outTok
+			return usage
+		}
+		if in.SourceCostKind != "" {
+			if in.SourceCostKind == "provider_billed" && in.SourceCostCurrency == p.Currency {
+				if cost, ok := decimalMicroCeiling(in.SourceCostDecimal); ok {
+					usage.Billing = "observed"
+					usage.Accounting.Spent = cost
+					inTok, outTok := in.Reported.InputTokens, in.Reported.OutputTokens
+					usage.InputTokens, usage.OutputTokens = &inTok, &outTok
+					return usage
+				}
+			}
+			usage.Billing = "unknown"
+			usage.Accounting.Unknown = in.Bounds.WorstCase
+			inTok, outTok := in.Reported.InputTokens, in.Reported.OutputTokens
+			usage.InputTokens, usage.OutputTokens = &inTok, &outTok
+			return usage
+		}
 		spent, err := p.costOf(in.Reported.InputTokens, in.Reported.OutputTokens)
 		if in.Unpriceable {
 			err = errAmountOverflow // priced outside the profile's rates: the amount is not known
@@ -156,8 +195,13 @@ func (p *responsesProfile) usageFor(in usageInput) wireProviderUsage {
 			usage.Billing = "unknown"
 			usage.Accounting.Unknown = in.Bounds.WorstCase
 		} else {
-			usage.Billing = "observed"
-			usage.Accounting.Spent = spent
+			if p.Provider == "openrouter" {
+				usage.Billing = "bounded_estimate"
+				usage.Accounting.Estimated = spent
+			} else {
+				usage.Billing = "observed"
+				usage.Accounting.Spent = spent
+			}
 		}
 		inTok, outTok := in.Reported.InputTokens, in.Reported.OutputTokens
 		usage.InputTokens = &inTok
@@ -173,6 +217,52 @@ func (p *responsesProfile) usageFor(in usageInput) wireProviderUsage {
 		usage.Accounting.Unknown = in.Bounds.WorstCase
 	}
 	return usage
+}
+
+// decimalMicroCeiling converts a nonnegative decimal currency amount to
+// integer micro-units without float arithmetic. A fractional micro-unit is
+// rounded upward so observed charges are never understated.
+func decimalMicroCeiling(s string) (int64, bool) {
+	if s == "" || len(s) > 64 {
+		return 0, false
+	}
+	parts := strings.Split(s, ".")
+	if len(parts) > 2 || parts[0] == "" {
+		return 0, false
+	}
+	for _, r := range s {
+		if (r < '0' || r > '9') && r != '.' {
+			return 0, false
+		}
+	}
+	fraction := ""
+	if len(parts) == 2 {
+		fraction = parts[1]
+	}
+	if len(fraction) > 18 || (len(parts) == 2 && fraction == "") {
+		return 0, false
+	}
+	n := new(big.Int)
+	if _, ok := n.SetString(parts[0], 10); !ok {
+		return 0, false
+	}
+	n.Mul(n, big.NewInt(1_000_000))
+	if fraction != "" {
+		f, ok := new(big.Int).SetString(fraction, 10)
+		if !ok {
+			return 0, false
+		}
+		den := new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(len(fraction))), nil)
+		n.Add(n, new(big.Int).Quo(new(big.Int).Mul(f, big.NewInt(1_000_000)), den))
+		rem := new(big.Int).Rem(new(big.Int).Mul(f, big.NewInt(1_000_000)), den)
+		if rem.Sign() > 0 {
+			n.Add(n, big.NewInt(1))
+		}
+	}
+	if !n.IsInt64() {
+		return 0, false
+	}
+	return n.Int64(), true
 }
 
 type builtEvidence struct {
@@ -212,6 +302,44 @@ func buildModelStepEvidence(sessionHandle string, physical wirePhysicalCallEvide
 	doc, err := json.Marshal(ev)
 	if err != nil {
 		return builtEvidence{}, internalError("encoding responses evidence failed: %v", err)
+	}
+	return builtEvidence{doc: doc, usage: usageDoc}, nil
+}
+
+func buildModelStepEvidenceV2(sessionMode, sessionID, sessionHandle string, physical wirePhysicalCallEvidence, output wireModelOutput, staged []wireStagedOutput) (builtEvidence, error) {
+	usageDoc, err := json.Marshal(output.Usage.Accounting)
+	if err != nil {
+		return builtEvidence{}, internalError("encoding responses usage failed: %v", err)
+	}
+	if output.TextOutputs == nil {
+		output.TextOutputs = []wireStagedLocator{}
+	}
+	if output.ToolProposals == nil {
+		output.ToolProposals = []wireModelToolProposal{}
+	}
+	if staged == nil {
+		staged = []wireStagedOutput{}
+	}
+	ev := wireResponsesEvidenceV2{Schema: "zatiti.responses.evidence/v2", PhysicalCall: physical, SessionHandle: sessionHandle, ResponseID: output.ResponseID, Output: &output, StagedOutputs: staged, OutputArtifacts: []wireArtifactRef{}, SessionMode: sessionMode, SessionID: sessionID}
+	doc, err := json.Marshal(ev)
+	if err != nil {
+		return builtEvidence{}, internalError("encoding responses v2 evidence failed: %v", err)
+	}
+	return builtEvidence{doc: doc, usage: usageDoc}, nil
+}
+
+func buildPrepareSessionEvidenceV2(sessionID, handle string, physical wirePhysicalCallEvidence, usage wireProviderUsage, staged []wireStagedOutput) (builtEvidence, error) {
+	usageDoc, err := json.Marshal(usage.Accounting)
+	if err != nil {
+		return builtEvidence{}, internalError("encoding responses usage failed: %v", err)
+	}
+	if staged == nil {
+		staged = []wireStagedOutput{}
+	}
+	ev := wireResponsesEvidenceV2{Schema: "zatiti.responses.evidence/v2", PhysicalCall: physical, SessionHandle: handle, StagedOutputs: staged, OutputArtifacts: []wireArtifactRef{}, SessionMode: "provider_conversation", SessionID: sessionID}
+	doc, err := json.Marshal(ev)
+	if err != nil {
+		return builtEvidence{}, internalError("encoding Responses v2 preparation evidence failed: %v", err)
 	}
 	return builtEvidence{doc: doc, usage: usageDoc}, nil
 }

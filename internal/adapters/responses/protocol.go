@@ -81,6 +81,9 @@ type protocolProfile struct {
 	Model          string
 	MaxInputTokens int64
 	Capabilities   []string
+	Provider       string
+	SessionMode    string
+	Routing        json.RawMessage
 }
 
 // protocolRequest is one model step in Zatiti terms. Every value comes
@@ -92,6 +95,7 @@ type protocolRequest struct {
 	MaxOutputTokens       int64
 	Context               *contextDocument
 	ContinuationReference string
+	SessionID             string
 }
 
 // protocolCall is one encoded upstream request.
@@ -142,6 +146,13 @@ type protocolResult struct {
 	ContinuationReference string
 	ErrorCode             string
 	ErrorMessage          string
+	RequestedModel        string
+	ServedModel           string
+	ServingProvider       string
+	ProviderRequestID     string
+	SourceCostDecimal     string
+	SourceCostCurrency    string
+	SourceCostKind        string
 }
 
 // qualifiedProtocols returns the wire protocols this build has qualified,
@@ -151,6 +162,8 @@ type protocolResult struct {
 // capability_evidence, never assumed here.
 func qualifiedProtocols() map[string]wireProtocol {
 	return map[string]wireProtocol{
-		openaiProtocolRevision: openaiProtocol{},
+		openaiProtocolRevision:       openaiProtocol{},
+		openRouterProtocolRevision:   gatewayProtocol{provider: "openrouter"},
+		experientialProtocolRevision: gatewayProtocol{provider: "experiential"},
 	}
 }

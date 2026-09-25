@@ -47,6 +47,12 @@ func newWithProtocols(deps contract.AdapterDependencies, raw json.RawMessage, pr
 		return nil, err
 	}
 	protocol := protocols[profile.CapabilityEvidence.ProtocolRevision]
+	if profile.Version == "zatiti.responses/v2" {
+		want := map[string]string{"openai": openaiProtocolRevision, "openrouter": openRouterProtocolRevision, "experiential": experientialProtocolRevision}[profile.Provider]
+		if want == "" || profile.CapabilityEvidence.ProtocolRevision != want {
+			return nil, invalidInput("provider %q and capability_evidence.protocol_revision do not agree", profile.Provider)
+		}
+	}
 	if protocol != nil {
 		if err := protocol.validateProfile(profile.protocolProfile()); err != nil {
 			return nil, capabilityUnsupported("profile cannot be honoured by wire protocol %q: %v", profile.CapabilityEvidence.ProtocolRevision, err)
@@ -96,6 +102,9 @@ type contractDocument struct {
 	ProfileSchema              json.RawMessage `json:"profile_schema"`
 	ParametersSchema           json.RawMessage `json:"parameters_schema"`
 	EvidenceSchema             json.RawMessage `json:"evidence_schema"`
+	ProfileSchemaV2            json.RawMessage `json:"profile_schema_v2"`
+	ParametersSchemaV2         json.RawMessage `json:"parameters_schema_v2"`
+	EvidenceSchemaV2           json.RawMessage `json:"evidence_schema_v2"`
 	ContextSchema              json.RawMessage `json:"context_schema"`
 	QualifiedProtocolRevisions []string        `json:"qualified_protocol_revisions"`
 }
@@ -113,6 +122,18 @@ func buildContractDocument(revisions []string) (json.RawMessage, error) {
 	if err != nil {
 		return nil, internalError("responses contract evidence schema composition failed: %v", err)
 	}
+	ps2, err := profileSchemaV2()
+	if err != nil {
+		return nil, internalError("responses contract v2 profile schema composition failed: %v", err)
+	}
+	as2, err := parametersSchemaV2()
+	if err != nil {
+		return nil, internalError("responses contract v2 parameters schema composition failed: %v", err)
+	}
+	es2, err := evidenceSchemaV2()
+	if err != nil {
+		return nil, internalError("responses contract v2 evidence schema composition failed: %v", err)
+	}
 	cs, err := contextSchema()
 	if err != nil {
 		return nil, internalError("responses contract context schema composition failed: %v", err)
@@ -123,6 +144,9 @@ func buildContractDocument(revisions []string) (json.RawMessage, error) {
 		ProfileSchema:              ps,
 		ParametersSchema:           as,
 		EvidenceSchema:             es,
+		ProfileSchemaV2:            ps2,
+		ParametersSchemaV2:         as2,
+		EvidenceSchemaV2:           es2,
 		ContextSchema:              cs,
 		QualifiedProtocolRevisions: revisions,
 	}
@@ -163,6 +187,19 @@ func (a *Adapter) admitStep(ctx context.Context, dispatch contract.Dispatch, rec
 		return nil, err
 	}
 	s := &step{act: act}
+	if a.profile.Version == "zatiti.responses/v2" {
+		if act.Schema != "zatiti.responses.action/v2" {
+			return nil, invalidInput("a v2 Responses profile requires a v2 action")
+		}
+		if act.SessionMode != a.profile.SessionMode {
+			return nil, invalidInput("action session_mode does not match the configured provider profile")
+		}
+		if act.Kind == kindPrepareSession && act.SessionMode != "provider_conversation" {
+			return nil, invalidInput("prepare_session is only valid for provider_conversation profiles")
+		}
+	} else if act.Schema != "zatiti.responses.action/v1" {
+		return nil, invalidInput("a v1 Responses profile requires a v1 action")
+	}
 
 	if act.Kind == kindPrepareSession {
 		// The wire boundary: everything above is defined by the frozen
@@ -184,6 +221,7 @@ func (a *Adapter) admitStep(ctx context.Context, dispatch contract.Dispatch, rec
 			Profile:     a.profile.protocolProfile(),
 			OperationID: string(dispatch.OperationID),
 			AttemptID:   string(dispatch.AttemptID),
+			SessionID:   act.SessionID,
 		}
 		// Session creation is never billed by the pinned protocol (see
 		// PROTOCOL.md's accounting section): there is no worst-case
@@ -230,6 +268,7 @@ func (a *Adapter) admitStep(ctx context.Context, dispatch contract.Dispatch, rec
 		MaxOutputTokens:       act.MaxOutputTokens,
 		Context:               doc,
 		ContinuationReference: act.ContinuationReference,
+		SessionID:             act.SessionID,
 	}
 	s.bound = a.protocol.inputTokenBound(s.request)
 	if reconcile {
@@ -313,7 +352,12 @@ func (a *Adapter) invokePrepareSession(ctx, callCtx context.Context, dispatch co
 	disposition, handle := interpretPrepareSession(a.protocol, s.secret, po, &physical)
 	physical.ProviderReference = handle
 	usage := a.profile.usageFor(usageInput{Bounds: s.bounds, Sent: disposition != contract.DispositionNotSent, NoCharge: true})
-	built, err := buildPrepareSessionEvidence(handle, physical, usage, po.staged())
+	var built builtEvidence
+	if a.profile.Version == "zatiti.responses/v2" {
+		built, err = buildPrepareSessionEvidenceV2(s.act.SessionID, handle, physical, usage, po.staged())
+	} else {
+		built, err = buildPrepareSessionEvidence(handle, physical, usage, po.staged())
+	}
 	if err != nil {
 		return contract.Observation{}, err
 	}
@@ -349,11 +393,20 @@ func (a *Adapter) invokeModelStep(ctx, callCtx context.Context, dispatch contrac
 		result, decodeErr := a.protocol.decode(po.status, po.header, po.body)
 		staged = in.interpret(ctx, a, po.status, result, decodeErr, &physical, &output, staged)
 	}
-	built, err := buildModelStepEvidence(s.act.SessionHandle, physical, output, staged)
+	var built builtEvidence
+	if a.profile.Version == "zatiti.responses/v2" {
+		built, err = buildModelStepEvidenceV2(a.profile.SessionMode, s.act.SessionID, s.act.SessionHandle, physical, output, staged)
+	} else {
+		built, err = buildModelStepEvidence(s.act.SessionHandle, physical, output, staged)
+	}
 	if err != nil {
 		return contract.Observation{}, err
 	}
-	return finishObservation(in.disposition, s.act.SessionHandle, built, physical.FinishedAt), nil
+	reference := s.act.SessionHandle
+	if a.profile.Version == "zatiti.responses/v2" && a.profile.SessionMode == "stateless" {
+		reference = output.ResponseID
+	}
+	return finishObservation(in.disposition, reference, built, physical.FinishedAt), nil
 }
 
 // encodeStep translates the admitted step through the wire protocol,

@@ -24,7 +24,16 @@ const (
 // pins the same tool twice: a tool closure with two versions of one tool
 // cannot identify which contract a model proposal was made under.
 func decodeAction(raw json.RawMessage) (*wireResponsesParameters, error) {
+	var head struct {
+		Schema string `json:"schema"`
+	}
+	if err := json.Unmarshal(raw, &head); err != nil {
+		return nil, invalidInput("responses action must be a JSON object")
+	}
 	schema, err := parametersSchema()
+	if head.Schema == "zatiti.responses.action/v2" {
+		schema, err = parametersSchemaV2()
+	}
 	if err != nil {
 		return nil, internalError("responses parameters schema composition failed: %v", err)
 	}

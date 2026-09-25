@@ -41,12 +41,15 @@ const schemaContextBody = `{"$schema":"https://json-schema.org/draft/2020-12/sch
 // composeOnce lazily composes the four operation-shaped documents with the
 // shared $defs catalog. Composition happens once; documents are immutable.
 var (
-	composeOnce         sync.Once
-	composedProfile     json.RawMessage
-	composedParameters  json.RawMessage
-	composedEvidence    json.RawMessage
-	composedContext     json.RawMessage
-	composeSchemaErrVal error
+	composeOnce          sync.Once
+	composedProfile      json.RawMessage
+	composedParameters   json.RawMessage
+	composedEvidence     json.RawMessage
+	composedContext      json.RawMessage
+	composedProfileV2    json.RawMessage
+	composedParametersV2 json.RawMessage
+	composedEvidenceV2   json.RawMessage
+	composeSchemaErrVal  error
 )
 
 func composeSchemas() error {
@@ -64,6 +67,24 @@ func composeSchemas() error {
 			composeSchemaErrVal = fmt.Errorf("responses: embedded $defs catalog has no $defs object")
 			return
 		}
+		var base map[string]json.RawMessage
+		if err := json.Unmarshal(defs, &base); err != nil {
+			composeSchemaErrVal = err
+			return
+		}
+		var v2 map[string]json.RawMessage
+		if err := json.Unmarshal([]byte(schemaDefsV2), &v2); err != nil {
+			composeSchemaErrVal = err
+			return
+		}
+		for k, v := range v2 {
+			base[k] = v
+		}
+		defs, err := json.Marshal(base)
+		if err != nil {
+			composeSchemaErrVal = err
+			return
+		}
 		targets := []struct {
 			body string
 			dst  *json.RawMessage
@@ -72,6 +93,9 @@ func composeSchemas() error {
 			{schemaParametersBody, &composedParameters},
 			{schemaEvidenceBody, &composedEvidence},
 			{schemaContextBody, &composedContext},
+			{`{"$schema":"https://json-schema.org/draft/2020-12/schema","$ref":"#/$defs/ResponsesProfileV2"}`, &composedProfileV2},
+			{`{"$schema":"https://json-schema.org/draft/2020-12/schema","$ref":"#/$defs/ResponsesParametersV2"}`, &composedParametersV2},
+			{`{"$schema":"https://json-schema.org/draft/2020-12/schema","$ref":"#/$defs/ResponsesEvidenceV2"}`, &composedEvidenceV2},
 		}
 		for _, t := range targets {
 			composed, err := withDefs(t.body, defs)
@@ -125,6 +149,25 @@ func evidenceSchema() (json.RawMessage, error) {
 		return nil, err
 	}
 	return composedEvidence, nil
+}
+
+func profileSchemaV2() (json.RawMessage, error) {
+	if err := composeSchemas(); err != nil {
+		return nil, err
+	}
+	return composedProfileV2, nil
+}
+func parametersSchemaV2() (json.RawMessage, error) {
+	if err := composeSchemas(); err != nil {
+		return nil, err
+	}
+	return composedParametersV2, nil
+}
+func evidenceSchemaV2() (json.RawMessage, error) {
+	if err := composeSchemas(); err != nil {
+		return nil, err
+	}
+	return composedEvidenceV2, nil
 }
 
 // contextSchema returns the composed zatiti.context/v1 schema.
