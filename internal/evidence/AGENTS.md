@@ -1,6 +1,6 @@
 # Implementation assignment: `internal/evidence`
 
-Generated specification revision 12; source digest `835f0622199660a7b90674e1e0557ca713d5abff0a60b93ab74ed9cab04b178a`. This file is committed implementation context. Do not independently edit it. Everything required from the product specification and adjacent interfaces is embedded below; no RFC copy is required.
+Generated specification revision 13; source digest `6b086d744761eeee6bd2c58666f74a84397375da262081b073a06565ad42ea3d`. This file is committed implementation context. Do not independently edit it. Everything required from the product specification and adjacent interfaces is embedded below; no RFC copy is required.
 
 ## Mission and scope
 
@@ -30,9 +30,11 @@ These briefs are embedded so you need not read a sibling prompt to discover its 
 
 ## Shared foundation contract
 
-# Frozen implementation contract, revision 12
+# Frozen implementation contract, revision 13
 
 These decisions complete the product specification and bind every scope. Report contradictions with an affected-dependency list and proposed coordinated revision; do not change another owner's interface locally.
+
+Revision 13 permits a Responses v2 provider-conversation evidence record to omit `session_handle` when its physical call was not authoritatively successful. A confirmed prepare-session still requires a nonempty handle; stateless evidence still forbids it. This preserves honest unknown/failure outcomes without inventing a provider session identifier. Execution persists the model-step index alongside each effects operation reference and accepts a callback only when that exact reference, route step, current turn step and `model_pending` state agree. Chat observations use the existing controller-only `_execution.turn.observation` operation and never fabricate a task or Attempt.
 
 Revision 11 selects **hosted Serenity as the primary Mac memory service**. The user's existing hosted personal brain is the default personal-chief brain, including when another client already uses it. Zatiti does not create or import a duplicate personal brain during setup. Serenity remains the canonical memory writer; Zatiti retains local execution, authorization, accounting, conversation and recovery state. Separate restricted worker or project brains, when required by the existing isolation contract, are separate projects within the same hosted Serenity account and require explicit grants. The free tier may be offered, but no paid entitlement, quota, extra brain, or successful memory call is assumed from sign-in alone. The local Serenity distribution path is optional future/self-hosted packaging; the Mac release descriptor, controller manifest, bootstrap, installer and LaunchAgent do not require or start a bundled Serenity binary or local read facade for the hosted mode. Preserve the rev10 installer and trust chain for Zatiti's controller, desktop and credential helper.
 

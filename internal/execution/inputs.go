@@ -157,6 +157,13 @@ type turnAdmitInput struct {
 	RequesterID contract.ID    `json:"requester_id"`
 }
 
+type turnObservationInput struct {
+	TurnID      contract.ID          `json:"turn_id"`
+	StepIndex   int64                `json:"step_index"`
+	OperationID contract.ID          `json:"operation_id"`
+	Observation contract.Observation `json:"observation"`
+}
+
 type workPendingInput struct {
 	Limit int64 `json:"limit"`
 }

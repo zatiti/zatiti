@@ -1,6 +1,6 @@
 # Package implementation specification
 
-Revision 12. **Specification scaffold; no product implementation or executed release qualification is claimed.**
+Revision 13. **Specification scaffold; no product implementation or executed release qualification is claimed.**
 
 36 disjoint implementation roots; 202 public operations; 93 internal owner methods; 153 source blocks with explicit ownership; 142 named acceptance cases covering Z01–Z21 and release journeys.
 

@@ -669,7 +669,7 @@ func (s *Service) dispatchModelEffect(ctx context.Context, unit contract.Unit, t
 	if err != nil {
 		return err
 	}
-	return insertTurnDispatch(ctx, unit, s.newID(), t.ID, t.InstallationID, kind, string(op.ID), now)
+	return insertTurnDispatch(ctx, unit, s.newID(), t.ID, t.InstallationID, kind, t.StepsUsed, string(op.ID), now)
 }
 
 // handleProposalPrepare is the _execution.proposal.prepare boundary: return

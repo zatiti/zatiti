@@ -4365,10 +4365,21 @@
             "properties": {
               "session_mode": {
                 "const": "provider_conversation"
+              },
+              "physical_call": {
+                "properties": {
+                  "confirmation": {
+                    "const": "authoritative_success"
+                  }
+                },
+                "required": [
+                  "confirmation"
+                ]
               }
             },
             "required": [
-              "session_mode"
+              "session_mode",
+              "physical_call"
             ]
           },
           "then": {

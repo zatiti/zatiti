@@ -26,7 +26,11 @@ func handleResolveExecutionProfile(ctx context.Context, s *Service, unit contrac
 	if err != nil {
 		return contract.Payload{}, faultOf(err)
 	}
-	if row == nil || row.State != stateActive {
+	// Historical versions stay resolvable after replacement/archive so an
+	// already-prepared effect can recover against the exact configuration it
+	// pinned. A row without adapter_profile still fails below, which keeps
+	// legacy definitions from becoming executable by inference.
+	if row == nil {
 		return contract.Payload{}, notFound("execution profile version %s@%d not found", in.Profile.ID, in.Profile.Version)
 	}
 	profile := profileDef(row)

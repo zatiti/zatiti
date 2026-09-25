@@ -36,6 +36,7 @@ const (
 	opTick              = "_execution.tick"
 	opVerificationRec   = "_execution.verification.record"
 	opTurnAdmit         = "_execution.turn.admit"
+	opTurnObservation   = "_execution.turn.observation"
 	opWorkPending       = "_execution.work.pending"
 	opWorkClaim         = "_execution.work.claim"
 	opContextPrepare    = "_execution.context.prepare"
@@ -134,6 +135,8 @@ var opMetas = []opMeta{
 
 	{id: opTurnAdmit, visibility: "internal", mode: "mutation",
 		callers: []string{"controller", "scheduling"}},
+	{id: opTurnObservation, visibility: "internal", mode: "mutation",
+		callers: []string{"controller"}},
 	{id: opWorkPending, visibility: "internal", mode: "query",
 		callers: []string{"controller"}},
 	{id: opWorkClaim, visibility: "internal", mode: "mutation", expected: true,
@@ -328,6 +331,8 @@ func (s *Service) bindHandler(d contract.Descriptor) (contract.Handler, error) {
 		return bind(d, s.handleVerificationRecord)
 	case opTurnAdmit:
 		return bind(d, s.handleTurnAdmit)
+	case opTurnObservation:
+		return bind(d, s.handleTurnObservation)
 	case opWorkPending:
 		return bind(d, s.handleWorkPending)
 	case opWorkClaim:
