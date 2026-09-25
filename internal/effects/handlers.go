@@ -390,6 +390,10 @@ func (s *Service) stageOperation(ctx context.Context, unit contract.Unit, scope 
 	if err := validatePreconditions(action); err != nil {
 		return nil, err
 	}
+	adapterProfileJSON, profileConnectionVersion, err := s.resolvePinnedAdapterProfile(ctx, unit, action)
+	if err != nil {
+		return nil, err
+	}
 	a, err := s.ensureAction(ctx, unit, scope.InstallationID, action, now)
 	if err != nil {
 		return nil, err
@@ -416,22 +420,24 @@ func (s *Service) stageOperation(ctx context.Context, unit contract.Unit, scope 
 		routeJSON = string(raw)
 	}
 	o := &operationRow{
-		ID:                s.deps.IDs.New(),
-		Version:           1,
-		InstallID:         scope.InstallationID,
-		OrganizationID:    action.Scope.OrganizationID,
-		ProjectID:         action.Scope.ProjectID,
-		WorkerID:          action.Scope.WorkerID,
-		TaskID:            action.Scope.TaskID,
-		ActionID:          a.ID,
-		ActionDigest:      string(a.Digest),
-		SourceKey:         sourceKey,
-		State:             opStatePrepared,
-		LinkedOperation:   linked,
-		Relationship:      relationship,
-		CallbackRouteJSON: routeJSON,
-		CreatedAt:         now,
-		UpdatedAt:         now,
+		ID:                       s.deps.IDs.New(),
+		Version:                  1,
+		InstallID:                scope.InstallationID,
+		OrganizationID:           action.Scope.OrganizationID,
+		ProjectID:                action.Scope.ProjectID,
+		WorkerID:                 action.Scope.WorkerID,
+		TaskID:                   action.Scope.TaskID,
+		ActionID:                 a.ID,
+		ActionDigest:             string(a.Digest),
+		SourceKey:                sourceKey,
+		State:                    opStatePrepared,
+		LinkedOperation:          linked,
+		Relationship:             relationship,
+		CallbackRouteJSON:        routeJSON,
+		AdapterProfileJSON:       adapterProfileJSON,
+		ProfileConnectionVersion: profileConnectionVersion,
+		CreatedAt:                now,
+		UpdatedAt:                now,
 	}
 	if err := insertOperation(ctx, unit, o); err != nil {
 		return nil, err
@@ -469,6 +475,47 @@ func (s *Service) stageOperation(ctx context.Context, unit contract.Unit, scope 
 			string(action.Tool.ID), strings.Join(policy.Reasons, "; "))
 	}
 	return o, nil
+}
+
+// resolvePinnedAdapterProfile resolves only the exact action reference and
+// checks the duplicated legacy fields before preserving the immutable,
+// secret-free adapter document on the operation.
+func (s *Service) resolvePinnedAdapterProfile(ctx context.Context, unit contract.Unit, action wireAction) (string, int64, error) {
+	if action.ExecutionProfile == nil {
+		return "", 0, nil
+	}
+	if action.ExecutionProfile.ID == "" || action.ExecutionProfile.Version < 1 {
+		return "", 0, invalidInput("execution_profile must name an exact positive version")
+	}
+	p, err := s.executionProfileResolve(ctx, unit, executionProfileResolveInput{
+		Scope: action.Scope, Profile: *action.ExecutionProfile,
+	})
+	if err != nil {
+		return "", 0, err
+	}
+	if p.ID != action.ExecutionProfile.ID || p.Version != action.ExecutionProfile.Version {
+		return "", 0, prerequisiteMissing("configuration returned a different execution-profile version")
+	}
+	if p.Executor != "hosted" {
+		return "", 0, capabilityUnsupported("effects adapter profiles are only valid for hosted model execution")
+	}
+	if p.ConnectionID != action.Connection.ID || p.ProviderDestination != action.Destination ||
+		p.CostBound != action.CostBound {
+		return "", 0, invalidInput("action connection, destination or cost bound disagrees with its pinned execution profile")
+	}
+	if p.AdapterProfile == nil || len(p.AdapterProfile) == 0 || p.ConnectionVersion == nil || *p.ConnectionVersion < 1 {
+		return "", 0, prerequisiteMissing("execution profile %s@%d lacks a validated adapter profile or connection version; import/resolve the legacy profile first",
+			p.ID, p.Version)
+	}
+	var object map[string]json.RawMessage
+	if err := json.Unmarshal(p.AdapterProfile, &object); err != nil || object == nil {
+		return "", 0, prerequisiteMissing("execution profile %s@%d has a malformed adapter profile", p.ID, p.Version)
+	}
+	canonical, err := contract.Canonicalize(p.AdapterProfile)
+	if err != nil {
+		return "", 0, invalidInput("execution profile adapter_profile is not canonicalizable")
+	}
+	return string(canonical), *p.ConnectionVersion, nil
 }
 
 // _effects.prepare persists the immutable action and logical effect for
@@ -649,6 +696,11 @@ func (s *Service) handleAdmit(ctx context.Context, unit contract.Unit, in admitI
 	if err != nil {
 		return contract.Outcome[operationResourceBody]{}, err
 	}
+	if action.ExecutionProfile != nil && conn.Version != o.ProfileConnectionVersion {
+		return contract.Outcome[operationResourceBody]{}, staleVersion(
+			"connection %s is at version %d; pinned execution profile requires version %d",
+			conn.ID, conn.Version, o.ProfileConnectionVersion)
+	}
 	reservation, err := s.accountingReserve(ctx, unit, accountingReserveInput{
 		Scope:       action.Scope,
 		RootTaskID:  rootTask,
@@ -820,6 +872,26 @@ func (s *Service) handleClaim(ctx context.Context, unit contract.Unit, in claimI
 			"attempt %s is %s and cannot be claimed", a.ID, a.State)
 	}
 	now := s.now()
+	// Resolve the exact connection again immediately before consuming the
+	// one-use claim. This is the final current-authority/version fence before
+	// the controller can send bytes to a provider.
+	_, action, err := loadStoredAction(ctx, unit, o)
+	if err != nil {
+		return contract.Outcome[dispatchResourceBody]{}, err
+	}
+	if action.ExpiresAt.Before(now) {
+		return contract.Outcome[dispatchResourceBody]{}, conflict("action of operation %s expired before dispatch", o.ID)
+	}
+	_, currentConnection, err := s.resolveDispatch(ctx, unit, action.Scope, action)
+	if err != nil {
+		return contract.Outcome[dispatchResourceBody]{}, err
+	}
+	if currentConnection.Version != a.ConnectionVersion ||
+		(action.ExecutionProfile != nil && currentConnection.Version != o.ProfileConnectionVersion) {
+		return contract.Outcome[dispatchResourceBody]{}, staleVersion(
+			"connection %s changed from admitted version %d to %d before dispatch",
+			currentConnection.ID, a.ConnectionVersion, currentConnection.Version)
+	}
 	if err := consumeClaim(ctx, unit, a.ID, now); err != nil {
 		return contract.Outcome[dispatchResourceBody]{}, err
 	}
@@ -838,6 +910,9 @@ func (s *Service) handleClaim(ctx context.Context, unit contract.Unit, in claimI
 	if err := json.Unmarshal([]byte(a.DispatchJSON), &dispatch); err != nil {
 		return contract.Outcome[dispatchResourceBody]{}, &contract.Fault{Code: contract.CodeInternalError,
 			Message: fmt.Sprintf("stored dispatch intent of attempt %s does not decode", a.ID)}
+	}
+	if o.AdapterProfileJSON != "" {
+		dispatch.AdapterProfile = json.RawMessage(o.AdapterProfileJSON)
 	}
 	return completedOutcome(dispatchResourceBody{Resource: dispatch})
 }

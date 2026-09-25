@@ -127,5 +127,16 @@ func migrations() []contract.Migration {
 		Version: 2,
 		SQL:     schemaV2,
 		SHA256:  contract.Hash([]byte(schemaV2)),
+	}, {
+		Owner:   ownerName,
+		Version: 3,
+		SQL:     schemaV3,
+		SHA256:  contract.Hash([]byte(schemaV3)),
 	}}
 }
+
+// schemaV3 pins the exact secret-free adapter configuration resolved for a
+// hosted execution profile at operation preparation. Historical operations
+// never follow a later worker selection.
+const schemaV3 = `ALTER TABLE effects_operations ADD COLUMN adapter_profile_json TEXT NOT NULL DEFAULT '';
+ALTER TABLE effects_operations ADD COLUMN profile_connection_version INTEGER NOT NULL DEFAULT 0;`

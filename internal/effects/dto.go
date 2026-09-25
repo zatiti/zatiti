@@ -80,6 +80,7 @@ type wireAction struct {
 	ConfigurationRevision int64             `json:"configuration_revision"`
 	Parameters            json.RawMessage   `json:"parameters"`
 	CostBound             wireMoney         `json:"cost_bound"`
+	ExecutionProfile      *wireRef          `json:"execution_profile,omitempty"`
 }
 
 // wireOperation mirrors $defs/Operation.
@@ -127,15 +128,16 @@ type wireCallbackRoute struct {
 
 // wireDispatch mirrors $defs/Dispatch.
 type wireDispatch struct {
-	OperationID   contract.ID        `json:"operation_id"`
-	AttemptID     contract.ID        `json:"attempt_id"`
-	Generation    int64              `json:"generation"`
-	Adapter       string             `json:"adapter"`
-	Action        json.RawMessage    `json:"action"`
-	CredentialRef string             `json:"credential_ref"`
-	Deadline      time.Time          `json:"deadline"`
-	ProviderKey   string             `json:"provider_key,omitempty"`
-	CallbackRoute *wireCallbackRoute `json:"callback_route,omitempty"`
+	OperationID    contract.ID        `json:"operation_id"`
+	AttemptID      contract.ID        `json:"attempt_id"`
+	Generation     int64              `json:"generation"`
+	Adapter        string             `json:"adapter"`
+	Action         json.RawMessage    `json:"action"`
+	CredentialRef  string             `json:"credential_ref"`
+	Deadline       time.Time          `json:"deadline"`
+	ProviderKey    string             `json:"provider_key,omitempty"`
+	CallbackRoute  *wireCallbackRoute `json:"callback_route,omitempty"`
+	AdapterProfile json.RawMessage    `json:"adapter_profile,omitempty"`
 }
 
 // wireObservation mirrors $defs/Observation.
@@ -321,6 +323,31 @@ type snapshotBody struct {
 		Scope    wireScope `json:"scope"`
 		Revision int64     `json:"revision"`
 	} `json:"resource"`
+}
+
+// executionProfileResolveInput asks configuration for one exact immutable
+// version. It never accepts a worker key or latest selector.
+type executionProfileResolveInput struct {
+	Scope   wireScope `json:"scope"`
+	Profile wireRef   `json:"profile"`
+}
+
+// wireExecutionProfile decodes the frozen configuration owner result. The
+// adapter profile remains raw so it is preserved exactly and cannot be
+// interpreted or modified by Effects.
+type wireExecutionProfile struct {
+	ID                  contract.ID     `json:"id"`
+	Version             int64           `json:"version"`
+	Executor            string          `json:"executor"`
+	Model               string          `json:"model"`
+	ConnectionID        contract.ID     `json:"connection_id"`
+	ProviderDestination string          `json:"provider_destination"`
+	Capabilities        []string        `json:"capabilities"`
+	CostBound           wireMoney       `json:"cost_bound"`
+	Classification      string          `json:"classification"`
+	ContextCapture      string          `json:"context_capture"`
+	AdapterProfile      json.RawMessage `json:"adapter_profile,omitempty"`
+	ConnectionVersion   *int64          `json:"connection_version,omitempty"`
 }
 
 // taskBody decodes _tasks.snapshot output fields this package charges

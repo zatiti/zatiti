@@ -62,6 +62,18 @@ func (s *Service) configurationSnapshot(ctx context.Context, unit contract.Unit,
 	return out, nil
 }
 
+// executionProfileResolve fetches the exact immutable profile selected by
+// the action. It must never substitute a worker's current/latest profile.
+func (s *Service) executionProfileResolve(ctx context.Context, unit contract.Unit, in executionProfileResolveInput) (wireExecutionProfile, error) {
+	var out struct {
+		Resource wireExecutionProfile `json:"resource"`
+	}
+	if err := callPeer(ctx, s, unit, opConfigExecutionProfileResolve, in, &out); err != nil {
+		return wireExecutionProfile{}, err
+	}
+	return out.Resource, nil
+}
+
 // policyCheck evaluates current authorization for one capability and action.
 func (s *Service) policyCheck(ctx context.Context, unit contract.Unit, in policyCheckInput) (policyResultBody, error) {
 	var out policyResultBody
