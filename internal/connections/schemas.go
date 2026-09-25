@@ -64,6 +64,11 @@ var (
 	}
 )
 
+const (
+	schemaModelProviderListIn  = `{"type":"object","additionalProperties":false,"properties":{"scope":{"$ref":"#/$defs/Scope"}},"required":["scope"]}`
+	schemaModelProviderListOut = `{"type":"object","additionalProperties":false,"properties":{"items":{"type":"array","maxItems":3,"items":{"type":"object","additionalProperties":false,"properties":{"id":{"type":"string","enum":["openai","openrouter","experiential"]},"display_name":{"type":"string","minLength":1,"maxLength":128},"default_endpoint":{"type":"string","format":"uri","pattern":"^https://","maxLength":4096},"session_mode":{"type":"string","enum":["provider_conversation","stateless"]},"credential_setup":{"type":"string","const":"api_key"}},"required":["id","display_name","default_endpoint","session_mode","credential_setup"],"allOf":[{"if":{"properties":{"id":{"const":"openai"}},"required":["id"]},"then":{"properties":{"default_endpoint":{"const":"https://api.openai.com/v1/responses"},"session_mode":{"const":"provider_conversation"}}}},{"if":{"properties":{"id":{"const":"openrouter"}},"required":["id"]},"then":{"properties":{"default_endpoint":{"const":"https://openrouter.ai/api/v1/responses"},"session_mode":{"const":"stateless"}}}},{"if":{"properties":{"id":{"const":"experiential"}},"required":["id"]},"then":{"properties":{"default_endpoint":{"const":"https://api.experientiallabs.ai/v1/responses"},"session_mode":{"const":"stateless"}}}]}}},"required":["items"]}`
+)
+
 // opSchema is one operation's declared input/output bodies.
 type opSchemas struct {
 	input  string
@@ -73,6 +78,7 @@ type opSchemas struct {
 // operationSchemaBodies holds every operation catalog entry exactly as the
 // assignment embeds it. Internal operations precede public ones.
 var operationSchemaBodies = map[string]opSchemas{
+	"model.provider.list": {schemaModelProviderListIn, schemaModelProviderListOut},
 	// Internal operations.
 	"_connections.activate":          {schemaCandidateIn, schemaActivateOut},
 	"_connections.resolve":           {`{"type":"object","additionalProperties":false,"properties":{"scope":{"$ref":"#/$defs/Scope"},"connection":{"$ref":"#/$defs/Ref"},"tool":{"$ref":"#/$defs/Ref"},"destination":{"type":"string","maxLength":8192}},"required":["scope","connection","tool","destination"]}`, `{"type":"object","additionalProperties":false,"properties":{"connection":{"$ref":"#/$defs/Connection"},"tool":{"$ref":"#/$defs/Tool"}},"required":["connection","tool"]}`},
