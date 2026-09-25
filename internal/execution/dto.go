@@ -108,6 +108,8 @@ type wireExecutionProfile struct {
 	CostBound           wireMoney        `json:"cost_bound"`
 	Classification      string           `json:"classification"`
 	ContextCapture      string           `json:"context_capture"`
+	ConnectionVersion   contract.Version `json:"connection_version,omitempty"`
+	AdapterProfile      json.RawMessage  `json:"adapter_profile,omitempty"`
 }
 
 type wireWorker struct {

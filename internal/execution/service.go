@@ -63,15 +63,16 @@ const (
 	opWorkerPause       = "worker.pause"
 	opWorkerResume      = "worker.resume"
 
-	peerConfigSnapshot     = "_configuration.snapshot"
-	peerAccountReserve     = "_accounting.reserve"
-	peerAccountSettle      = "_accounting.settle"
-	peerArtifactsMeta      = "_artifacts.metadata"
-	peerEffectsPrepare     = "_effects.prepare"
-	peerTasksReady         = "_tasks.ready"
-	peerTasksSnapshot      = "_tasks.snapshot"
-	peerTasksTransit       = "_tasks.transition"
-	peerMessagingProcessed = "_messaging.processed"
+	peerConfigSnapshot       = "_configuration.snapshot"
+	peerConfigProfileResolve = "_configuration.execution_profile.resolve"
+	peerAccountReserve       = "_accounting.reserve"
+	peerAccountSettle        = "_accounting.settle"
+	peerArtifactsMeta        = "_artifacts.metadata"
+	peerEffectsPrepare       = "_effects.prepare"
+	peerTasksReady           = "_tasks.ready"
+	peerTasksSnapshot        = "_tasks.snapshot"
+	peerTasksTransit         = "_tasks.transition"
+	peerMessagingProcessed   = "_messaging.processed"
 
 	// P18: driving independent verification to a bound task success
 	// transition publishes the sealed verification request as a real

@@ -69,6 +69,17 @@ type peerScopeSnapshot struct {
 	Bindings []wireBinding    `json:"bindings"`
 }
 
+// resolveExecutionProfile loads the exact immutable hosted model profile.
+// It is deliberately separate from the current worker snapshot so an in-flight
+// turn can never silently adopt a newer profile version.
+func (s *Service) resolveExecutionProfile(ctx context.Context, unit contract.Unit, scope contract.Scope, ref wireRef) (wireExecutionProfile, error) {
+	data, err := s.callPeer(ctx, unit, peerConfigProfileResolve, map[string]any{"scope": scope, "profile": ref})
+	if err != nil {
+		return wireExecutionProfile{}, err
+	}
+	return decodeResource[wireExecutionProfile]("execution profile", data)
+}
+
 // callScopeSnapshot reads configuration's scope snapshot.
 func (s *Service) callScopeSnapshot(ctx context.Context, unit contract.Unit, scope contract.Scope) (peerScopeSnapshot, error) {
 	data, err := s.callPeer(ctx, unit, peerConfigSnapshot, map[string]any{"scope": scope})

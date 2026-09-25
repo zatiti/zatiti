@@ -559,19 +559,11 @@ func (s *Service) handleContextCommit(ctx context.Context, unit contract.Unit, i
 		}
 	}
 
-	// Chain through to the actual Responses dispatch (execution-dispatch-
-	// model-step, the same-day P22 gap fix): a committed context previously
-	// stopped here, leaving nothing to ever dispatch the model_step effect.
-	// Only a task-bound turn (a real attempt) is dispatched -- _execution.
-	// observation's delivery is attempt_id-keyed, so a pure chat/
-	// responsibility turn with no attempt has no route back for the
-	// confirmation under the current frozen contract; extending that is a
-	// controller/contract-level change outside this card's scope, and this
-	// call is a documented no-op for it (dispatchModelEffect's own guard).
-	if t.AttemptID != "" {
-		if err := s.dispatchModelEffect(ctx, unit, t, plan, ref, now); err != nil {
-			return contract.Outcome[turnBody]{}, err
-		}
+	// Dispatch every committed hosted turn, including chief chat with no task
+	// or execution Attempt. Effects persists the explicit worker_turn callback
+	// route; callback correlation never depends on an AttemptID.
+	if err := s.dispatchModelEffect(ctx, unit, t, plan, ref, now); err != nil {
+		return contract.Outcome[turnBody]{}, err
 	}
 	return completedOutcome(turnBody{Resource: turnOut(t)})
 }
@@ -589,7 +581,7 @@ func (s *Service) handleContextCommit(ctx context.Context, unit contract.Unit, i
 func (s *Service) dispatchModelEffect(ctx context.Context, unit contract.Unit, t *turnRow, plan *contextPlanRow, contextArtifact wireArtifactRef, now time.Time) error {
 	modelTool := resolveModelToolComponent(plan)
 	if modelTool == nil {
-		return nil
+		return prerequisiteMissing("worker turn %s has no currently resolved hosted model tool/connection", t.ID)
 	}
 	var (
 		kind            string
@@ -599,12 +591,28 @@ func (s *Service) dispatchModelEffect(ctx context.Context, unit contract.Unit, t
 		accountIdentity string
 		err             error
 	)
-	if t.SessionHandle == "" {
+	var exactProfile wireRef
+	var maximumCost *wireMoney
+	mode, adapterSchema, maxOutput, err := modelDispatchProfile(plan)
+	if err != nil {
+		return err
+	}
+	if mode == "provider_conversation" && t.SessionHandle == "" {
 		kind = "prepare_session"
 		_, parameters, toolRef, connectionRef, accountIdentity, err = buildResponsesPrepareSessionAction(plan)
 	} else {
 		kind = "model_step"
-		_, parameters, toolRef, connectionRef, accountIdentity, err = buildResponsesModelStepAction(plan, contextArtifact, t.SessionHandle, "")
+		if adapterSchema == "zatiti.responses/v2" {
+			parameters, toolRef, connectionRef, accountIdentity, err = buildResponsesModelStepActionV2(plan, contextArtifact, t.SessionHandle, mode, maxOutput, t.ID)
+		} else {
+			_, parameters, toolRef, connectionRef, accountIdentity, err = buildResponsesModelStepAction(plan, contextArtifact, t.SessionHandle, "")
+		}
+		if err == nil {
+			maximumCost, err = modelStepMaximumCost(plan)
+		}
+	}
+	if len(plan.Recipe.AdapterProfile) > 0 {
+		exactProfile = wireRef{ID: plan.Recipe.ExecutionProfile.ID, Version: plan.Recipe.ExecutionProfile.Version}
 	}
 	if err != nil {
 		return err
@@ -626,20 +634,32 @@ func (s *Service) dispatchModelEffect(ctx context.Context, unit contract.Unit, t
 		"preconditions":          map[string]any{},
 		"configuration_revision": t.ConfigurationRevision,
 		"parameters":             parameters,
-		// Session creation is not billed by the pinned protocol; a real
-		// model_step's cost bound is a follow-up (the same zero-bound
-		// simplification interpretExternalTool already uses for its own
-		// effect dispatch in this package).
-		"cost_bound": map[string]any{"currency": t.Limits.Currency, "micro_units": 0},
+		"cost_bound":             map[string]any{"currency": t.Limits.Currency, "micro_units": int64(0)},
 	}
-	data, err := s.callPeer(ctx, unit, peerEffectsPrepare, map[string]any{
+	if exactProfile.ID != "" {
+		action["execution_profile"] = exactProfile
+	}
+	if maximumCost != nil {
+		if maximumCost.Currency != t.Limits.Currency {
+			return capabilityUnsupported("model profile currency %s differs from the turn's configured currency %s", maximumCost.Currency, t.Limits.Currency)
+		}
+		if t.Limits.SpendMicroUnits > 0 && maximumCost.MicroUnits > t.Limits.SpendMicroUnits {
+			return prerequisiteMissing("model step maximum cost %d exceeds the turn spend limit %d", maximumCost.MicroUnits, t.Limits.SpendMicroUnits)
+		}
+		action["cost_bound"] = maximumCost
+	}
+	input := map[string]any{
 		"scope":     t.Scope,
 		"action":    action,
-		"source_id": t.AttemptID,
+		"source_id": s.newID(),
 		"callback_route": map[string]any{
 			"kind": "worker_turn", "turn_id": t.ID, "step_index": t.StepsUsed,
 		},
-	})
+	}
+	if exactProfile.ID != "" {
+		input["execution_profile"] = exactProfile
+	}
+	data, err := s.callPeer(ctx, unit, peerEffectsPrepare, input)
 	if err != nil {
 		return err
 	}

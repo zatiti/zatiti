@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math/big"
 	"time"
 
 	"github.com/zatiti/zatiti/internal/contract"
@@ -53,6 +54,7 @@ const (
 type contextRecipe struct {
 	Worker           wireRef            `json:"worker"`
 	ExecutionProfile wireRef            `json:"execution_profile"`
+	AdapterProfile   json.RawMessage    `json:"adapter_profile,omitempty"`
 	SkillVersions    []wireRef          `json:"skill_versions"`
 	Components       []contextComponent `json:"components"`
 }
@@ -220,10 +222,24 @@ func (s *Service) handleContextPrepare(ctx context.Context, unit contract.Unit, 
 		return contract.Outcome[contextPlanBody]{}, prerequisiteMissing(
 			"worker %s carries no execution profile to dispatch a model step under", worker.ID)
 	}
+	// Pin the immutable, fully resolved hosted profile now. Pending work must
+	// not be reinterpreted with a later worker selection, and dispatch must not
+	// infer a provider profile from the legacy display fields.
+	if worker.Profile.Executor == "hosted" && worker.Profile.ConnectionVersion > 0 && len(worker.Profile.AdapterProfile) > 0 {
+		resolved, err := s.resolveExecutionProfile(ctx, unit, t.Scope, wireRef{ID: worker.Profile.ID, Version: worker.Profile.Version})
+		if err != nil {
+			return contract.Outcome[contextPlanBody]{}, err
+		}
+		if len(resolved.AdapterProfile) == 0 || resolved.ConnectionVersion != worker.Profile.ConnectionVersion {
+			return contract.Outcome[contextPlanBody]{}, capabilityUnsupported("resolved hosted profile is incomplete or differs from the pinned snapshot")
+		}
+		worker.Profile = &resolved
+	}
 
 	recipe := contextRecipe{
 		Worker:           wireRef{ID: worker.ID, Version: worker.Version},
 		ExecutionProfile: wireRef{ID: worker.Profile.ID, Version: worker.Profile.Version},
+		AdapterProfile:   append(json.RawMessage(nil), worker.Profile.AdapterProfile...),
 		SkillVersions:    worker.SkillVersions,
 	}
 	refs := []wireArtifactRef{}
@@ -333,7 +349,7 @@ func (s *Service) handleContextPrepare(ctx context.Context, unit contract.Unit, 
 			continue
 		}
 		conn, tool, err := s.callConnectionsResolve(ctx, unit, t.Scope,
-			wireRef{ID: worker.Profile.ConnectionID, Version: defaultResolveVersion},
+			wireRef{ID: worker.Profile.ConnectionID, Version: profileConnectionVersion(worker.Profile)},
 			wireRef{ID: binding.TargetID, Version: defaultResolveVersion}, destination)
 		if err != nil {
 			// Unresolvable: the caller has not (yet) qualified this
@@ -416,6 +432,13 @@ func boundTargetIDs(bindings []wireBinding, workerBindingIDs []contract.ID, kind
 		}
 	}
 	return out
+}
+
+func profileConnectionVersion(profile *wireExecutionProfile) contract.Version {
+	if profile != nil && profile.ConnectionVersion > 0 {
+		return profile.ConnectionVersion
+	}
+	return defaultResolveVersion
 }
 
 // findBinding locates the authorized binding of kind naming targetID.
@@ -601,6 +624,114 @@ func (s *Service) componentMessage(c contextComponent) (wireContextMessage, bool
 	default:
 		return wireContextMessage{}, false, nil
 	}
+}
+
+type resolvedResponsesProfile struct {
+	Schema          string      `json:"schema"`
+	Provider        string      `json:"provider"`
+	Model           string      `json:"model"`
+	ConnectionID    contract.ID `json:"connection_id"`
+	MaxInputTokens  int64       `json:"max_input_tokens"`
+	MaxOutputTokens int64       `json:"max_output_tokens"`
+	Currency        string      `json:"currency"`
+	InputRate       struct {
+		Numerator   int64  `json:"numerator_micro_units"`
+		Denominator int64  `json:"denominator_units"`
+		Unit        string `json:"unit"`
+	} `json:"input_rate"`
+	OutputRate struct {
+		Numerator   int64  `json:"numerator_micro_units"`
+		Denominator int64  `json:"denominator_units"`
+		Unit        string `json:"unit"`
+	} `json:"output_rate"`
+	SessionMode string `json:"session_mode"`
+}
+
+func modelDispatchProfile(plan *contextPlanRow) (mode, schema string, maxOutput int64, err error) {
+	if len(plan.Recipe.AdapterProfile) == 0 {
+		return "provider_conversation", "zatiti.responses/v1", defaultMaxOutputTokens, nil
+	}
+	var p resolvedResponsesProfile
+	if err = json.Unmarshal(plan.Recipe.AdapterProfile, &p); err != nil {
+		return "", "", 0, invalidInput("pinned responses adapter profile is malformed")
+	}
+	if p.Schema != "zatiti.responses/v2" || (p.Provider != "openai" && p.Provider != "openrouter" && p.Provider != "experiential") {
+		return "", "", 0, capabilityUnsupported("pinned responses adapter profile has an unsupported schema or provider")
+	}
+	if p.SessionMode != "provider_conversation" && p.SessionMode != "stateless" {
+		return "", "", 0, capabilityUnsupported("pinned responses adapter profile has no valid session mode")
+	}
+	if p.MaxInputTokens < 1 || p.MaxOutputTokens < 1 || p.MaxOutputTokens > 1_000_000 {
+		return "", "", 0, capabilityUnsupported("pinned responses adapter profile has invalid token bounds")
+	}
+	if p.Provider == "openai" && p.SessionMode != "provider_conversation" || p.Provider != "openai" && p.SessionMode != "stateless" {
+		return "", "", 0, capabilityUnsupported("provider and session mode in pinned profile disagree")
+	}
+	return p.SessionMode, p.Schema, p.MaxOutputTokens, nil
+}
+
+func buildResponsesModelStepActionV2(plan *contextPlanRow, contextArtifact wireArtifactRef, sessionHandle, mode string, maxOutput int64, sessionID contract.ID) (map[string]any, wireRef, wireRef, string, error) {
+	modelTool := resolveModelToolComponent(plan)
+	if modelTool == nil {
+		return nil, wireRef{}, wireRef{}, "", prerequisiteMissing("no responses adapter tool is bound for this worker")
+	}
+	toolVersions := make([]wireRef, 0, len(plan.Recipe.Components))
+	for _, component := range plan.Recipe.Components {
+		if component.Kind == "tool" {
+			toolVersions = append(toolVersions, wireRef{ID: component.ToolID, Version: component.ToolVersion})
+		}
+	}
+	action := map[string]any{"schema": "zatiti.responses.action/v2", "kind": "model_step", "session_mode": mode, "context_artifact": contextArtifact, "max_output_tokens": maxOutput, "tool_contract_versions": toolVersions}
+	if mode == "provider_conversation" {
+		if sessionHandle == "" {
+			return nil, wireRef{}, wireRef{}, "", prerequisiteMissing("provider conversation model step has no confirmed session handle")
+		}
+		action["session_handle"] = sessionHandle
+	} else {
+		// A local deterministic turn ID is grouping metadata only; it is not sent
+		// as prior model context. The artifact already contains the full transcript.
+		action["session_id"] = string(sessionID)
+	}
+	raw, err := json.Marshal(action)
+	if err != nil {
+		return nil, wireRef{}, wireRef{}, "", err
+	}
+	schema := json.RawMessage(`{"type":"object","additionalProperties":false,"properties":{"schema":{"const":"zatiti.responses.action/v2"},"kind":{"const":"model_step"},"session_mode":{"enum":["provider_conversation","stateless"]},"session_id":{"type":"string","minLength":1,"maxLength":128},"context_artifact":{"type":"object","additionalProperties":false,"properties":{"id":{"type":"string","format":"uuid"},"digest":{"type":"string","pattern":"^[0-9a-f]{64}$"}},"required":["id","digest"]},"max_output_tokens":{"type":"integer","minimum":1,"maximum":1000000},"tool_contract_versions":{"type":"array","items":{"type":"object","additionalProperties":false,"properties":{"id":{"type":"string","format":"uuid"},"version":{"type":"integer","minimum":1}},"required":["id","version"]}},"session_handle":{"type":"string","minLength":1,"maxLength":1024}},"required":["schema","kind","session_mode","context_artifact","max_output_tokens","tool_contract_versions"]}`)
+	if err := contract.ValidateSchema(schema, raw); err != nil {
+		return nil, wireRef{}, wireRef{}, "", fmt.Errorf("execution: assembled v2 model_step action is invalid: %w", err)
+	}
+	var params map[string]any
+	if err := json.Unmarshal(raw, &params); err != nil {
+		return nil, wireRef{}, wireRef{}, "", err
+	}
+	return params, wireRef{ID: modelTool.ToolID, Version: modelTool.ToolVersion}, wireRef{ID: modelTool.ConnectionID, Version: modelTool.ConnectionVersion}, modelTool.AccountIdentity, nil
+}
+
+// modelStepMaximumCost computes the conservative bound for one request using
+// exact integer arithmetic and rounds fractional micro-units upward.
+func modelStepMaximumCost(plan *contextPlanRow) (*wireMoney, error) {
+	if len(plan.Recipe.AdapterProfile) == 0 {
+		return &wireMoney{Currency: "USD", MicroUnits: 0}, nil
+	}
+	var p resolvedResponsesProfile
+	if err := json.Unmarshal(plan.Recipe.AdapterProfile, &p); err != nil {
+		return nil, invalidInput("pinned responses profile is malformed")
+	}
+	if p.InputRate.Denominator < 1 || p.OutputRate.Denominator < 1 || p.InputRate.Unit != "input_token" || p.OutputRate.Unit != "output_token" || p.InputRate.Numerator < 0 || p.OutputRate.Numerator < 0 || p.Currency == "" {
+		return nil, capabilityUnsupported("pinned model profile has no usable exact per-token cost rates")
+	}
+	inputTokens := p.MaxInputTokens
+	total := new(big.Rat).SetFrac(big.NewInt(p.InputRate.Numerator), big.NewInt(p.InputRate.Denominator))
+	total.Mul(total, new(big.Rat).SetInt64(inputTokens))
+	out := new(big.Rat).SetFrac(big.NewInt(p.OutputRate.Numerator), big.NewInt(p.OutputRate.Denominator))
+	total.Add(total, out.Mul(out, new(big.Rat).SetInt64(p.MaxOutputTokens)))
+	n, d := total.Num(), total.Denom()
+	n.Add(n, new(big.Int).Sub(d, big.NewInt(1)))
+	n.Div(n, d)
+	if !n.IsInt64() {
+		return nil, capabilityUnsupported("model profile maximum cost exceeds the supported accounting range")
+	}
+	return &wireMoney{Currency: p.Currency, MicroUnits: n.Int64()}, nil
 }
 
 // buildResponsesModelStepAction constructs the exact zatiti.responses.action/v1
