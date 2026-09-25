@@ -16,13 +16,12 @@ const (
 	// readinessStorageOnly: the installation is open and its stored state
 	// (tasks, principals, configuration, evidence, ...) is reachable
 	// through every query and non-model mutation, but no adapter capable of
-	// a paid model step (modelAdapterNames) is registered -- nothing that
-	// needs a hosted model can start.
+	// a paid model step or profile factory is attached.
 	readinessStorageOnly readinessLevel = "storage_only"
-	// readinessChatReady: at least one hosted-model adapter is registered
-	// from a valid, explicit, self-binding profile (loadAdapters/
-	// responses.New already refuse anything less), so a controlled model
-	// turn can start. Durable task automation may still be incomplete: a
+	// readinessChatReady: the hosted-model adapter factory is attached so
+	// controlled turns can construct an adapter from each dispatch's pinned
+	// durable profile. The profile is validated at dispatch time. Durable
+	// task automation may still be incomplete: a
 	// catalog job kind may have no attached runner, or the trusted verifier
 	// may be unavailable.
 	readinessChatReady readinessLevel = "chat_ready"
@@ -100,13 +99,13 @@ func isModelAdapter(name string) bool {
 //     fails startup hard, so "attached" here really means "constructed
 //     successfully"; helperProvisioned reports whether the connection-setup
 //     helper's shared HMAC receipt key exists yet -- see helper.go).
-func assemblyReadiness(registeredAdapters map[string]contract.Adapter, unregistered []string, missingRunners []jobKind, verifierAttached, helperProvisioned bool) (readinessLevel, []startupRequirement) {
+func assemblyReadiness(registeredAdapters map[string]contract.Adapter, unregistered []string, missingRunners []jobKind, verifierAttached, helperProvisioned bool, responsesFactoryReady ...bool) (readinessLevel, []startupRequirement) {
 	var reqs []startupRequirement
 	for _, name := range unregistered {
 		if isModelAdapter(name) {
 			reqs = append(reqs, startupRequirement{
 				Categories: []string{"provider", "price", "currency"},
-				Message:    "adapter " + name + " is not registered; no hosted model step can start until a valid " + name + " profile exists at <state-dir>/adapters/" + name + ".json",
+				Message:    "adapter " + name + " is not registered; no hosted model step can start until a valid durable execution profile is configured",
 			})
 			continue
 		}
@@ -135,7 +134,8 @@ func assemblyReadiness(registeredAdapters map[string]contract.Adapter, unregiste
 	}
 
 	level := readinessStorageOnly
-	if hasRegisteredModelAdapter(registeredAdapters) {
+	factoryReady := len(responsesFactoryReady) > 0 && responsesFactoryReady[0]
+	if hasRegisteredModelAdapter(registeredAdapters) || factoryReady {
 		level = readinessChatReady
 		if len(missingRunners) == 0 && verifierAttached {
 			level = readinessTaskReady

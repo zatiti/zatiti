@@ -18,28 +18,24 @@ import (
 	"github.com/zatiti/zatiti/internal/contract"
 )
 
-// Adapter profiles are trusted local configuration: one strictly validated,
-// secret-free JSON profile per adapter at <state-dir>/adapters/<name>.json.
-// An adapter with no profile is not registered and a dispatch naming it is
-// recorded not_sent with capability_unsupported by the controller; it is
-// never guessed at. A profile is loaded only if it validates in full
-// against its adapter's frozen schema (responses: zatiti.responses/v1,
-// self-binding capability_evidence included); an invalid or partial
-// profile fails startup rather than silently constructing a degraded
-// adapter or falling back to any default provider/model/price (P24 item 1).
+// Tool adapter profiles are trusted local configuration: one strictly
+// validated, secret-free JSON profile per tool adapter at
+// <state-dir>/adapters/<name>.json. Hosted model profiles are durable
+// execution configuration, resolved per dispatch by the controller through
+// responsesAdapterFactory; they are not loaded from a process-global file.
+// No provider, model or price is guessed when a pinned profile is absent.
 
 // adapterConstructors maps the landed adapter names to their constructors.
 var adapterConstructors = map[string]func(contract.AdapterDependencies, json.RawMessage) (contract.Adapter, error){
-	"github":    github.New,
-	"httpread":  httpread.New,
-	"responses": responses.New,
-	"serenity":  serenity.New,
+	"github":   github.New,
+	"httpread": httpread.New,
+	"serenity": serenity.New,
 }
 
 // unimplementedAdapters names adapters the product wires by design whose
-// package has not landed. serve reports them at startup. Empty on this
-// tree: every adapter the product names (github, httpread, responses,
-// serenity) has a landed constructor above.
+// package has not landed. serve reports them at startup. Empty on this tree:
+// every tool adapter is landed, and responses is supplied by its per-dispatch
+// factory.
 var unimplementedAdapters = []string{}
 
 // maxAdapterProfileBytes bounds one profile file.
@@ -63,6 +59,13 @@ func loadAdapters(dir string, deps contract.AdapterDependencies) (map[string]con
 			continue
 		}
 		name := strings.TrimSuffix(e.Name(), ".json")
+		// Responses providers are selected by the durable execution profile
+		// on each dispatch. The former responses.json file is retained only
+		// as an explicit legacy/import source; it must never select or
+		// override a provider for a running controller.
+		if name == "responses" {
+			continue
+		}
 		construct, ok := adapterConstructors[name]
 		if !ok {
 			return nil, nil, fmt.Errorf("adapter profile %q names no landed adapter (landed: %s)", e.Name(), strings.Join(landedAdapterNames(), ", "))
@@ -95,6 +98,25 @@ func loadAdapters(dir string, deps contract.AdapterDependencies) (map[string]con
 		}
 	}
 	return adapters, missing, nil
+}
+
+// newResponsesAdapter constructs a Responses adapter for the immutable
+// profile pinned to one execution dispatch. It deliberately takes the
+// profile as an argument instead of loading process-global configuration,
+// so changing a durable model profile takes effect without restarting the
+// controller. The adapter resolves its credential from the installation's
+// protected SecretStore through these dependencies.
+func newResponsesAdapter(deps contract.AdapterDependencies, rawProfile json.RawMessage) (contract.Adapter, error) {
+	return responses.New(deps, rawProfile)
+}
+
+// responsesAdapterFactory closes over installation-scoped dependencies and
+// is attached to the controller. The controller supplies the exact,
+// revision-pinned profile on every dispatch.
+func responsesAdapterFactory(deps contract.AdapterDependencies) func(json.RawMessage) (contract.Adapter, error) {
+	return func(rawProfile json.RawMessage) (contract.Adapter, error) {
+		return newResponsesAdapter(deps, rawProfile)
+	}
 }
 
 func landedAdapterNames() []string {

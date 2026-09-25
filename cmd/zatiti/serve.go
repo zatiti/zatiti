@@ -305,6 +305,11 @@ func superviseController(ctx context.Context, h *installationHandle, adapters ma
 		Operator:         h.app,
 		Verifier:         verifier,
 		RestoreLifecycle: restoreLifecycleValue,
+		// The model profile is resolved from the durable, version-pinned
+		// dispatch, not from process-global adapter configuration. Keeping
+		// this factory on the trusted controller side also lets provider
+		// changes take effect without restarting serve.
+		ResponsesAdapterFactory: responsesAdapterFactory(adapterDependencies(h)),
 	}
 	if err := ctl.Attach(collab); err != nil {
 		return err
@@ -317,7 +322,7 @@ func superviseController(ctx context.Context, h *installationHandle, adapters ma
 	for _, k := range missingRunners {
 		log.Warn("catalog job kind has no attached runner; a pending job of this kind is never claimed", "owner", k.Owner, "operation", k.Operation)
 	}
-	level, reqs := assemblyReadiness(adapters, unregisteredAdapters, missingRunners, true, helperReceiptKeyProvisioned(ctx, h.plat.Secrets()))
+	level, reqs := assemblyReadiness(adapters, unregisteredAdapters, missingRunners, true, helperReceiptKeyProvisioned(ctx, h.plat.Secrets()), true)
 	for _, r := range reqs {
 		log.Warn("startup requirement", "categories", r.Categories, "message", r.Message)
 	}
