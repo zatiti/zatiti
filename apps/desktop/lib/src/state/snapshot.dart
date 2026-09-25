@@ -22,6 +22,8 @@ class WorkerEntry {
     this.conversationId,
     this.isOrganizationChief = false,
     this.preview = '',
+    this.provider,
+    this.model,
   });
 
   final WorkerId id;
@@ -43,6 +45,10 @@ class WorkerEntry {
 
   /// The latest meaningful summary line, when the source has one.
   final String preview;
+
+  /// Controller-reported model identity for this worker's committed profile.
+  final String? provider;
+  final String? model;
 
   String get ancestry => organizationPath.join(' › ');
 }

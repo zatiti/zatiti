@@ -80,9 +80,7 @@ class ConversationView extends StatelessWidget {
                       recipientName: title,
                       contextLine: worker == null
                           ? 'Talking to everyone in this group.'
-                          : worker.parentId == null
-                          ? '${worker.name} will coordinate the right people.'
-                          : 'Talking directly to ${worker.name}.',
+                          : '${worker.parentId == null ? '${worker.name} will coordinate the right people.' : 'Talking directly to ${worker.name}.'} · ${worker.provider ?? 'Provider not reported'} · ${worker.model ?? 'No committed model reported'}',
                     ),
             ),
           ),

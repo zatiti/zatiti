@@ -623,6 +623,55 @@ class LiveWorkspaceSource implements WorkspaceSource {
           ..sort((a, b) => a.at.compareTo(b.at));
       });
 
+  /// Stages an assignment of an existing controller-returned model profile.
+  /// The profile is copied intact; the client cannot synthesize qualification.
+  Future<ResourceSubmission<DraftedResource>> prepareWorkerProfileUpdate({
+    required String workerId,
+    required wire.ExecutionProfile profile,
+  }) => _guard(() async {
+    final worker = await api.workerGet(workerId);
+    return _LiveResourceSubmission(
+      api.prepareWorkerProfileUpdate(worker: worker, profile: profile),
+      (data) {
+        final o = StrictObject(data, 'worker.update');
+        final draft = wire.Draft.fromJson(o.object('draft'));
+        final updated = wire.Worker.fromJson(o.object('resource'));
+        o.finish();
+        return DraftedResource(
+          draftId: draft.id,
+          draftVersion: draft.version,
+          resourceId: updated.id,
+        );
+      },
+      'update worker model profile $workerId',
+    );
+  });
+
+  /// Stages a provider connection with the preset's fixed destination. The
+  /// returned identity can be passed to the existing secure key helper only
+  /// after the plan is applied.
+  ResourceSubmission<DraftedResource> prepareProviderConnection({
+    required wire.ProviderDescriptor provider,
+    required String accountIdentity,
+  }) => _LiveResourceSubmission(
+    api.prepareProviderConnection(
+      provider: provider,
+      accountIdentity: accountIdentity,
+    ),
+    (data) {
+      final o = StrictObject(data, 'connection.create');
+      final draft = wire.Draft.fromJson(o.object('draft'));
+      final connection = wire.Connection.fromJson(o.object('resource'));
+      o.finish();
+      return DraftedResource(
+        draftId: draft.id,
+        draftVersion: draft.version,
+        resourceId: connection.id,
+      );
+    },
+    'create ${provider.id} provider connection',
+  );
+
   /// Whether a message is shown as the person's own. A direct conversation
   /// has exactly the worker and the human as participants, so a sender who
   /// is not that worker is the human — derived from data the contract
@@ -1382,6 +1431,8 @@ class LiveWorkspaceSource implements WorkspaceSource {
               ? null
               : ConversationId(conversation),
           isOrganizationChief: chief,
+          provider: w.profile?.provider,
+          model: w.profile?.model,
         ),
       );
     }

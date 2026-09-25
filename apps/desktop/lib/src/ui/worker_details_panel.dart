@@ -11,6 +11,7 @@ import 'action_review_dialog.dart';
 import 'creation_dialogs.dart';
 import 'memory_dialogs.dart';
 import 'task_dialogs.dart';
+import 'provider_model_editor.dart';
 import 'theme.dart';
 import 'widgets.dart';
 
@@ -56,6 +57,16 @@ class WorkerDetailsPanel extends StatelessWidget {
                           style: text.titleMedium,
                         ),
                       ),
+                    ),
+                    IconButton(
+                      key: ValueKey('worker-model-${worker.id.value}'),
+                      tooltip: 'Choose model profile',
+                      onPressed: () => showProviderModelEditor(
+                        context,
+                        controller: controller,
+                        workerId: worker.id.value,
+                      ),
+                      icon: const Icon(Icons.tune),
                     ),
                     IconButton(
                       key: const ValueKey('details-close'),

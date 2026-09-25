@@ -48,6 +48,11 @@ abstract final class Operations {
   );
   static const workerList = OperationDescriptor.query('worker.list');
   static const workerCreate = OperationDescriptor.mutation('worker.create');
+  static const workerGet = OperationDescriptor.query('worker.get');
+  static const workerUpdate = OperationDescriptor.mutation(
+    'worker.update',
+    expectedVersion: true,
+  );
 
   static const conversationList = OperationDescriptor.query(
     'conversation.list',
@@ -114,6 +119,15 @@ abstract final class Operations {
   static const budgetGet = OperationDescriptor.query('budget.get');
   static const connectionList = OperationDescriptor.query('connection.list');
   static const connectionGet = OperationDescriptor.query('connection.get');
+  static const connectionCreate = OperationDescriptor.mutation(
+    'connection.create',
+  );
+  static const modelProviderList = OperationDescriptor.query(
+    'model.provider.list',
+  );
+  static const executionProfileList = OperationDescriptor.query(
+    'execution_profile.list',
+  );
   static const installationVerifierList = OperationDescriptor.query(
     'installation.verifier.list',
   );
@@ -150,6 +164,8 @@ abstract final class Operations {
     organizationCreate,
     workerList,
     workerCreate,
+    workerGet,
+    workerUpdate,
     conversationList,
     conversationMessageList,
     conversationMessageSend,
@@ -177,6 +193,9 @@ abstract final class Operations {
     budgetGet,
     connectionList,
     connectionGet,
+    connectionCreate,
+    modelProviderList,
+    executionProfileList,
     installationVerifierList,
     memoryBindingList,
     memoryList,

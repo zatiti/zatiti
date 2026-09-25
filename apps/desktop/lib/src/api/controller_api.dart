@@ -273,6 +273,63 @@ class ControllerApi {
   Future<List<Connection>> connections() =>
       listAll(Operations.connectionList, Connection.fromJson);
 
+  Future<List<ProviderDescriptor>> modelProviders() async {
+    final r = await client.query(Operations.modelProviderList, {
+      'scope': client.scope(),
+    });
+    final data = StrictObject(
+      r.requireData('model.provider.list'),
+      'model.provider.list',
+    );
+    final providers = data
+        .list('items')
+        .map(ProviderDescriptor.fromJson)
+        .toList();
+    data.finish();
+    return providers;
+  }
+
+  Future<List<ExecutionProfile>> executionProfiles() =>
+      listAll(Operations.executionProfileList, ExecutionProfile.fromJson);
+
+  Submission prepareProviderConnection({
+    required ProviderDescriptor provider,
+    required String accountIdentity,
+  }) {
+    final scope = client.scope();
+    return client.prepare(Operations.connectionCreate, {
+      'scope': scope,
+      'definition': {
+        'scope': scope,
+        'provider': provider.id,
+        'account_identity': accountIdentity.trim(),
+        // A reference only. The raw API key is entered later through the
+        // signed local helper and never enters this request.
+        'credential_ref': 'connections/credentials/${newUuidV4()}',
+        'destinations': [provider.defaultEndpoint],
+        'allowed_scopes': const <String>[],
+      },
+    });
+  }
+
+  Future<Worker> workerGet(String id) async {
+    final r = await client.query(Operations.workerGet, {
+      'scope': client.scope(),
+      'id': id,
+    });
+    return Worker.fromJson(_resource(r.data, 'worker.get'));
+  }
+
+  Submission prepareWorkerProfileUpdate({
+    required Worker worker,
+    required ExecutionProfile profile,
+  }) => client.prepare(Operations.workerUpdate, {
+    'scope': client.scope(organizationId: worker.organizationId),
+    'id': worker.id,
+    'expected_version': worker.version,
+    'definition': worker.definitionWithProfile(profile),
+  });
+
   Future<Connection> connectionGet(String id) async {
     final response = await client.query(Operations.connectionGet, {
       'scope': client.scope(),
