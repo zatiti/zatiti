@@ -14,6 +14,7 @@ Status as of 2026-09-26: **pre-release; Mac install-to-first-chat is not qualifi
 
 - The integrated full Go suite passed: `go test -p 2 ./... -count=1 -timeout=20m`.
 - `go vet ./...` passed.
+- Draft PR CI passed on Ubuntu, native Apple Silicon macOS, and native Intel macOS for build, full unit/integration tests, and the Flutter desktop matrix. The race suite passed on Ubuntu and Apple Silicon; Intel ran the full unit/integration suite, with its race step omitted because the same full suite exceeded the 40-minute race timeout there.
 - The spec renderer check passed for 41 files, 37 scopes, 305 operations, 153 source blocks, and 147 cases. The generated MCP runtime mirror check and its synchronization tests passed.
 - Flutter analyze and all 243 desktop tests passed from `apps/desktop`.
 - The opt-in OpenAI live qualification test compiles and its default gated path passes; it did not make a live request.
@@ -23,4 +24,4 @@ These results demonstrate source-level and controlled-test progress only. They d
 
 ## Repository integration status
 
-Local `main` includes the reconciled `origin/main` history plus the integrated implementation commits; it is 82 commits ahead with no remote-only commits. The integration changes in this update are tested and ready for a draft PR. There are no side worktrees or local implementation branches. The GitHub description and marketing README describe the current pre-release status. No local implementation branch or worktree for the closed P00–P50 dispatch has been abandoned. Remote historical/topic refs remain for repository history; none are active local work items. The draft PR is the review/publishing step, not a release qualification claim.
+Local `main` includes the reconciled `origin/main` history plus the integrated implementation commits; it is 82 commits ahead with no remote-only commits. Draft PR [#71](https://github.com/zatiti/zatiti/pull/71) contains the reviewed integration and follow-up CI fixes, and its full CI matrix passes. The only local topic branch is the active PR branch; there are no side worktrees or abandoned local implementation branches. The closed, unmerged Z-M2 implementation branch was deleted after verifying its implementation is integrated; its PR remains as an audit record. The GitHub description and marketing README describe the current pre-release status. Remote merged topic refs remain as history, not active work. This draft PR is the review step, not a release qualification claim.
