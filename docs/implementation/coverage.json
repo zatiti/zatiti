@@ -1,5 +1,5 @@
 {
-  "revision": 4,
+  "revision": 18,
   "requirements": [
     {
       "requirement": "R1-002",
@@ -2402,6 +2402,157 @@
         "tests/integration",
         "tests/qualification"
       ]
+    },
+    {
+      "requirement": "R-MAC9-001",
+      "section": "MAC9",
+      "kind": "requirement",
+      "owner": "packaging",
+      "participants": [
+        ".github/workflows",
+        "tests/qualification",
+        "apps/desktop",
+        "internal/platform"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R-MAC9-002",
+      "section": "MAC9",
+      "kind": "requirement",
+      "owner": "cmd/zatiti",
+      "participants": [
+        "internal/platform",
+        "internal/connections",
+        "apps/desktop",
+        "packaging",
+        "tests/qualification"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R-MAC9-003",
+      "section": "MAC9",
+      "kind": "requirement",
+      "owner": "packaging",
+      "participants": [
+        ".github/workflows",
+        "cmd/zatiti",
+        "tests/qualification"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R-MAC10-001",
+      "section": "MAC10",
+      "kind": "requirement",
+      "owner": "packaging",
+      "participants": [
+        "cmd/zatiti",
+        "internal/platform",
+        "tests/qualification",
+        ".github/workflows"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R-MAC10-002",
+      "section": "MAC10",
+      "kind": "requirement",
+      "owner": "cmd/zatiti",
+      "participants": [
+        "internal/connections",
+        "tests/qualification"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R-MAC10-003",
+      "section": "MAC10",
+      "kind": "requirement",
+      "owner": "tests/qualification",
+      "participants": [
+        ".github/workflows",
+        "packaging",
+        "cmd/zatiti",
+        "internal/adapters/serenity",
+        "apps/desktop"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R-MAC11-001",
+      "section": "MAC11",
+      "kind": "requirement",
+      "owner": "internal/connections",
+      "participants": [
+        "internal/platform",
+        "cmd/zatiti",
+        "apps/desktop",
+        "internal/adapters/serenity",
+        "internal/memory",
+        "tests/qualification"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R-MAC11-002",
+      "section": "MAC11",
+      "kind": "requirement",
+      "owner": "internal/adapters/serenity",
+      "participants": [
+        "internal/memory",
+        "internal/accounting",
+        "packaging",
+        "tests/qualification",
+        ".github/workflows"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
+    },
+    {
+      "requirement": "R12-PROVIDER-CONTRACTS",
+      "section": "provider model revision 12",
+      "kind": "requirement",
+      "owner": "internal/configuration",
+      "participants": [
+        "internal/connections",
+        "internal/effects",
+        "internal/execution",
+        "internal/accounting",
+        "internal/controller",
+        "internal/adapters/responses",
+        "apps/desktop",
+        "tests/integration",
+        "tests/qualification"
+      ],
+      "verification": [
+        "tests/integration",
+        "tests/qualification"
+      ]
     }
   ],
   "acceptance_cases": [
@@ -2598,7 +2749,6 @@
         "internal/connections",
         "internal/effects",
         "internal/adapters/httpread",
-        "internal/adapters/mcpclient",
         "tests/integration"
       ]
     },
@@ -2650,7 +2800,6 @@
         "internal/adapters/responses",
         "internal/adapters/github",
         "internal/adapters/httpread",
-        "internal/adapters/mcpclient",
         "tests/integration"
       ]
     },
@@ -3741,61 +3890,207 @@
       ]
     },
     {
-      "id": "Z05.mcp_discovery_grants_nothing",
-      "gate": "Z05",
+      "id": "QUALIFICATION.macos_pkg_binding",
+      "gate": "QUALIFICATION",
       "scopes": [
+        "packaging",
+        ".github/workflows",
+        "tests/qualification"
+      ]
+    },
+    {
+      "id": "QUALIFICATION.macos_gui_secret_helper",
+      "gate": "QUALIFICATION",
+      "scopes": [
+        "cmd/zatiti",
+        "internal/platform",
         "internal/connections",
-        "internal/policy",
-        "internal/adapters/mcpclient",
+        "apps/desktop",
+        "packaging",
+        "tests/qualification"
+      ]
+    },
+    {
+      "id": "QUALIFICATION.macos_serenity_hard_gate",
+      "gate": "QUALIFICATION",
+      "scopes": [
+        "internal/adapters/serenity",
+        "internal/memory",
+        "internal/accounting",
+        "tests/qualification",
+        "packaging"
+      ]
+    },
+    {
+      "id": "QUALIFICATION.macos_bootstrap_entrypoint",
+      "gate": "QUALIFICATION",
+      "scopes": [
+        "packaging",
+        ".github/workflows",
+        "cmd/zatiti",
+        "tests/qualification"
+      ]
+    },
+    {
+      "id": "QUALIFICATION.macos_install_to_first_chat",
+      "gate": "QUALIFICATION",
+      "scopes": [
+        "tests/qualification",
+        ".github/workflows",
+        "packaging",
+        "cmd/zatiti",
+        "apps/desktop",
+        "internal/adapters/serenity"
+      ]
+    },
+    {
+      "id": "QUALIFICATION.macos_hosted_serenity_oauth",
+      "gate": "QUALIFICATION",
+      "scopes": [
+        "tests/qualification",
+        "internal/adapters/serenity",
+        "internal/connections",
+        "cmd/zatiti",
+        "apps/desktop",
+        "internal/platform",
+        "internal/memory"
+      ]
+    },
+    {
+      "id": "P12.responses_v1_recovery",
+      "gate": "Z18",
+      "scopes": [
+        "internal/configuration",
+        "internal/connections",
+        "internal/effects",
+        "internal/execution",
+        "internal/accounting",
+        "internal/controller",
         "tests/integration"
       ]
     },
     {
-      "id": "Z06.mcp_one_request_per_call",
-      "gate": "Z06",
+      "id": "P12.stateless_action",
+      "gate": "Z18",
       "scopes": [
+        "internal/configuration",
+        "internal/connections",
+        "internal/effects",
+        "internal/execution",
+        "internal/accounting",
+        "internal/controller",
+        "tests/integration"
+      ]
+    },
+    {
+      "id": "P12.pinned_profile_recovery",
+      "gate": "Z18",
+      "scopes": [
+        "internal/configuration",
+        "internal/connections",
+        "internal/effects",
+        "internal/execution",
+        "internal/accounting",
+        "internal/controller",
+        "tests/integration"
+      ]
+    },
+    {
+      "id": "P12.turn_without_task",
+      "gate": "Z18",
+      "scopes": [
+        "internal/configuration",
+        "internal/connections",
+        "internal/effects",
+        "internal/execution",
+        "internal/accounting",
+        "internal/controller",
+        "tests/integration"
+      ]
+    },
+    {
+      "id": "P12.provider_metadata",
+      "gate": "Z18",
+      "scopes": [
+        "internal/configuration",
+        "internal/connections",
+        "internal/effects",
+        "internal/execution",
+        "internal/accounting",
+        "internal/controller",
+        "tests/integration"
+      ]
+    },
+    {
+      "id": "P12.exact_cost",
+      "gate": "Z18",
+      "scopes": [
+        "internal/configuration",
+        "internal/connections",
+        "internal/effects",
+        "internal/execution",
+        "internal/accounting",
+        "internal/controller",
+        "tests/integration"
+      ]
+    },
+    {
+      "id": "P15.profile_qualification_requires_evidence_free_candidate",
+      "gate": "Z18",
+      "scopes": [
+        "internal/configuration",
+        "internal/connections",
         "internal/effects",
         "internal/controller",
-        "internal/adapters/mcpclient",
         "tests/integration"
       ]
     },
     {
-      "id": "Z08.mcp_lost_tool_call_response",
-      "gate": "Z08",
+      "id": "P15.profile_qualification_cost_and_authority",
+      "gate": "Z18",
       "scopes": [
+        "internal/identity",
+        "internal/configuration",
+        "internal/policy",
         "internal/effects",
-        "internal/adapters/mcpclient",
+        "internal/accounting",
+        "internal/adapters/responses",
+        "internal/controller",
         "tests/integration"
       ]
     },
     {
-      "id": "Z13.mcp_credential_confined",
-      "gate": "Z13",
+      "id": "P15.profile_qualification_unknown_never_replays",
+      "gate": "Z18",
       "scopes": [
-        "internal/adapters/mcpclient",
-        "internal/connections",
+        "internal/configuration",
+        "internal/effects",
+        "internal/adapters/responses",
+        "internal/controller",
         "tests/integration"
       ]
     },
     {
-      "id": "Z05.mcp_server_requests_refused",
-      "gate": "Z05",
+      "id": "P15.desktop_model_profile_setup_and_first_chat",
+      "gate": "Z21",
       "scopes": [
-        "internal/adapters/mcpclient",
-        "tests/integration"
-      ]
-    },
-    {
-      "id": "Z05.mcp_governed_probe_and_catalog",
-      "gate": "Z05",
-      "scopes": [
+        "internal/configuration",
         "internal/connections",
         "internal/effects",
         "internal/execution",
         "internal/controller",
-        "internal/adapters/mcpclient",
-        "tests/integration"
+        "apps/desktop",
+        "tests/qualification"
+      ]
+    },
+    {
+      "id": "P15.complete_authorized_chat_history",
+      "gate": "Z21",
+      "scopes": [
+        "internal/messaging",
+        "internal/execution",
+        "internal/controller",
+        "tests/qualification"
       ]
     }
   ]

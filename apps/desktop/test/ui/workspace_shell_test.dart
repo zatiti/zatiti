@@ -526,7 +526,7 @@ void main() {
     testWidgets('follows the operating system preference', (t) async {
       await _pump(t, platform: Brightness.dark);
       var scaffold = t.widget<Scaffold>(find.byType(Scaffold).first);
-      expect(scaffold.backgroundColor, const Color(0xFF141515));
+      expect(scaffold.backgroundColor, const Color(0xFF070707));
 
       t.platformDispatcher.platformBrightnessTestValue = Brightness.light;
       await t.pumpAndSettle();
@@ -539,7 +539,7 @@ void main() {
       h.settings.themeMode = ThemeMode.dark;
       await t.pumpAndSettle();
       final palette = ZatitiPalette.of(t.element(find.byType(Scaffold).first));
-      expect(palette.accent, const Color(0xFFB8D8C8));
+      expect(palette.accent, const Color(0xFFFCFCFC));
       expect(palette.amber, const Color(0xFFE4C391));
     });
 

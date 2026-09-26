@@ -1514,16 +1514,17 @@ type turnDispatchRow struct {
 	InstallationID contract.ID
 	Kind           string // prepare_session | model_step
 	State          string // prepared | recorded | failed
+	StepIndex      int64
 	OperationRef   string
 	CreatedAt      time.Time
 }
 
-const turnDispatchColumns = `id, turn_id, installation_id, kind, state, operation_ref, created_at`
+const turnDispatchColumns = `id, turn_id, installation_id, kind, state, step_index, operation_ref, created_at`
 
 func scanTurnDispatch(scan func(dest ...any) error) (*turnDispatchRow, error) {
 	var d turnDispatchRow
 	var created string
-	err := scan(&d.ID, &d.TurnID, &d.InstallationID, &d.Kind, &d.State, &d.OperationRef, &created)
+	err := scan(&d.ID, &d.TurnID, &d.InstallationID, &d.Kind, &d.State, &d.StepIndex, &d.OperationRef, &created)
 	if err != nil {
 		return nil, err
 	}
@@ -1535,11 +1536,11 @@ func scanTurnDispatch(scan func(dest ...any) error) (*turnDispatchRow, error) {
 
 // insertTurnDispatch records one newly prepared turn-pipeline Responses
 // dispatch.
-func insertTurnDispatch(ctx context.Context, unit contract.Unit, id, turnID, installationID contract.ID, kind, operationRef string, at time.Time) error {
+func insertTurnDispatch(ctx context.Context, unit contract.Unit, id, turnID, installationID contract.ID, kind string, stepIndex int64, operationRef string, at time.Time) error {
 	_, err := unit.ExecContext(ctx, `INSERT INTO execution_turn_dispatches
-		(id, turn_id, installation_id, kind, state, operation_ref, created_at)
-		VALUES (?, ?, ?, ?, 'prepared', ?, ?)`,
-		id, turnID, installationID, kind, operationRef, formatStamp(at))
+		(id, turn_id, installation_id, kind, state, step_index, operation_ref, created_at)
+		VALUES (?, ?, ?, ?, 'prepared', ?, ?, ?)`,
+		id, turnID, installationID, kind, stepIndex, operationRef, formatStamp(at))
 	return err
 }
 

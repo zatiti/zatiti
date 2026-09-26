@@ -517,7 +517,7 @@ func TestContextPrepareCommitStaleGenerationDiscardsPlan(t *testing.T) {
 	worker := e.ids.New()
 	e.installWorkerSnapshot(worker, fixtureHostedProfile(worker))
 	payload := e.mustOK(opTurnAdmit, turnAdmitInput{
-		Source:   wireTurnSource{Kind: "message", SourceID: e.ids.New(), SourceVersion: 1},
+		Source:   wireTurnSource{Kind: "continuation", SourceID: e.ids.New(), SourceVersion: 1},
 		WorkerID: worker, Scope: e.scope, RequesterID: e.ids.New(),
 	})
 	var body turnBody
@@ -585,7 +585,7 @@ func TestContextCommitRefusesStagedLocator(t *testing.T) {
 	worker := e.ids.New()
 	e.installWorkerSnapshot(worker, fixtureHostedProfile(worker))
 	payload := e.mustOK(opTurnAdmit, turnAdmitInput{
-		Source:   wireTurnSource{Kind: "message", SourceID: e.ids.New(), SourceVersion: 1},
+		Source:   wireTurnSource{Kind: "continuation", SourceID: e.ids.New(), SourceVersion: 1},
 		WorkerID: worker, Scope: e.scope, RequesterID: e.ids.New(),
 	})
 	var body turnBody

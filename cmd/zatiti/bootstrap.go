@@ -5,6 +5,8 @@ import (
 	"fmt"
 
 	"github.com/zatiti/zatiti/internal/contract"
+	"github.com/zatiti/zatiti/internal/installation"
+	"github.com/zatiti/zatiti/internal/platform"
 )
 
 // The controller runs every internal call under the service principal
@@ -39,33 +41,74 @@ func resolveControllerIdentity(ctx context.Context, h *installationHandle, insta
 	return actor, nil
 }
 
-// handOverOwnerCredential runs once, in the process that served
-// installation.init, right after the bootstrap transaction committed: it
-// hands the owner credential installation custodied to the local operator
-// through the owner profile (a 0600 file under the state directory). The
-// credential bytes exist in this function's frame and nowhere else; they
-// are zeroed before return and never logged. It returns the profile name.
-func handOverOwnerCredential(ctx context.Context, h *installationHandle) (string, error) {
-	put, ok := h.secrets.latest()
-	if !ok {
-		return "", &contract.Fault{
-			Code:    contract.CodePrerequisiteMissing,
-			Message: "installation is initialized but this process custodied no owner credential; the bootstrap ran elsewhere",
-		}
-	}
-	credential, err := h.secrets.Get(ctx, put.ref)
+// committedOwnerCredential reads the authoritative owner identity and opaque
+// StoreRef from one database snapshot. It never relies on the process that
+// handled installation.init still being alive.
+func committedOwnerCredential(ctx context.Context, h *installationHandle, installationID contract.ID) (installation.OwnerCredential, error) {
+	var owner installation.OwnerCredential
+	actor := contract.Actor{PrincipalID: contract.NewID(), Kind: contract.KindService}
+	err := h.db.Read(ctx, actor, contract.Scope{InstallationID: installationID}, func(u contract.Unit) error {
+		var readErr error
+		owner, readErr = h.installation.OwnerCredential(ctx, u)
+		return readErr
+	})
 	if err != nil {
-		return "", fmt.Errorf("resolving the custodied owner credential: %w", err)
+		return installation.OwnerCredential{}, fmt.Errorf("reading committed owner credential metadata: %w", err)
+	}
+	if owner.InstallationID != installationID || owner.OwnerID == "" || owner.CredentialID == "" || owner.StoreRef == "" {
+		return installation.OwnerCredential{}, &contract.Fault{Code: contract.CodePrerequisiteMissing, Message: "committed owner credential metadata does not match this installation"}
+	}
+	return owner, nil
+}
+
+// recoverOwnerCredential maintains the CLI profile from the same persisted
+// StoreRef used for desktop Keychain discovery. It works after a restart that
+// occurred between the init commit and profile/discovery publication.
+func recoverOwnerCredential(ctx context.Context, h *installationHandle, installationID contract.ID) (string, installation.OwnerCredential, error) {
+	owner, err := committedOwnerCredential(ctx, h, installationID)
+	if err != nil {
+		return "", installation.OwnerCredential{}, err
+	}
+	credential, err := h.secrets.Get(ctx, owner.StoreRef)
+	if err != nil {
+		if code := platform.Code(err); code == contract.CodeNotFound || code == contract.CodeControllerUnavailable {
+			return "", installation.OwnerCredential{}, &contract.Fault{Code: contract.CodePrerequisiteMissing, Message: "committed owner credential is missing or unreadable in secure custody"}
+		}
+		return "", installation.OwnerCredential{}, fmt.Errorf("resolving the committed owner credential from secure custody: %w", err)
 	}
 	defer zero(credential)
 	if err := validateHeaderValue(credential); err != nil {
-		return "", &contract.Fault{Code: contract.CodePrerequisiteMissing, Message: "owner " + err.Error()}
+		return "", installation.OwnerCredential{}, &contract.Fault{Code: contract.CodePrerequisiteMissing, Message: "owner " + err.Error()}
+	}
+	var authenticated contract.Actor
+	actor := contract.Actor{PrincipalID: contract.NewID(), Kind: contract.KindService}
+	// Identity consumes and zeroes presented bytes; keep custody's original
+	// slice alive only long enough to write the compatibility profile below.
+	authCopy := append([]byte(nil), credential...)
+	defer zero(authCopy)
+	if err := h.db.Read(ctx, actor, contract.Scope{InstallationID: installationID}, func(u contract.Unit) error {
+		var authErr error
+		authenticated, authErr = h.identity.Authenticate(ctx, u, authCopy)
+		return authErr
+	}); err != nil || authenticated.PrincipalID != owner.OwnerID || authenticated.CredentialID != owner.CredentialID {
+		return "", installation.OwnerCredential{}, &contract.Fault{Code: contract.CodePrerequisiteMissing, Message: "committed owner credential is no longer valid"}
 	}
 	store := profileStore{dir: h.cfg.profilesDir()}
 	if err := store.write(defaultProfile, credential); err != nil {
-		return "", fmt.Errorf("handing the owner credential to the local operator: %w", err)
+		return "", installation.OwnerCredential{}, fmt.Errorf("handing the owner credential to the local operator: %w", err)
 	}
-	return defaultProfile, nil
+	return defaultProfile, owner, nil
+}
+
+// handOverOwnerCredential is the original local handoff entrypoint retained
+// for callers that need only the CLI profile name.
+func handOverOwnerCredential(ctx context.Context, h *installationHandle) (string, error) {
+	id, err := h.initialized(ctx)
+	if err != nil {
+		return "", err
+	}
+	profile, _, err := recoverOwnerCredential(ctx, h, id)
+	return profile, err
 }
 
 func zero(b []byte) {

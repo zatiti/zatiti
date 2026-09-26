@@ -296,6 +296,73 @@ func healthyQualReport(revision, digest string) map[string]any {
 	}
 }
 
+func TestMacReleaseCasesRequireNativeFreshEvidence(t *testing.T) {
+	t.Parallel()
+	const revision, digest, platform = "deadbeef", "cafef00d", "darwin/arm64"
+	build := func() map[string]any {
+		cases := make([]map[string]any, 0, len(requiredMacReleaseCases))
+		for _, id := range requiredMacReleaseCases {
+			cases = append(cases, map[string]any{
+				"case": id, "status": "passed",
+				"versions": map[string]string{"platform": platform, "source_revision": revision, "module_root_go_mod": digest},
+				"expected": []string{"live release behavior"}, "observed": []string{"synthetic validator fixture"},
+				"evidence": map[string]any{"artifact": "validator-fixture"},
+			})
+		}
+		return map[string]any{
+			"versions": map[string]string{"platform": platform, "source_revision": revision, "module_root_go_mod": digest},
+			"cases":    cases,
+			"gates":    []map[string]any{{"gate": "QUALIFICATION", "status": "passed_cases_only"}},
+		}
+	}
+	evaluate := func(report map[string]any) qualificationVerdict {
+		return evaluateQualificationEvidenceForPlatform(qualReport(t, report), revision, digest, []string{"QUALIFICATION"}, requiredMacReleaseCases, platform)
+	}
+	if got := evaluate(build()); !got.Qualified {
+		t.Fatalf("complete native evidence rejected: %v", got.Blocking)
+	}
+	for _, id := range requiredMacReleaseCases {
+		t.Run("missing "+id, func(t *testing.T) {
+			report := build()
+			all := report["cases"].([]map[string]any)
+			for i, item := range all {
+				if item["case"] == id {
+					report["cases"] = append(all[:i:i], all[i+1:]...)
+					break
+				}
+			}
+			if got := evaluate(report); got.Qualified || !strings.Contains(strings.Join(got.Blocking, "|"), id) {
+				t.Fatalf("missing case was accepted: %v", got.Blocking)
+			}
+		})
+	}
+	wrongPlatform := build()
+	wrongPlatform["cases"].([]map[string]any)[0]["versions"] = map[string]string{"platform": "darwin/amd64", "source_revision": revision, "module_root_go_mod": digest}
+	if got := evaluate(wrongPlatform); got.Qualified {
+		t.Fatal("case from another native architecture was accepted")
+	}
+	stale := build()
+	stale["cases"].([]map[string]any)[0]["versions"] = map[string]string{"platform": platform, "source_revision": "other", "module_root_go_mod": digest}
+	if got := evaluate(stale); got.Qualified {
+		t.Fatal("case from another revision was accepted")
+	}
+	duplicate := build()
+	duplicate["cases"] = append(duplicate["cases"].([]map[string]any), duplicate["cases"].([]map[string]any)[0])
+	if got := evaluate(duplicate); got.Qualified {
+		t.Fatal("duplicate case evidence was accepted")
+	}
+	synthetic := build()
+	synthetic["cases"].([]map[string]any)[0]["evidence"] = map[string]any{"synthetic": true}
+	if got := evaluate(synthetic); got.Qualified {
+		t.Fatal("explicitly synthetic release evidence was accepted")
+	}
+	empty := build()
+	empty["cases"].([]map[string]any)[0]["observed"] = []string{}
+	if got := evaluate(empty); got.Qualified {
+		t.Fatal("case without observed release evidence was accepted")
+	}
+}
+
 // TestQualificationEvidenceEnumeratesEveryRequiredGate proves P48.md's
 // required behavioral test "Deliberately omit or skip one required journey:
 // release gate fails." A gate that never appears in the report (its case

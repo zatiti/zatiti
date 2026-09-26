@@ -62,3 +62,24 @@ func TestMCPMissingLinkedJobDefersAdmission(t *testing.T) {
 		}
 	}
 }
+
+func TestLegacyConnectionRouteDefaultsToValidation(t *testing.T) {
+	f := newFx(t)
+	op, attempt, connection := contract.NewID(), contract.NewID(), contract.NewID()
+	c, sess := f.started()
+	observation := succeeded(nil)
+	e := &entry{
+		ID: string(contract.NewID()), Kind: kindEffect, OperationID: op, AttemptID: attempt,
+		Route:       &route{Owner: ownerConnections, Connection: wireRef{ID: connection, Version: 3}},
+		Observation: &observation,
+	}
+	c.deliver(context.Background(), sess, e)
+	if f.called("_connections.validation.record") != 1 || f.called("_connections.discovery.record") != 0 {
+		t.Fatalf("legacy route callbacks: validation=%d discovery=%d", f.called("_connections.validation.record"), f.called("_connections.discovery.record"))
+	}
+	got := f.queryString(`SELECT operation_id || ':' || attempt_id || ':' || connection_id || ':' || expected_version || ':' || disposition FROM connections_validations`)
+	want := string(op) + ":" + string(attempt) + ":" + string(connection) + ":3:succeeded"
+	if got != want {
+		t.Fatalf("legacy validation identity %s, want %s", got, want)
+	}
+}

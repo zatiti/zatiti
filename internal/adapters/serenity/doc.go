@@ -17,7 +17,7 @@
 //
 // The adapter is therefore truthful rather than functional:
 //
-//   - New strictly validates the zatiti.serenity/v1 profile, binds
+//   - New strictly validates the zatiti.serenity/v2 profile, binds
 //     capability evidence to the profile digest, requires the exact pinned
 //     source, protocol and adapter build, and refuses any profile that claims
 //     a capability the pinned upstream lacks.

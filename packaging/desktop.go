@@ -105,7 +105,7 @@ func (m Manifest) validateDesktop(index map[string]Artifact) error {
 		switch a.Kind {
 		case KindDesktopBundle:
 			bundles = append(bundles, a.Path)
-		case KindControllerBinary, KindSerenityRuntime, KindSerenityReadFacade:
+		case KindControllerBinary, KindCredentialHelper, KindSerenityRuntime, KindSerenityReadFacade:
 			return errf(CodeInvalidInput, "the desktop distribution carries no controller or Serenity binary; they are packaged separately")
 		}
 		for _, ext := range stateExtensions {

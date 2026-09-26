@@ -41,6 +41,13 @@ func (f *fakeSecrets) Put(_ context.Context, reference string, secret []byte) (s
 	return reference, nil
 }
 
+func (f *fakeSecrets) Lookup(_ context.Context, name string) (string, error) {
+	if _, ok := f.m[name]; !ok {
+		return "", &contract.Fault{Code: contract.CodeNotFound}
+	}
+	return name, nil
+}
+
 func (f *fakeSecrets) Get(_ context.Context, reference string) ([]byte, error) {
 	secret, ok := f.m[reference]
 	if !ok {

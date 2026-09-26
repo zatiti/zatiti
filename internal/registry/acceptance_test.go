@@ -207,6 +207,36 @@ func validInstance(t *testing.T, opID string, schema json.RawMessage) json.RawMe
 	if err != nil {
 		t.Fatalf("operation %s: input schema: %v", opID, err)
 	}
+	if opID == "execution_profile.qualify" {
+		candidate := map[string]any{
+			"scope":                    map[string]any{"installation_id": "00000000-0000-4000-8000-000000000001"},
+			"qualification_cost_bound": map[string]any{"currency": "USD", "micro_units": 1},
+			"definition": map[string]any{
+				"executor": "hosted", "model": "test-model", "connection_id": "00000000-0000-4000-8000-000000000002",
+				"provider_destination": "https://api.openai.com/v1/responses", "capabilities": []any{},
+				"cost_bound":     map[string]any{"currency": "USD", "micro_units": 1},
+				"classification": "internal", "context_capture": "complete", "connection_version": 1,
+				"adapter_profile": map[string]any{
+					"schema": "zatiti.responses/v2", "provider": "openai", "session_mode": "provider_conversation",
+					"endpoint": "https://api.openai.com/v1/responses", "model": "test-model",
+					"connection_id": "00000000-0000-4000-8000-000000000002", "max_input_tokens": 1,
+					"max_output_tokens": 1, "max_response_bytes": 1024, "timeout_seconds": 10, "currency": "USD",
+					"input_rate":  map[string]any{"numerator_micro_units": 1, "denominator_units": 1, "unit": "input_token"},
+					"output_rate": map[string]any{"numerator_micro_units": 1, "denominator_units": 1, "unit": "output_token"},
+					"enforcement": map[string]any{"cost": "enforced", "disclosure": "enforced", "maximum_cost": map[string]any{"currency": "USD", "micro_units": 1}, "provider_destinations": []any{}},
+					"routing":     map[string]any{},
+				},
+			},
+		}
+		raw, marshalErr := json.Marshal(candidate)
+		if marshalErr != nil {
+			t.Fatal(marshalErr)
+		}
+		if validateErr := contract.ValidateSchema(merged, raw); validateErr != nil {
+			t.Fatalf("operation %s: hand-built evidence-free qualification input invalid: %v", opID, validateErr)
+		}
+		return raw
+	}
 	var firstErr error
 	var firstRaw json.RawMessage
 	for _, candidate := range instanceCandidates(decodeUseNumber(t, schema), cat.sharedDefs, 0) {

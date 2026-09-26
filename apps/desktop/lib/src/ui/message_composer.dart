@@ -72,9 +72,11 @@ class _MessageComposerState extends State<MessageComposer> {
     final canSend = _text.text.trim().isNotEmpty;
     return Container(
       decoration: BoxDecoration(
-        color: p.card,
+        color: Theme.of(context).brightness == Brightness.dark
+            ? const Color(0xFF2F2F2F)
+            : p.card,
         border: Border.all(color: p.line),
-        borderRadius: BorderRadius.circular(Measure.cardRadius + 1),
+        borderRadius: BorderRadius.circular(26),
       ),
       padding: const EdgeInsets.fromLTRB(
         Space.lg,

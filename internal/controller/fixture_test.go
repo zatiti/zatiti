@@ -428,7 +428,7 @@ func (f *fx) controller(own contract.Ownership) *Controller {
 		f.t.Fatalf("New: %v", err)
 	}
 	if err := c.Attach(Collaborators{
-		Identity: f.actor, Blobs: f.blobs, Jobs: f.jobs, Verifier: f.verifier, Operator: f.operator,
+		Identity: f.actor, Blobs: f.blobs, Context: fxContextPerformer{}, Jobs: f.jobs, Verifier: f.verifier, Operator: f.operator,
 		RestoreLifecycle: f.restoreLifecycle,
 	}); err != nil {
 		f.t.Fatalf("Attach: %v", err)
@@ -544,6 +544,15 @@ func (f *fx) crash() {
 
 type ownerFunc func(ctx context.Context, u contract.Unit, input json.RawMessage) (any, error)
 
+type fxContextPerformer struct{}
+
+func (fxContextPerformer) PerformContext(ctx context.Context, plan contract.ContextPlan) (json.RawMessage, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return json.Marshal(map[string]any{"fixture_context": true, "turn_id": plan.TurnID})
+}
+
 // handler wraps one fake owner method with schema checks and injection.
 func (f *fx) handler(op string, checkOutput bool, fn ownerFunc) contract.Handler {
 	return func(ctx context.Context, u contract.Unit, inv contract.Invocation) (contract.Payload, error) {
@@ -614,6 +623,7 @@ func (f *fx) catalog() *catalog {
 		"_scheduling.wake.admit":          f.wakeAdmit,
 		"_memory.record":                  f.memoryRecord,
 		"_connections.validation.record":  f.validationRecord,
+		"_connections.discovery.record":   f.discoveryRecord,
 		"_artifacts.publish":              f.artifactsPublish,
 		"_installation.restore.record":    f.restoreRecord,
 		"_execution.turn.admit":           f.executionTurnAdmit,
@@ -687,7 +697,11 @@ CREATE TABLE scheduling_cycles (occurrence_key TEXT PRIMARY KEY, wake_id TEXT NO
 		mig("memory", `CREATE TABLE memory_records (seq INTEGER PRIMARY KEY AUTOINCREMENT, operation_id TEXT NOT NULL, job_id TEXT NOT NULL,
 	disposition TEXT NOT NULL, evidence TEXT NOT NULL);`),
 		mig("connections", `CREATE TABLE connections_validations (seq INTEGER PRIMARY KEY AUTOINCREMENT, connection_id TEXT NOT NULL,
-	expected_version INTEGER NOT NULL, disposition TEXT NOT NULL);`),
+		expected_version INTEGER NOT NULL, disposition TEXT NOT NULL, operation_id TEXT NOT NULL DEFAULT '', attempt_id TEXT NOT NULL DEFAULT '',
+		UNIQUE(operation_id, attempt_id));
+		CREATE TABLE connections_discoveries (seq INTEGER PRIMARY KEY AUTOINCREMENT, connection_id TEXT NOT NULL,
+		expected_version INTEGER NOT NULL, disposition TEXT NOT NULL, operation_id TEXT NOT NULL, attempt_id TEXT NOT NULL,
+		UNIQUE(operation_id, attempt_id));`),
 		mig("artifacts", `CREATE TABLE artifacts_items (id TEXT PRIMARY KEY, digest TEXT NOT NULL, size INTEGER NOT NULL,
 	media_type TEXT NOT NULL, classification TEXT NOT NULL, scope TEXT NOT NULL);`),
 		mig("installation", `CREATE TABLE installation_restores (seq INTEGER PRIMARY KEY AUTOINCREMENT, job_id TEXT NOT NULL,

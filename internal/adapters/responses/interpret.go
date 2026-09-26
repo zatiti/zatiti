@@ -30,7 +30,11 @@ func (in *interpretation) unknown(physical *wirePhysicalCallEvidence, output *wi
 	physical.ErrorCode = sanitizeText(in.secret, code, maxErrorCodeChars)
 	physical.ErrorMessage = sanitizeText(in.secret, message, maxMessageChars)
 	output.FinishReason = finishUnknown
-	output.Usage = profile.usageFor(usageInput{Bounds: in.bounds, Sent: true})
+	meta := usageInput{Bounds: in.bounds, Sent: true}
+	if profile.Version == "zatiti.responses/v2" {
+		meta.RequestedModel, meta.ServingProvider = profile.Model, profile.Provider
+	}
+	output.Usage = profile.usageFor(meta)
 }
 
 // interpret classifies a fully read, in-bounds response. It returns staged
@@ -51,6 +55,14 @@ func (in *interpretation) interpret(ctx context.Context, a *Adapter, status int,
 	if decodeErr == nil {
 		decodeErr = validateResult(result, is2xx)
 	}
+	if a.profile.Version == "zatiti.responses/v2" {
+		if result.RequestedModel == "" {
+			result.RequestedModel = a.profile.Model
+		}
+		if result.ServingProvider == "" {
+			result.ServingProvider = a.profile.Provider
+		}
+	}
 
 	if !is2xx {
 		// A failure body is interpreted best-effort: it can add a
@@ -58,7 +70,7 @@ func (in *interpretation) interpret(ctx context.Context, a *Adapter, status int,
 		// cannot turn a non-2xx into anything better.
 		var usage usageInput
 		if decodeErr == nil {
-			usage = usageInput{Reported: result.Usage, Unpriceable: result.UsageUnpriceable != "", NoCharge: result.NoCharge, UsageReference: sanitizeText(in.secret, result.UsageReference, maxReferenceChars)}
+			usage = usageInput{Reported: result.Usage, Unpriceable: result.UsageUnpriceable != "", NoCharge: result.NoCharge, UsageReference: sanitizeText(in.secret, result.UsageReference, maxReferenceChars), RequestedModel: sanitizeText(in.secret, result.RequestedModel, 256), ServedModel: sanitizeText(in.secret, result.ServedModel, 256), ServingProvider: result.ServingProvider, ProviderRequestID: sanitizeText(in.secret, result.ProviderRequestID, 256), SourceCostDecimal: result.SourceCostDecimal, SourceCostCurrency: result.SourceCostCurrency, SourceCostKind: result.SourceCostKind}
 			output.ResponseID = scrubSecret(in.secret, result.ResponseID)
 			physical.ErrorMessage = sanitizeText(in.secret, result.ErrorMessage, maxMessageChars)
 		}
@@ -88,12 +100,18 @@ func (in *interpretation) interpret(ctx context.Context, a *Adapter, status int,
 		in.unknown(physical, output, a.profile, "response_undecodable", decodeErr.Error())
 		return staged
 	}
-
 	output.ResponseID = scrubSecret(in.secret, result.ResponseID)
 	physical.ProviderReference = output.ResponseID
 	output.Usage = a.profile.usageFor(usageInput{
 		Bounds: in.bounds, Sent: true, Reported: result.Usage, Unpriceable: result.UsageUnpriceable != "", NoCharge: result.NoCharge,
-		UsageReference: sanitizeText(in.secret, result.UsageReference, maxReferenceChars),
+		UsageReference:     sanitizeText(in.secret, result.UsageReference, maxReferenceChars),
+		RequestedModel:     sanitizeText(in.secret, result.RequestedModel, 256),
+		ServedModel:        sanitizeText(in.secret, result.ServedModel, 256),
+		ServingProvider:    result.ServingProvider,
+		ProviderRequestID:  sanitizeText(in.secret, result.ProviderRequestID, 256),
+		SourceCostDecimal:  result.SourceCostDecimal,
+		SourceCostCurrency: result.SourceCostCurrency,
+		SourceCostKind:     result.SourceCostKind,
 	})
 
 	switch result.State {

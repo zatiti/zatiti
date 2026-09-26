@@ -18,6 +18,7 @@ package packaging
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"io/fs"
@@ -25,6 +26,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"testing"
+	"time"
 )
 
 // runCLI invokes RunCLI in-process and captures both streams.
@@ -33,6 +35,54 @@ func runCLI(t *testing.T, args ...string) (stdout, stderr string, code int) {
 	var outBuf, errBuf bytes.Buffer
 	code = RunCLI(args, &outBuf, &errBuf)
 	return outBuf.String(), errBuf.String(), code
+}
+
+func TestDirectMacCLIApplyTakesBootstrapLockBeforePlanning(t *testing.T) {
+	home := filepath.Join(canonicalTempDir(t), "home")
+	if err := os.Mkdir(home, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	fence, err := NewFileMacSequenceWatermark(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name string
+		args []string
+	}{
+		{"install", []string{"install", "--distribution", DistributionController, "--os", "darwin", "--home", home,
+			"--state-dir", filepath.Join(home, "state"), "--source", filepath.Join(home, "missing-release"),
+			"--host-arch", "amd64", "--allow-unsigned", "--apply"}},
+		{"uninstall", []string{"uninstall", "--distribution", DistributionController, "--os", "darwin", "--home", home,
+			"--state-dir", "relative-invalid-state", "--apply"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			unlock, err := fence.Lock(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			done := make(chan int, 1)
+			go func() {
+				var stdout, stderr bytes.Buffer
+				done <- RunCLI(tc.args, &stdout, &stderr)
+			}()
+			select {
+			case code := <-done:
+				unlock()
+				t.Fatalf("direct %s reached planning while bootstrap lock was held (exit %d)", tc.name, code)
+			case <-time.After(120 * time.Millisecond):
+			}
+			unlock()
+			select {
+			case code := <-done:
+				if code == 0 {
+					t.Fatalf("invalid direct %s unexpectedly succeeded", tc.name)
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatalf("direct %s did not resume after lock release", tc.name)
+			}
+		})
+	}
 }
 
 // writeDescriptor writes in (minus Root) as an "assemble" descriptor file.
@@ -179,7 +229,7 @@ func buildSignedRelease(t *testing.T, version, goos string) driverRelease {
 func TestDriverControllerLifecycleInstallBootstrapRestartUpgradeBackupKeyUninstall(t *testing.T) {
 	for _, goos := range []string{"darwin", "linux"} {
 		t.Run(goos, func(t *testing.T) {
-			home := filepath.Join(t.TempDir(), "home", "operator")
+			home := filepath.Join(canonicalTempDir(t), "home", "operator")
 			if err := os.MkdirAll(home, 0o755); err != nil {
 				t.Fatal(err)
 			}
@@ -393,7 +443,7 @@ func TestDriverDesktopInstallAuditUninstall(t *testing.T) {
 				t.Fatalf("sign: exit %d: %s", code, stderr)
 			}
 
-			home := filepath.Join(t.TempDir(), "home", "operator")
+			home := filepath.Join(canonicalTempDir(t), "home", "operator")
 			if err := os.MkdirAll(home, 0o755); err != nil {
 				t.Fatal(err)
 			}

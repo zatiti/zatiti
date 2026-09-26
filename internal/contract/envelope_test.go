@@ -175,6 +175,7 @@ func (fakePorts) Call(context.Context, Unit, Invocation) (Payload, error) { retu
 type fakeSecrets struct{}
 
 func (fakeSecrets) Put(context.Context, string, []byte) (string, error) { return "", nil }
+func (fakeSecrets) Lookup(context.Context, string) (string, error)      { return "", nil }
 func (fakeSecrets) Get(context.Context, string) ([]byte, error)         { return nil, nil }
 func (fakeSecrets) Delete(context.Context, string) error                { return nil }
 

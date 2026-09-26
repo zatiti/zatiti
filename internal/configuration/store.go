@@ -106,6 +106,8 @@ type profileRow struct {
 	CostBoundJSON       string
 	Classification      string
 	ContextCapture      string
+	AdapterProfileJSON  string
+	ConnectionVersion   int64
 	State               string
 	CreatedAt           time.Time
 	UpdatedAt           time.Time
@@ -376,17 +378,20 @@ func scanBinding(row rowScanner) (*bindingRow, error) {
 
 func scanProfile(row rowScanner) (*profileRow, error) {
 	var r profileRow
-	var capabilities sql.NullString
+	var capabilities, adapterProfile sql.NullString
+	var connectionVersion sql.NullInt64
 	var created, updated string
 	err := row.Scan(&r.ID, &r.Version, &r.InstallationID, &r.Executor, &r.Model, &r.ConnectionID,
 		&r.ProviderDestination, &capabilities, &r.CostBoundJSON, &r.Classification,
-		&r.ContextCapture, &r.State, &created, &updated)
+		&r.ContextCapture, &adapterProfile, &connectionVersion, &r.State, &created, &updated)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
+	r.AdapterProfileJSON = adapterProfile.String
+	r.ConnectionVersion = connectionVersion.Int64
 	if capabilities.String != "" {
 		if err := json.Unmarshal([]byte(capabilities.String), &r.Capabilities); err != nil {
 			return nil, err

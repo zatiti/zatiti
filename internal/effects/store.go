@@ -93,38 +93,40 @@ const (
 // operationRow is one logical effect: immutable action reference, state
 // machine position and links to related operations.
 type operationRow struct {
-	ID                contract.ID
-	Version           int64
-	InstallID         contract.ID
-	OrganizationID    contract.ID
-	ProjectID         contract.ID
-	WorkerID          contract.ID
-	TaskID            contract.ID
-	ActionID          contract.ID
-	ActionDigest      string
-	SourceKey         string
-	State             string
-	LinkedOperation   contract.ID
-	Relationship      string
-	JobID             contract.ID
-	AttemptCount      int64
-	CallbackRouteJSON string
-	CreatedAt         time.Time
-	UpdatedAt         time.Time
+	ID                       contract.ID
+	Version                  int64
+	InstallID                contract.ID
+	OrganizationID           contract.ID
+	ProjectID                contract.ID
+	WorkerID                 contract.ID
+	TaskID                   contract.ID
+	ActionID                 contract.ID
+	ActionDigest             string
+	SourceKey                string
+	State                    string
+	LinkedOperation          contract.ID
+	Relationship             string
+	JobID                    contract.ID
+	AttemptCount             int64
+	CallbackRouteJSON        string
+	AdapterProfileJSON       string
+	ProfileConnectionVersion int64
+	CreatedAt                time.Time
+	UpdatedAt                time.Time
 }
 
 const operationColumns = `id, version, installation_id, organization_id, project_id, worker_id, task_id,
 	action_id, action_digest, source_key, state, linked_operation_id, relationship, job_id,
-	attempt_count, callback_route_json, created_at, updated_at`
+	attempt_count, callback_route_json, adapter_profile_json, profile_connection_version, created_at, updated_at`
 
 func scanOperation(scan func(dest ...any) error) (*operationRow, error) {
 	var o operationRow
 	var organization, project, worker, task, sourceKey, linked, relationship, jobID string
-	var callbackRoute string
+	var callbackRoute, adapterProfile string
 	var created, updated string
 	err := scan(&o.ID, &o.Version, &o.InstallID, &organization, &project, &worker, &task,
 		&o.ActionID, &o.ActionDigest, &sourceKey, &o.State, &linked, &relationship, &jobID,
-		&o.AttemptCount, &callbackRoute, &created, &updated)
+		&o.AttemptCount, &callbackRoute, &adapterProfile, &o.ProfileConnectionVersion, &created, &updated)
 	if err != nil {
 		return nil, err
 	}
@@ -143,6 +145,7 @@ func scanOperation(scan func(dest ...any) error) (*operationRow, error) {
 		o.JobID = contract.ID(jobID)
 	}
 	o.CallbackRouteJSON = callbackRoute
+	o.AdapterProfileJSON = adapterProfile
 	var perr error
 	o.CreatedAt, perr = parseStamp(created)
 	if perr != nil {
@@ -180,11 +183,12 @@ func loadOperationBySource(ctx context.Context, unit contract.Unit, install cont
 // insertOperation persists a new operation row.
 func insertOperation(ctx context.Context, unit contract.Unit, o *operationRow) error {
 	_, err := unit.ExecContext(ctx, `INSERT INTO effects_operations (`+operationColumns+`)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		string(o.ID), o.Version, string(o.InstallID), string(o.OrganizationID), string(o.ProjectID),
 		string(o.WorkerID), string(o.TaskID), string(o.ActionID), o.ActionDigest, o.SourceKey,
 		o.State, string(o.LinkedOperation), o.Relationship, string(o.JobID),
-		o.AttemptCount, o.CallbackRouteJSON, formatStamp(o.CreatedAt), formatStamp(o.UpdatedAt))
+		o.AttemptCount, o.CallbackRouteJSON, o.AdapterProfileJSON, o.ProfileConnectionVersion,
+		formatStamp(o.CreatedAt), formatStamp(o.UpdatedAt))
 	return err
 }
 

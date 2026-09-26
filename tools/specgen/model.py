@@ -3,7 +3,7 @@ from copy import deepcopy
 
 # Specification revision. Bump with every coordinated contract revision; the renderer
 # refuses to render unless contracts.md names the same revision in its title.
-REVISION = 4
+REVISION=18
 
 S={'type':'string','maxLength':8192}
 ID={'type':'string','format':'uuid'}
@@ -36,12 +36,19 @@ D['Credential']=obj(id=ID,version=VER,principal_id=ID,store_ref=S,revoked=BOOL,*
 D['Organization']=obj(id=ID,version=VER,key=S,name=S,chief_id=ID,**{'parent_id?':ID,'limits?':ref('Limits'),'extensions?':JSON})
 D['Team']=obj(id=ID,version=VER,organization_id=ID,key=S,name=S,worker_ids=arr(ID),**{'extensions?':JSON})
 D['Project']=obj(id=ID,version=VER,organization_id=ID,key=S,name=S,repositories=arr(S),bindings=arr(ID),classification=enum('internal','public','restricted'),**{'limits?':ref('Limits'),'extensions?':JSON})
-D['ExecutionProfile']=obj(id=ID,version=VER,executor=enum('hosted','cooperative'),model=S,connection_id=ID,provider_destination=S,capabilities=arr(S),cost_bound=ref('Money'),classification=enum('internal','public','restricted'),context_capture=enum('complete','partial','advisory'))
+D['ProviderDescriptor']=obj(id=enum('openai','openrouter','experiential'),display_name=S,default_endpoint=S,session_mode=enum('provider_conversation','stateless'),credential_setup=enum('api_key'))
+D['ProviderDescriptor']['allOf']=[
+ {'if':{'properties':{'id':{'const':'openai'}},'required':['id']},'then':{'properties':{'default_endpoint':{'const':'https://api.openai.com/v1/responses'},'session_mode':{'const':'provider_conversation'}}}},
+ {'if':{'properties':{'id':{'const':'openrouter'}},'required':['id']},'then':{'properties':{'default_endpoint':{'const':'https://openrouter.ai/api/v1/responses'},'session_mode':{'const':'stateless'}}}},
+ {'if':{'properties':{'id':{'const':'experiential'}},'required':['id']},'then':{'properties':{'default_endpoint':{'const':'https://api.experientiallabs.ai/v1/responses'},'session_mode':{'const':'stateless'}}}}
+]
+D['ExecutionProfile']=obj(id=ID,version=VER,executor=enum('hosted','cooperative'),model=S,connection_id=ID,provider_destination=S,capabilities=arr(S),cost_bound=ref('Money'),classification=enum('internal','public','restricted'),context_capture=enum('complete','partial','advisory'),**{'adapter_profile?':ref('ResponsesProfile'),'connection_version?':VER})
 D['Worker']=obj(id=ID,version=VER,organization_id=ID,key=S,name=S,purpose=S,instructions=S,skill_versions=arr(ref('Ref')),bindings=arr(ID),profile=ref('ExecutionProfile'),limits=ref('Limits'),**{'extensions?':JSON})
 D['Binding']=obj(id=ID,version=VER,scope=ref('Scope'),kind=enum('tool','skill','connection','worker','repository','reporting','memory'),target_id=ID,permissions=arr(S),**{'source_scope?':ref('Scope'),'destinations?':arr(S)})
 D['Skill']=obj(id=ID,version=VER,name=S,instruction_artifact=ref('ArtifactRef'),content_digest=DIG,input_schema=JSON,output_schema=JSON,requirements=arr(S),dependencies=arr(ref('Ref')),source=S,license=S,evaluation_refs=arr(ID),diagnostics=arr(ref('Diagnostic')))
 D['Tool']=obj(id=ID,version=VER,name=S,input_schema=JSON,output_schema=JSON,effect=enum('local','disclosure','external_read','external_mutation'),destinations=arr(S),credential_kind=S,cost_bound=ref('Money'),timeout_seconds=VER,idempotency=enum('none','qualified_key','authoritative_nonexecution'),key_retention_seconds=INT,confirmation=enum('synchronous','asynchronous','advisory'),reconciliation=S,adapter=S)
-D['Connection']=obj(id=ID,version=VER,scope=ref('Scope'),provider=S,account_identity=S,credential_ref=S,destinations=arr(S),allowed_scopes=arr(S),validation_state=enum('unverified','valid','invalid','expired','revoked'),**{'validated_at?':TIME,'valid_until?':TIME})
+D['HostedMemoryGrant']=obj(issuer=S,resource=S,account_id=S,project_id=S,scopes=arr(enum('memory:read','memory:write'),2),verified_at=TIME)
+D['Connection']=obj(id=ID,version=VER,scope=ref('Scope'),provider=S,account_identity=S,credential_ref=S,destinations=arr(S),allowed_scopes=arr(S),validation_state=enum('unverified','valid','invalid','expired','revoked'),**{'validated_at?':TIME,'valid_until?':TIME,'hosted_memory_grant?':ref('HostedMemoryGrant')})
 D['Challenge']=obj(id=ID,version=VER,connection_id=ID,state=enum('pending','external_action_required','completed','cancelled','expired','failed'),expires_at=TIME,**{'consent_url?':S,'helper_ref?':S,'requirements?':arr(ref('Requirement'))})
 D['Policy']=obj(id=ID,version=VER,scope=ref('Scope'),rules=arr(ref('Rule')),**{'extensions?':JSON})
 D['PromotionRule']=obj(id=ID,version=VER,scope=ref('Scope'),capability=S,destinations=arr(S),required_evidence=arr(S),minimum_successes=VER,evidence_window_seconds=VER,disqualifying_events=arr(S),ceiling_grant_id=ID,human_required_preserved=BOOL)
@@ -52,7 +59,7 @@ D['Schedule']=obj(id=ID,version=VER,scope=ref('Scope'),task_template=ref('Task')
 D['Responsibility']=obj(id=ID,version=VER,scope=ref('Scope'),worker_id=ID,outcome=S,signals=arr(S),triggers=arr(S),reasoning_policy=S,min_interval_seconds=VER,cycle_limits=ref('Limits'),aggregate_limits=ref('Limits'),pause_conditions=arr(S),escalation_conditions=arr(S),acceptance=ref('Acceptance'),paused=BOOL,**{'next_wake?':TIME})
 D['Run']=obj(id=ID,version=VER,task_id=ID,configuration_revision=VER,input_versions=arr(ref('Ref')),state=enum('ready','running','waiting','verifying','succeeded','failed','cancelled'),attempt_ids=arr(ID))
 D['Attempt']=obj(id=ID,version=VER,run_id=ID,worker_id=ID,executor=enum('hosted','cooperative'),generation=VER,lease_id=ID,lease_expires_at=TIME,last_heartbeat=TIME,reservation_id=ID,state=enum('claimed','running','waiting','reported','fenced','stopped','failed'),capabilities=arr(S),**{'context_artifact?':ref('ArtifactRef'),'recovery_reason?':S})
-D['Action']=obj(scope=ref('Scope'),tool=ref('Ref'),connection=ref('Ref'),account_identity=S,destination=S,content=arr(ref('ArtifactRef')),not_before=TIME,expires_at=TIME,preconditions=JSON,configuration_revision=VER,parameters=JSON,cost_bound=ref('Money'))
+D['Action']=obj(scope=ref('Scope'),tool=ref('Ref'),connection=ref('Ref'),account_identity=S,destination=S,content=arr(ref('ArtifactRef')),not_before=TIME,expires_at=TIME,preconditions=JSON,configuration_revision=VER,parameters=JSON,cost_bound=ref('Money'),**{'execution_profile?':ref('Ref')})
 D['Operation']=obj(id=ID,version=VER,action=ref('Action'),action_digest=DIG,state=enum('prepared','awaiting_review','ready','executing','awaiting_confirmation','outcome_unknown','succeeded','failed','denied','expired','cancelled'),attempt_ids=arr(ID),**{'linked_operation_id?':ID,'relationship?':enum('retry','reconciliation','compensation','replacement')})
 D['Review']=obj(id=ID,version=VER,scope=ref('Scope'),action_digest=DIG,preview=ref('Action'),requirement=ref('DecisionRequirement'),proposer_id=ID,state=enum('pending','approved','rejected','expired','invalidated'),**{'decision_id?':ID})
 D['Decision']=obj(id=ID,review_id=ID,review_version=VER,action_digest=DIG,reviewer_id=ID,decision=enum('approve','reject'),at=TIME,reason=S)
@@ -89,7 +96,7 @@ PAGE={**SC,'cursor?':S,'limit?':{'type':'integer','minimum':1,'maximum':200},'fi
 def one(t): return obj(resource=ref(t))
 def page(t): return obj(items=arr(ref(t),500))
 def without_generated(t):
-    x=deepcopy(D[t]); generated={'id','version','created_at','activated_at','state','validation_state','validated_at','valid_until','diagnostics','next_wake','last_meaningful_event'}
+    x=deepcopy(D[t]); generated={'id','version','created_at','activated_at','state','validation_state','validated_at','valid_until','hosted_memory_grant','diagnostics','next_wake','last_meaningful_event'}
     for k in generated: x['properties'].pop(k,None)
     x['required']=[k for k in x['required'] if k not in generated]
     return x
@@ -148,9 +155,9 @@ add('tool.schema','connections',fields(KEY),obj(input_schema=JSON,output_schema=
 for v in ('bind','unbind'):
     add('tool.'+v,'connections',fields({**SC,'binding':ref('Binding'),'draft_id?':ID}),one('Draft'),'Stage explicit tool binding change through compiler; reject unknown adapter or unqualified executable binding.')
 resource('connection','connections','Connection')
-D['MCPDiscoveredTool']=obj(name=S,input_schema=JSON,input_schema_digest=DIG,discovered_at=TIME,discovery_operation_id=ID,**{'title?':S,'description?':S,'output_schema?':JSON,'annotations?':obj(**{'title?':S,'read_only_hint?':{'type':'boolean'},'destructive_hint?':{'type':'boolean'},'idempotent_hint?':{'type':'boolean'},'open_world_hint?':{'type':'boolean'}})})
-add('connection.discover','connections',fields(EDIT),one('Job'),'Admit a bounded, separately authorized tool-catalog read (adapter kind list_tools; provider mcp only, capability_unsupported for every other provider). Records the observed tool names, pinned input schemas, digests and server annotations through _connections.discovery.record. Discovery installs no authority: a discovered tool is callable only after an explicit binding names it and the profile allowlist permits it.',effect='external_read')
-add('connection.tools','connections',fields({**PAGE,'connection_id':ID}),page('MCPDiscoveredTool'),'List the connection\'s recorded discovered tools with pinned schema digests under current authorization; never a live server call.',mode='query')
+D['MCPDiscoveredTool']=obj(name=S,input_schema=JSON,input_schema_digest=DIG,id=ID,version=VER,discovered_at=TIME,discovery_operation_id=ID,**{'title?':S,'description?':S,'output_schema?':JSON,'annotations?':obj(**{'title?':S,'read_only_hint?':BOOL,'destructive_hint?':BOOL,'idempotent_hint?':BOOL,'open_world_hint?':BOOL})})
+add('connection.discover','connections',fields(EDIT),one('Job'),'Admit one bounded, separately authorized MCP tools/list catalog read for the selected connection. It installs no authority; each discovered tool needs an explicit binding and profile allowlist entry.',effect='external_read')
+add('connection.tools','connections',fields({**PAGE,'connection_id':ID}),page('MCPDiscoveredTool'),'List the locally recorded discovered tool catalog under current authorization; this operation makes no live provider call.',mode='query')
 add('connection.validate','connections',fields(EDIT),one('Job'),'Admit a bounded separately authorized provider probe. Record observed account/scopes, timestamp and freshness. Mismatch cannot silently substitute accounts.',effect='external_read')
 for v in ('begin','status','complete','cancel'):
     inp=fields({**SC,'connection_id':ID,'expected_version':VER,'method':enum('browser','store_reference')}) if v=='begin' else fields({**SC,'challenge_id':ID,**({'expected_version':VER} if v!='status' else {}),**({'helper_ref':S} if v=='complete' else {})})
@@ -242,7 +249,7 @@ D['Validation']=obj(diagnostics=arr(ref('Diagnostic')),requirements=arr(ref('Req
 D['Authority']=obj(principal=ref('Principal'),grants=arr(ref('Grant')),restrictions=arr(S))
 D['ScopeSnapshot']=obj(scope=ref('Scope'),revision=VER,ancestors=arr(ref('Organization')),bindings=arr(ref('Binding')),**{'worker?':ref('Worker'),'project?':ref('Project')})
 D['PolicyResult']=obj(decision=enum('allow','deny','review','prerequisite_missing'),reasons=arr(S),requirements=arr(ref('DecisionRequirement')))
-D['Dispatch']=obj(operation_id=ID,attempt_id=ID,generation=VER,adapter=S,action=ref('Action'),credential_ref=S,deadline=TIME,**{'provider_key?':S})
+D['Dispatch']=obj(operation_id=ID,attempt_id=ID,generation=VER,adapter=S,action=ref('Action'),credential_ref=S,deadline=TIME,**{'provider_key?':S,'adapter_profile?':JSON})
 D['Observation']=obj(disposition=enum('succeeded','failed','accepted','unknown','not_sent'),evidence=JSON,usage=ref('Usage'),**{'provider_reference?':S,'confirmed_at?':TIME})
 D['Wake']=obj(id=ID,scope=ref('Scope'),source_id=ID,occurrence_key=S,due_at=TIME,condition_version=VER)
 D['Context']=obj(attempt_id=ID,artifact=ref('ArtifactRef'),configuration_revision=VER,source_artifacts=arr(ref('ArtifactRef')),capture=enum('complete','partial','advisory'))
@@ -267,8 +274,10 @@ internal('reserve','accounting',obj(scope=ref('Scope'),root_task_id=ID,operation
 internal('settle','accounting',obj(reservation_id=ID,expected_version=VER,usage=ref('Usage'),authoritative_nonexecution=BOOL),one('Reservation'),'Settle observed cost or retain unknown reservation; release only proven unused portion and conclusive no-effect/no-cost evidence. Check currency and overflow.',['effects','execution','installation'])
 internal('inspect','accounting',fields(SC),obj(limits=ref('Limits'),usage=ref('Usage')),'Return current intersected limits and honest usage to admission/doctor.',['policy','tasks','execution','effects','scheduling','installation'],mode='query')
 internal('resolve','connections',obj(scope=ref('Scope'),connection=ref('Ref'),tool=ref('Ref'),destination=S),obj(connection=ref('Connection'),tool=ref('Tool')),'Resolve exact validated account/tool/destination/binding and current revocation/freshness; return opaque credential reference only to trusted dispatcher.',['effects','execution','memory','skills','configuration'],mode='query')
-internal('discovery.record','connections',obj(connection_id=ID,expected_version=VER,observation=ref('Observation')),one('Connection'),'Record the observed MCP tool catalog page (names, pinned input schemas, digests, annotations) from actual list_tools evidence for the named connection; replaces the previous catalog for the names observed and marks tools absent from a complete catalog as stale. Annotations are hints, never classification or authority.',['effects','controller'])
+internal('tool.resolve','connections',obj(scope=ref('Scope'),tool_id=ID),obj(connection=ref('Connection'),tool=ref('Tool')),'Resolve an exact, current MCP catalog identity to its owning connection and fully composed tool contract. This is lookup only; dispatch still requires current explicit bindings and authorization.',['execution','configuration'],mode='query')
 internal('validation.record','connections',obj(connection_id=ID,expected_version=VER,observation=ref('Observation')),one('Connection'),'Record authorized probe identity/scopes/freshness and invalidation without accepting account substitution.',['effects','controller'])
+internal('discovery.record','connections',obj(connection_id=ID,expected_version=VER,observation=ref('Observation')),one('Connection'),'Record the observed MCP tool catalog from the exact physical observation; pin schemas and digests as inert data, advance catalog versions, and mark absent entries stale only for a complete catalog page.',['effects','controller'])
+internal('callback.evidence','effects',obj(operation_id=ID,attempt_id=ID),obj(action=ref('Action'),observation=ref('Observation'),generation=VER),'Return the immutable action and recorded physical observation for the exact effect attempt; callbacks cannot supply provider facts in place of recorded evidence.',['connections'],mode='query')
 internal('create','tasks',obj(task=ref('Task'),source_id=ID,occurrence_key=S),one('Task'),'Create/deduplicate admitted task from wake/responsibility/conversation by source+occurrence identity; differing content conflicts. Enforce current bounds and bindings.',['scheduling','messaging','execution'])
 internal('snapshot','tasks',fields(KEY),one('Task'),'Return current pinned contract and task scope, parent/root/dependency state; caller still obeys authority.',['execution','effects','scheduling','memory','reviews','policy'],mode='query')
 internal('transition','tasks',obj(task_id=ID,expected_version=VER,state=D['Task']['properties']['state'],evidence_ids=arr(ID),**{'waiting_reason?':S,'manual?':BOOL} ),one('Task'),'Validate legal transition and pinned independent acceptance. succeeded requires verifier-established observations or eligible explicitly manual acceptance; failed verification never releases success dependents.',['execution','scheduling','installation'])
@@ -279,7 +288,7 @@ internal('admit','effects',obj(operation_id=ID,expected_version=VER),one('Operat
 internal('claim','effects',obj(operation_id=ID,attempt_id=ID,generation=VER),one('Dispatch'),'Consume one-use attempt claim after current generation, revocation, expiry, restriction and action checks. Dispatch never returned to cooperative workers.',['controller'])
 internal('record','effects',obj(operation_id=ID,attempt_id=ID,generation=VER,observation=ref('Observation')),one('Operation'),'Store actual provider observation plus cost settlement/uncertainty atomically. Lost record is recoverable without blind resend. Contradictory late evidence records correction/dispute.',['controller'])
 internal('pending','effects',obj(limit={'type':'integer','minimum':1,'maximum':100}),obj(operations=arr(ref('Operation'),100)),'List pending intents/confirmation/reconciliation obligations; claimed attempts after restart become unknown, not ready for resend.',['controller','installation'],mode='query')
-internal('prepare','effects',obj(scope=ref('Scope'),action=ref('Action'),source_id=ID),one('Operation'),'Persist immutable action and logical effect for hosted steps/memory/probes/evaluation; required decisions produce awaiting_review. No physical call here.',['execution','memory','connections','skills','installation'])
+internal('prepare','effects',obj(scope=ref('Scope'),action=ref('Action'),source_id=ID),one('Operation'),'Persist immutable action and logical effect for hosted steps/memory/probes/evaluation; required decisions produce awaiting_review. No physical call here.',['execution','memory','connections','skills','installation','configuration'])
 internal('tick','execution',obj(now=TIME,limit={'type':'integer','minimum':1,'maximum':100}),obj(attempt_ids=arr(ID)),'Admit bounded owned work/expire leases; persist request context artifact before preparing model effect. Any blob staging happens via IO boundary before this method. No network inside transaction.',['controller'])
 internal('context','execution',obj(attempt_id=ID,context=ref('Context')),one('Attempt'),'Pin persisted model-visible messages/instructions/tools/results/memory/compaction lineage and safe-boundary mailbox injection before dispatch.',['controller'])
 internal('observation','execution',obj(attempt_id=ID,operation_id=ID,observation=ref('Observation')),one('Attempt'),'Continue bounded model loop from recorded effect; dispatch declared tools via effects owner, persist output context, verify submitted task independently.',['controller'])
@@ -362,10 +371,23 @@ for o in OPS:
         o['input_schema']['properties']['filter']=obj(**{'state?':S,'key?':S,'parent_id?':ID,'worker_id?':ID,'task_id?':ID,'organization_id?':ID,'descendants?':BOOL,'needs_you?':BOOL})
         o['behavior']+=' Filters are structured exact-match fields (AND semantics); unsupported fields for this resource refuse invalid_input. Never interpolate filter strings as SQL.'
 
+# Revision 18 adds governed MCP client discovery and dispatch to the existing catalog.
+for _operation in OPS:
+    if _operation['id']=='_connections.resolve':
+        _operation['input_schema']['properties'].update(operation_id=ID,action=ref('Action'))
+        _operation['output_schema']['properties']['validation_intent']=BOOL
+        _operation['behavior'] += ' MCP admission and claim re-resolve the exact immutable Action, connection/catalog/profile versions, current authority and pending validation intent; identity alone never bypasses freshness.'
+    if _operation['id'] in ('_connections.validation.record','_connections.discovery.record'):
+        _operation['input_schema']['properties'].update(operation_id=ID,attempt_id=ID)
+        _operation['behavior'] += ' MCP callbacks require exact operation and attempt identity and consume only the corresponding effects callback evidence; duplicate exact delivery is idempotent.'
+    if _operation['id']=='_artifacts.metadata' and 'connections' not in _operation['callers']:
+        _operation['callers'].append('connections')
+
 # Async completion schemas are distinct from the immediate accepted Job envelope.
 _COMPLETIONS={
  'skill.evaluate':obj(evaluation_id=ID,passed=BOOL,evidence=arr(ref('ArtifactRef'))),
  'connection.validate':one('Connection'),'connection.discover':one('Connection'),'connection.rotate':one('Connection'),
+ 'execution_profile.qualify':one('QualifiedExecutionProfile'),
  'operation.reconcile':one('Operation'),
  'memory.recall':obj(context_artifact=ref('ArtifactRef'),claims=arr(ref('Claim')),brain_versions=arr(ref('Ref')),freshness=TIME,requirements=arr(ref('Requirement'))),
  'memory.remember':obj(claims=arr(ref('Claim')),obligations=arr(ref('Requirement'))),
@@ -423,7 +445,7 @@ D['ProposalRecord']=obj(
 D['CallbackRoute']=obj(kind=enum('worker_turn','job','memory','skill','connection'),**{'turn_id?':ID,'step_index?':INT,'job_id?':ID})
 D['OperationAttempt']=obj(attempt_id=ID,generation=VER)
 D['WorkItem']=obj(id=ID,kind=enum('claim','context','proposal','resume'),scope=ref('Scope'),turn=ref('WorkerTurn'),**{'run_id?':ID})
-D['ContextPlan']=obj(id=ID,turn_id=ID,expected_version=VER,generation=VER,refs=arr(ref('ArtifactRef')),configuration_revision=VER,byte_bound=INT,token_bound=INT)
+D['ContextPlan']=obj(id=ID,turn_id=ID,expected_version=VER,generation=VER,scope=ref('Scope'),**{'attempt_id?':ID},refs=arr(ref('ArtifactRef')),configuration_revision=VER,byte_bound=INT,token_bound=INT,recipe=JSON)
 
 # Unique source identity (installation_id, source_kind, source_id, source_version,
 # recipient_worker_id) makes _execution.turn.admit idempotent re-admission. A pending
@@ -448,6 +470,7 @@ internal('evidence.record','tasks',obj(task_id=ID,attempt_id=ID,expected_version
 internal('dependencies.wake','tasks',obj(completed_task_id=ID,limit={'type':'integer','minimum':1,'maximum':100},**{'cursor?':S}),obj(dependents=arr(ref('Task'),100),**{'next_cursor?':S}),'Bounded scan of dependents blocked on a just-completed task; revalidate current eligibility per dependent and never report success for a dependent whose required child failed.',['execution','controller'])
 internal('ready','messaging',obj(limit={'type':'integer','minimum':1,'maximum':100}),page('Message'),'Bounded fair scan of admitted messages awaiting a durable worker turn, scoped and ordered without acknowledgment.',['execution','controller'],mode='query')
 internal('processed','messaging',obj(message_id=ID,recipient_id=ID,turn_id=ID,**{'context_artifact?':ref('ArtifactRef')}),one('Message'),'Record durable delivery disposition sharing the same transaction as turn admission/context commit; replay of the same message/turn pair is idempotent.',['execution'])
+internal('history','messaging',obj(scope=ref('Scope'),conversation_id=ID,worker_id=ID,limit={'type':'integer','minimum':1,'maximum':200}),obj(items=arr(ref('Message'),200),complete=BOOL),'Read at most 200 messages for the persisted worker turn from a conversation where that worker is a current participant. Preserve recipient-admission membership intervals, return messages chronologically, and set complete=false when older authorized history exists; execution must refuse dispatch rather than silently omit history. This internal operation is callable only by execution and never lets a public caller choose another principal.',['execution'],mode='query')
 add('conversation.message.list','messaging',fields({**SC,'conversation_id':ID,'cursor?':S,'limit?':{'type':'integer','minimum':1,'maximum':200}}),page('Message'),'Read authorized sent/received message history for a conversation, limited to disclosed membership intervals; joining a group discloses no retroactive restricted history.',mode='query')
 D['Conversation']['properties'].update(caller_unread_count=deepcopy(INT),caller_last_read_marker=deepcopy(TIME))
 # conversation.get/list now also return the calling principal's unread count and read
@@ -546,19 +569,58 @@ internal('restore.overlay','installation',obj(job_id=ID),obj(artifact=ref('Artif
  'Return the published, sealed recovery-overlay artifact installation.restore already registered against this restore job, so the controller can resolve and merge it after the database swap. The reference is read before the swap, while the caller\'s own application is still valid, and names bytes the artifacts owner already published; this operation performs no IO, decrypts nothing and returns not_found for a job with no registered overlay rather than guessing one.',
  ['controller'],mode='query')
 
-# Revision 4: serialized Z-M2 governed MCP integration.
-D['MCPDiscoveredTool']['properties'].update(id=ID,version=VER)
-D['MCPDiscoveredTool']['required'] += ['id','version']
-for operation in OPS:
-    if operation['id']=='_connections.resolve':
-        operation['input_schema']['properties'].update(operation_id=ID,action=ref('Action'))
-        operation['output_schema']['properties']['validation_intent']=BOOL
-        operation['behavior'] += ' MCP admission and claim pass the exact immutable Action and operation_id. A non-fresh connection resolves only for an owner-created, pending validation intent matching the exact operation, action digest, connection version and open_session action; identity alone never exempts freshness. The returned validation_intent is owner-verified, not caller authority. Enforce profile/account/destination/schema/cost/session/catalog pins at admission and claim.'
-    if operation['id'] in ('_connections.validation.record','_connections.discovery.record'):
-        operation['input_schema']['properties'].update(operation_id=ID,attempt_id=ID)
-        operation['behavior'] += ' MCP callbacks require operation_id and attempt_id; read the actual recorded observation through _effects.callback.evidence and match the immutable owner intent. Duplicate exact delivery is idempotent; foreign, stale or unrelated callbacks never complete another job or mutate freshness.'
-internal('tool.resolve','connections',obj(scope=ref('Scope'),tool_id=ID),obj(connection=ref('Connection'),tool=ref('Tool')),'Resolve only an existing MCP catalog identity to its owning fresh connection and exact composed Tool. No wildcard dispatch: this is context lookup, and execution must require explicitly selected tool and connection bindings with intersecting destinations. Return not_found for non-MCP identities.',['execution','configuration'],mode='query')
-internal('callback.evidence','effects',obj(operation_id=ID,attempt_id=ID),obj(action=ref('Action'),observation=ref('Observation'),generation=VER),'Return the unique recorded physical observation of the exact attempt under this operation and installation, plus immutable action and attempt generation. Missing or contradictory observations refuse. Connections uses owner-held evidence rather than caller-supplied provider JSON.',['connections'],mode='query')
+
+
+# Strict operation-catalog mirror of adapter-schemas ResponsesProfile v1/v2.
+_RSPSTR={'type':'string','minLength':1,'maxLength':128}
+D['ResponsesCapabilityEvidence']=obj(artifact=ref('ArtifactRef'),adapter_version=_RSPSTR,source_revision=_RSPSTR,protocol_revision=_RSPSTR,profile_digest=DIG,qualified_at=TIME,capabilities={'type':'array','items':_RSPSTR,'minItems':0,'maxItems':128},limitations={'type':'array','items':{'type':'string','minLength':1,'maxLength':2048},'minItems':0,'maxItems':128})
+D['ResponsesRate']=obj(numerator_micro_units=INT,denominator_units=VER,unit=enum('input_token','output_token','request','byte','second'))
+D['ResponsesEnforcement']=obj(cost=enum('enforced','advisory','unsupported'),disclosure=enum('enforced','advisory','unsupported'),maximum_cost=ref('Money'),provider_destinations={'type':'array','items':{'type':'string','format':'uri','pattern':'^https://','maxLength':2048},'minItems':0,'maxItems':64})
+D['ResponsesRoutingOpenRouter']=obj(only={'type':'array','items':S,'minItems':1,'maxItems':16},allow_fallbacks={'const':False,'type':'boolean'},require_parameters={'const':True,'type':'boolean'},**{'price_ceiling?':obj(currency={'const':'USD','type':'string'},input_per_million={'type':'string','pattern':'^(0|[1-9][0-9]*)(\\.[0-9]{1,18})?$','maxLength':64},output_per_million={'type':'string','pattern':'^(0|[1-9][0-9]*)(\\.[0-9]{1,18})?$','maxLength':64}),'privacy?':arr(enum('no_training','data_policy','zero_retention'),8)})
+D['ResponsesRoutingExperiential']=obj(gateway=obj(retry=obj(max_attempts_per_route={'const':1,'type':'integer'},max_total_attempts={'const':1,'type':'integer'}),backoff=obj(type={'const':'none','type':'string'}),routing=obj(allow_fallbacks={'const':False,'type':'boolean'})),**{'route_id?':S,'privacy?':arr(enum('no_training','data_policy','zero_retention'),8)})
+_D_RESPONSES_COMMON=dict(endpoint={'type':'string','format':'uri','pattern':'^https://','maxLength':2048},model={'type':'string','minLength':1,'maxLength':256},connection_id=ID,max_input_tokens={'type':'integer','minimum':1,'maximum':10000000},max_output_tokens={'type':'integer','minimum':1,'maximum':1000000},max_response_bytes={'type':'integer','minimum':1,'maximum':268435456},timeout_seconds={'type':'integer','minimum':1,'maximum':1800},currency={'type':'string','pattern':'^[A-Z]{3}$'},input_rate=ref('ResponsesRate'),output_rate=ref('ResponsesRate'),enforcement=ref('ResponsesEnforcement'),capability_evidence=ref('ResponsesCapabilityEvidence'))
+D['ResponsesProfileV1']=obj(schema={'const':'zatiti.responses/v1','type':'string'},**_D_RESPONSES_COMMON)
+D['ResponsesProfileV2']=obj(schema={'const':'zatiti.responses/v2','type':'string'},**_D_RESPONSES_COMMON,provider=enum('openai','openrouter','experiential'),session_mode=enum('provider_conversation','stateless'),routing={'oneOf':[obj(),ref('ResponsesRoutingOpenRouter'),ref('ResponsesRoutingExperiential')]})
+D['ResponsesProfileV2']['allOf']=[{'if':{'properties':{'provider':{'const':'openai'}},'required':['provider']},'then':{'properties':{'session_mode':{'const':'provider_conversation'},'endpoint':{'const':'https://api.openai.com/v1/responses'},'routing':obj()}}},{'if':{'properties':{'provider':{'const':'openrouter'}},'required':['provider']},'then':{'properties':{'session_mode':{'const':'stateless'},'endpoint':{'const':'https://openrouter.ai/api/v1/responses'},'routing':ref('ResponsesRoutingOpenRouter')}}},{'if':{'properties':{'provider':{'const':'experiential'}},'required':['provider']},'then':{'properties':{'session_mode':{'const':'stateless'},'endpoint':{'const':'https://api.experientiallabs.ai/v1/responses'},'routing':ref('ResponsesRoutingExperiential')}}}]
+D['ResponsesProfile']= {'oneOf':[ref('ResponsesProfileV1'),ref('ResponsesProfileV2')]}
+
+# A qualification request has the same bounded, secret-free provider settings
+# as an executable profile, but deliberately carries no client-authored
+# capability evidence. Only a trusted qualification completion can produce a
+# complete ResponsesProfile.
+_D_RESPONSES_DRAFT_COMMON={k:deepcopy(v) for k,v in _D_RESPONSES_COMMON.items() if k!='capability_evidence'}
+D['ResponsesProfileDraftV1']=obj(schema={'const':'zatiti.responses/v1','type':'string'},**_D_RESPONSES_DRAFT_COMMON)
+D['ResponsesProfileDraftV2']=obj(schema={'const':'zatiti.responses/v2','type':'string'},**_D_RESPONSES_DRAFT_COMMON,provider=enum('openai','openrouter','experiential'),session_mode=enum('provider_conversation','stateless'),routing={'oneOf':[obj(),ref('ResponsesRoutingOpenRouter'),ref('ResponsesRoutingExperiential')]})
+D['ResponsesProfileDraftV2']['allOf']=deepcopy(D['ResponsesProfileV2']['allOf'])
+D['ResponsesProfileDraft']={'oneOf':[ref('ResponsesProfileDraftV1'),ref('ResponsesProfileDraftV2')]}
+D['ExecutionProfileCandidate']=obj(executor=enum('hosted','cooperative'),model=S,connection_id=ID,provider_destination=S,capabilities=arr(S),cost_bound=ref('Money'),classification=enum('internal','public','restricted'),context_capture=enum('complete','partial','advisory'),adapter_profile=ref('ResponsesProfileDraft'),connection_version=VER)
+D['QualifiedExecutionProfile']=obj(executor=enum('hosted','cooperative'),model=S,connection_id=ID,provider_destination=S,capabilities=arr(S),cost_bound=ref('Money'),classification=enum('internal','public','restricted'),context_capture=enum('complete','partial','advisory'),adapter_profile=ref('ResponsesProfile'),connection_version=VER)
+
+# --- Revision 12: versioned provider profiles and stateless turn dispatch ---
+D['ContextPlan']=obj(id=ID,turn_id=ID,expected_version=VER,generation=VER,scope=ref('Scope'),**{'attempt_id?':ID},refs=arr(ref('ArtifactRef')),configuration_revision=VER,byte_bound=INT,token_bound=INT,recipe=JSON)
+D['ProviderDescriptor']=obj(id=enum('openai','openrouter','experiential'),display_name=S,default_endpoint=S,session_mode=enum('provider_conversation','stateless'),credential_setup=enum('api_key'))
+D['ProviderDescriptor']['allOf']=[
+ {'if':{'properties':{'id':{'const':'openai'}},'required':['id']},'then':{'properties':{'default_endpoint':{'const':'https://api.openai.com/v1/responses'},'session_mode':{'const':'provider_conversation'}}}},
+ {'if':{'properties':{'id':{'const':'openrouter'}},'required':['id']},'then':{'properties':{'default_endpoint':{'const':'https://openrouter.ai/api/v1/responses'},'session_mode':{'const':'stateless'}}}},
+ {'if':{'properties':{'id':{'const':'experiential'}},'required':['id']},'then':{'properties':{'default_endpoint':{'const':'https://api.experientiallabs.ai/v1/responses'},'session_mode':{'const':'stateless'}}}}
+]
+add('model.provider.list','connections',fields(SC),obj(items=arr(ref('ProviderDescriptor'),3)),'Return the fixed supported provider presets and endpoints; no network/catalog request, credentials, or account identity. Provider validation is a separate bounded connection.validate job.',mode='query')
+add('execution_profile.qualify','configuration',obj(scope=ref('Scope'),definition=ref('ExecutionProfileCandidate'),qualification_cost_bound=ref('Money')),
+    obj(job=ref('Job')),
+    'Run one explicit, bounded provider qualification probe for this exact connection version, model, endpoint, route and pricing profile. The probe is separately authorized and accounted, accepts no capability-evidence input, and produces a trusted qualified profile only from the recorded physical-call observation. A lost acknowledgement remains outcome_unknown and is never silently resent; the caller retrieves the same job and may only start a new probe after authoritative non-execution.',
+    effect='external_read')
+internal('execution_profile.resolve','configuration',obj(scope=ref('Scope'),profile=ref('Ref')),one('ExecutionProfile'),'Resolve the exact immutable hosted execution-profile version under current scoped authority, including its validated secret-free adapter_profile and connection version. Never substitute the latest worker setting.',['execution','effects'],mode='query')
+internal('execution_profile.qualification.resolve','configuration',obj(qualification_id=ID),obj(candidate=ref('ExecutionProfileCandidate'),profile_digest=DIG),'Resolve one pending, exact, secret-free provider-profile qualification candidate for Effects. This private seam is available only to Effects while preparing the corresponding qualification operation; it never resolves a public draft or an already-unknown job.',['effects'],mode='query')
+internal('turn.observation','execution',obj(turn_id=ID,step_index=INT,operation_id=ID,observation=JSON),one('WorkerTurn'),'Authenticate the persisted effects callback route, fence turn generation and step, and idempotently record the model observation by operation ID. Chat has no task or fabricated Attempt; task compatibility delegates while task success still requires verification.',['controller'])
+internal('execution_profile.qualify.record','configuration',obj(job_id=ID,expected_version=VER,generation=VER,operation_id=ID,profile_digest=DIG,artifact=ref('ArtifactRef'),qualified_at=TIME,adapter_version=S,source_revision=S,protocol_revision=S,capabilities=arr(S,128),limitations=arr(S,128)),one('QualifiedExecutionProfile'),'Accept only the controller-recorded terminal success for the exact pending qualification job/effect and candidate profile digest. Verify current exact connection version and published evidence artifact, compute evidence binding from trusted runtime metadata, persist the qualified candidate idempotently, and return it for the durable job result. Refuse stale, failed, unknown, replay-conflicting or mismatched observations; never infer success from provider acceptance.',['controller'])
+internal('execution_profile.qualify.finish','configuration',obj(job_id=ID,expected_version=VER,generation=VER,operation_id=ID,profile_digest=DIG,state=enum('failed','outcome_unknown')),obj(),'Persist a trusted terminal failed or unknown qualification outcome against the exact pending job/effect/candidate, so the private candidate can never resolve for another dispatch. Success is recorded only through qualify.record.',['controller'])
+for o in OPS:
+    if o['id']=='_effects.prepare':
+        o['input_schema']['properties']['qualification_id']=ID
+        o['behavior']+=' Qualification-only preparation may name a pending configuration-owned qualification_id. Effects resolves that exact candidate through _configuration.execution_profile.qualification.resolve, validates that it agrees with the immutable action and active connection version, and persists the draft adapter profile on the effect. Only configuration may call this seam; ordinary operations still require an exact qualified execution_profile. Public inputs cannot inject Dispatch.adapter_profile.'
+    if o['id']=='_execution.context.prepare':
+        o['behavior']+=' The matching trusted ContextPerformer receives the resulting ContextPlan outside a write Unit; _execution.context.commit alone publishes after generation, authority and referenced-version checks.'
+
 
 # scope_required must be computed last, after every add() call above: it was
 # previously computed mid-file (once, by iterating OPS at that point), so
@@ -579,13 +641,12 @@ internal('callback.evidence','effects',obj(operation_id=ID,attempt_id=ID),obj(ac
 # way an ordinary caller-facing operation's "scope" is.
 _SCOPE_REQUIRED_EXEMPT={'_configuration.export.prepare'}
 for _o in OPS:
+    # Later coordinated revisions may add async operations after the initial
+    # catalog pass above; bind their completion contract only after the final
+    # operation surface is known.
+    if _o['id'] in _COMPLETIONS:
+        _o['completion_schema']=_COMPLETIONS[_o['id']]
     if _o['id'] in _SCOPE_REQUIRED_EXEMPT:
         _o['scope_required']=[]
     else:
         _o['scope_required']=['installation_id'] if 'scope' in _o['input_schema'].get('required',[]) else []
-
-
-# Revision 4: callbacks verify published artifacts against recorded staged evidence.
-for _op in OPS:
-    if _op["id"] == "_artifacts.metadata" and "connections" not in _op["callers"]:
-        _op["callers"].append("connections")

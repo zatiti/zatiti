@@ -233,7 +233,7 @@ func TestKeychainHelperIsDarwinOnly(t *testing.T) {
 func TestAttestationWithEvidenceIsAccepted(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t, "1.2.3", "darwin")
-	f.input.Attestations = []Attestation{{Kind: AttestationQualification, Subject: "serenity/serenity", Evidence: "evidence/serenity.json"}}
+	f.input.Attestations = append(f.input.Attestations, Attestation{Kind: AttestationQualification, Subject: "serenity/serenity", Evidence: "evidence/serenity.json"})
 	f.input.Profiles = []Profile{{Adapter: "github", Name: "default", Version: "1", Evidence: "evidence/serenity.json"}}
 	f.build(t)
 }

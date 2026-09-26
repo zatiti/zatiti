@@ -6,9 +6,14 @@ import (
 )
 
 // SecretStore stores opaque secret material under reference strings.
-// Implementations keep secrets out of logs, Invocation JSON and Faults.
+// Lookup recovers the installation-local reference for a stable secret name;
+// it never returns secret bytes or creates a credential. Implementations
+// validate the name like Put, return not_found when absent, and fail closed
+// when the secure store is unavailable. References stay out of public
+// operation payloads, receipts, logs and model context.
 type SecretStore interface {
-	Put(ctx context.Context, reference string, secret []byte) (string, error)
+	Put(ctx context.Context, key string, secret []byte) (string, error)
+	Lookup(ctx context.Context, key string) (string, error)
 	Get(ctx context.Context, reference string) ([]byte, error)
 	Delete(ctx context.Context, reference string) error
 }

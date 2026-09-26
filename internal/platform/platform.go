@@ -231,6 +231,15 @@ func ensureInstanceID(stateDir string) (string, error) {
 	if _, err := f.WriteString(id); err != nil {
 		return "", errWrap(contractCodeControllerUnavailable, "installation identity file cannot be written", err)
 	}
+	if err := f.Sync(); err != nil {
+		return "", errWrap(contractCodeControllerUnavailable, "installation identity file cannot be flushed", err)
+	}
+	if err := f.Close(); err != nil {
+		return "", errWrap(contractCodeControllerUnavailable, "installation identity file cannot be closed", err)
+	}
+	if err := fsyncDir(stateDir); err != nil {
+		return "", err
+	}
 	return id, nil
 }
 

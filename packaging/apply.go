@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // ServiceManager loads and unloads launchers. Both verbs are idempotent. The
@@ -30,6 +31,14 @@ func Apply(ctx context.Context, plan Plan, services ServiceManager) error {
 	if err := checkPlan(plan); err != nil {
 		return err
 	}
+	unlock, err := lockInstallation(ctx, plan.Layout)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	if plan.Kind == PlanNoop {
+		return verifyNoop(plan)
+	}
 	if len(plan.Before)+len(plan.After) != 0 && services == nil {
 		return errf(CodePrerequisiteMissing, "the plan changes services and no service manager is configured")
 	}
@@ -47,25 +56,84 @@ func Apply(ctx context.Context, plan Plan, services ServiceManager) error {
 			return err
 		}
 	}
+	previousLaunchers := map[string]savedLauncher{}
+	if plan.Kind == PlanUpgrade && plan.Layout.Manager != ManagerNone {
+		for _, step := range plan.Steps {
+			if step.Action == ActionWriteFile && filepath.Dir(step.Path) == plan.Layout.UnitDir {
+				raw, err := os.ReadFile(step.Path)
+				if err != nil {
+					return errWrap(CodeConflict, "the previous launcher is missing before upgrade", err)
+				}
+				info, err := os.Stat(step.Path)
+				if err != nil || !info.Mode().IsRegular() {
+					return errf(CodeConflict, "the previous launcher is not a regular file")
+				}
+				previousLaunchers[step.Path] = savedLauncher{content: raw, mode: info.Mode().Perm()}
+			}
+		}
+	}
+	unloaded := false
 	for _, action := range plan.Before {
 		if err := doAction(ctx, services, action); err != nil {
+			if unloaded {
+				return recoveryResult(err, restoreUpgrade(plan, previousLaunchers, services, false))
+			}
 			return err
 		}
+		unloaded = true
 	}
 	linkMoved := false
 	for _, step := range plan.Steps {
 		if err := runStep(ctx, plan.Layout, step); err != nil {
-			if plan.Kind == PlanUpgrade && !linkMoved {
-				for _, action := range plan.After {
-					// Best effort: the step failure is the error the
-					// caller must see.
-					_ = doAction(context.WithoutCancel(ctx), services, action)
-				}
+			if plan.Kind == PlanUpgrade && plan.Layout.Manager != ManagerNone {
+				return recoveryResult(err, restoreUpgrade(plan, previousLaunchers, services, linkMoved))
 			}
 			return err
 		}
 		if step.Action == ActionSwapLink {
 			linkMoved = true
+		}
+	}
+	for _, action := range plan.After {
+		if err := doAction(ctx, services, action); err != nil {
+			if plan.Kind == PlanUpgrade && plan.Layout.Manager != ManagerNone {
+				return recoveryResult(err, restoreUpgrade(plan, previousLaunchers, services, linkMoved))
+			}
+			return err
+		}
+	}
+	return nil
+}
+
+func recoveryResult(original, recovery error) error {
+	if recovery != nil {
+		return errWrap(CodeInternalError, "upgrade failed and the previous service could not be fully restored", errors.Join(original, recovery))
+	}
+	return original
+}
+
+// restoreUpgrade is best effort because a failed service manager can also
+// refuse recovery. The old release remains on disk; callers see the original
+// failure and can inspect/repair the service if recovery did not complete.
+type savedLauncher struct {
+	content []byte
+	mode    fs.FileMode
+}
+
+func restoreUpgrade(plan Plan, launchers map[string]savedLauncher, services ServiceManager, linkMoved bool) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if linkMoved {
+		for _, action := range plan.Before {
+			_ = doAction(ctx, services, action)
+		}
+		if err := swapLink(plan.Layout.Current, filepath.Join(dirNameVersions, plan.PreviousVersion)); err != nil {
+			return err
+		}
+	}
+	for path, saved := range launchers {
+		if err := writeAtomic(path, saved.content, saved.mode); err != nil {
+			return err
 		}
 	}
 	for _, action := range plan.After {
@@ -91,8 +159,13 @@ func checkPlan(plan Plan) error {
 	if err := l.validate(); err != nil {
 		return err
 	}
-	if plan.Kind != PlanInstall && plan.Kind != PlanUpgrade && plan.Kind != PlanUninstall {
+	if plan.Kind != PlanInstall && plan.Kind != PlanUpgrade && plan.Kind != PlanUninstall && plan.Kind != PlanNoop {
 		return errf(CodeInvalidInput, "the plan kind is unknown")
+	}
+	if plan.Kind == PlanNoop {
+		if plan.Version == "" || plan.Version != plan.PreviousVersion || len(plan.ExpectedManifest) == 0 || len(plan.Prepare)+len(plan.Before)+len(plan.Steps)+len(plan.After) != 0 {
+			return errf(CodeInvalidInput, "a repeat-install plan may only verify an existing release")
+		}
 	}
 	if plan.RemovesState && plan.Kind != PlanUninstall {
 		return errf(CodeInvalidInput, "only an uninstall may remove state")

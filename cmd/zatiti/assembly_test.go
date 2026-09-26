@@ -90,17 +90,16 @@ func TestInertBlobsFailClosed(t *testing.T) {
 }
 
 // TestCatalogIsTheFrozenPublicCatalog derives the CLI/MCP catalog exactly as
-// the controller registers it: the 203 frozen public operations, every one
-// with CLI and MCP mappings. (203 = prior 201 + connection.discover +
-// connection.tools from the Z-M2 coordinated revision.)
+// the controller registers it: the 205 frozen public operations, every one
+// with CLI and MCP mappings.
 func TestCatalogIsTheFrozenPublicCatalog(t *testing.T) {
 	t.Parallel()
 	descs, err := catalog()
 	if err != nil {
 		t.Fatalf("catalog: %v", err)
 	}
-	if len(descs) != 203 {
-		t.Fatalf("catalog holds %d operations, want 203", len(descs))
+	if len(descs) != 205 {
+		t.Fatalf("catalog holds %d operations, want 205", len(descs))
 	}
 	seen := map[string]bool{}
 	for _, d := range descs {

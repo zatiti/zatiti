@@ -22,6 +22,8 @@ class WorkerEntry {
     this.conversationId,
     this.isOrganizationChief = false,
     this.preview = '',
+    this.provider,
+    this.model,
   });
 
   final WorkerId id;
@@ -43,6 +45,10 @@ class WorkerEntry {
 
   /// The latest meaningful summary line, when the source has one.
   final String preview;
+
+  /// Controller-reported model identity for this worker's committed profile.
+  final String? provider;
+  final String? model;
 
   String get ancestry => organizationPath.join(' › ');
 }
@@ -663,6 +669,10 @@ class WorkspaceSnapshot {
     this.prerequisites = const [],
     this.unresolvedOperations = const [],
     this.workspaceName = '',
+    this.installedMac = false,
+    this.installedChiefWorkerId,
+    this.installedChiefConversationId,
+    this.installedChiefIssue,
   });
 
   static final WorkspaceSnapshot empty = WorkspaceSnapshot(
@@ -695,6 +705,15 @@ class WorkspaceSnapshot {
   final List<PrerequisiteNotice> prerequisites;
   final List<UnresolvedOperationEntry> unresolvedOperations;
   final String workspaceName;
+  final bool installedMac;
+  final String? installedChiefWorkerId;
+  final String? installedChiefConversationId;
+  final String? installedChiefIssue;
+  bool get installedChiefReady =>
+      installedMac &&
+      installedChiefWorkerId != null &&
+      installedChiefConversationId != null &&
+      installedChiefIssue == null;
 
   WorkerEntry? worker(WorkerId id) {
     for (final w in workers) {

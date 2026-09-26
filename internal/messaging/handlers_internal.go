@@ -53,6 +53,66 @@ func handleMessagingAdmit(ctx context.Context, s *Service, unit contract.Unit, i
 	return s.completed(map[string]any{"resource": wire})
 }
 
+// handleMessagingHistory is an execution-only read for a persisted worker
+// turn. The caller allowlist is enforced by Application; this owner still
+// verifies the installation, asserted conversation scope and current worker
+// membership before reading sender/admitted-recipient rows.
+func handleMessagingHistory(ctx context.Context, s *Service, unit contract.Unit, inv contract.Invocation) (contract.Payload, error) {
+	in, err := decodeInto[struct {
+		Scope          wireScope   `json:"scope"`
+		ConversationID contract.ID `json:"conversation_id"`
+		WorkerID       contract.ID `json:"worker_id"`
+		Limit          int64       `json:"limit"`
+	}](s, "_messaging.history", inv.Input)
+	if err != nil {
+		return contract.Payload{}, err
+	}
+	if err := checkUnitScope(unit, in.Scope); err != nil {
+		return contract.Payload{}, err
+	}
+	if in.Scope.InstallationID == "" || in.Scope.WorkerID == "" || in.Scope.WorkerID != in.WorkerID {
+		return contract.Payload{}, permissionDenied("history worker must match the persisted worker scope")
+	}
+	if in.Limit < 1 || in.Limit > 200 {
+		return contract.Payload{}, invalidInput("history limit must be between 1 and 200")
+	}
+	conv, err := getConversation(ctx, unit, in.ConversationID)
+	if err != nil {
+		return contract.Payload{}, err
+	}
+	if conv == nil || conv.InstallationID != unit.Scope().InstallationID {
+		return contract.Payload{}, notFound("conversation %s not found", in.ConversationID)
+	}
+	asserted := in.Scope
+	asserted.WorkerID = "" // the turn worker is a participant, not the conversation's owner scope.
+	if err := checkStoredConversationScope(unit, asserted, conv); err != nil {
+		return contract.Payload{}, err
+	}
+	if !containsID(mustIDList(conv.ParticipantIDsJSON), in.WorkerID) {
+		return contract.Payload{}, permissionDenied("turn worker is not a current participant of the conversation")
+	}
+	rows, err := listConversationMessages(ctx, unit, in.ConversationID, in.WorkerID, int(in.Limit)+1, 0)
+	if err != nil {
+		return contract.Payload{}, err
+	}
+	complete := len(rows) <= int(in.Limit)
+	if !complete {
+		rows = rows[:int(in.Limit)]
+	}
+	if err := hydrateRecipients(ctx, unit, rows); err != nil {
+		return contract.Payload{}, err
+	}
+	items := make([]*wireMessage, 0, len(rows))
+	for i := len(rows) - 1; i >= 0; i-- { // query is newest-first; context is chronological.
+		message, err := rows[i].toWire()
+		if err != nil {
+			return contract.Payload{}, err
+		}
+		items = append(items, message)
+	}
+	return s.completed(map[string]any{"items": items, "complete": complete})
+}
+
 // handleMessagingBootstrap creates the pinned personal-chief direct
 // conversation from committed identities. Bootstrap is idempotent by the
 // stable key inside one installation: a replay with the same participants

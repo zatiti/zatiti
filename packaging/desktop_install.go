@@ -136,6 +136,27 @@ func PlanDesktopInstallation(in DesktopInstallInput) (Plan, error) {
 	if pathWithin(in.SourceRoot, l.DistRoot) || pathWithin(in.SourceRoot, l.StateDir) {
 		return Plan{}, errf(CodeInvalidInput, "the source tree must sit outside the distribution and state directories")
 	}
+	if in.Installed.Current == m.Version {
+		p, err := verifiedNoop(l, m, nil)
+		if err != nil {
+			return Plan{}, err
+		}
+		launcher := desktopLauncherPath(l, m)
+		if l.OS == "darwin" {
+			app := m.Desktop.Executable[:strings.Index(m.Desktop.Executable, ".app/")+len(".app")]
+			p.ExpectedLinks = map[string]string{launcher: filepath.Join(l.CurrentBundle, filepath.FromSlash(app))}
+		} else {
+			entry, err := RenderDesktopEntry(DesktopEntry{Name: DesktopDisplayName, Comment: "Zatiti workspace", Exec: filepath.Join(l.CurrentBundle, filepath.FromSlash(m.Desktop.Executable))})
+			if err != nil {
+				return Plan{}, err
+			}
+			p.ExpectedLaunchers = map[string][]byte{launcher: entry}
+		}
+		if err := verifyNoop(p); err != nil {
+			return Plan{}, err
+		}
+		return p, nil
+	}
 	plan, err := planRelease(l, m, in.SourceRoot, in.Installed)
 	if err != nil {
 		return Plan{}, err

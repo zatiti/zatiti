@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -38,27 +39,72 @@ func (c *fakeClock) Now() time.Time {
 // fakeSecrets is a minimal contract.SecretStore.
 type fakeSecrets struct {
 	mu     sync.Mutex
+	names  map[string]string
 	values map[string][]byte
 	getErr error
+	next   int
 }
 
 func newFakeSecrets(ref string, secret []byte) *fakeSecrets {
-	return &fakeSecrets{values: map[string][]byte{ref: secret}}
+	return &fakeSecrets{names: map[string]string{ref: ref}, values: map[string][]byte{ref: secret}}
 }
 
-func (s *fakeSecrets) Put(_ context.Context, ref string, secret []byte) (string, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.values[ref] = secret
-	return ref, nil
-}
-
-func (s *fakeSecrets) Get(_ context.Context, ref string) ([]byte, error) {
-	if s.getErr != nil {
-		return nil, s.getErr
+func (s *fakeSecrets) Put(_ context.Context, key string, secret []byte) (string, error) {
+	if err := validateFakeSecretKey(key); err != nil {
+		return "", err
+	}
+	if len(secret) == 0 {
+		return "", &contract.Fault{Code: contract.CodeInvalidInput, Message: "credential value is empty"}
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.next++
+	ref := fmt.Sprintf("fake-secret:%d", s.next)
+	if old := s.names[key]; old != "" {
+		delete(s.values, old)
+	}
+	s.names[key] = ref
+	s.values[ref] = append([]byte(nil), secret...)
+	return ref, nil
+}
+
+func (s *fakeSecrets) Lookup(_ context.Context, key string) (string, error) {
+	if err := validateFakeSecretKey(key); err != nil {
+		return "", err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.getErr != nil {
+		return "", s.getErr
+	}
+	ref, ok := s.names[key]
+	if !ok {
+		return "", &contract.Fault{Code: contract.CodeNotFound, Message: "credential not found"}
+	}
+	if _, ok := s.values[ref]; !ok {
+		return "", &contract.Fault{Code: contract.CodeNotFound, Message: "credential not found"}
+	}
+	return ref, nil
+}
+
+func validateFakeSecretKey(key string) error {
+	if key == "" || len(key) > 256 || strings.ContainsRune(key, 0) {
+		return &contract.Fault{Code: contract.CodeInvalidInput, Message: "invalid credential name"}
+	}
+	return nil
+}
+
+func isCode(err error, code string) bool {
+	f, ok := err.(*contract.Fault)
+	return ok && f.Code == code
+}
+
+func (s *fakeSecrets) Get(_ context.Context, ref string) ([]byte, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.getErr != nil {
+		return nil, s.getErr
+	}
 	v, ok := s.values[ref]
 	if !ok {
 		return nil, &contract.Fault{Code: contract.CodeNotFound, Message: "credential not found"}
@@ -70,7 +116,43 @@ func (s *fakeSecrets) Delete(_ context.Context, ref string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.values, ref)
+	for key, current := range s.names {
+		if current == ref {
+			delete(s.names, key)
+		}
+	}
 	return nil
+}
+
+func TestFakeSecretsNamedLookup(t *testing.T) {
+	s := newFakeSecrets("existing-ref", []byte("existing"))
+	ctx := context.Background()
+	if ref, err := s.Lookup(ctx, "missing"); ref != "" || !isCode(err, contract.CodeNotFound) {
+		t.Fatalf("missing Lookup = %q, %v", ref, err)
+	}
+	if ref, err := s.Lookup(ctx, ""); ref != "" || !isCode(err, contract.CodeInvalidInput) {
+		t.Fatalf("invalid Lookup = %q, %v", ref, err)
+	}
+	first, err := s.Put(ctx, "provider-key", []byte("first"))
+	if err != nil || first == "provider-key" {
+		t.Fatalf("Put returned nonopaque ref %q, %v", first, err)
+	}
+	if ref, err := s.Lookup(ctx, "provider-key"); err != nil || ref != first {
+		t.Fatalf("Lookup = %q, %v; want %q", ref, err, first)
+	}
+	second, err := s.Put(ctx, "provider-key", []byte("second"))
+	if err != nil || second == first {
+		t.Fatalf("replacement ref = %q, %v", second, err)
+	}
+	if _, err := s.Get(ctx, first); !isCode(err, contract.CodeNotFound) {
+		t.Fatalf("old ref still resolves: %v", err)
+	}
+	if err := s.Delete(ctx, second); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Lookup(ctx, "provider-key"); !isCode(err, contract.CodeNotFound) {
+		t.Fatalf("deleted name still resolves: %v", err)
+	}
 }
 
 // fakeBlobStore is a minimal in-memory contract.BlobStore.

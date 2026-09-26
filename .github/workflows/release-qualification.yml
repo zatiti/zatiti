@@ -224,8 +224,8 @@ jobs:
       fail-fast: false
       matrix:
         os:
-          - ubuntu-24.04
           - macos-15
+          - macos-15-intel
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     steps:
@@ -233,6 +233,19 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Verify native runner architecture
+        env:
+          EXPECTED_IMAGE: ${{ matrix.os }}
+        run: |
+          case "$EXPECTED_IMAGE" in
+            ubuntu-24.04) expected_os=Linux; expected_runner=X64; expected_uname=x86_64 ;;
+            macos-15) expected_os=macOS; expected_runner=ARM64; expected_uname=arm64 ;;
+            macos-15-intel) expected_os=macOS; expected_runner=X64; expected_uname=x86_64 ;;
+            *) exit 1 ;;
+          esac
+          test "$RUNNER_OS" = "$expected_os"
+          test "$RUNNER_ARCH" = "$expected_runner"
+          test "$(uname -m)" = "$expected_uname"
       - name: Install the pinned Go toolchain
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
@@ -282,8 +295,8 @@ jobs:
       fail-fast: false
       matrix:
         os:
-          - ubuntu-24.04
           - macos-15
+          - macos-15-intel
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     steps:
@@ -291,6 +304,21 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Verify native runner architecture
+        env:
+          EXPECTED_IMAGE: ${{ matrix.os }}
+        run: |
+          case "$EXPECTED_IMAGE" in
+            ubuntu-24.04) expected_os=Linux; expected_runner=X64; expected_uname=x86_64 ;;
+            macos-15) expected_os=macOS; expected_runner=ARM64; expected_uname=arm64 ;;
+            macos-15-intel) expected_os=macOS; expected_runner=X64; expected_uname=x86_64 ;;
+            *) exit 1 ;;
+          esac
+          test "$RUNNER_OS" = "$expected_os"
+          test "$RUNNER_ARCH" = "$expected_runner"
+          test "$(uname -m)" = "$expected_uname"
+          case "$RUNNER_ARCH" in ARM64) arch=arm64 ;; X64) arch=amd64 ;; esac
+          echo "CANDIDATE_ARCH=$arch" >> "$GITHUB_ENV"
       - name: Install the pinned Go toolchain
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
@@ -336,6 +364,18 @@ jobs:
       - name: Build the release-mode macOS application
         if: runner.os == 'macOS'
         run: go run ./.github/workflows/cigate bounded -name flutter-build -out-dir "$EVIDENCE" -dir apps/desktop -- flutter build macos --release
+      - name: Audit and archive the unsigned native desktop candidate
+        run: |
+          bundle="$GITHUB_WORKSPACE/apps/desktop/build/macos/Build/Products/Release/zatiti_desktop.app"
+          candidate="$RUNNER_TEMP/candidate"
+          mkdir -p "$candidate"
+          cp LICENSE "$candidate/LICENSE"
+          cp docs/implementation/dependencies.lock.json "$candidate/dependencies.lock.json"
+          cp apps/desktop/pubspec.lock "$candidate/pubspec.lock"
+          archive="$candidate/zatiti-unsigned-darwin-$CANDIDATE_ARCH-desktop.tar.gz"
+          go run ./packaging/cmd/zatiti-pack assemble-bundle --dir "$bundle" --archive "$archive" > "$EVIDENCE/desktop-archive.json"
+          go run ./.github/workflows/cigate candidate -kind desktop -arch "$CANDIDATE_ARCH" -root "$bundle" -archive "$archive" -license "$candidate/LICENSE" -dependency-lock "$candidate/dependencies.lock.json" -pubspec-lock "$candidate/pubspec.lock" -revision "$GITHUB_SHA" -out "$EVIDENCE/desktop-candidate.json"
+          cp "$EVIDENCE/desktop-candidate.json" "$candidate/candidate.json"
       - name: Require the integration_test suite
         run: go run ./.github/workflows/cigate require -kind dir apps/desktop/integration_test
       - name: Run integration_test on Linux under a virtual display
@@ -349,7 +389,9 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: release-evidence-flutter-${{ matrix.os }}
-          path: ${{ runner.temp }}/evidence/
+          path: |
+            ${{ runner.temp }}/evidence/
+            ${{ runner.temp }}/candidate/
           if-no-files-found: error
           retention-days: 30
 
@@ -360,8 +402,8 @@ jobs:
       fail-fast: false
       matrix:
         os:
-          - ubuntu-24.04
           - macos-15
+          - macos-15-intel
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     steps:
@@ -369,6 +411,21 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Verify native runner architecture
+        env:
+          EXPECTED_IMAGE: ${{ matrix.os }}
+        run: |
+          case "$EXPECTED_IMAGE" in
+            ubuntu-24.04) expected_os=Linux; expected_runner=X64; expected_uname=x86_64 ;;
+            macos-15) expected_os=macOS; expected_runner=ARM64; expected_uname=arm64 ;;
+            macos-15-intel) expected_os=macOS; expected_runner=X64; expected_uname=x86_64 ;;
+            *) exit 1 ;;
+          esac
+          test "$RUNNER_OS" = "$expected_os"
+          test "$RUNNER_ARCH" = "$expected_runner"
+          test "$(uname -m)" = "$expected_uname"
+          case "$RUNNER_ARCH" in ARM64) arch=arm64 ;; X64) arch=amd64 ;; *) exit 1 ;; esac
+          echo "QUALIFICATION_ARCH=$arch" >> "$GITHUB_ENV"
       - name: Install the pinned Go toolchain
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
@@ -394,7 +451,13 @@ jobs:
           mkdir -p /tmp/zt
           go run ./.github/workflows/cigate gotest -strict -name qualification -out-dir "$EVIDENCE" -- -timeout 40m ./tests/qualification/...
       - name: Enforce qualification case enumeration and evidence freshness
-        run: go run ./.github/workflows/cigate qualevidence -report "$EVIDENCE/qualification-cases/release-report.json" -require-gate "Z01,Z04,Z13,Z16,Z21,JOURNEY,QUALIFICATION" -out "$EVIDENCE/qualification-verdict.json"
+        run: |
+          go run ./.github/workflows/cigate qualevidence \
+            -report "$EVIDENCE/qualification-cases/release-report.json" \
+            -require-gate "Z01,Z04,Z13,Z16,Z21,JOURNEY,QUALIFICATION" \
+            -require-case "Z21.first_conversation,QUALIFICATION.macos_pkg_binding,QUALIFICATION.macos_gui_secret_helper,QUALIFICATION.macos_serenity_hard_gate,QUALIFICATION.macos_bootstrap_entrypoint" \
+            -platform "darwin/$QUALIFICATION_ARCH" \
+            -out "$EVIDENCE/qualification-verdict.json"
       - name: Retain evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -411,8 +474,8 @@ jobs:
       fail-fast: false
       matrix:
         os:
-          - ubuntu-24.04
           - macos-15
+          - macos-15-intel
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     steps:
@@ -420,6 +483,21 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Verify native runner architecture
+        env:
+          EXPECTED_IMAGE: ${{ matrix.os }}
+        run: |
+          case "$EXPECTED_IMAGE" in
+            ubuntu-24.04) expected_os=Linux; expected_runner=X64; expected_uname=x86_64 ;;
+            macos-15) expected_os=macOS; expected_runner=ARM64; expected_uname=arm64 ;;
+            macos-15-intel) expected_os=macOS; expected_runner=X64; expected_uname=x86_64 ;;
+            *) exit 1 ;;
+          esac
+          test "$RUNNER_OS" = "$expected_os"
+          test "$RUNNER_ARCH" = "$expected_runner"
+          test "$(uname -m)" = "$expected_uname"
+          case "$RUNNER_ARCH" in ARM64) arch=arm64 ;; X64) arch=amd64 ;; esac
+          echo "CANDIDATE_ARCH=$arch" >> "$GITHUB_ENV"
       - name: Install the pinned Go toolchain
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
@@ -439,17 +517,146 @@ jobs:
         run: go run ./.github/workflows/cigate require -kind main cmd/zatiti
       - name: Build from the unmodified tagged commit
         env:
-          CGO_ENABLED: "0"
+          CGO_ENABLED: "1"
         run: |
+          test "$(go env CGO_ENABLED)" = 1
           mkdir -p "$RUNNER_TEMP/candidate"
           go build -trimpath -buildvcs=true -o "$RUNNER_TEMP/candidate/zatiti" ./cmd/zatiti
+          go version -m "$RUNNER_TEMP/candidate/zatiti" | grep -Eq '^[[:space:]]*build[[:space:]]+CGO_ENABLED=1$'
+          nm "$RUNNER_TEMP/candidate/zatiti" | grep -F '_SecItemAdd' >/dev/null
+          nm "$RUNNER_TEMP/candidate/zatiti" | grep -F '_SecItemUpdate' >/dev/null
       - name: Record and verify build provenance
         run: go run ./.github/workflows/cigate provenance -go-version "$(go env GOVERSION)" -out "$EVIDENCE/provenance.json" "$RUNNER_TEMP/candidate/zatiti"
+      - name: Audit and archive the unsigned native controller candidate
+        run: |
+          candidate="$RUNNER_TEMP/candidate"
+          mkdir -p "$candidate/controller-tree/bin"
+          cp "$candidate/zatiti" "$candidate/controller-tree/bin/zatiti"
+          cp LICENSE "$candidate/controller-tree/LICENSE"
+          cp docs/implementation/dependencies.lock.json "$candidate/dependencies.lock.json"
+          cp LICENSE "$candidate/LICENSE"
+          archive="$candidate/zatiti-unsigned-darwin-$CANDIDATE_ARCH-controller.tar.gz"
+          go run ./packaging/cmd/zatiti-pack assemble-bundle --dir "$candidate/controller-tree" --archive "$archive" > "$EVIDENCE/controller-archive.json"
+          go run ./.github/workflows/cigate candidate -kind controller -arch "$CANDIDATE_ARCH" -root "$candidate/zatiti" -archive "$archive" -license "$candidate/LICENSE" -dependency-lock "$candidate/dependencies.lock.json" -revision "$GITHUB_SHA" -out "$EVIDENCE/controller-candidate.json"
+          cp "$EVIDENCE/controller-candidate.json" "$candidate/candidate.json"
       - name: Retain evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: release-evidence-build-${{ matrix.os }}
+          path: |
+            ${{ runner.temp }}/evidence/
+            ${{ runner.temp }}/candidate/
+          if-no-files-found: error
+          retention-days: 30
+
+  candidate_matrix:
+    name: unsigned native Mac candidate matrix
+    needs:
+      - spec
+      - build
+      - flutter
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out the source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install the pinned Go toolchain
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Verify the toolchain and dependency lock
+        env:
+          GOTOOLCHAIN: local
+        run: |
+          evidence="$RUNNER_TEMP/evidence"
+          echo "EVIDENCE=$evidence" >> "$GITHUB_ENV"
+          echo "GOTOOLCHAIN=local" >> "$GITHUB_ENV"
+          go run ./.github/workflows/cigate lock -go-version "$(go env GOVERSION)"
+          go run ./.github/workflows/cigate environ -go-version "$(go env GOVERSION)" -out "$evidence/environment.json"
+      - name: Download native Intel controller candidate
+        uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3 # v8.0.0
+        with:
+          name: release-evidence-build-macos-15-intel
+          path: ${{ runner.temp }}/matrix/controller-amd64
+      - name: Download native Intel desktop candidate
+        uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3 # v8.0.0
+        with:
+          name: release-evidence-flutter-macos-15-intel
+          path: ${{ runner.temp }}/matrix/desktop-amd64
+      - name: Download native Apple Silicon controller candidate
+        uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3 # v8.0.0
+        with:
+          name: release-evidence-build-macos-15
+          path: ${{ runner.temp }}/matrix/controller-arm64
+      - name: Download native Apple Silicon desktop candidate
+        uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3 # v8.0.0
+        with:
+          name: release-evidence-flutter-macos-15
+          path: ${{ runner.temp }}/matrix/desktop-arm64
+      - name: Verify the four unsigned native candidates
+        run: |
+          go run ./.github/workflows/cigate candidate-matrix -root "$RUNNER_TEMP/matrix" -revision "$GITHUB_SHA" -license "$GITHUB_WORKSPACE/LICENSE" -dependency-lock "$GITHUB_WORKSPACE/docs/implementation/dependencies.lock.json" -pubspec-lock "$GITHUB_WORKSPACE/apps/desktop/pubspec.lock" -out "$EVIDENCE/unsigned-candidate-matrix.json"
+      - name: Retain evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-evidence-candidate-matrix
+          path: ${{ runner.temp }}/evidence/
+          if-no-files-found: error
+          retention-days: 30
+
+  qualification_matrix:
+    name: native Mac final-release evidence matrix
+    needs:
+      - spec
+      - qualification
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out the source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install the pinned Go toolchain
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Verify the toolchain and dependency lock
+        env:
+          GOTOOLCHAIN: local
+        run: |
+          evidence="$RUNNER_TEMP/evidence"
+          echo "EVIDENCE=$evidence" >> "$GITHUB_ENV"
+          echo "GOTOOLCHAIN=local" >> "$GITHUB_ENV"
+          go run ./.github/workflows/cigate lock -go-version "$(go env GOVERSION)"
+          go run ./.github/workflows/cigate environ -go-version "$(go env GOVERSION)" -out "$evidence/environment.json"
+      - name: Download native Intel qualification evidence
+        uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3 # v8.0.0
+        with:
+          name: release-evidence-qualification-macos-15-intel
+          path: ${{ runner.temp }}/native-reports/amd64
+      - name: Download native Apple Silicon qualification evidence
+        uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3 # v8.0.0
+        with:
+          name: release-evidence-qualification-macos-15
+          path: ${{ runner.temp }}/native-reports/arm64
+      - name: Bind both clean-host reports to one final signed release
+        run: |
+          go run ./.github/workflows/cigate qualmatrix \
+            -amd64-report "$RUNNER_TEMP/native-reports/amd64/qualification-cases/release-report.json" \
+            -arm64-report "$RUNNER_TEMP/native-reports/arm64/qualification-cases/release-report.json" \
+            -revision "$GITHUB_SHA" \
+            -out "$EVIDENCE/native-qualification-matrix.json"
+      - name: Retain evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-evidence-native-qualification-matrix
           path: ${{ runner.temp }}/evidence/
           if-no-files-found: error
           retention-days: 30
@@ -466,6 +673,8 @@ jobs:
       - flutter
       - qualification
       - build
+      - candidate_matrix
+      - qualification_matrix
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:

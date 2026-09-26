@@ -42,19 +42,21 @@ const (
 	opReconcile           = "operation.reconcile"
 	opReplacementPropose  = "operation.replacement.propose"
 
-	opIdentityAuthority           = "_identity.authority"
-	opConfigSnapshot              = "_configuration.snapshot"
-	opPolicyCheck                 = "_policy.check"
-	opReviewsEnsure               = "_reviews.ensure"
-	opReviewsCheck                = "_reviews.check"
-	opAccountingInspect           = "_accounting.inspect"
-	opAccountingReserve           = "_accounting.reserve"
-	opAccountingSettle            = "_accounting.settle"
-	opConnectionsResolve          = "_connections.resolve"
-	opConnectionsValidationRecord = "_connections.validation.record"
-	opTasksSnapshot               = "_tasks.snapshot"
-	opArtifactsMetadata           = "_artifacts.metadata"
-	opExecutionJobCreate          = "_execution.job.create"
+	opIdentityAuthority             = "_identity.authority"
+	opConfigSnapshot                = "_configuration.snapshot"
+	opConfigExecutionProfileResolve = "_configuration.execution_profile.resolve"
+	opConfigQualificationResolve    = "_configuration.execution_profile.qualification.resolve"
+	opPolicyCheck                   = "_policy.check"
+	opReviewsEnsure                 = "_reviews.ensure"
+	opReviewsCheck                  = "_reviews.check"
+	opAccountingInspect             = "_accounting.inspect"
+	opAccountingReserve             = "_accounting.reserve"
+	opAccountingSettle              = "_accounting.settle"
+	opConnectionsResolve            = "_connections.resolve"
+	opConnectionsValidationRecord   = "_connections.validation.record"
+	opTasksSnapshot                 = "_tasks.snapshot"
+	opArtifactsMetadata             = "_artifacts.metadata"
+	opExecutionJobCreate            = "_execution.job.create"
 )
 
 // opMeta is the static registration record for one operation.
@@ -81,7 +83,7 @@ var opMetas = []opMeta{
 	{id: opPending, visibility: "internal", mode: "query",
 		callers: []string{"controller", "installation"}},
 	{id: opPrepare, visibility: "internal", mode: "mutation",
-		callers: []string{"execution", "memory", "connections", "skills", "installation"}},
+		callers: []string{"execution", "memory", "connections", "skills", "installation", "configuration"}},
 	{id: opRecord, visibility: "internal", mode: "mutation",
 		callers: []string{"controller"}},
 	{id: opReconciliationPrepare, visibility: "internal", mode: "mutation", expected: true,

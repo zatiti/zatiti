@@ -94,16 +94,18 @@ type wireLimits struct {
 // carry it as nullable; a nil pointer serializes as null and a bootstrap
 // chief's null profile never becomes executable authority.
 type wireExecutionProfile struct {
-	ID                  contract.ID `json:"id"`
-	Version             int64       `json:"version"`
-	Executor            string      `json:"executor"`
-	Model               string      `json:"model"`
-	ConnectionID        contract.ID `json:"connection_id"`
-	ProviderDestination string      `json:"provider_destination"`
-	Capabilities        []string    `json:"capabilities"`
-	CostBound           wireMoney   `json:"cost_bound"`
-	Classification      string      `json:"classification"`
-	ContextCapture      string      `json:"context_capture"`
+	ID                  contract.ID     `json:"id"`
+	Version             int64           `json:"version"`
+	Executor            string          `json:"executor"`
+	Model               string          `json:"model"`
+	ConnectionID        contract.ID     `json:"connection_id"`
+	ProviderDestination string          `json:"provider_destination"`
+	Capabilities        []string        `json:"capabilities"`
+	CostBound           wireMoney       `json:"cost_bound"`
+	Classification      string          `json:"classification"`
+	ContextCapture      string          `json:"context_capture"`
+	AdapterProfile      json.RawMessage `json:"adapter_profile,omitempty"`
+	ConnectionVersion   int64           `json:"connection_version,omitempty"`
 }
 
 // wireOrganization mirrors $defs/Organization.

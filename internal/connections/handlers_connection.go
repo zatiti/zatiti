@@ -467,17 +467,18 @@ func scopeCovers(request, row contract.Scope) bool {
 // wire projects a stored row onto the wire Connection shape.
 func (r connectionRow) wire() wireConnection {
 	return wireConnection{
-		ID:              r.ID,
-		Version:         r.Version,
-		Scope:           scopeFromContract(r.Scope),
-		Provider:        r.Provider,
-		AccountIdentity: r.AccountIdentity,
-		CredentialRef:   r.CredentialRef,
-		Destinations:    r.Destinations,
-		AllowedScopes:   r.AllowedScopes,
-		ValidationState: r.ValidationState,
-		ValidatedAt:     r.ValidatedAt,
-		ValidUntil:      r.ValidUntil,
+		ID:                r.ID,
+		Version:           r.Version,
+		Scope:             scopeFromContract(r.Scope),
+		Provider:          r.Provider,
+		AccountIdentity:   r.AccountIdentity,
+		CredentialRef:     r.CredentialRef,
+		Destinations:      r.Destinations,
+		AllowedScopes:     r.AllowedScopes,
+		ValidationState:   r.ValidationState,
+		ValidatedAt:       r.ValidatedAt,
+		ValidUntil:        r.ValidUntil,
+		HostedMemoryGrant: r.HostedMemoryGrant,
 	}
 }
 

@@ -215,7 +215,7 @@
       "installation"
     ],
     "kind": "requirement",
-    "text": "Initial distribution targets macOS and Linux. Windows is a later qualification target. No advertised platform or agent-client compatibility is established solely by code compiling."
+    "text": "Distribution is phased: the first release targets macOS on both native Apple Silicon (arm64) and Intel (amd64). Both architectures must pass installed-artifact qualification before the Mac release is claimed. Linux follows after its own qualification; Windows is later. No advertised platform or agent-client compatibility is established solely by code compiling."
   },
   {
     "id": "R2.4-002",
@@ -298,7 +298,7 @@
       "distribution"
     ],
     "kind": "requirement",
-    "text": "The controller publishes a versioned API contract; a pinned Mint generation step may turn that contract into the MCP server shipped with Zatiti. Mint is a build-time adapter, not a second source of domain behavior. Serenity has a separate canonical memory store and one writer owner per brain; this revises the original single-binary-only deployment proposal. Its process packaging and lifecycle must be qualified with the desktop/controller distribution."
+    "text": "The controller publishes a versioned API contract; a pinned Mint generation step may turn that contract into the MCP server shipped with Zatiti. Mint is a build-time adapter, not a second source of domain behavior. Serenity has a separate canonical memory store and one writer owner per brain. The Mac release connects to hosted Serenity through public OAuth and MCP; local Serenity process packaging is an optional later mode, not a Mac installed dependency."
   },
   {
     "id": "R3-005",
@@ -1968,5 +1968,129 @@
     ],
     "kind": "requirement",
     "text": "memory.list lists authorized scoped claim refs (source, freshness, lineage, supported actions) for brains the calling principal can access; it never lists an unauthorized brain and never performs paid retrieval. installation.verifier.list separately enumerates installed trusted verifier profiles (secret-free, no executable path or argv) so a task's acceptance contract can name one before admission."
+  },
+  {
+    "id": "R-MAC9-001",
+    "section": "MAC9",
+    "owner": "distribution",
+    "participants": [
+      "ci",
+      "qualification",
+      "desktop",
+      "platform"
+    ],
+    "kind": "requirement",
+    "text": "The first Mac release uses architecture-specific signed, notarized, data-only per-user packages. Each package has one exact inbox payload with canonical acyclic binding to the separately signed inner descriptor and controller/desktop archive bytes; no package script, extra choice, unexpected path or executable payload activates. The trusted bootstrap verifies actual payload bytes, pinned Developer ID identity and Gatekeeper decision before fixed current-user installation, re-verifies installed bytes, activates only through packaging.Apply, audits active trees and launcher, then advances the protected sequence fence. Both native Mac architectures and real supported OS versions must pass clean-host installation, upgrade and crash-recovery qualification without Xcode on the destination."
+  },
+  {
+    "id": "R-MAC9-002",
+    "section": "MAC9",
+    "owner": "zatiti",
+    "participants": [
+      "platform",
+      "connections",
+      "desktop",
+      "distribution",
+      "qualification"
+    ],
+    "kind": "requirement",
+    "text": "An installed signed Mac GUI credential helper in the controller distribution captures a bounded provider key through AppKit without passing raw bytes through Dart, argv, environment or any public operation. The signed Runner sends only installation and connection IDs and receives a redacted status; the helper owns the protected Keychain and trusted challenge/store-reference/receipt flow. Setup mutations use durable submission keys and command/status reconciliation; a protected pending intent prevents silent duplicate challenges or orphaned credential refs after a lost acknowledgement or crash. Missing master-key/owner access and locked or refused Keychain fail closed. A real provider first reply and all required Serenity protocol, writer, memory, accounting, reconciliation and backup guarantees remain mandatory release gates."
+  },
+  {
+    "id": "R-MAC9-003",
+    "section": "MAC9",
+    "owner": "distribution",
+    "participants": [
+      "ci",
+      "zatiti",
+      "qualification"
+    ],
+    "kind": "requirement",
+    "text": "The one-line Mac command is generated only after the hosted bootstrap script has a literal SHA-256 in the command. That script verifies a literal hash of the signed/notarized universal bootstrap app archive before extracting and launching its fixed executable. The bootstrap app embeds the trusted delivery-signature public keys and hardware-architecture detection, then consumes the six-asset signed delivery record through RunMacBootstrap. Neither an unsigned curl-pipe-shell stage nor a fetched trust key establishes trust. Real Team ID, hosting URL, notarization and clean-host evidence are external gates; no public command is claimed from fixture tests."
+  },
+  {
+    "id": "R-MAC10-001",
+    "section": "MAC10",
+    "owner": "distribution",
+    "participants": [
+      "zatiti",
+      "platform",
+      "qualification",
+      "ci"
+    ],
+    "kind": "requirement",
+    "text": "Mac bootstrap activation is a locked ordered chain: prove signed package bytes and Apple trust, run the fixed per-user installer, verify the installed three-file inbox against the signed plan, create or validate the fixed login-Keychain master item without rotation, activate through Apply, audit the active controller and desktop trees, helper and LaunchAgent, then advance the protected release fence. Existing-release and crash recovery require the same authoritative active-tree audit; package receipts and inert inbox bytes are insufficient. Packaging owns narrow injected interfaces and imports no platform code; cmd/zatiti composes the platform provisioner."
+  },
+  {
+    "id": "R-MAC10-002",
+    "section": "MAC10",
+    "owner": "zatiti",
+    "participants": [
+      "connections",
+      "qualification"
+    ],
+    "kind": "requirement",
+    "text": "A protected credential-helper recovery intent retains only bounded nonsecret replay identities, account and credential name, opaque store reference, challenge version/expiry, stable begin and complete submission keys, and an exact request digest or request bytes persisted before each mutation call. A retry reconstructs byte-identical input under the same key or refuses; phase-dependent fields are validated and provider/owner/HMAC secret bytes are absent."
+  },
+  {
+    "id": "R-MAC10-003",
+    "section": "MAC10",
+    "owner": "qualification",
+    "participants": [
+      "ci",
+      "distribution",
+      "zatiti",
+      "serenity",
+      "desktop"
+    ],
+    "kind": "requirement",
+    "text": "Each native Mac release report must prove one linked clean-host install-to-first-chat journey on its architecture, binding the same signed delivery, literal script and universal bootstrap hashes to its architecture-specific package, component and helper hashes, installed-inbox and active-tree audits, fixed launcher and Keychain readiness, genuine provider response readback and full Serenity capability evidence. The Intel and Apple Silicon reports use distinct host-run IDs, agree on shared release identity, and both pass the linked named case; absent, skipped, synthetic or independently assembled evidence blocks release."
+  },
+  {
+    "id": "R-MAC11-001",
+    "section": "MAC11",
+    "owner": "connections",
+    "participants": [
+      "platform",
+      "zatiti",
+      "desktop",
+      "serenity",
+      "memory",
+      "qualification"
+    ],
+    "kind": "requirement",
+    "text": "Mac setup signs the personal chief into the existing hosted Serenity personal brain through system-browser OAuth with explicit project and read/write consent. A trusted installed helper owns PKCE, exact loopback callback, token exchange and secure token custody; a public authenticated binding read verifies issuer, resource, account, selected project, scopes and grant before connection activation. Zatiti maps its local UUID brain to the verified hosted project ID without duplicating memory or granting other workers inherited access. Lost responses, denial, refresh/revocation and account/project changes reconcile or fail closed; tokens and codes never enter Dart, model context, public operations, argv or logs."
+  },
+  {
+    "id": "R-MAC11-002",
+    "section": "MAC11",
+    "owner": "serenity",
+    "participants": [
+      "memory",
+      "accounting",
+      "distribution",
+      "qualification",
+      "ci"
+    ],
+    "kind": "requirement",
+    "text": "The hosted Serenity mode is the first Mac release memory target and needs no bundled Serenity process/read facade. Its public authenticated interface must expose verifiable build/capabilities, selected grant/brain identity, full scoped claim and lineage semantics, authoritative write disposition, enforceable per-call cost/disclosure bounds, and immutable brain revision/export/recovery evidence. The free tier and account quota do not substitute for these guarantees. Both native clean-host runs must use the selected pre-existing personal brain and observe a real memory effect and provider reply through the linked signed release; any unavailable capability blocks release."
+  },
+  {
+    "id": "R12-PROVIDER-CONTRACTS",
+    "section": "provider model revision 12",
+    "owner": "configuration",
+    "participants": [
+      "connections",
+      "effects",
+      "execution",
+      "accounting",
+      "controller",
+      "responses",
+      "desktop",
+      "integration",
+      "qualification"
+    ],
+    "kind": "requirement",
+    "text": "Revision 12 freezes strict Responses v2 provider/session schemas for OpenAI conversation mode and stateless OpenRouter/Experiential gateway modes; immutable v1 schemas remain readable. Hosted execution profiles pin a complete secret-free adapter profile and exact connection version. Effects persists that exact profile with every operation and returns it during claim/reconciliation. Controller injects execution-owned context performance and records turn observations without task fabrication. Provider metadata is a fixed local query. Provider cost evidence preserves exact source decimal and converts to integer micro-units with checked arithmetic and upward rounding; unknown/unpriced BYOK cost remains advisory."
   }
 ]

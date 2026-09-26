@@ -80,6 +80,25 @@ type wireResponsesProfile struct {
 	CapabilityEvidence wireCapabilityEvidence `json:"capability_evidence"`
 }
 
+type wireResponsesProfileV2 struct {
+	Schema             string                 `json:"schema"`
+	Endpoint           string                 `json:"endpoint"`
+	Model              string                 `json:"model"`
+	ConnectionID       contract.ID            `json:"connection_id"`
+	MaxInputTokens     int64                  `json:"max_input_tokens"`
+	MaxOutputTokens    int64                  `json:"max_output_tokens"`
+	MaxResponseBytes   int64                  `json:"max_response_bytes"`
+	TimeoutSeconds     int64                  `json:"timeout_seconds"`
+	Currency           string                 `json:"currency"`
+	InputRate          wireRationalRate       `json:"input_rate"`
+	OutputRate         wireRationalRate       `json:"output_rate"`
+	Enforcement        wireBoundEnforcement   `json:"enforcement"`
+	CapabilityEvidence wireCapabilityEvidence `json:"capability_evidence"`
+	Provider           string                 `json:"provider"`
+	SessionMode        string                 `json:"session_mode"`
+	Routing            json.RawMessage        `json:"routing"`
+}
+
 // ---------- action (Dispatch.Action) body ----------
 
 // wireResponsesParameters is the decoded zatiti.responses.action/v1 action:
@@ -91,13 +110,20 @@ type wireResponsesProfile struct {
 // zero value. MarshalJSON re-splits it back into the exact shape its Kind
 // names, for the one caller (tests) that constructs an action as a Go value.
 type wireResponsesParameters struct {
-	Schema                string           `json:"schema"`
-	Kind                  string           `json:"kind"`
-	SessionHandle         string           `json:"session_handle"`
-	ContextArtifact       wireArtifactRef  `json:"context_artifact"`
-	MaxOutputTokens       int64            `json:"max_output_tokens"`
-	ToolContractVersions  []wireVersionRef `json:"tool_contract_versions"`
-	ContinuationReference string           `json:"continuation_reference,omitempty"`
+	Schema                 string           `json:"schema"`
+	Kind                   string           `json:"kind"`
+	SessionHandle          string           `json:"session_handle"`
+	ContextArtifact        wireArtifactRef  `json:"context_artifact"`
+	MaxOutputTokens        int64            `json:"max_output_tokens"`
+	ToolContractVersions   []wireVersionRef `json:"tool_contract_versions"`
+	ContinuationReference  string           `json:"continuation_reference,omitempty"`
+	SessionMode            string           `json:"session_mode,omitempty"`
+	SessionID              string           `json:"session_id,omitempty"`
+	Model                  string           `json:"model,omitempty"`
+	ProbeText              string           `json:"probe_text,omitempty"`
+	ProfileDigest          contract.Digest  `json:"profile_digest,omitempty"`
+	QualificationCostBound wireMoney        `json:"qualification_cost_bound,omitempty"`
+	Provider               string           `json:"provider,omitempty"`
 }
 
 // MarshalJSON encodes w as exactly ResponsesPrepareSessionParameters (only
@@ -106,6 +132,40 @@ type wireResponsesParameters struct {
 // Action is produced upstream of this package -- so this exists for tests
 // and any future caller that builds one as a Go value.
 func (w wireResponsesParameters) MarshalJSON() ([]byte, error) {
+	if w.Schema == "zatiti.responses.action/v2" {
+		if w.Kind == kindPrepareSession {
+			return json.Marshal(struct {
+				Schema      string `json:"schema"`
+				Kind        string `json:"kind"`
+				SessionMode string `json:"session_mode"`
+				SessionID   string `json:"session_id,omitempty"`
+			}{w.Schema, w.Kind, w.SessionMode, w.SessionID})
+		}
+		if w.Kind == kindQualificationProbe {
+			return json.Marshal(struct {
+				Schema          string          `json:"schema"`
+				Kind            string          `json:"kind"`
+				SessionMode     string          `json:"session_mode"`
+				Model           string          `json:"model"`
+				ProbeText       string          `json:"probe_text"`
+				MaxOutputTokens int64           `json:"max_output_tokens"`
+				ProfileDigest   contract.Digest `json:"profile_digest"`
+				CostBound       wireMoney       `json:"qualification_cost_bound"`
+				Provider        string          `json:"provider"`
+			}{w.Schema, w.Kind, w.SessionMode, w.Model, w.ProbeText, w.MaxOutputTokens, w.ProfileDigest, w.QualificationCostBound, w.Provider})
+		}
+		return json.Marshal(struct {
+			Schema                string           `json:"schema"`
+			Kind                  string           `json:"kind"`
+			SessionMode           string           `json:"session_mode"`
+			SessionID             string           `json:"session_id,omitempty"`
+			ContextArtifact       wireArtifactRef  `json:"context_artifact"`
+			MaxOutputTokens       int64            `json:"max_output_tokens"`
+			ToolContractVersions  []wireVersionRef `json:"tool_contract_versions"`
+			SessionHandle         string           `json:"session_handle,omitempty"`
+			ContinuationReference string           `json:"continuation_reference,omitempty"`
+		}{w.Schema, w.Kind, w.SessionMode, w.SessionID, w.ContextArtifact, w.MaxOutputTokens, w.ToolContractVersions, w.SessionHandle, w.ContinuationReference})
+	}
 	if w.Kind == kindPrepareSession {
 		return json.Marshal(struct {
 			Schema string `json:"schema"`
@@ -233,7 +293,7 @@ type wirePhysicalCallEvidence struct {
 	RequestedDestination string            `json:"requested_destination"`
 	ResolvedDestination  string            `json:"resolved_destination"`
 	ProfileDigest        contract.Digest   `json:"profile_digest"`
-	CapabilityEvidence   wireArtifactRef   `json:"capability_evidence"`
+	CapabilityEvidence   *wireArtifactRef  `json:"capability_evidence,omitempty"`
 	StartedAt            time.Time         `json:"started_at"`
 	FinishedAt           time.Time         `json:"finished_at"`
 	RequestContext       wireStagedLocator `json:"request_context"`
@@ -262,6 +322,13 @@ type wireProviderUsage struct {
 	InputRate              *wireRationalRate `json:"input_rate,omitempty"`
 	OutputRate             *wireRationalRate `json:"output_rate,omitempty"`
 	ProviderUsageReference string            `json:"provider_usage_reference,omitempty"`
+	RequestedModel         string            `json:"requested_model,omitempty"`
+	ServedModel            string            `json:"served_model,omitempty"`
+	ServingProvider        string            `json:"serving_provider,omitempty"`
+	ProviderRequestID      string            `json:"provider_request_id,omitempty"`
+	SourceCostDecimal      string            `json:"source_cost_decimal,omitempty"`
+	SourceCostCurrency     string            `json:"source_cost_currency,omitempty"`
+	SourceCostKind         string            `json:"source_cost_kind,omitempty"`
 }
 
 type wireStagedOutput struct {
@@ -307,4 +374,26 @@ type wireResponsesEvidence struct {
 	Output          *wireModelOutput         `json:"output,omitempty"`
 	StagedOutputs   []wireStagedOutput       `json:"staged_outputs"`
 	OutputArtifacts []wireArtifactRef        `json:"output_artifacts,omitempty"`
+}
+
+type wireResponsesEvidenceV2 struct {
+	Schema          string                       `json:"schema"`
+	Kind            string                       `json:"kind,omitempty"`
+	Qualification   *wireQualificationMetadataV2 `json:"qualification,omitempty"`
+	PhysicalCall    wirePhysicalCallEvidence     `json:"physical_call"`
+	SessionHandle   string                       `json:"session_handle,omitempty"`
+	ResponseID      string                       `json:"response_id,omitempty"`
+	Output          *wireModelOutput             `json:"output,omitempty"`
+	StagedOutputs   []wireStagedOutput           `json:"staged_outputs"`
+	OutputArtifacts []wireArtifactRef            `json:"output_artifacts,omitempty"`
+	SessionMode     string                       `json:"session_mode"`
+	SessionID       string                       `json:"session_id,omitempty"`
+}
+
+type wireQualificationMetadataV2 struct {
+	AdapterVersion   string   `json:"adapter_version"`
+	SourceRevision   string   `json:"source_revision"`
+	ProtocolRevision string   `json:"protocol_revision"`
+	Capabilities     []string `json:"capabilities"`
+	Limitations      []string `json:"limitations"`
 }

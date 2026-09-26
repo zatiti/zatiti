@@ -65,6 +65,9 @@ func runServe(ctx context.Context, cfg config, log *slog.Logger, opts serveOptio
 	if err := cfg.validateServe(); err != nil {
 		return &contract.Fault{Code: contract.CodeInvalidInput, Message: err.Error()}
 	}
+	if err := validateInstalledMacServeConfig(cfg); err != nil {
+		return &contract.Fault{Code: contract.CodeInvalidInput, Message: err.Error()}
+	}
 	if opts.pollInterval <= 0 {
 		opts.pollInterval = defaultPollInterval
 	}
@@ -126,7 +129,7 @@ func logPendingRestoreMarker(ctx context.Context, h *installationHandle, log *sl
 // controller.ErrRestoreHandoff. h is never opened or closed here: runServe
 // owns h's lifetime across every call this loop makes.
 func runServeOnce(ctx context.Context, cfg config, h *installationHandle, log *slog.Logger, opts serveOptions) error {
-	adapters, missing, err := loadAdapters(cfg.adaptersDir(), adapterDependencies(h))
+	adapters, missing, err := loadAdaptersWithMCPProfile(cfg.adaptersDir(), adapterDependencies(h), h.mcpProfile)
 	if err != nil {
 		return err
 	}
@@ -152,6 +155,20 @@ func runServeOnce(ctx context.Context, cfg config, h *installationHandle, log *s
 	}, h.app)
 	if err != nil {
 		return err
+	}
+	// server.New has bound the private listener. An already initialized
+	// installation keeps its previous locator until the committed owner
+	// credential is verified and the new locator is atomically published.
+	// Clearing it here would misrepresent a failed recovery as first setup.
+	installedID, discoveryErr := h.initialized(ctx)
+	if discoveryErr == nil && installedID == "" {
+		discoveryErr = h.publishPrebootstrapDiscovery(ctx)
+	}
+	if discoveryErr != nil {
+		grace, cancel := context.WithTimeout(context.Background(), shutdownGrace)
+		defer cancel()
+		_ = srv.Close(grace)
+		return fmt.Errorf("preparing desktop discovery: %w", discoveryErr)
 	}
 	log.Info("listening", "socket", cfg.SocketPath, "remote", cfg.RemoteAddress != "")
 	if opts.listening != nil {
@@ -228,15 +245,21 @@ func superviseController(ctx context.Context, h *installationHandle, adapters ma
 	if err != nil {
 		return err
 	}
+	newBootstrap := installationID == ""
 	if installationID == "" {
 		log.Info("installation is not initialized; serving bootstrap only until `zatiti init` completes")
 		if installationID, err = awaitInitialized(ctx, h, poll); err != nil {
 			return err
 		}
-		profile, err := handOverOwnerCredential(ctx, h)
-		if err != nil {
-			return fmt.Errorf("completing bootstrap: %w", err)
-		}
+	}
+	profile, owner, err := recoverOwnerCredential(ctx, h, installationID)
+	if err != nil {
+		return fmt.Errorf("recovering committed owner credential: %w", err)
+	}
+	if err := h.publishInitializedDiscovery(ctx, installationID, owner); err != nil {
+		return fmt.Errorf("publishing initialized desktop discovery: %w", err)
+	}
+	if newBootstrap {
 		log.Info("bootstrap completed", "installation_id", installationID, "owner_profile", profile)
 	}
 
@@ -252,6 +275,10 @@ func superviseController(ctx context.Context, h *installationHandle, adapters ma
 	verifier, err := execution.NewVerifier(contract.VerifierDependencies{Clock: h.clock, Blobs: h.plat.Blobs()})
 	if err != nil {
 		return fmt.Errorf("constructing the trusted verifier: %w", err)
+	}
+	contextPerformer, ok := h.owners["execution"].(contract.ContextPerformer)
+	if !ok {
+		return errors.New("execution module does not implement the trusted context performer")
 	}
 	jobs := buildJobRunners(h.jobRunners)
 
@@ -281,7 +308,13 @@ func superviseController(ctx context.Context, h *installationHandle, adapters ma
 		// construction step exists.
 		Operator:         h.app,
 		Verifier:         verifier,
+		Context:          contextPerformer,
 		RestoreLifecycle: restoreLifecycleValue,
+		// The model profile is resolved from the durable, version-pinned
+		// dispatch, not from process-global adapter configuration. Keeping
+		// this factory on the trusted controller side also lets provider
+		// changes take effect without restarting serve.
+		ResponsesAdapterFactory: responsesAdapterFactory(adapterDependencies(h)),
 	}
 	if err := ctl.Attach(collab); err != nil {
 		return err
@@ -294,7 +327,7 @@ func superviseController(ctx context.Context, h *installationHandle, adapters ma
 	for _, k := range missingRunners {
 		log.Warn("catalog job kind has no attached runner; a pending job of this kind is never claimed", "owner", k.Owner, "operation", k.Operation)
 	}
-	level, reqs := assemblyReadiness(adapters, unregisteredAdapters, missingRunners, true, helperReceiptKeyProvisioned(ctx, h.plat.Secrets()))
+	level, reqs := assemblyReadiness(adapters, unregisteredAdapters, missingRunners, true, helperReceiptKeyProvisioned(ctx, h.plat.Secrets()), true)
 	for _, r := range reqs {
 		log.Warn("startup requirement", "categories", r.Categories, "message", r.Message)
 	}

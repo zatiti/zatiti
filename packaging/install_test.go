@@ -189,7 +189,9 @@ func TestPlanRefusals(t *testing.T) {
 		_, err = PlanInstallation(input)
 		return err
 	}
-	wantCode(t, build("1.1.0", nil), CodeConflict)
+	if err := build("1.1.0", nil); err != nil {
+		t.Fatalf("matching repeat install: %v", err)
+	}
 	wantCode(t, build("1.0.9", nil), CodeCapabilityUnsupported)
 	wantCode(t, build("1.2.0-rc.1", func(i *InstallInput, _ fixture) { i.HostArch = "amd64" }), CodeCapabilityUnsupported)
 	wantCode(t, build("1.2.0", func(i *InstallInput, _ fixture) { i.Services = nil }), CodeInvalidInput)

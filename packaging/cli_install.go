@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // layoutFlags binds the installation layout inputs shared by install,
@@ -127,6 +128,23 @@ func buildServiceManager(kind, goos, launchctlPath, systemctlPath string, uid in
 	}
 }
 
+// A direct Mac mutation must join the bootstrap's release-channel lock before
+// inspecting or planning installed state. Apply takes the separate install
+// lock inside this critical section, so the only lock order is bootstrap then
+// install. Dry runs and Linux plans do not modify that Mac release channel.
+func lockDirectMacApply(goos, home string, apply bool) (func(), error) {
+	if !apply || goos != "darwin" {
+		return func() {}, nil
+	}
+	fence, err := NewFileMacSequenceWatermark(home)
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	return fence.Lock(ctx)
+}
+
 // cliInstall plans, and with --apply performs, a first install or an
 // upgrade of one distribution. It refuses to proceed on an unverified
 // signature unless the caller explicitly accepts that with --allow-unsigned,
@@ -163,6 +181,11 @@ func cliInstall(args []string, stdout io.Writer) error {
 	if !*allowUnsigned && len(trustedPaths) == 0 {
 		return errf(CodeInvalidInput, "install: a signature must be verified before install; pass --trusted (and optionally --sig), or --allow-unsigned to install without one")
 	}
+	unlock, err := lockDirectMacApply(lf.goos, lf.home, *apply)
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	absSource, err := filepath.Abs(*source)
 	if err != nil {
 		return errWrap(CodeInvalidInput, "the source tree could not be resolved", err)
@@ -268,6 +291,11 @@ func cliUninstall(args []string, stdout io.Writer) error {
 	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
+	unlock, err := lockDirectMacApply(lf.goos, lf.home, *apply)
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	layout, err := lf.resolve()
 	if err != nil {
 		return err

@@ -295,6 +295,13 @@ func TestDesktopInstallUpgradeUninstall(t *testing.T) {
 			if err := AuditDesktopInstalled(l); err != nil {
 				t.Fatalf("AuditDesktopInstalled: %v", err)
 			}
+			repeat, _ := plan("1.0.0")
+			if repeat.Kind != PlanNoop {
+				t.Fatalf("repeat desktop install is %s", repeat.Kind)
+			}
+			if err := Apply(context.Background(), repeat, nil); err != nil {
+				t.Fatalf("repeat desktop install: %v", err)
+			}
 			runner := filepath.Join(l.CurrentBundle, filepath.FromSlash(m.Desktop.Executable))
 			if raw, err := os.ReadFile(runner); err != nil || string(raw) != "synthetic runner 1.0.0" {
 				t.Fatalf("active runner: %q, %v", raw, err)

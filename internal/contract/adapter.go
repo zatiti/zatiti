@@ -31,6 +31,10 @@ type Dispatch struct {
 	ProviderKey   string          `json:"provider_key,omitempty"`
 	Deadline      time.Time       `json:"deadline"`
 	CallbackRoute json.RawMessage `json:"callback_route,omitempty"`
+	// AdapterProfile is trusted, version-pinned, secret-free provider configuration
+	// resolved by Effects from the operation's exact execution profile. Public
+	// operation input can never populate it.
+	AdapterProfile json.RawMessage `json:"adapter_profile,omitempty"`
 }
 
 // Observation is an adapter's recorded outcome for one physical attempt.

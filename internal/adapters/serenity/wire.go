@@ -58,11 +58,13 @@ type wireBoundEnforcement struct {
 // wireBrainMapping binds one Zatiti brain to its locally provisioned
 // Serenity endpoint, brain root and single writer owner.
 type wireBrainMapping struct {
-	BrainID        contract.ID `json:"brain_id"`
-	Endpoint       string      `json:"endpoint"`
-	RootRef        string      `json:"root_ref"`
-	WriterOwner    string      `json:"writer_owner"`
-	Classification string      `json:"classification"`
+	BrainID         contract.ID `json:"brain_id"`
+	Endpoint        string      `json:"endpoint"`
+	RootRef         string      `json:"root_ref,omitempty"`
+	WriterOwner     string      `json:"writer_owner,omitempty"`
+	HostedProjectID string      `json:"hosted_project_id,omitempty"`
+	ConnectionID    contract.ID `json:"connection_id,omitempty"`
+	Classification  string      `json:"classification"`
 }
 
 type wireLookupSemantics struct {
@@ -88,7 +90,7 @@ type wireBackupProtocol struct {
 	Evidence                []wireArtifactRef `json:"evidence"`
 }
 
-// wireSerenityProfile is the decoded zatiti.serenity/v1 adapter profile.
+// wireSerenityProfile is the decoded zatiti.serenity/v2 adapter profile.
 type wireSerenityProfile struct {
 	Schema                 string                  `json:"schema"`
 	Version                string                  `json:"version"`

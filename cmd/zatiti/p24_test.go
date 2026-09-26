@@ -7,9 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"log/slog"
-	"os"
-	"path/filepath"
-	"strings"
+	"net/http"
 	"testing"
 	"time"
 
@@ -34,50 +32,6 @@ import (
 // change to pass -- they were verified locally against a temporary,
 // reverted patch of the affected files before being committed here.
 
-// buildResponsesProfile constructs a valid, self-bound zatiti.responses/v1
-// adapter profile: every field internal/adapters/responses/profile.go's
-// loadProfile requires, with capability_evidence.profile_digest computed
-// exactly as profileDigestWithoutCapabilityEvidence does (canonical JSON of
-// the document with capability_evidence deleted, SHA-256) -- the same
-// two-pass construction internal/adapters/responses' own test helper
-// (unexported, package responses, not importable here) uses.
-func buildResponsesProfile(t *testing.T, endpoint string) []byte {
-	t.Helper()
-	doc := map[string]any{
-		"schema":             "zatiti.responses/v1",
-		"endpoint":           endpoint,
-		"model":              "gpt-test",
-		"connection_id":      string(contract.NewID()),
-		"max_input_tokens":   8192,
-		"max_output_tokens":  2048,
-		"max_response_bytes": 1 << 20,
-		"timeout_seconds":    30,
-		"currency":           "USD",
-		"input_rate":         map[string]any{"numerator_micro_units": 1, "denominator_units": 1, "unit": "input_token"},
-		"output_rate":        map[string]any{"numerator_micro_units": 2, "denominator_units": 1, "unit": "output_token"},
-		"enforcement": map[string]any{
-			"cost":                  "enforced",
-			"disclosure":            "enforced",
-			"maximum_cost":          map[string]any{"currency": "USD", "micro_units": 1000000},
-			"provider_destinations": []string{endpoint},
-			"classifications":       []string{"internal"},
-			"evidence":              capabilityEvidenceStub(t),
-		},
-		"capability_evidence": capabilityEvidenceStub(t),
-	}
-	raw, err := json.Marshal(doc)
-	if err != nil {
-		t.Fatalf("marshal profile: %v", err)
-	}
-	digest := profileSelfDigest(t, raw)
-	doc["capability_evidence"].(map[string]any)["profile_digest"] = string(digest)
-	final, err := json.Marshal(doc)
-	if err != nil {
-		t.Fatalf("marshal profile (final): %v", err)
-	}
-	return final
-}
-
 func capabilityEvidenceStub(t *testing.T) map[string]any {
 	t.Helper()
 	return map[string]any{
@@ -98,77 +52,50 @@ func syntheticDigest(t *testing.T, seed string) contract.Digest {
 	return contract.Digest(hex.EncodeToString(sum[:]))
 }
 
-// profileSelfDigest mirrors internal/adapters/responses/profile.go's
-// profileDigestWithoutCapabilityEvidence: canonical JSON of raw with its
-// top-level capability_evidence field removed, SHA-256 hex.
-func profileSelfDigest(t *testing.T, raw json.RawMessage) contract.Digest {
-	t.Helper()
-	var doc map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &doc); err != nil {
-		t.Fatalf("decoding profile for digest: %v", err)
-	}
-	delete(doc, "capability_evidence")
-	stripped, err := json.Marshal(doc)
-	if err != nil {
-		t.Fatalf("marshal stripped profile: %v", err)
-	}
-	canon, err := contract.Canonicalize(stripped)
-	if err != nil {
-		t.Fatalf("canonicalize stripped profile: %v", err)
-	}
-	return contract.Hash(canon)
-}
-
-// TestServeAcceptsAValidResponsesProfile is half of P24's required test 1:
-// the production binary (serve, through the real loadAdapters/
-// adapterConstructors path this card wires -- cmd/zatiti/adapters.go)
-// accepts a valid, self-bound zatiti.responses/v1 profile placed at
-// <state-dir>/adapters/responses.json and registers the real
-// internal/adapters/responses.New-constructed adapter, never guessing or
-// silently skipping it. The profile's endpoint need not be reachable here:
-// construction validates the profile document itself (schema, self-binding
-// digest, rate units, enforceable bounds, destination containment) without
-// making a physical call -- only Invoke would need a live endpoint, and
-// this test's concern is acceptance, not a live model step.
-func TestServeAcceptsAValidResponsesProfile(t *testing.T) {
-	cfg := serveConfig(t)
-	if err := os.MkdirAll(cfg.adaptersDir(), 0o700); err != nil {
-		t.Fatalf("adapters dir: %v", err)
-	}
-	profile := buildResponsesProfile(t, "https://api.example.invalid/v1/responses")
-	if err := os.WriteFile(filepath.Join(cfg.adaptersDir(), "responses.json"), profile, 0o600); err != nil {
-		t.Fatalf("writing responses.json: %v", err)
-	}
-
-	h := openTestInstallation(t, cfg)
-	bootstrapInstallation(t, h)
-	h.close()
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	done, logs := serveInBackground(t, ctx, cfg)
-	waitFor(t, 15*time.Second, "the controller to run", func() bool {
-		select {
-		case err := <-done:
-			t.Fatalf("serve exited: %v (logs:\n%s)", err, logs.String())
-		default:
-		}
-		return strings.Contains(logs.String(), "controller running")
+// Responses providers are constructed from the durable profile pinned to an
+// individual dispatch. A process-global responses.json must not register or
+// select a provider; the trusted per-dispatch factory accepts the evidence-free
+// v2 draft only for its bounded qualification probe.
+func TestResponsesAdapterFactoryAcceptsQualificationDraftOnDemand(t *testing.T) {
+	const endpoint = "https://openrouter.ai/api/v1/responses"
+	const model = "z-ai/glm-flash-latest"
+	connectionID := contract.NewID()
+	draft, err := json.Marshal(map[string]any{
+		"schema": "zatiti.responses/v2", "endpoint": endpoint, "model": model,
+		"connection_id": connectionID, "max_input_tokens": 32768,
+		"max_output_tokens": 2048, "max_response_bytes": 65536,
+		"timeout_seconds": 30, "currency": "USD",
+		"input_rate":  map[string]any{"numerator_micro_units": 500000, "denominator_units": 1000000, "unit": "input_token"},
+		"output_rate": map[string]any{"numerator_micro_units": 1500000, "denominator_units": 1000000, "unit": "output_token"},
+		"enforcement": map[string]any{
+			"cost": "enforced", "disclosure": "enforced",
+			"maximum_cost":          map[string]any{"currency": "USD", "micro_units": 20000},
+			"provider_destinations": []string{endpoint},
+		},
+		"provider": "openrouter", "session_mode": "stateless",
+		"routing": map[string]any{
+			"only": []string{model}, "allow_fallbacks": false, "require_parameters": true,
+		},
 	})
-	if !strings.Contains(logs.String(), `"adapter registered"`) || !strings.Contains(logs.String(), "adapter=responses") {
-		t.Fatalf("the responses adapter was never registered from its valid profile (logs:\n%s)", logs.String())
+	if err != nil {
+		t.Fatal(err)
 	}
-	if strings.Contains(logs.String(), "adapter package has not landed") {
-		t.Fatalf("responses is still reported unimplemented (logs:\n%s)", logs.String())
+	deps := contract.AdapterDependencies{
+		HTTP:  &http.Client{Transport: &http.Transport{Proxy: nil}},
+		Clock: adapterFactoryTestClock{},
 	}
-	if !strings.Contains(logs.String(), "readiness=chat_ready") && !strings.Contains(logs.String(), "readiness=task_ready") {
-		t.Fatalf("readiness never reached chat_ready with a valid responses adapter registered (logs:\n%s)", logs.String())
+	adapter, err := responsesAdapterFactory(deps)(draft)
+	if err != nil {
+		t.Fatalf("constructing the dispatch-pinned Responses adapter: %v", err)
 	}
-	cancel()
-	if err := awaitExit(t, done, "context cancellation", logs); err != nil {
-		t.Fatalf("serve = %v on shutdown", err)
+	if adapter.Name() != "responses" {
+		t.Fatalf("factory constructed %q, want responses", adapter.Name())
 	}
 }
+
+type adapterFactoryTestClock struct{}
+
+func (adapterFactoryTestClock) Now() time.Time { return time.Now().UTC() }
 
 // TestServeAttachesTheRealVerifierNotAStub is the other half of P24's
 // required test 1: the collaborator superviseController actually attaches

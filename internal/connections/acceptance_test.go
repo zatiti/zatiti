@@ -26,7 +26,7 @@ func TestZ01CredentialCustody(t *testing.T) {
 	env := newEnv(t)
 	conn := env.seedConnection(nil)
 	env.secrets.seed(t, conn.CredentialRef, []byte(markedSecret))
-	env.secrets.seed(t, helperReceiptKeyRef, helperReceiptKeyMaterial)
+	keyRef := env.secrets.seedNamed(t, helperReceiptKeyName, helperReceiptKeyMaterial)
 
 	run := env.beginChallenge(conn, methodStoreReference)
 	ch := env.challengeOf(run.Payload)
@@ -61,7 +61,7 @@ func TestZ01CredentialCustody(t *testing.T) {
 		if ref == conn.CredentialRef {
 			credentialRead = true
 		}
-		if ref == helperReceiptKeyRef {
+		if ref == keyRef {
 			keyRead = true
 		}
 	}
@@ -108,7 +108,7 @@ func TestChallengeExpiryCancelReplay(t *testing.T) {
 	env := newEnv(t)
 	conn := env.seedConnection(nil)
 	env.seedBrowserCredential(conn.CredentialRef)
-	env.secrets.seed(t, helperReceiptKeyRef, helperReceiptKeyMaterial)
+	env.secrets.seedNamed(t, helperReceiptKeyName, helperReceiptKeyMaterial)
 	ch := env.challengeOf(env.beginChallenge(conn, methodBrowser).Payload)
 
 	env.clock.Advance(challengeExpiry + time.Minute)
@@ -170,7 +170,7 @@ func TestHelperForgeryRefuses(t *testing.T) {
 	env := newEnv(t)
 	conn := env.seedConnection(nil)
 	env.seedBrowserCredential(conn.CredentialRef)
-	env.secrets.seed(t, helperReceiptKeyRef, helperReceiptKeyMaterial)
+	env.secrets.seedNamed(t, helperReceiptKeyName, helperReceiptKeyMaterial)
 
 	// The genuine receipt passes first.
 	ch := env.challengeOf(env.beginChallenge(conn, methodBrowser).Payload)
@@ -459,7 +459,7 @@ func TestSetupCompleteAppliesVerifiedCredentialReference(t *testing.T) {
 	env := newEnv(t)
 	conn := env.seedConnection(nil)
 	env.secrets.seed(t, conn.CredentialRef, []byte(markedSecret))
-	env.secrets.seed(t, helperReceiptKeyRef, helperReceiptKeyMaterial)
+	env.secrets.seedNamed(t, helperReceiptKeyName, helperReceiptKeyMaterial)
 	rotated := "connections/credentials/" + string(env.ids.New())
 	env.secrets.seed(t, rotated, []byte("rotated-material"))
 
@@ -496,6 +496,147 @@ func TestSetupCompleteAppliesVerifiedCredentialReference(t *testing.T) {
 	}
 }
 
+func TestSerenitySetupPersistsOnlyVerifiedHostedBinding(t *testing.T) {
+	env := newEnv(t)
+	conn := env.seedConnection(func(w *wireConnection) {
+		w.Provider = "serenity"
+		w.AccountIdentity = ""
+		w.CredentialRef = ""
+		w.Destinations = []string{"serenity.sire.run"}
+		w.AllowedScopes = []string{"memory:read", "memory:write"}
+	})
+	credentialRef := "connections/serenity/credential"
+	env.secrets.seed(t, credentialRef, []byte("synthetic-oauth-token-bundle"))
+	env.secrets.seedNamed(t, helperReceiptKeyName, helperReceiptKeyMaterial)
+	started := env.beginChallenge(conn, methodBrowser)
+	challenge := env.challengeOf(started.Payload)
+	if challenge.State != challengeExternalActionRequired || challenge.ConsentURL != "" {
+		t.Fatalf("hosted OAuth begin must defer browser work to the trusted helper: %+v", challenge)
+	}
+
+	grant := &wireHostedMemoryGrant{
+		Issuer: serenityIssuer, Resource: serenityResource, AccountID: "hosted-account-1",
+		ProjectID: "existing-personal-brain", Scopes: []string{"memory:read", "memory:write"}, VerifiedAt: env.clock.Now(),
+	}
+	receipt := mintReceipt(helperReceiptKeyMaterial, helperPayload{
+		ChallengeID: challenge.ID, CredentialRef: credentialRef, AccountIdentity: grant.AccountID,
+		ExpiresAt: challenge.ExpiresAt, HostedGrant: grant, HostedGrantID: "synthetic-grant-1",
+		AccountState: "active", ProjectState: "ready", RevocationEpoch: 0,
+	})
+	env.mustIO("connection.setup.complete", completeInput{
+		Scope: env.scope, ChallengeID: challenge.ID, ExpectedVersion: challenge.Version, HelperRef: receipt,
+	})
+	result := env.mustOK("connection.get", connGetIn{Scope: env.scope, ID: conn.ID})
+	var got resourceOut
+	env.decode(result.Data, &got)
+	if got.Resource.AccountIdentity != grant.AccountID || got.Resource.CredentialRef != credentialRef || got.Resource.HostedMemoryGrant == nil {
+		t.Fatalf("setup did not persist the verified hosted binding: %+v", got.Resource)
+	}
+	if !equalHostedMemoryGrant(got.Resource.HostedMemoryGrant, grant) {
+		t.Fatalf("persisted binding differs from the signed helper receipt: got %+v, want %+v", got.Resource.HostedMemoryGrant, grant)
+	}
+
+	// A configuration compiler input cannot mint this server-observed field.
+	forged := got.Resource
+	forged.ID = env.ids.New()
+	forged.Version = 1
+	_ = env.expectFault("_connections.activate", candidateInBody{Candidate: candidateBody{
+		PlanID: env.ids.New(), BaseRevision: 1, CandidateDigest: testDigest("forged-hosted-binding"),
+		Changes: []wireChange{connectionDef(forged)},
+	}}, contract.CodeInvalidInput)
+}
+
+func TestSerenitySetupRejectsProjectSubstitutionOnReconnect(t *testing.T) {
+	env := newEnv(t)
+	conn := env.seedConnection(func(w *wireConnection) {
+		w.Provider = "serenity"
+		w.AccountIdentity = ""
+		w.CredentialRef = ""
+		w.Destinations = []string{"serenity.sire.run"}
+		w.AllowedScopes = []string{"memory:read", "memory:write"}
+	})
+	env.secrets.seedNamed(t, helperReceiptKeyName, helperReceiptKeyMaterial)
+
+	firstCredential := "connections/serenity/credential-1"
+	env.secrets.seed(t, firstCredential, []byte("synthetic-token-1"))
+	firstChallenge := env.challengeOf(env.beginChallenge(conn, methodBrowser).Payload)
+	firstGrant := &wireHostedMemoryGrant{
+		Issuer: serenityIssuer, Resource: serenityResource, AccountID: "hosted-account-1",
+		ProjectID: "existing-personal-brain", Scopes: []string{"memory:read", "memory:write"}, VerifiedAt: env.clock.Now(),
+	}
+	firstReceipt := mintReceipt(helperReceiptKeyMaterial, helperPayload{
+		ChallengeID: firstChallenge.ID, CredentialRef: firstCredential, AccountIdentity: firstGrant.AccountID,
+		ExpiresAt: firstChallenge.ExpiresAt, HostedGrant: firstGrant, HostedGrantID: "synthetic-grant-1",
+		AccountState: "active", ProjectState: "ready", RevocationEpoch: 0,
+	})
+	env.mustIO("connection.setup.complete", completeInput{
+		Scope: env.scope, ChallengeID: firstChallenge.ID, ExpectedVersion: firstChallenge.Version, HelperRef: firstReceipt,
+	})
+	var bound resourceOut
+	env.decode(env.mustOK("connection.get", connGetIn{Scope: env.scope, ID: conn.ID}).Data, &bound)
+
+	secondCredential := "connections/serenity/credential-2"
+	env.secrets.seed(t, secondCredential, []byte("synthetic-token-2"))
+	secondChallenge := env.challengeOf(env.beginChallenge(bound.Resource, methodBrowser).Payload)
+	secondGrant := *firstGrant
+	secondGrant.ProjectID = "another-brain-in-same-account"
+	secondGrant.VerifiedAt = env.clock.Now()
+	secondReceipt := mintReceipt(helperReceiptKeyMaterial, helperPayload{
+		ChallengeID: secondChallenge.ID, CredentialRef: secondCredential, AccountIdentity: firstGrant.AccountID,
+		ExpiresAt: secondChallenge.ExpiresAt, HostedGrant: &secondGrant, HostedGrantID: "synthetic-grant-2",
+		AccountState: "active", ProjectState: "ready", RevocationEpoch: 0,
+	})
+	_ = env.expectIOFault("connection.setup.complete", completeInput{
+		Scope: env.scope, ChallengeID: secondChallenge.ID, ExpectedVersion: secondChallenge.Version, HelperRef: secondReceipt,
+	}, contract.CodeVerificationFailed)
+
+	var after resourceOut
+	env.decode(env.mustOK("connection.get", connGetIn{Scope: env.scope, ID: conn.ID}).Data, &after)
+	if after.Resource.HostedMemoryGrant == nil || after.Resource.HostedMemoryGrant.ProjectID != firstGrant.ProjectID ||
+		after.Resource.CredentialRef != firstCredential {
+		t.Fatalf("reconnect changed the active project or credential after substitution refusal: %+v", after.Resource)
+	}
+}
+
+func TestSerenitySetupRejectsMissingOrStaleBindingProof(t *testing.T) {
+	for name, mutate := range map[string]func(*helperPayload){
+		"missing grant":          func(p *helperPayload) { p.HostedGrant = nil },
+		"wrong issuer":           func(p *helperPayload) { p.HostedGrant.Issuer = "https://attacker.example" },
+		"missing read scope":     func(p *helperPayload) { p.HostedGrant.Scopes = []string{"memory:write"} },
+		"disabled account":       func(p *helperPayload) { p.AccountState = "deleted" },
+		"non-ready project":      func(p *helperPayload) { p.ProjectState = "allocating" },
+		"missing grant identity": func(p *helperPayload) { p.HostedGrantID = "" },
+		"expired observation":    func(p *helperPayload) { p.HostedGrant.VerifiedAt = time.Time{} },
+	} {
+		t.Run(name, func(t *testing.T) {
+			env := newEnv(t)
+			conn := env.seedConnection(func(w *wireConnection) {
+				w.Provider = "serenity"
+				w.AccountIdentity = ""
+				w.CredentialRef = ""
+			})
+			credentialRef := "connections/serenity/credential"
+			env.secrets.seed(t, credentialRef, []byte("synthetic-token"))
+			env.secrets.seedNamed(t, helperReceiptKeyName, helperReceiptKeyMaterial)
+			challenge := env.challengeOf(env.beginChallenge(conn, methodBrowser).Payload)
+			grant := &wireHostedMemoryGrant{
+				Issuer: serenityIssuer, Resource: serenityResource, AccountID: "hosted-account-1",
+				ProjectID: "existing-personal-brain", Scopes: []string{"memory:read"}, VerifiedAt: env.clock.Now(),
+			}
+			payload := &helperPayload{
+				ChallengeID: challenge.ID, CredentialRef: credentialRef, AccountIdentity: grant.AccountID,
+				ExpiresAt: challenge.ExpiresAt, HostedGrant: grant, HostedGrantID: "synthetic-grant-1",
+				AccountState: "active", ProjectState: "ready", RevocationEpoch: 0,
+			}
+			mutate(payload)
+			receipt := mintReceipt(helperReceiptKeyMaterial, *payload)
+			_ = env.expectIOFault("connection.setup.complete", completeInput{
+				Scope: env.scope, ChallengeID: challenge.ID, ExpectedVersion: challenge.Version, HelperRef: receipt,
+			}, contract.CodeVerificationFailed)
+		})
+	}
+}
+
 // TestSetupCompleteRefusesChangedConnection is the changed-connection local
 // property: a connection mutated after setup began — even one whose
 // definition change lands and activates before the challenge completes —
@@ -505,7 +646,7 @@ func TestSetupCompleteRefusesChangedConnection(t *testing.T) {
 	env := newEnv(t)
 	conn := env.seedConnection(nil)
 	env.secrets.seed(t, conn.CredentialRef, []byte(markedSecret))
-	env.secrets.seed(t, helperReceiptKeyRef, helperReceiptKeyMaterial)
+	env.secrets.seedNamed(t, helperReceiptKeyName, helperReceiptKeyMaterial)
 	ch := env.challengeOf(env.beginChallenge(conn, methodStoreReference).Payload)
 
 	// The connection changes after begin, before complete: destinations move
@@ -547,7 +688,7 @@ func TestHelperReceiptReplayRefuses(t *testing.T) {
 	env := newEnv(t)
 	conn := env.seedConnection(nil)
 	env.secrets.seed(t, conn.CredentialRef, []byte(markedSecret))
-	env.secrets.seed(t, helperReceiptKeyRef, helperReceiptKeyMaterial)
+	env.secrets.seedNamed(t, helperReceiptKeyName, helperReceiptKeyMaterial)
 	ch := env.challengeOf(env.beginChallenge(conn, methodStoreReference).Payload)
 	receipt := mintReceipt(helperReceiptKeyMaterial, helperPayload{
 		ChallengeID: ch.ID, CredentialRef: conn.CredentialRef, AccountIdentity: conn.AccountIdentity,

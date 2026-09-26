@@ -1,9 +1,11 @@
 package registry
 
 import (
+	"bytes"
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"io"
 	"strings"
 	"sync"
 
@@ -66,6 +68,12 @@ type catalog struct {
 	sharedRaw       map[string]json.RawMessage
 	sharedCanonical map[string]string
 	verified        sync.Map
+	parsedDefs      sync.Map // raw $defs JSON -> strict, immutable decoded map
+}
+
+type parsedDefinitions struct {
+	definitions map[string]json.RawMessage
+	err         error
 }
 
 var (
@@ -223,14 +231,14 @@ func (c *catalog) resolveSchema(opSchema json.RawMessage) (body, document json.R
 	if len(opSchema) == 0 {
 		return nil, nil, fmt.Errorf("operation schema is empty")
 	}
-	var opRoot map[string]json.RawMessage
-	if err := contract.DecodeStrict(opSchema, &opRoot); err != nil {
+	opRoot, err := decodeOperationSchema(opSchema)
+	if err != nil {
 		return nil, nil, fmt.Errorf("operation schema is not a strict JSON object: %w", err)
 	}
 	private := map[string]json.RawMessage{}
 	if rawDefs, ok := opRoot["$defs"]; ok {
-		var own map[string]json.RawMessage
-		if err := contract.DecodeStrict(rawDefs, &own); err != nil {
+		own, err := c.parseDefinitions(rawDefs)
+		if err != nil {
 			return nil, nil, fmt.Errorf("operation schema $defs is not a strict JSON object: %w", err)
 		}
 		for name, def := range own {
@@ -247,6 +255,13 @@ func (c *catalog) resolveSchema(opSchema json.RawMessage) (body, document json.R
 	body, err = json.Marshal(opRoot)
 	if err != nil {
 		return nil, nil, fmt.Errorf("operation schema does not marshal: %w", err)
+	}
+	// The streaming split above leaves operation-body values as RawMessages.
+	// Validate them strictly after removing the separately cached $defs block,
+	// so nested duplicate keys in a body remain rejected.
+	var strictBody map[string]json.RawMessage
+	if err := contract.DecodeStrict(body, &strictBody); err != nil {
+		return nil, nil, fmt.Errorf("operation schema body is not strict JSON: %w", err)
 	}
 
 	// Transitive closure of the definitions the body reaches.
@@ -288,6 +303,70 @@ func (c *catalog) resolveSchema(opSchema json.RawMessage) (body, document json.R
 		return nil, nil, fmt.Errorf("operation schema does not marshal: %w", err)
 	}
 	return body, document, nil
+}
+
+// decodeOperationSchema reads only the top-level members as RawMessages.
+// Operation schemas commonly repeat a large $defs block; decoding the entire
+// tree with DecodeStrict for every operation needlessly allocates a map for
+// every schema node. Nested strict validation is done once for $defs by
+// parseDefinitions and separately for the small operation body.
+func decodeOperationSchema(data []byte) (map[string]json.RawMessage, error) {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	first, err := dec.Token()
+	if err != nil {
+		return nil, err
+	}
+	if first != json.Delim('{') {
+		return nil, fmt.Errorf("expected object")
+	}
+	root := make(map[string]json.RawMessage)
+	for dec.More() {
+		tok, err := dec.Token()
+		if err != nil {
+			return nil, err
+		}
+		key, ok := tok.(string)
+		if !ok {
+			return nil, fmt.Errorf("object key is not a string")
+		}
+		if _, duplicate := root[key]; duplicate {
+			return nil, fmt.Errorf("duplicate object key %q", key)
+		}
+		var value json.RawMessage
+		if err := dec.Decode(&value); err != nil {
+			return nil, err
+		}
+		root[key] = value
+	}
+	last, err := dec.Token()
+	if err != nil {
+		return nil, err
+	}
+	if last != json.Delim('}') {
+		return nil, fmt.Errorf("expected object end")
+	}
+	var extra any
+	if err := dec.Decode(&extra); err != io.EOF {
+		if err == nil {
+			return nil, fmt.Errorf("unexpected trailing JSON value")
+		}
+		return nil, err
+	}
+	return root, nil
+}
+
+func (c *catalog) parseDefinitions(raw json.RawMessage) (map[string]json.RawMessage, error) {
+	key := string(raw)
+	if cached, ok := c.parsedDefs.Load(key); ok {
+		result := cached.(parsedDefinitions)
+		return result.definitions, result.err
+	}
+	var definitions map[string]json.RawMessage
+	err := contract.DecodeStrict(raw, &definitions)
+	result := parsedDefinitions{definitions: definitions, err: err}
+	cached, _ := c.parsedDefs.LoadOrStore(key, result)
+	result = cached.(parsedDefinitions)
+	return result.definitions, result.err
 }
 
 // mergedSchema returns only the self-contained document of resolveSchema.

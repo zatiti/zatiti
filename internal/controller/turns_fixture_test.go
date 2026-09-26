@@ -442,8 +442,17 @@ func (f *fx) executionContextPrepare(ctx context.Context, u contract.Unit, input
 			return nil, err
 		}
 	}
+	var scope contract.Scope
+	if err := json.Unmarshal([]byte(t.scope), &scope); err != nil {
+		return nil, err
+	}
+	var attempt any
+	if t.attemptID != "" {
+		attempt = t.attemptID
+	}
 	return map[string]any{"resource": map[string]any{
 		"id": planID, "turn_id": t.id, "expected_version": mustAtoi(t.version), "generation": t.generation,
+		"scope": scope, "attempt_id": attempt, "recipe": map[string]any{},
 		"refs": []any{}, "configuration_revision": mustAtoi(t.configRevision), "byte_bound": 1048576, "token_bound": 100000,
 	}}, nil
 }

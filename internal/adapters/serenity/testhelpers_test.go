@@ -51,6 +51,14 @@ func (s probeSecrets) Put(context.Context, string, []byte) (string, error) {
 	return "", errors.New("unexpected secret write")
 }
 
+func (s probeSecrets) Lookup(_ context.Context, key string) (string, error) {
+	s.p.bump(&s.p.secrets)
+	if key != testCredentialRef {
+		return "", &contract.Fault{Code: contract.CodeNotFound, Message: "credential name is unknown"}
+	}
+	return testCredentialRef, nil
+}
+
 func (s probeSecrets) Get(context.Context, string) ([]byte, error) {
 	s.p.bump(&s.p.secrets)
 	return []byte(testToken), nil
@@ -59,6 +67,22 @@ func (s probeSecrets) Get(context.Context, string) ([]byte, error) {
 func (s probeSecrets) Delete(context.Context, string) error {
 	s.p.bump(&s.p.secrets)
 	return errors.New("unexpected secret delete")
+}
+
+func TestProbeSecretsLookup(t *testing.T) {
+	p := &probes{}
+	s := probeSecrets{p: p}
+	if ref, err := s.Lookup(context.Background(), testCredentialRef); err != nil || ref != testCredentialRef {
+		t.Fatalf("known Lookup = %q, %v", ref, err)
+	}
+	ref, err := s.Lookup(context.Background(), "missing")
+	var fault *contract.Fault
+	if ref != "" || !errors.As(err, &fault) || fault.Code != contract.CodeNotFound {
+		t.Fatalf("missing Lookup = %q, %v; want not_found", ref, err)
+	}
+	if p.total() != 2 {
+		t.Fatalf("Lookup did not count two secret accesses: %d", p.total())
+	}
 }
 
 type probeBlobs struct{ p *probes }
@@ -132,7 +156,7 @@ func testEnforcementEvidence() wireCapabilityEvidence {
 // no supported operation and every guarantee unsupported.
 func truthfulProfile() wireSerenityProfile {
 	return wireSerenityProfile{
-		Schema:  "zatiti.serenity/v1",
+		Schema:  "zatiti.serenity/v2",
 		Version: pinnedDescribe,
 		Commit:  pinnedCommit,
 		BrainMappings: []wireBrainMapping{

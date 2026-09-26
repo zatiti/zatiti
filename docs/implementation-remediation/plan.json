@@ -1,8 +1,8 @@
 {
   "schema": "zatiti.remediation-plan/v1",
   "baseline_revision": "34d291f4c44b1a2a4950e8155498daad2a56c251",
-  "date": "2026-09-19",
-  "state": "plan_only_not_implemented",
+  "date": "2026-09-25",
+  "state": "implementation_cards_landed_with_open_launch_gates",
   "tasks": [
     {
       "id": "P00",
@@ -18,7 +18,7 @@
       ],
       "depends_on": [],
       "priority": "P0",
-      "status": "planned",
+      "status": "implemented",
       "steps": [
         "Read this audit, contract-proposals.md, the 127 requirement blocks and 116 acceptance cases. Turn the proposed seams into revision 3 authored schemas and contracts; do not weaken existing acceptance.",
         "Reconcile the recorded revision-3 backlog in docs/roadmap.md against current code: registry version-0 lookup and self-contained schema normalization, CLI root tokens, public/internal caller declarations, service-principal bootstrap, artifact locator staging, review eligibility and internal authority checks. Preserve tested current behavior unless a coordinated migration explicitly changes it.",
@@ -49,7 +49,7 @@
         "P00"
       ],
       "priority": "P0",
-      "status": "planned",
+      "status": "implemented",
       "steps": [
         "Implement only the revision 3 shared DTOs/interfaces and schema primitives; preserve existing fault/result and canonicalization behavior.",
         "Add worker-subject execution, job claim/result, context work item, output-slot binding, restore snapshot/overlay types and discriminated model decision validation.",
@@ -80,7 +80,7 @@
         "P01"
       ],
       "priority": "P0",
-      "status": "planned",
+      "status": "implemented",
       "steps": [
         "Integration owner alone owns root go.mod/go.sum, tools.go if needed, and docs/implementation/dependencies.lock.json during this assignment.",
         "Compare actual Go imports, pubspec.lock, Flutter/Dart metadata and adapter protocol documents with the lock; remove stale Fyne qualification claims and distinguish historical from current evidence.",
@@ -109,7 +109,7 @@
         "P02"
       ],
       "priority": "P0",
-      "status": "planned",
+      "status": "implemented",
       "steps": [
         "Add identity.current from the authenticated actor, exposing principal kind/scope only, never a credential.",
         "Implement the internal worker-subject resolver from P00: a controller can resolve a configured worker to its own scoped principal, but cannot choose an arbitrary human identity.",
@@ -138,7 +138,7 @@
         "P02"
       ],
       "priority": "P0",
-      "status": "planned",
+      "status": "implemented",
       "steps": [
         "Implement WorkerOperator from the frozen contract as a controller-only capability; resolve worker actor through identity instead of accepting an actor JSON field.",
         "For each proposal recheck current worker grants, bindings, installation restrictions, scope and operation allowlist before the ordinary application dispatcher runs.",
@@ -167,7 +167,7 @@
         "P02"
       ],
       "priority": "P0",
-      "status": "planned",
+      "status": "implemented",
       "steps": [
         "Extend snapshots to resolve the exact worker, principal binding, instructions, skill version closure, tool bindings, execution profile, connection versions and classification constraints needed by context assembly.",
         "Implement configuration prerequisites for runnable hosted workers; a missing profile/provider/budget must yield named diagnostics and remain unready.",
@@ -196,7 +196,7 @@
         "P02"
       ],
       "priority": "P0",
-      "status": "planned",
+      "status": "implemented",
       "steps": [
         "Define executable tool contracts for model calls, public HTTP reads, repository operations and supported memory reads using exact adapter schemas, separate from ExecutionProfile IDs.",
         "Complete the secure-helper receipt handoff: custody a real reference, bind receipt to challenge/account/destinations/expiry and atomically apply the verified credential reference at Finish.",
@@ -225,7 +225,7 @@
         "P02"
       ],
       "priority": "P0",
-      "status": "planned",
+      "status": "implemented",
       "steps": [
         "Use the frozen worker-subject and context disclosure contracts to intersect installation/org/project/task/worker authority for every model call and proposal.",
         "Validate all resolved context classifications and destinations before model dispatch, including skills, attachments, tool results and memory excerpts.",
@@ -253,7 +253,7 @@
         "P02"
       ],
       "priority": "P0",
-      "status": "planned",
+      "status": "implemented",
       "steps": [
         "Specify reservation ownership for root task, attempt, physical model/tool call, evaluation and responsibility cycle; avoid double-reserving the same ceiling as independent spend.",
         "Enforce shared root/ancestor limits across parallel children and model calls; settle real provider usage once by operation/attempt identity.",
@@ -281,7 +281,7 @@
         "P02"
       ],
       "priority": "P0",
-      "status": "planned",
+      "status": "implemented",
       "steps": [
         "Implement artifact metadata/provenance additions for output name, task/run/attempt, producing operation and source artifacts; validate scope ownership through the frozen ports.",
         "Support the staged-to-published handoff for contexts, model text, tool results, verifier requests and verdicts using stable source identities.",
@@ -309,7 +309,7 @@
         "P02"
       ],
       "priority": "P0",
-      "status": "planned",
+      "status": "implemented",
       "steps": [
         "Add controller/execution-facing ready-recipient discovery and atomic turn admission/ack fences using message ID plus recipient ID as the deduplication identity.",
         "Do not acknowledge a worker message until an execution turn or safe-boundary injection is committed in the same unit; reading a mailbox is not processing.",
@@ -338,7 +338,7 @@
         "P02"
       ],
       "priority": "P0",
-      "status": "planned",
+      "status": "implemented",
       "steps": [
         "Implement versioned task.start as the explicit draft-to-ready public path using existing applyTransition, preserving draft creation semantics.",
         "Recheck prerequisites, sealed acceptance, budgets, dependencies and worker binding at start; enqueue atomically and deduplicate the current accepted task version.",
@@ -367,7 +367,7 @@
         "P02"
       ],
       "priority": "P0",
-      "status": "planned",
+      "status": "implemented",
       "steps": [
         "Persist an explicit callback route and dispatch mode outside adapter Action parameters; validate source/owner linkage so arbitrary JSON cannot select an execution callback.",
         "Replace operation.reconcile's stalled job with a separately admitted bounded read linked to the original logical effect, exact prior attempt/provider reference and review/policy constraints.",
@@ -396,7 +396,7 @@
         "P02"
       ],
       "priority": "P0",
-      "status": "planned",
+      "status": "implemented",
       "steps": [
         "Retain the existing adapter and protocol implementation. Validate runtime-created actions against zatiti.responses.action/v1 and expose fixtures using actual context artifacts/tool closure.",
         "Split OpenAI conversation/session preparation from the model call into separately admitted, journaled single-call effects. Persist the session handle before the model call; retain unknown preparation outcome and never use an empty conversation as proof of nonexecution. P00 must add the exact prepare_session action and pinned session-reference schema.",
@@ -432,7 +432,7 @@
         "P02"
       ],
       "priority": "P0",
-      "status": "planned",
+      "status": "implemented",
       "steps": [
         "Create execution-owned turns for chat, task and responsibility triggers; use unique trigger/recipient identity and persist accountable source actor, worker, scope, limits and configuration revision.",
         "Admit queued hosted runs automatically through the same fenced claim rules as cooperative run.claim; never auto-claim cooperative runs as hosted.",
@@ -466,7 +466,7 @@
         "P02"
       ],
       "priority": "P0",
-      "status": "planned",
+      "status": "implemented",
       "steps": [
         "Implement context prepare/perform/commit from P00. Prepare resolves pinned configuration/task/history/tool/memory references in a read transaction; perform reads bounded artifact bytes and stages outside the Unit; commit validates pins and publishes metadata/lineage.",
         "Build zatiti.context/v1 in exact transcript order from worker instructions, immutable skill closure, accepted task, authorized inbox, selected memory, prior outputs and tool results. Mark untrusted parts by origin.",
@@ -498,7 +498,7 @@
         "P02"
       ],
       "priority": "P0",
-      "status": "planned",
+      "status": "implemented",
       "steps": [
         "Replace unconditional prepare-next-model-step behavior with the decision state machine in contract-proposals.md: reply/clarify, local proposal, external proposal, delegate, wait, complete, refused/incomplete.",
         "Strictly validate normalized ModelOutput and source_context against the dispatched request. Admit proposals via the worker operator and deterministic turn/proposal keys; resolve current tool/connection/bindings independently of model text.",
@@ -529,7 +529,7 @@
         "P02"
       ],
       "priority": "P0",
-      "status": "planned",
+      "status": "implemented",
       "steps": [
         "Consume durable cycle results from execution containing source responsibility/version, artifacts, child task IDs and bounded next-wake decision.",
         "Validate useful-work/no-work/wait/escalate outcomes; record cycle and arm the next wake atomically, idempotent by cycle turn identity.",
@@ -561,7 +561,7 @@
         "P02"
       ],
       "priority": "P0",
-      "status": "planned",
+      "status": "implemented",
       "steps": [
         "Expose pending/claim/request/record verification work separately from generic jobs, or implement the exact unified mapping frozen in P00; never leave execution_verification_jobs undiscoverable.",
         "Resolve named output slots to published attempt artifacts and populate VerificationRequest.Outputs; seal the exact request digest before dispatch.",
@@ -591,7 +591,7 @@
         "P02"
       ],
       "priority": "P0",
-      "status": "planned",
+      "status": "implemented",
       "steps": [
         "Implement the frozen local job executor for skill.evaluate, preserving its accepted skill/version, fixtures, posture, limits and verifier profile.",
         "Use published fixture artifacts and real verification rather than storing pending evaluation metadata forever.",
@@ -621,7 +621,7 @@
         "P02"
       ],
       "priority": "P1",
-      "status": "planned",
+      "status": "implemented",
       "steps": [
         "Implement repository_patch_applies and repository_command using the controlled runner/profile fixed by P00/P02 inside the execution root.",
         "Checkout the pinned repository/base/tree into a fresh disposable workspace; apply only the reported patch artifact and run only accepted argv/env/check definitions.",
@@ -652,7 +652,7 @@
         "P20"
       ],
       "priority": "P1",
-      "status": "planned",
+      "status": "implemented",
       "steps": [
         "Make cooperative claim return a published context artifact rather than the current digest-only synthetic envelope; show advisory posture and required capabilities.",
         "Resume waiting runs only after unknown effects/leases are resolved under explicit recovery policy; enforce cumulative root/model-step/deadline limits across replacement attempts.",
@@ -683,7 +683,7 @@
         "P02"
       ],
       "priority": "P0",
-      "status": "planned",
+      "status": "implemented",
       "steps": [
         "Extend tick with bounded fair work phases: discover worker recipients, atomically admit turns, claim hosted work, prepare/publish context, prepare effects, settle observations and resume eligible turns.",
         "Use internal owner ports; never query another package's tables or bypass worker authority. Remove the monitoring-only ready scan as the sole stranded-task response.",
@@ -717,7 +717,7 @@
         "P02"
       ],
       "priority": "P0",
-      "status": "planned",
+      "status": "implemented",
       "steps": [
         "Add declared verifier/job collaborators and execute them outside Units with bounded concurrency, deadlines and explicit owner callbacks.",
         "Drive verification pending/claim/result records; retain independent verifier identity and publish staged request/verdict bytes before domain completion.",
@@ -749,7 +749,7 @@
         "P02"
       ],
       "priority": "P0",
-      "status": "planned",
+      "status": "implemented",
       "steps": [
         "Import/register responses.New and remove the stale unimplemented-adapter entry; load only valid explicit profiles.",
         "Construct trusted verifier, local job adapters and worker operator; attach every supported collaborator in superviseController instead of only Identity/Blobs.",
@@ -779,7 +779,7 @@
         "P02"
       ],
       "priority": "P0",
-      "status": "planned",
+      "status": "implemented",
       "steps": [
         "Replace the current draft-only FirstTaskSequence with a truthful sequence for configure provider/budget/tool/worker, create/start task and inspect verified output.",
         "Keep zero-spend initialization separate from paid work and expose missing setup requirements rather than requiring users to self-publish arbitrary verifier qualification evidence.",
@@ -808,7 +808,7 @@
         "P02"
       ],
       "priority": "P1",
-      "status": "planned",
+      "status": "blocked_external",
       "steps": [
         "Add authorized memory.list/source/freshness/lineage projections for the desktop and context builder; do not invent claims when Serenity is unavailable.",
         "Expose context selection as a governed durable job with exact brain revisions, scope, classification, freshness and disclosure/spend bounds.",
@@ -824,7 +824,8 @@
       "deliverable": "Complete local memory read/projection and governed job contracts.",
       "serialized_global": false,
       "verification_command": "go test ./internal/memory",
-      "integration_wave": 3
+      "integration_wave": 3,
+      "status_note": "Local governed memory jobs and projections exist, but hosted memory recall is not joined into model context; execution currently fails closed when an authorized memory binding needs recall. See docs/launch-readiness.md."
     },
     {
       "id": "P27",
@@ -838,7 +839,7 @@
         "P02"
       ],
       "priority": "P1",
-      "status": "planned",
+      "status": "blocked_external",
       "steps": [
         "Begin with PROTOCOL.md and current capability report: all actual operations currently refuse and no physical request is made.",
         "Qualify a public pinned service/read facade against the frozen local memory schemas. Implement only the operations whose actual upstream guarantees meet freshness, scope, bounded cost and disclosure requirements.",
@@ -854,7 +855,8 @@
       "deliverable": "A functioning qualified Serenity adapter or a precise upstream blocker per required capability.",
       "serialized_global": false,
       "verification_command": "go test ./internal/adapters/serenity",
-      "integration_wave": 4
+      "integration_wave": 4,
+      "status_note": "The adapter maps Serenity v2 and refuses unsupported guarantees. No live hosted-service qualification proving bounded real recall/write and provenance is recorded. See docs/launch-readiness.md."
     },
     {
       "id": "P28",
@@ -870,7 +872,7 @@
         "P26"
       ],
       "priority": "P1",
-      "status": "planned",
+      "status": "blocked_external",
       "steps": [
         "Connect selection/recall/curation/promotion/retraction jobs to the real adapter modes and record normalized result artifacts.",
         "Reconcile unknown memory writes by stable command identity and propagate corrections to derived/promoted claims without overwriting provenance.",
@@ -885,7 +887,8 @@
       "deliverable": "End-to-end usable memory, gated on explicit upstream capability evidence.",
       "serialized_global": false,
       "verification_command": "go test ./internal/memory",
-      "integration_wave": 7
+      "integration_wave": 7,
+      "status_note": "The memory lifecycle code exists, but the first-chat memory path is not complete until P26/P27 live recall is qualified. See docs/launch-readiness.md."
     },
     {
       "id": "P29",
@@ -898,7 +901,7 @@
         "P02"
       ],
       "priority": "P1",
-      "status": "planned",
+      "status": "implemented",
       "steps": [
         "Implement the narrow backup inventory/restore capability frozen in P00; expose migrations/schema checks through a typed capability, not arbitrary domain SQL access.",
         "Validate an imported SQLite image and schema versions in staging before replacing the live file; checkpoint/close writers and prevent WAL mixing.",
@@ -927,7 +930,7 @@
         "P02"
       ],
       "priority": "P1",
-      "status": "planned",
+      "status": "implemented",
       "steps": [
         "Implement typed encrypted blob inventory/import and backup key-transfer mechanics fixed by P00 without exposing raw keys in manifests/API results.",
         "Backups must be recoverable in a clean destination using explicit secure key provisioning; current opaque references to a different secret store are insufficient.",
@@ -961,7 +964,7 @@
         "P02"
       ],
       "priority": "P1",
-      "status": "planned",
+      "status": "implemented",
       "steps": [
         "Replace empty manifest lists with actual schema versions, encrypted artifact bytes/pins, brain exports/revisions, adapter profiles and retained obligations, all from narrow owner ports.",
         "Capture a consistent paused/quiesced snapshot; required unavailable brain/blob capability must block a complete backup rather than yield success.",
@@ -992,7 +995,7 @@
         "P02"
       ],
       "priority": "P1",
-      "status": "planned",
+      "status": "implemented",
       "steps": [
         "Implement an exclusive restore handoff that quiesces work, drains/records in-flight effects, closes admission and hands the sealed work item to entrypoint storage lifecycle code.",
         "Do not run database replacement as an ordinary JobRunner that retains a live application/database handle.",
@@ -1022,7 +1025,7 @@
         "P02"
       ],
       "priority": "P1",
-      "status": "planned",
+      "status": "implemented",
       "steps": [
         "Implement startup detection of pending restore markers before normal assembly and listener admission.",
         "Close old application/server/database in order, invoke narrow validated restore capability, reassemble owners and merge overlays, then expose paused status.",
@@ -1050,7 +1053,7 @@
         "P02"
       ],
       "priority": "P0",
-      "status": "planned",
+      "status": "implemented",
       "steps": [
         "Add a stable resumable event-tail cursor even on a drained page; bind it to principal/scope/filter/retention semantics.",
         "Project turn/proposal/task/run/effect/verification linkage from committed evidence, including waiting and unknown dispositions, never from worker claims.",
@@ -1080,7 +1083,7 @@
         "P02"
       ],
       "priority": "P1",
-      "status": "planned",
+      "status": "implemented",
       "steps": [
         "Exercise exact reviews created by real hosted proposals, retaining proposer, immutable action digest, account/destination and content artifacts.",
         "Provide readable reason/title plus pending/resolved review links for waiting turns; current eligibility and human-required policy remain authoritative.",
@@ -1111,7 +1114,7 @@
         "P02"
       ],
       "priority": "P1",
-      "status": "planned",
+      "status": "implemented",
       "steps": [
         "Connect verified result/incident events to autonomy evaluation and immediate demotion with durable deduplication/cursors.",
         "Require pinned evidence identity, verifier versions, freshness and unchanged dependency closure; model reports and stale tests are not qualification.",
@@ -1139,7 +1142,7 @@
         "P02"
       ],
       "priority": "P0",
-      "status": "planned",
+      "status": "implemented",
       "steps": [
         "Register every revision 3 operation and strict schemas, with stable CLI/MCP paths, version/caller metadata and collision checks.",
         "Distinguish operation availability from runtime readiness and qualified execution guarantees; a listed operation is not proof its provider/job runner is configured.",
@@ -1169,7 +1172,7 @@
         "P02"
       ],
       "priority": "P1",
-      "status": "planned",
+      "status": "implemented",
       "steps": [
         "Support revision 3 version negotiation and new stable event cursors without duplicating domain logic.",
         "Retain complete command lookup coordinates: scope, operation, version and original submission key; update regression fixtures for worker/task lifecycles.",
@@ -1199,7 +1202,7 @@
         "P02"
       ],
       "priority": "P1",
-      "status": "planned",
+      "status": "implemented",
       "steps": [
         "Generate commands for new catalog operations; preserve --input, --json, submission key and exit semantics.",
         "Provide discoverable start/inspect/wait paths through public operations without a TTY or hidden confirmation.",
@@ -1229,7 +1232,7 @@
         "P02"
       ],
       "priority": "P1",
-      "status": "planned",
+      "status": "implemented",
       "steps": [
         "Regenerate MCP tool definitions from revision 3 catalog, including new start/history and recovery operations.",
         "Keep tools backed by the authenticated common client; no model-supplied profile/actor switch or private internal-operation shortcut.",
@@ -1258,7 +1261,7 @@
         "P02"
       ],
       "priority": "P1",
-      "status": "planned",
+      "status": "implemented",
       "steps": [
         "Serve revision 3 operations through the unchanged authenticated envelope and enforce exact version/error HTTP mapping.",
         "Integrate quiesce/restore admission states: queries remain intentionally scoped, prohibited mutations refuse, bootstrap cannot reopen after initialization.",
@@ -1290,7 +1293,7 @@
         "P02"
       ],
       "priority": "P0",
-      "status": "planned",
+      "status": "implemented",
       "steps": [
         "Use identity.current and conversation.message.list instead of optional principal config and window-only sent history.",
         "Persist selected conversation, bounded authorized cache and unsent drafts in OS-protected local storage; credential remains only in secure storage. Revalidate cache on revocation/account switch.",
@@ -1323,7 +1326,7 @@
         "P02"
       ],
       "priority": "P1",
-      "status": "planned",
+      "status": "implemented",
       "steps": [
         "Implement New organization/New worker/group flows through draft/plan/review/apply and actual conversation membership operations.",
         "Drive bounded task creation/start/delegation and ongoing responsibility creation/pause through public APIs; chief chat uses the same APIs through hosted execution.",
@@ -1356,7 +1359,7 @@
         "P02"
       ],
       "priority": "P1",
-      "status": "planned",
+      "status": "implemented",
       "steps": [
         "Replace prerequisite-only tabs with authorized memory claims/source/freshness/retract views when capability exists, keeping unsupported modes clearly visible.",
         "Render artifact output names, task/run provenance, immutable digest and authorized sharing metadata; show verifier observations and failed checks.",
@@ -1389,7 +1392,7 @@
         "P02"
       ],
       "priority": "P1",
-      "status": "planned",
+      "status": "implemented_open_qualification",
       "steps": [
         "Build on the existing manifest/signature/install library: add a documented executable packaging/install driver within the allowed root and reproducible controller/desktop release assembly.",
         "Include the qualified secure helper, adapter profiles, Serenity runtime/read facade and exact licenses/SBOM; missing mandatory memory guarantees block the full release.",
@@ -1405,7 +1408,8 @@
       "deliverable": "Installable reproducible artifacts and executable distribution qualification inputs.",
       "serialized_global": false,
       "verification_command": "go test ./packaging",
-      "integration_wave": 16
+      "integration_wave": 16,
+      "status_note": "Packaging and Mac release assembly tooling exist. No signed/notarized Intel and Apple Silicon release installed and qualified on clean native hosts is recorded."
     },
     {
       "id": "P46",
@@ -1433,7 +1437,7 @@
         "P36"
       ],
       "priority": "P0",
-      "status": "planned",
+      "status": "implemented",
       "steps": [
         "Add a full real-owner fixture with the actual controller, Responses adapter pointed at a controlled provider, real artifact store and trusted verifier; fake only external services/time where specified.",
         "Prove message-to-chief-to-task-to-tool-to-output-to-verification-to-reply with no test SQL writes or internal operations standing in for missing production code.",
@@ -1469,7 +1473,7 @@
         "P02"
       ],
       "priority": "P1",
-      "status": "planned",
+      "status": "implemented_open_qualification",
       "steps": [
         "Replace Responses' unconditional notRun with a pinned controlled-protocol harness and separately authorized real-provider qualification; record actual endpoint/model/price/limits evidence.",
         "Launch the built Flutter application with an integration_test/native driver for all Z21 and daily-work journeys; widget tests alone do not qualify the built app.",
@@ -1485,7 +1489,8 @@
       "deliverable": "Executable external/native qualification and a claim-specific release evidence report.",
       "serialized_global": false,
       "verification_command": "go test ./tests/qualification",
-      "integration_wave": 17
+      "integration_wave": 17,
+      "status_note": "Executable qualification harnesses exist. Real hosted Serenity, live provider, signing, and clean-host evidence remain absent or gated."
     },
     {
       "id": "P48",
@@ -1500,7 +1505,7 @@
         "P02"
       ],
       "priority": "P1",
-      "status": "planned",
+      "status": "implemented",
       "steps": [
         "Extend existing CI/gate tooling to the updated contract/dependency pins and actual hosted/integration/desktop suites.",
         "Enumerate every required case, not just tests that happen to emit a record. Treat missing tests, unconditional skips and stale evidence as blocked release claims.",
@@ -1533,7 +1538,7 @@
         "P02"
       ],
       "priority": "P1",
-      "status": "planned",
+      "status": "implemented",
       "steps": [
         "Integration owner updates authored README/status/setup/recovery docs with actual supported behavior and executable examples; regenerate spec index rather than editing generated README directly.",
         "Remove stale claims that all code is absent, Responses has not landed, Fyne is the desktop, or fixed first-task/command-lookup defects still apply.",
@@ -1549,7 +1554,8 @@
       "deliverable": "Accurate product documentation and closed implementation/evidence ledger.",
       "serialized_global": true,
       "verification_command": "python3 tools/specgen/render.py --check (plus assignment-specific checks above)",
-      "integration_wave": 19
+      "integration_wave": 19,
+      "status_note": "Documentation delivery is updated in this change; generated implementation assignments remain specifications and do not certify launch readiness."
     },
     {
       "id": "P50",
@@ -1571,7 +1577,7 @@
         "P33"
       ],
       "priority": "P1",
-      "status": "planned",
+      "status": "implemented",
       "steps": [
         "Extend the frozen contract via tools/specgen/model.py (never hand-edit operations.json): add _effects.restore.merge, _identity.restore.merge and _memory.restore.merge (internal mutations, owners effects/identity/memory, callers: [\"controller\"]) that each fold their slice of a decoded RecoveryOverlay's obligations into their own tables monotonically; add _identity.revocations (internal query, owner identity, callers: [\"installation\"]) reporting current credential/grant revocation state; and add _installation.restore.overlay (internal query, owner installation, callers: [\"controller\"]) returning the published recovery-overlay artifact reference already recorded against a restore job. Regenerate assignments/fixtures and run python3 tools/specgen/render.py --check before any downstream step starts.",
         "internal/identity: implement _identity.revocations, and implement _identity.restore.merge to re-apply (never lift) named credential/grant revocations monotonically -- never resurrecting a revocation newer than the overlay's own capture point, and idempotent under a repeated call with the same restore job's obligations.",
@@ -1593,5 +1599,10 @@
       "verification_command": "go test ./internal/installation ./internal/effects ./internal/identity ./internal/memory ./internal/controller ./cmd/zatiti && python3 tools/specgen/render.py --check",
       "integration_wave": 20
     }
-  ]
+  ],
+  "status_legend": {
+    "implemented": "The scoped code and local acceptance work are present in main; this does not claim external service or native release qualification unless stated.",
+    "blocked_external": "Implementation cannot satisfy its acceptance criteria until an external Serenity capability or real service evidence is available.",
+    "implemented_open_qualification": "Release tooling/harness is implemented; required live service, signing, native host, or clean-install evidence has not been produced."
+  }
 }

@@ -11,7 +11,7 @@ import (
 // pinnedRoute is the only route the pinned upstream serves MEMORY_VERBS on.
 const pinnedRoute = "/mcp"
 
-// serenityProfile is the decoded, validated zatiti.serenity/v1 adapter
+// serenityProfile is the decoded, validated zatiti.serenity/v2 adapter
 // profile, with brain mappings indexed for lookup at Invoke time.
 type serenityProfile struct {
 	Brains             map[contract.ID]wireBrainMapping
@@ -20,7 +20,7 @@ type serenityProfile struct {
 	Digest             contract.Digest
 }
 
-// loadProfile validates raw against the zatiti.serenity/v1 schema, strict
+// loadProfile validates raw against the zatiti.serenity/v2 schema, strict
 // decodes it, and checks three things the schema cannot express:
 //
 //   - capability_evidence.profile_digest binds this exact profile: the digest
@@ -38,7 +38,7 @@ func loadProfile(raw json.RawMessage) (*serenityProfile, error) {
 		return nil, internalError("serenity profile schema composition failed: %v", err)
 	}
 	if err := contract.ValidateSchema(schema, raw); err != nil {
-		return nil, invalidInput("serenity profile does not match the zatiti.serenity/v1 schema: %v", err)
+		return nil, invalidInput("serenity profile does not match the zatiti.serenity/v2 schema: %v", err)
 	}
 	var w wireSerenityProfile
 	if err := contract.DecodeStrict(raw, &w); err != nil {
@@ -164,17 +164,35 @@ func checkClaims(w *wireSerenityProfile) error {
 	return nil
 }
 
-// indexBrains validates and indexes the brain mappings. The pinned upstream
-// serves exactly one brain per process and takes no brain selector on any
-// request, so a brain is identified by its endpoint alone: two brains
-// sharing an endpoint would alias one canonical store under two
-// authorizations, and is refused.
+// indexBrains validates both local and hosted identity spaces. Local pins
+// identify one brain per endpoint. A hosted OAuth grant selects one project,
+// so neither a project nor its connection may alias another local brain.
 func indexBrains(mappings []wireBrainMapping) (map[contract.ID]wireBrainMapping, error) {
 	brains := make(map[contract.ID]wireBrainMapping, len(mappings))
 	endpoints := make(map[string]contract.ID, len(mappings))
+	projects := make(map[string]contract.ID, len(mappings))
+	connections := make(map[contract.ID]contract.ID, len(mappings))
 	for _, m := range mappings {
 		if _, dup := brains[m.BrainID]; dup {
-			return nil, invalidInput("serenity profile maps brain %s more than once; each brain has exactly one endpoint and one writer owner", m.BrainID)
+			return nil, invalidInput("serenity profile maps brain %s more than once", m.BrainID)
+		}
+		if m.HostedProjectID != "" {
+			if m.Endpoint != "https://serenity.sire.run/mcp" || m.ConnectionID == "" || m.RootRef != "" || m.WriterOwner != "" {
+				return nil, invalidInput("serenity hosted brain mapping has mismatched identity fields")
+			}
+			if other, dup := projects[m.HostedProjectID]; dup {
+				return nil, invalidInput("serenity hosted project is mapped by brains %s and %s", other, m.BrainID)
+			}
+			if other, dup := connections[m.ConnectionID]; dup {
+				return nil, invalidInput("serenity hosted connection is mapped by brains %s and %s", other, m.BrainID)
+			}
+			brains[m.BrainID] = m
+			projects[m.HostedProjectID] = m.BrainID
+			connections[m.ConnectionID] = m.BrainID
+			continue
+		}
+		if m.ConnectionID != "" || m.RootRef == "" || m.WriterOwner == "" {
+			return nil, invalidInput("serenity local brain mapping has mismatched identity fields")
 		}
 		if err := checkEndpoint(m.Endpoint); err != nil {
 			return nil, invalidInput("serenity profile brain %s endpoint is invalid: %v", m.BrainID, err)

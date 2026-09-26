@@ -124,6 +124,7 @@ class InstallationStatus {
     required this.initialized,
     required this.requirements,
     required this.version,
+    this.runtimeReady,
   });
 
   factory InstallationStatus.fromJson(Object? json) {
@@ -138,12 +139,8 @@ class InstallationStatus {
         for (final r in o.list('requirements')) Requirement.fromJson(r),
       ],
       version: o.integer('version'),
+      runtimeReady: o.optionalBoolean('runtime_ready'),
     );
-    // runtime_ready is a real, additive-optional revision-3 field this
-    // client does not yet surface; read and discard, matching Organization/
-    // Project's own limits/extensions pattern for fields not yet modeled,
-    // per the frozen contract's additive-field rule.
-    o.optional('runtime_ready');
     o.finish();
     return s;
   }
@@ -155,6 +152,7 @@ class InstallationStatus {
   final bool initialized;
   final List<Requirement> requirements;
   final int version;
+  final bool? runtimeReady;
 }
 
 /// An identity the controller authenticates. The client never creates one in
@@ -290,11 +288,16 @@ class ExecutionProfile {
     required this.providerDestination,
     required this.costBound,
     required this.contextCapture,
+    this.provider,
+    this.adapterProfile,
+    this.connectionVersion,
+    this.costEnforcement,
+    this.raw,
   });
 
   factory ExecutionProfile.fromJson(Object? json) {
     final o = StrictObject(json, 'execution profile');
-    final p = ExecutionProfile(
+    final base = ExecutionProfile(
       id: o.string('id'),
       version: o.integer('version'),
       executor: o.string('executor'),
@@ -306,8 +309,56 @@ class ExecutionProfile {
     );
     o.list('capabilities');
     o.string('classification');
+    final adapter = o.optionalObject('adapter_profile');
+    final connectionVersion = o.optionalInteger('connection_version');
     o.finish();
-    return p;
+    final provider =
+        adapter?['provider'] as String? ??
+        (adapter?['schema'] == 'zatiti.responses/v1' ? 'openai' : null);
+    if (adapter != null &&
+        (adapter['schema'] is! String ||
+            adapter['model'] is! String ||
+            (adapter['schema'] != 'zatiti.responses/v1' &&
+                adapter['schema'] != 'zatiti.responses/v2') ||
+            (provider != 'openai' &&
+                provider != 'openrouter' &&
+                provider != 'experiential'))) {
+      throw StrictJsonException(
+        'execution profile adapter_profile is malformed',
+      );
+    }
+    final enforcement = adapter?['enforcement'];
+    if (enforcement != null && enforcement is! Map<String, Object?>) {
+      throw StrictJsonException('execution profile enforcement is malformed');
+    }
+    final costEnforcement = enforcement is Map<String, Object?>
+        ? enforcement['cost']
+        : null;
+    if (costEnforcement != null &&
+        !const {
+          'enforced',
+          'advisory',
+          'unsupported',
+        }.contains(costEnforcement)) {
+      throw StrictJsonException(
+        'execution profile cost enforcement is invalid',
+      );
+    }
+    return ExecutionProfile(
+      id: base.id,
+      version: base.version,
+      executor: base.executor,
+      model: base.model,
+      connectionId: base.connectionId,
+      providerDestination: base.providerDestination,
+      costBound: base.costBound,
+      contextCapture: base.contextCapture,
+      provider: provider,
+      adapterProfile: adapter,
+      connectionVersion: connectionVersion,
+      costEnforcement: costEnforcement as String?,
+      raw: Map<String, Object?>.from(json as Map),
+    );
   }
 
   final String id;
@@ -325,6 +376,49 @@ class ExecutionProfile {
   /// output is a suggestion, never confirmed state; this client renders the
   /// exact word the controller sent, never a softened paraphrase.
   final String contextCapture;
+  final String? provider;
+  final Map<String, Object?>? adapterProfile;
+  final int? connectionVersion;
+  final String? costEnforcement;
+  final Map<String, Object?>? raw;
+}
+
+/// One fixed provider preset returned by `model.provider.list`. Endpoints and
+/// protocol modes come from the controller; the client never infers them.
+class ProviderDescriptor {
+  const ProviderDescriptor({
+    required this.id,
+    required this.displayName,
+    required this.defaultEndpoint,
+    required this.sessionMode,
+    required this.credentialSetup,
+  });
+
+  factory ProviderDescriptor.fromJson(Object? json) {
+    final o = StrictObject(json, 'model provider');
+    final p = ProviderDescriptor(
+      id: o.string('id'),
+      displayName: o.string('display_name'),
+      defaultEndpoint: o.string('default_endpoint'),
+      sessionMode: o.string('session_mode'),
+      credentialSetup: o.string('credential_setup'),
+    );
+    o.finish();
+    if (!const {'openai', 'openrouter', 'experiential'}.contains(p.id) ||
+        !const {'provider_conversation', 'stateless'}.contains(p.sessionMode) ||
+        p.credentialSetup != 'api_key') {
+      throw StrictJsonException(
+        'model provider contains an unsupported preset',
+      );
+    }
+    return p;
+  }
+
+  final String id;
+  final String displayName;
+  final String defaultEndpoint;
+  final String sessionMode;
+  final String credentialSetup;
 }
 
 class Worker {
@@ -337,9 +431,11 @@ class Worker {
     required this.purpose,
     this.profile,
     this.limits,
+    this.raw,
   });
 
   factory Worker.fromJson(Object? json) {
+    final raw = Map<String, Object?>.from(json as Map);
     final o = StrictObject(json, 'worker');
     final w = Worker(
       id: o.string('id'),
@@ -358,9 +454,19 @@ class Worker {
     o.string('instructions');
     o.list('skill_versions');
     o.list('bindings');
-    o.optional('extensions');
+    o.optionalObject('extensions');
     o.finish();
-    return w;
+    return Worker(
+      id: w.id,
+      version: w.version,
+      organizationId: w.organizationId,
+      key: w.key,
+      name: w.name,
+      purpose: w.purpose,
+      profile: w.profile,
+      limits: w.limits,
+      raw: raw,
+    );
   }
 
   final String id;
@@ -376,6 +482,21 @@ class Worker {
 
   /// The worker's spend/step ceiling. Null means no budget was configured.
   final Limits? limits;
+  final Map<String, Object?>? raw;
+
+  /// Preserves every controller-owned worker field while changing only the
+  /// selected immutable execution profile.
+  Map<String, Object?> definitionWithProfile(ExecutionProfile profile) {
+    final source = raw;
+    final selected = profile.raw;
+    if (source == null || selected == null) {
+      throw StrictJsonException('worker/profile raw data is unavailable');
+    }
+    return Map<String, Object?>.from(source)
+      ..remove('id')
+      ..remove('version')
+      ..['profile'] = selected;
+  }
 }
 
 enum ConversationKind { direct, group }
@@ -1476,6 +1597,7 @@ class Job {
     required this.state,
     required this.owner,
     required this.operation,
+    this.result,
   });
 
   factory Job.fromJson(Object? json) {
@@ -1496,11 +1618,11 @@ class Job {
       },
       owner: o.string('owner'),
       operation: o.string('operation'),
+      result: o.optional('result'),
     );
     o.list('requirements');
     o.optional('result_artifact');
     o.optionalString('operation_id');
-    o.optional('result');
     o.finish();
     return j;
   }
@@ -1511,6 +1633,7 @@ class Job {
   final JobState state;
   final String owner;
   final String operation;
+  final Object? result;
 
   String get label => switch (state) {
     JobState.pending => 'Queued',

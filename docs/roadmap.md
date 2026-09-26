@@ -1,5 +1,12 @@
 # Roadmap
 
+> **Current status (2026-09-25):** the P00–P50 implementation dispatch has
+> landed, but Zatiti is still pre-release. See
+> [launch readiness](launch-readiness.md) for open Serenity, provider, and
+> Intel/Apple Silicon release gates. Entries below this notice are historical
+> execution records; their “landed” status does not mean Mac first-chat is
+> qualified.
+
 RFC implementation status (docs/rfc.md). Integration lead: the `zatiti`
 session; packages land only through its gate (build, vet, lint, stub scan,
 tests, race under lease, mutation red→green, rebase, ff-merge).

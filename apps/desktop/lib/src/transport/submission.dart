@@ -41,6 +41,18 @@ class Submission {
          encodeRequest(input: input, submissionKey: key),
        );
 
+  /// Reconstitutes an exact request retained in OS-secure storage after a
+  /// process restart. The bytes and submission key are frozen: this object
+  /// may only reconcile through command.get and cannot be resent.
+  Submission.restore({
+    required this.operation,
+    required this.operationVersion,
+    required this.key,
+    required List<int> body,
+  }) : body = List<int>.unmodifiable(body),
+       state = SubmissionState.acknowledgmentUnknown,
+       attempts = 1;
+
   final String operation;
   final int operationVersion;
   final String key;

@@ -128,7 +128,7 @@ func TestInvokeSendsExactlyOneExactRequest(t *testing.T) {
 	if pc.RequestedDestination != testEndpoint || pc.ResolvedDestination != testEndpoint {
 		t.Fatalf("destinations = %q / %q", pc.RequestedDestination, pc.ResolvedDestination)
 	}
-	if pc.ProfileDigest != h.adapter.profile.Digest || pc.CapabilityEvidence != testCapabilityArtifact() {
+	if pc.ProfileDigest != h.adapter.profile.Digest || pc.CapabilityEvidence == nil || *pc.CapabilityEvidence != testCapabilityArtifact() {
 		t.Fatalf("profile binding = %s / %+v", pc.ProfileDigest, pc.CapabilityEvidence)
 	}
 	if pc.RequestSent != "yes" || pc.Confirmation != "authoritative_success" || pc.HTTPStatus != 200 || pc.ErrorCode != "" {

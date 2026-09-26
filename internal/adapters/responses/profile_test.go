@@ -3,6 +3,7 @@ package responses
 import (
 	"encoding/json"
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
 
@@ -148,8 +149,10 @@ func TestContractDocument(t *testing.T) {
 		t.Fatalf("schema = %q", doc.Schema)
 	}
 	// Production qualifies exactly the revisions PROTOCOL.md pins.
-	if len(doc.QualifiedProtocolRevisions) != 1 || doc.QualifiedProtocolRevisions[0] != openaiProtocolRevision {
-		t.Fatalf("qualified_protocol_revisions = %v, want [%s]", doc.QualifiedProtocolRevisions, openaiProtocolRevision)
+	wantProtocols := []string{openaiProtocolRevision, openRouterProtocolRevision, experientialProtocolRevision}
+	slices.Sort(wantProtocols)
+	if !slices.Equal(doc.QualifiedProtocolRevisions, wantProtocols) {
+		t.Fatalf("qualified_protocol_revisions = %v, want %v", doc.QualifiedProtocolRevisions, wantProtocols)
 	}
 	// The embedded profile schema is the one New enforces.
 	if err := contract.ValidateSchema(doc.ProfileSchema, bindProfile(t, defaultProfile())); err != nil {

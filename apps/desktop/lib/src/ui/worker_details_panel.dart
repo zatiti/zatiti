@@ -4,6 +4,7 @@
 
 import 'package:flutter/material.dart';
 
+import '../app/credential_store.dart';
 import '../state/snapshot.dart';
 import '../state/view_state.dart';
 import '../state/workspace_controller.dart';
@@ -11,6 +12,7 @@ import 'action_review_dialog.dart';
 import 'creation_dialogs.dart';
 import 'memory_dialogs.dart';
 import 'task_dialogs.dart';
+import 'provider_model_editor.dart';
 import 'theme.dart';
 import 'widgets.dart';
 
@@ -19,10 +21,12 @@ class WorkerDetailsPanel extends StatelessWidget {
     super.key,
     required this.controller,
     required this.worker,
+    required this.credentials,
   });
 
   final WorkspaceController controller;
   final WorkerEntry worker;
+  final CredentialStore? credentials;
 
   @override
   Widget build(BuildContext context) {
@@ -56,6 +60,17 @@ class WorkerDetailsPanel extends StatelessWidget {
                           style: text.titleMedium,
                         ),
                       ),
+                    ),
+                    IconButton(
+                      key: ValueKey('worker-model-${worker.id.value}'),
+                      tooltip: 'Choose model profile',
+                      onPressed: () => showProviderModelEditor(
+                        context,
+                        controller: controller,
+                        workerId: worker.id.value,
+                        credentials: credentials,
+                      ),
+                      icon: const Icon(Icons.tune),
                     ),
                     IconButton(
                       key: const ValueKey('details-close'),

@@ -2,6 +2,8 @@ package platform
 
 import (
 	"context"
+	"errors"
+	"io/fs"
 	"path/filepath"
 	"sync"
 )
@@ -16,10 +18,11 @@ type headlessSecrets struct {
 	blobsDir string // <state>/secrets/blobs
 	encKey   []byte
 
-	mu     sync.Mutex
-	loaded bool
-	zeroed bool              // keys wiped by Platform.Close: the store fails closed
-	index  map[string]string // caller-facing key -> opaque ref
+	mu      sync.Mutex
+	loaded  bool
+	loadErr error
+	zeroed  bool              // keys wiped by Platform.Close: the store fails closed
+	index   map[string]string // caller-facing key -> opaque ref
 }
 
 const (
@@ -75,6 +78,41 @@ func (h *headlessSecrets) refForKey(key string) string {
 	defer h.mu.Unlock()
 	_ = h.load()
 	return h.index[key]
+}
+
+func (h *headlessSecrets) Lookup(ctx context.Context, key string) (string, error) {
+	if err := validateSecretKey(key); err != nil {
+		return "", err
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if err := h.closed(); err != nil {
+		return "", err
+	}
+	if err := h.load(); err != nil {
+		return "", err
+	}
+	ref := h.index[key]
+	if ref == "" {
+		return "", errf(contractCodeNotFound, "credential name is unknown")
+	}
+	id, err := parseSecretRef(ref)
+	if err != nil {
+		return "", errf(contractCodeControllerUnavailable, "credential store index contains an invalid reference")
+	}
+	data, err := readFilePrivate(filepath.Join(h.blobsDir, id))
+	if errors.Is(err, fs.ErrNotExist) {
+		return "", errf(contractCodeNotFound, "credential reference is unknown")
+	}
+	if err != nil {
+		return "", errWrap(contractCodeControllerUnavailable, "stored credential cannot be read", err)
+	}
+	value, err := openSecret(h.encKey, []byte(id), data)
+	if err != nil {
+		return "", errf(contractCodeControllerUnavailable, "stored credential failed integrity verification")
+	}
+	zero(value)
+	return ref, nil
 }
 
 func (h *headlessSecrets) Put(ctx context.Context, key string, secret []byte) (string, error) {
@@ -167,22 +205,27 @@ func (h *headlessSecrets) Delete(ctx context.Context, ref string) error {
 	return nil
 }
 
-// load reads the key->reference index. A missing or corrupt index is not
-// fatal: references stay resolvable on their own, only the convenience
-// lookup is lost.
+// load reads the key->reference index. Direct Get(ref) stays usable after a
+// corrupt index, but named Lookup and mutations fail closed rather than
+// treating corruption or an unreadable file as an empty store.
 func (h *headlessSecrets) load() error {
 	if h.loaded {
-		return nil
+		return h.loadErr
 	}
 	h.loaded = true
 	h.index = make(map[string]string)
 	data, err := readFilePrivate(filepath.Join(h.dir, fileSecretIndex))
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
 	if err != nil {
-		return nil // absent index: empty map
+		h.loadErr = errWrap(contractCodeControllerUnavailable, "credential store index cannot be read", err)
+		return h.loadErr
 	}
 	var parsed secretIndexFile
 	if err := strictUnmarshal(data, &parsed); err != nil || parsed.Version != 1 {
-		return nil // corrupt index degrades to empty; refs stay valid
+		h.loadErr = errf(contractCodeControllerUnavailable, "credential store index is corrupt")
+		return h.loadErr
 	}
 	if parsed.Keys != nil {
 		h.index = parsed.Keys

@@ -421,3 +421,55 @@ for its digest has no basis for it.
 Every request and response shape above is exercised in `openai_test.go`
 with fixtures shaped by the OpenAPI document. A fixture is not a claim that
 the live endpoint behaves that way.
+
+## Stateless gateway profiles (revision 12)
+
+The local protocol revision strings are `openrouter-responses/stateless-v1` and
+`experiential-responses/stateless-v1`. They identify the request and response
+shapes implemented in `gateways.go`; they are not claims of live endpoint
+qualification. The profile's capability evidence remains the qualification
+record for a particular model, route and price.
+
+Both gateways receive one `POST /v1/responses` request with the full persisted
+context translated into Responses `input` items, its exact selected `model`,
+tools translated to function tools, `max_output_tokens`, `stream:false`,
+`background:false` and `store:false`. The OpenAI conversation field and
+OpenAI-only cache and service-tier fields are removed. Neither gateway uses
+`/conversations`, `session_handle`, `previous_response_id`, nor a continuation
+lookup. Every invocation makes at most one HTTP request; `SupportsReconcile`
+is false. A timeout or malformed response after send remains unknown.
+
+OpenRouter pins `https://openrouter.ai/api/v1/responses`, sends the configured
+provider allowlist (`only`), `allow_fallbacks:false` and
+`require_parameters:true`. Configured privacy choices become the documented
+`provider.data_collection` and `provider.zdr` constraints. A configured price
+ceiling becomes `provider.max_price.prompt` and `.completion` in USD per
+million tokens. Enforced-cost profiles require those ceilings and configured
+per-token profile rates at least as high as the ceilings; returned decimal
+`usage.cost` is parsed without floating point and is retained as
+`provider_billed`. When provider cost is absent, observed tokens are priced at
+the pinned ceiling and recorded as a bounded estimate. `X-OpenRouter-Metadata:
+enabled` asks the gateway to include available route metadata; the complete
+redacted response is staged, preserving any provider endpoint identity it
+returns.
+
+Experiential pins `https://api.experientiallabs.ai/v1/responses`. Each request
+carries the documented `gateway.retry` limits of one attempt per route and one
+total attempt, `backoff.type:none`, `gateway.routing.allow_fallbacks:false`,
+and the configured route ID under `gateway.routing.route_id`. Privacy flags
+are passed through the documented OpenRouter-compatible `provider` object.
+Because the gateway cost is a platform charge and may be zero for BYOK while
+the upstream provider is still billed, this adapter only accepts advisory-cost
+Experiential profiles. Inline gateway cost is retained as `gateway_platform`
+and does not replace the unknown upstream charge. The adapter treats a
+reported ignored safety parameter or `x-gateway-replay-repair` disclosure as
+an undecodable outcome; it never retries to obtain a cleaner response.
+
+The primary references read 2026-09-24 are OpenRouter's [Responses create
+reference](https://openrouter.ai/docs/api/api-reference/responses/create-responses)
+and [provider routing guide](https://openrouter.ai/docs/guides/routing/provider-selection),
+and Experiential's [waterfall controls](https://platform.experientiallabs.ai/docs/waterfall),
+[OpenAI compatibility](https://platform.experientiallabs.ai/docs/openai-compatibility),
+and [data controls](https://platform.experientiallabs.ai/docs/data-controls).
+These hosted references can evolve. The implementation therefore makes no
+live qualification or release claim by itself.

@@ -126,19 +126,29 @@ const (
 
 // route names the owner callback an effect outcome is delivered to.
 type route struct {
-	// Owner is "", "execution", "execution_proposal", "memory" or
-	// "connections".
-	Owner     string `json:"owner,omitempty"`
-	ProbeKind string `json:"probe_kind,omitempty"`
+	// Owner is "", "execution", "execution_proposal", "memory",
+	// "connections" or "configuration_qualification".
+	Owner string `json:"owner,omitempty"`
 	// AttemptID is the execution attempt a model effect belongs to.
 	AttemptID contract.ID `json:"attempt_id,omitempty"`
 	// JobID is the network job waiting on the operation.
-	JobID contract.ID `json:"job_id,omitempty"`
+	JobID         contract.ID `json:"job_id,omitempty"`
+	JobVersion    int64       `json:"job_version,omitempty"`
+	ProfileDigest string      `json:"profile_digest,omitempty"`
+	Provider      string      `json:"provider,omitempty"`
 	// Connection is the connection a probe validated.
 	Connection wireRef `json:"connection,omitempty"`
+	// ProbeKind selects the connections-owned callback for a persisted
+	// connection job. It is journaled with the operation and attempt so a
+	// recovered callback cannot be re-derived as a different operation.
+	ProbeKind string `json:"probe_kind,omitempty"`
 	// ProposalID names the WorkerTurn proposal (owner execution_proposal)
 	// this effect's outcome completes.
 	ProposalID string `json:"proposal_id,omitempty"`
+	// TurnID/StepIndex route a chat turn without a task Attempt through the
+	// execution-owned turn observation boundary.
+	TurnID    contract.ID `json:"turn_id,omitempty"`
+	StepIndex int64       `json:"step_index,omitempty"`
 }
 
 // turnProposalRef is what the controller remembers about one prepared

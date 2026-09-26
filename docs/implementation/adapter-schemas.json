@@ -494,7 +494,6 @@
         "requested_destination",
         "resolved_destination",
         "profile_digest",
-        "capability_evidence",
         "started_at",
         "finished_at",
         "request_context",
@@ -540,6 +539,45 @@
           "type": "string",
           "minLength": 0,
           "maxLength": 1024
+        },
+        "requested_model": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "served_model": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "serving_provider": {
+          "type": "string",
+          "enum": [
+            "openai",
+            "openrouter",
+            "experiential"
+          ]
+        },
+        "provider_request_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "source_cost_decimal": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,18})?$",
+          "maxLength": 64
+        },
+        "source_cost_currency": {
+          "$ref": "#/$defs/Currency"
+        },
+        "source_cost_kind": {
+          "type": "string",
+          "enum": [
+            "provider_billed",
+            "gateway_platform",
+            "upstream_estimate"
+          ]
         }
       },
       "required": [
@@ -2229,7 +2267,7 @@
       "additionalProperties": false,
       "properties": {
         "schema": {
-          "const": "zatiti.serenity/v1",
+          "const": "zatiti.serenity/v2",
           "type": "string"
         },
         "version": {
@@ -2245,7 +2283,14 @@
         "brain_mappings": {
           "type": "array",
           "items": {
-            "$ref": "#/$defs/SerenityBrainMapping"
+            "oneOf": [
+              {
+                "$ref": "#/$defs/SerenityBrainMapping"
+              },
+              {
+                "$ref": "#/$defs/SerenityHostedBrainMapping"
+              }
+            ]
           },
           "minItems": 0,
           "maxItems": 4096
@@ -3757,6 +3802,880 @@
       ],
       "$schema": "https://json-schema.org/draft/2020-12/schema"
     },
+    "SerenityHostedBrainMapping": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "brain_id": {
+          "$ref": "#/$defs/ID"
+        },
+        "hosted_project_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9]{16,64}$"
+        },
+        "connection_id": {
+          "$ref": "#/$defs/ID"
+        },
+        "endpoint": {
+          "const": "https://serenity.sire.run/mcp",
+          "type": "string"
+        },
+        "classification": {
+          "$ref": "#/$defs/Classification"
+        }
+      },
+      "required": [
+        "brain_id",
+        "hosted_project_id",
+        "connection_id",
+        "endpoint",
+        "classification"
+      ],
+      "$schema": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "ResponsesProfileV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema": {
+          "const": "zatiti.responses/v2",
+          "type": "string"
+        },
+        "endpoint": {
+          "$ref": "#/$defs/HTTPSURL"
+        },
+        "model": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "connection_id": {
+          "$ref": "#/$defs/ID"
+        },
+        "max_input_tokens": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10000000
+        },
+        "max_output_tokens": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000000
+        },
+        "max_response_bytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 268435456
+        },
+        "timeout_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1800
+        },
+        "currency": {
+          "$ref": "#/$defs/Currency"
+        },
+        "input_rate": {
+          "$ref": "#/$defs/RationalRate"
+        },
+        "output_rate": {
+          "$ref": "#/$defs/RationalRate"
+        },
+        "enforcement": {
+          "$ref": "#/$defs/BoundEnforcement"
+        },
+        "capability_evidence": {
+          "$ref": "#/$defs/CapabilityEvidence"
+        },
+        "provider": {
+          "type": "string",
+          "enum": [
+            "openai",
+            "openrouter",
+            "experiential"
+          ]
+        },
+        "session_mode": {
+          "type": "string",
+          "enum": [
+            "provider_conversation",
+            "stateless"
+          ]
+        },
+        "routing": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "schema",
+        "endpoint",
+        "model",
+        "connection_id",
+        "max_input_tokens",
+        "max_output_tokens",
+        "max_response_bytes",
+        "timeout_seconds",
+        "currency",
+        "input_rate",
+        "output_rate",
+        "enforcement",
+        "capability_evidence",
+        "provider",
+        "session_mode",
+        "routing"
+      ],
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "provider": {
+                "const": "openai"
+              }
+            },
+            "required": [
+              "provider"
+            ]
+          },
+          "then": {
+            "properties": {
+              "session_mode": {
+                "const": "provider_conversation"
+              },
+              "routing": {
+                "maxProperties": 0
+              },
+              "endpoint": {
+                "const": "https://api.openai.com/v1/responses",
+                "type": "string"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "provider": {
+                "const": "openrouter"
+              }
+            },
+            "required": [
+              "provider"
+            ]
+          },
+          "then": {
+            "properties": {
+              "session_mode": {
+                "const": "stateless"
+              },
+              "routing": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "only": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128
+                    },
+                    "minItems": 1,
+                    "maxItems": 16
+                  },
+                  "allow_fallbacks": {
+                    "const": false,
+                    "type": "boolean"
+                  },
+                  "require_parameters": {
+                    "const": true,
+                    "type": "boolean"
+                  },
+                  "privacy": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "no_training",
+                        "data_policy",
+                        "zero_retention"
+                      ]
+                    },
+                    "minItems": 0,
+                    "maxItems": 8
+                  },
+                  "price_ceiling": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "currency": {
+                        "const": "USD",
+                        "type": "string"
+                      },
+                      "input_per_million": {
+                        "type": "string",
+                        "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,18})?$",
+                        "maxLength": 64
+                      },
+                      "output_per_million": {
+                        "type": "string",
+                        "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,18})?$",
+                        "maxLength": 64
+                      }
+                    },
+                    "required": [
+                      "currency",
+                      "input_per_million",
+                      "output_per_million"
+                    ]
+                  }
+                },
+                "required": [
+                  "only",
+                  "allow_fallbacks",
+                  "require_parameters"
+                ]
+              },
+              "endpoint": {
+                "const": "https://openrouter.ai/api/v1/responses",
+                "type": "string"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "provider": {
+                "const": "experiential"
+              }
+            },
+            "required": [
+              "provider"
+            ]
+          },
+          "then": {
+            "properties": {
+              "session_mode": {
+                "const": "stateless"
+              },
+              "routing": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "gateway": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "retry": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                          "max_attempts_per_route": {
+                            "const": 1,
+                            "type": "integer"
+                          },
+                          "max_total_attempts": {
+                            "const": 1,
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "max_attempts_per_route",
+                          "max_total_attempts"
+                        ]
+                      },
+                      "backoff": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                          "type": {
+                            "const": "none",
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "type"
+                        ]
+                      },
+                      "routing": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                          "allow_fallbacks": {
+                            "const": false,
+                            "type": "boolean"
+                          }
+                        },
+                        "required": [
+                          "allow_fallbacks"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "retry",
+                      "backoff",
+                      "routing"
+                    ]
+                  },
+                  "route_id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256
+                  },
+                  "privacy": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "no_training",
+                        "data_policy",
+                        "zero_retention"
+                      ]
+                    },
+                    "minItems": 0,
+                    "maxItems": 8
+                  }
+                },
+                "required": [
+                  "gateway"
+                ]
+              },
+              "endpoint": {
+                "const": "https://api.experientiallabs.ai/v1/responses",
+                "type": "string"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "ResponsesPrepareSessionParametersV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema": {
+          "const": "zatiti.responses.action/v2",
+          "type": "string"
+        },
+        "kind": {
+          "const": "prepare_session",
+          "type": "string"
+        },
+        "session_mode": {
+          "type": "string",
+          "enum": [
+            "provider_conversation",
+            "stateless"
+          ],
+          "const": "provider_conversation"
+        },
+        "session_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        }
+      },
+      "required": [
+        "schema",
+        "kind",
+        "session_mode"
+      ]
+    },
+    "ResponsesModelStepParametersV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema": {
+          "const": "zatiti.responses.action/v2",
+          "type": "string"
+        },
+        "kind": {
+          "const": "model_step",
+          "type": "string"
+        },
+        "session_mode": {
+          "type": "string",
+          "enum": [
+            "provider_conversation",
+            "stateless"
+          ]
+        },
+        "session_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "context_artifact": {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        "max_output_tokens": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000000
+        },
+        "tool_contract_versions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/VersionRef"
+          },
+          "minItems": 0,
+          "maxItems": 256
+        },
+        "session_handle": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "continuation_reference": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        }
+      },
+      "required": [
+        "schema",
+        "kind",
+        "session_mode",
+        "context_artifact",
+        "max_output_tokens",
+        "tool_contract_versions"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "session_mode": {
+                "const": "provider_conversation"
+              }
+            },
+            "required": [
+              "session_mode"
+            ]
+          },
+          "then": {
+            "required": [
+              "session_handle"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "session_mode": {
+                "const": "stateless"
+              }
+            },
+            "required": [
+              "session_mode"
+            ]
+          },
+          "then": {
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "session_handle"
+                  ]
+                },
+                {
+                  "required": [
+                    "continuation_reference"
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "ResponsesParametersV2": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/ResponsesPrepareSessionParametersV2"
+        },
+        {
+          "$ref": "#/$defs/ResponsesModelStepParametersV2"
+        },
+        {
+          "$ref": "#/$defs/ResponsesQualificationProbeParametersV2"
+        }
+      ]
+    },
+    "ResponsesEvidenceV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema": {
+          "const": "zatiti.responses.evidence/v2",
+          "type": "string"
+        },
+        "physical_call": {
+          "$ref": "#/$defs/PhysicalCallEvidence"
+        },
+        "session_handle": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "response_id": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 1024
+        },
+        "output": {
+          "$ref": "#/$defs/ModelOutput"
+        },
+        "staged_outputs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/StagedOutput"
+          },
+          "minItems": 0,
+          "maxItems": 256
+        },
+        "output_artifacts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ArtifactRef"
+          },
+          "minItems": 0,
+          "maxItems": 256
+        },
+        "session_mode": {
+          "type": "string",
+          "enum": [
+            "provider_conversation",
+            "stateless"
+          ]
+        },
+        "session_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "kind": {
+          "type": "string",
+          "const": "qualification_probe"
+        },
+        "qualification": {
+          "$ref": "#/$defs/ResponsesQualificationMetadataV2"
+        }
+      },
+      "required": [
+        "schema",
+        "physical_call",
+        "staged_outputs",
+        "session_mode"
+      ],
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "session_mode": {
+                "const": "provider_conversation"
+              },
+              "physical_call": {
+                "properties": {
+                  "confirmation": {
+                    "const": "authoritative_success"
+                  }
+                },
+                "required": [
+                  "confirmation"
+                ]
+              }
+            },
+            "required": [
+              "session_mode",
+              "physical_call"
+            ],
+            "not": {
+              "required": [
+                "kind"
+              ]
+            }
+          },
+          "then": {
+            "required": [
+              "session_handle"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "session_mode": {
+                "const": "stateless"
+              }
+            },
+            "required": [
+              "session_mode"
+            ]
+          },
+          "then": {
+            "not": {
+              "required": [
+                "session_handle"
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "const": "qualification_probe"
+              }
+            }
+          },
+          "then": {
+            "not": {
+              "required": [
+                "session_handle"
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "const": "qualification_probe"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "qualification"
+            ]
+          }
+        }
+      ]
+    },
+    "ProviderDescriptor": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "enum": [
+            "openai",
+            "openrouter",
+            "experiential"
+          ]
+        },
+        "display_name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "default_endpoint": {
+          "$ref": "#/$defs/HTTPSURL"
+        },
+        "session_mode": {
+          "type": "string",
+          "enum": [
+            "provider_conversation",
+            "stateless"
+          ]
+        },
+        "credential_setup": {
+          "const": "api_key",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "display_name",
+        "default_endpoint",
+        "session_mode",
+        "credential_setup"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "id": {
+                "const": "openai"
+              }
+            },
+            "required": [
+              "id"
+            ]
+          },
+          "then": {
+            "properties": {
+              "default_endpoint": {
+                "const": "https://api.openai.com/v1/responses",
+                "type": "string"
+              },
+              "session_mode": {
+                "const": "provider_conversation"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "id": {
+                "const": "openrouter"
+              }
+            },
+            "required": [
+              "id"
+            ]
+          },
+          "then": {
+            "properties": {
+              "default_endpoint": {
+                "const": "https://openrouter.ai/api/v1/responses",
+                "type": "string"
+              },
+              "session_mode": {
+                "const": "stateless"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "id": {
+                "const": "experiential"
+              }
+            },
+            "required": [
+              "id"
+            ]
+          },
+          "then": {
+            "properties": {
+              "default_endpoint": {
+                "const": "https://api.experientiallabs.ai/v1/responses",
+                "type": "string"
+              },
+              "session_mode": {
+                "const": "stateless"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "ResponsesQualificationProbeParametersV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema": {
+          "const": "zatiti.responses.action/v2",
+          "type": "string"
+        },
+        "kind": {
+          "const": "qualification_probe",
+          "type": "string"
+        },
+        "session_mode": {
+          "type": "string",
+          "enum": [
+            "provider_conversation",
+            "stateless"
+          ]
+        },
+        "model": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "probe_text": {
+          "const": "Reply with exactly: ZATITI_MODEL_QUALIFIED",
+          "type": "string"
+        },
+        "max_output_tokens": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 64
+        },
+        "profile_digest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "qualification_cost_bound": {
+          "$ref": "#/$defs/Money"
+        },
+        "provider": {
+          "type": "string",
+          "enum": [
+            "openai",
+            "openrouter",
+            "experiential"
+          ]
+        }
+      },
+      "required": [
+        "schema",
+        "kind",
+        "session_mode",
+        "model",
+        "probe_text",
+        "max_output_tokens",
+        "profile_digest",
+        "qualification_cost_bound",
+        "provider"
+      ]
+    },
+    "ResponsesQualificationMetadataV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "adapter_version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "source_revision": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "protocol_revision": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "capabilities": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "maxItems": 32
+        },
+        "limitations": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048
+          },
+          "maxItems": 32
+        }
+      },
+      "required": [
+        "adapter_version",
+        "source_revision",
+        "protocol_revision",
+        "capabilities",
+        "limitations"
+      ]
+    },
     "MCPToolName": {
       "type": "string",
       "pattern": "^[A-Za-z0-9_.-]{1,128}$",
@@ -4560,7 +5479,10 @@
     "responses": {
       "profile": "ResponsesProfile",
       "parameters": "ResponsesParameters",
-      "evidence": "ResponsesEvidence"
+      "evidence": "ResponsesEvidence",
+      "profile_v2": "ResponsesProfileV2",
+      "parameters_v2": "ResponsesParametersV2",
+      "evidence_v2": "ResponsesEvidenceV2"
     },
     "github": {
       "profile": "GitHubProfile",

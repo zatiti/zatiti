@@ -51,14 +51,16 @@ func (s *seqIDs) New() contract.ID {
 type fakePorts struct {
 	mu sync.Mutex
 
-	ids          contract.IDSource     // mints _execution.job.create's Job.id, like the real owner would
-	connVersions map[contract.ID]int64 // _connections.validate's reported version for a connection-kind change's id
-	calls        []contract.Invocation
-	decision     string                    // _policy.check decision (default allow)
-	reasons      []string                  // policy reasons
-	decReqs      []wireDecisionRequirement // decision requirements on review
-	approveOK    bool                      // _reviews.check approval outcome for any ensured review
-	fail         map[string]*contract.Fault
+	ids                      contract.IDSource     // mints _execution.job.create's Job.id, like the real owner would
+	connVersions             map[contract.ID]int64 // _connections.validate's reported version for a connection-kind change's id
+	qualificationConnections map[contract.ID]resolvedQualificationConnection
+	qualificationEffects     map[contract.ID]contract.ID
+	calls                    []contract.Invocation
+	decision                 string                    // _policy.check decision (default allow)
+	reasons                  []string                  // policy reasons
+	decReqs                  []wireDecisionRequirement // decision requirements on review
+	approveOK                bool                      // _reviews.check approval outcome for any ensured review
+	fail                     map[string]*contract.Fault
 
 	// ensured holds the pending reviews _reviews.ensure created, keyed by
 	// action digest, the way the real reviews owner does; decided records
@@ -73,6 +75,8 @@ func newFakePorts(ids contract.IDSource) *fakePorts {
 		ids:      ids,
 		decision: "allow", approveOK: true, fail: map[string]*contract.Fault{},
 		ensured: map[string]reviewsEnsureInput{}, decided: map[string]string{},
+		qualificationConnections: map[contract.ID]resolvedQualificationConnection{},
+		qualificationEffects:     map[contract.ID]contract.ID{},
 	}
 }
 
@@ -153,6 +157,41 @@ func (p *fakePorts) Call(ctx context.Context, unit contract.Unit, inv contract.I
 		}}
 	case strings.HasSuffix(inv.Operation, ".activate"):
 		body = versionsOutput{Versions: []wireRef{}}
+	case inv.Operation == "_connections.resolve":
+		var in struct {
+			Scope       wireScope `json:"scope"`
+			Connection  wireRef   `json:"connection"`
+			Tool        wireRef   `json:"tool"`
+			Destination string    `json:"destination"`
+		}
+		if err := contract.DecodeStrict(inv.Input, &in); err != nil {
+			return contract.Payload{}, &contract.Fault{Code: contract.CodeInvalidInput, Message: "_connections.resolve: " + err.Error()}
+		}
+		p.mu.Lock()
+		resolved, ok := p.qualificationConnections[in.Connection.ID]
+		p.mu.Unlock()
+		if !ok || resolved.Connection.Version != in.Connection.Version {
+			return contract.Payload{}, &contract.Fault{Code: contract.CodePrerequisiteMissing, Message: "fake ports: exact qualification connection unavailable"}
+		}
+		body = resolved
+	case inv.Operation == "_effects.prepare":
+		var in struct {
+			Scope           wireScope       `json:"scope"`
+			Action          json.RawMessage `json:"action"`
+			SourceID        contract.ID     `json:"source_id"`
+			QualificationID contract.ID     `json:"qualification_id"`
+		}
+		if err := contract.DecodeStrict(inv.Input, &in); err != nil {
+			return contract.Payload{}, &contract.Fault{Code: contract.CodeInvalidInput, Message: "_effects.prepare: " + err.Error()}
+		}
+		if unit.ReadOnly() || in.SourceID == "" || in.QualificationID == "" || len(in.Action) == 0 {
+			return contract.Payload{}, &contract.Fault{Code: contract.CodePermissionDenied, Message: "_effects.prepare requires one scoped qualification action in a write unit"}
+		}
+		effectID := p.ids.New()
+		p.mu.Lock()
+		p.qualificationEffects[in.QualificationID] = effectID
+		p.mu.Unlock()
+		body = map[string]any{"resource": wireOperationRef{ID: effectID}}
 	case inv.Operation == "_policy.check":
 		// The real policy owner binds every decision requirement to the
 		// candidate digest the caller passed.
@@ -221,6 +260,7 @@ func (p *fakePorts) Call(ctx context.Context, unit contract.Unit, inv contract.I
 		body = map[string]any{"resource": wireJob{
 			ID: p.ids.New(), Version: 1, Kind: "local", State: "pending",
 			Requirements: []wireRequirement{}, Owner: in.Owner, Operation: in.Operation,
+			OperationID: in.OperationID,
 		}}
 	case inv.Operation == "_reviews.check":
 		var in reviewsCheckInput
