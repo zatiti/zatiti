@@ -29,6 +29,7 @@ import (
 	"github.com/zatiti/zatiti/internal/skills"
 	"github.com/zatiti/zatiti/internal/storage"
 	"github.com/zatiti/zatiti/internal/tasks"
+	"github.com/zatiti/zatiti/internal/voice"
 )
 
 // systemClock is the production clock.
@@ -70,7 +71,7 @@ func bindInstallationBackup(deps contract.Dependencies, backup contract.Database
 var moduleOrder = []string{
 	"identity", "configuration", "skills", "connections", "policy", "reviews",
 	"accounting", "tasks", "scheduling", "messaging", "execution", "effects",
-	"memory", "artifacts", "evidence", "installation",
+	"memory", "artifacts", "evidence", "voice", "installation",
 }
 
 // modules constructs the sixteen landed domain modules with owner-bound
@@ -91,6 +92,7 @@ func modules(router *application.PortRouter, clock contract.Clock, ids contract.
 		return contract.Dependencies{Clock: clock, IDs: ids, Ports: router.For(owner), Secrets: secrets, Blobs: blobs}
 	}
 	constructors := map[string]func(contract.Dependencies) (contract.Module, error){
+		"voice":         func(d contract.Dependencies) (contract.Module, error) { return voice.New(d) },
 		"configuration": func(d contract.Dependencies) (contract.Module, error) { return configuration.New(d) },
 		"skills":        func(d contract.Dependencies) (contract.Module, error) { return skills.New(d) },
 		"connections": func(d contract.Dependencies) (contract.Module, error) {

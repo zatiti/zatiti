@@ -1,6 +1,6 @@
 # Implementation assignment: `packaging`
 
-Generated specification revision 18; source digest `b69aafc1a7069d7f85acd918d019e4e8745a08fb7648343c9fadd56da1b51ed9`. This file is committed implementation context. Do not independently edit it. Everything required from the product specification and adjacent interfaces is embedded below; no RFC copy is required.
+Generated specification revision 19; source digest `3c050769e50c3874a3d19859a6ad5d5c0f8667c00109bc80d49c808c5e9530b1`. This file is committed implementation context. Do not independently edit it. Everything required from the product specification and adjacent interfaces is embedded below; no RFC copy is required.
 
 ## Mission and scope
 
@@ -24,7 +24,9 @@ Outgoing owner calls: none; use only declared Go dependency interfaces. Each exa
 
 ## Shared foundation contract
 
-# Frozen implementation contract, revision 18
+# Frozen implementation contract, revision 19
+
+Revision 19 adds human conversational voice through the `voice` owner. The explicitly registered `voice.transcribe` and `voice.speak` operations use the phased IO boundary for bounded interactive external speech, with durable intent and separate accounting admission before leaving the transaction. They are not worker execution profiles or autonomous tool effects. Every session requires explicit disclosure consent and acknowledgment that OpenRouter speech billing is advisory (transcription routing cannot enforce a provider price cap). Dedicated voice-only connections exclude `/responses`; raw keys remain in SecretStore. The phase's accepted command is never automatically retried after a crash or ambiguous response. Unknown reservations remain visible. Narrate owns craft and provider transport, while Zatiti owns current-authority checks, accounting, conversation identity and session fencing. Desktop only captures and plays audio and uses catalogued operations; no direct model calls or sidecar. Native Mac permission, echo and latency testing remains qualification work.
 
 These decisions complete the product specification and bind every scope. Report contradictions with an affected-dependency list and proposed coordinated revision; do not change another owner's interface locally.
 
@@ -312,7 +314,7 @@ Write only within the assigned root. Do not edit this prompt, siblings, shared c
 
 ## Local IO, authentication, jobs and verification seams
 
-These additional declarations are part of the SAME frozen contract package (using imports already shown). Implementing an interface does not permit calling it inside a Unit except where the signature explicitly takes Unit/Reader.
+These additional declarations are part of the SAME frozen contract package (using imports already shown). Implementing an interface does not permit calling it inside a Unit except where the signature explicitly takes Unit/Reader. For a completed local IO mutation, a nonempty PersistentData is validated and stored as the command/evidence result while Data remains the one-time response to the current caller. This supports bounded ephemeral response material; it must not be used to hide durable side effects or omit replay-safe metadata.
 
 ```go
 type Authenticator interface {
@@ -329,7 +331,11 @@ type IOPlan struct {
     ExpectedVersions map[ID]Version
     Prepared json.RawMessage
 }
-type IOResult struct { Data json.RawMessage; Fault *Fault }
+type IOResult struct {
+    Data json.RawMessage
+    PersistentData json.RawMessage // optional durable/replay projection; empty keeps Data
+    Fault *Fault
+}
 type LocalIO interface {
     Prepare(context.Context, Unit, Invocation) (IOPlan, error)
     Perform(context.Context, IOPlan) (IOResult, error)
@@ -413,7 +419,7 @@ Current state, honestly: production's only `RestoreLifecycle` implementation, `c
 
 Identity Service also implements Authenticator. Application receives this interface explicitly in New; it uses a dedicated read snapshot and never reads identity-owned tables itself. Only the byte-slice credential boundary carries secret authentication material, never Invocation JSON. Zero sensitive buffers after use where practical; no logging. Certificate authentication resolves a preprovisioned credential reference and follows the same current principal/revocation rules.
 
-Artifacts, skills, connections and installation Services also implement LocalIO. The registry detects this interface at assembly and routes ONLY registered local IO operations through Prepare/Perform/Finish: artifact.upload.chunk/finish/cancel/read/export; skill.import; connection.setup.begin/complete/cancel; installation.init/backup/restore. LocalIO handles local bounded files, secure helpers and backup work, never unadmitted provider/model calls. Prepare strictly validates input, versions, identity and authority and records replayable local intent under IOPlan.ID; Perform receives that exact trusted in-memory plan outside transactions, resolves opaque staging/helper references, and returns metadata; Finish rechecks authority/versions/generation and commits result/evidence. IOPlan is never public, accepted from an agent or stored with secrets. Prepared/Data JSON must use the operation's declared schemas plus private owner-local metadata, which no other package reads. No cross-owner business protocol may hide in those private fields. Perform must support safe replay of local staging/publication by plan ID, or preserve an inspectable failed/unknown local obligation. A synchronous read does not return bytes to client until final authorization check. New raw provider writes always use effects, not this interface.
+Artifacts, skills, connections, installation and voice Services also implement LocalIO. The registry detects this interface at assembly and routes ONLY registered local IO operations through Prepare/Perform/Finish: artifact.upload.chunk/finish/cancel/read/export; skill.import; connection.setup.begin/complete/cancel; installation.init/backup/restore; voice.transcribe/speak. Voice LocalIO is an explicitly consented human interaction exception for bounded speech calls, with durable intent and accounting reservation before network I/O, current-authority checks before returning speech or transcript, and no retries after ambiguity. Synthesized audio is returned once to the live caller; command replay and evidence retain call metadata only, never audio bytes. LocalIO otherwise handles local bounded files, secure helpers and backup work, never unadmitted provider/model calls. Prepare strictly validates input, versions, identity and authority and records replayable local intent under IOPlan.ID; Perform receives that exact trusted in-memory plan outside transactions, resolves opaque staging/helper references, and returns metadata; Finish rechecks authority/versions/generation and commits result/evidence. IOPlan is never public, accepted from an agent or stored with secrets. Prepared/Data JSON must use the operation's declared schemas plus private owner-local metadata, which no other package reads. No cross-owner business protocol may hide in those private fields. Perform must support safe replay of local staging/publication by plan ID, or preserve an inspectable failed/unknown local obligation. A synchronous read does not return bytes to client until final authorization check. New raw provider writes always use effects, not this interface.
 
 For synchronous local IO mutations, persist command identity plus accepted internal pending disposition at Prepare, then replace pending disposition once at Finish. Concurrent same-key calls join/inspect that same in-progress command and never run duplicate Perform. The controller can recover abandoned local intents using the execution job API. Async backup/export uses the same interface with an inspectable job returned immediately. The artifact.upload.chunk endpoint has a 2 MiB encoded request cap (all other ordinary JSON requests 1 MiB), allowing the specified 1 MiB decoded chunk plus envelope.
 

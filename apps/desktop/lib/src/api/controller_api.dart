@@ -327,6 +327,7 @@ class ControllerApi {
   Submission prepareProviderConnection({
     required ProviderDescriptor provider,
     required String accountIdentity,
+    bool voiceOnly = false,
   }) {
     final scope = client.scope();
     return client.prepare(Operations.connectionCreate, {
@@ -338,8 +339,16 @@ class ControllerApi {
         // A reference only. The raw API key is entered later through the
         // signed local helper and never enters this request.
         'credential_ref': 'connections/credentials/${newUuidV4()}',
-        'destinations': [provider.defaultEndpoint],
-        'allowed_scopes': const <String>[],
+        'destinations': voiceOnly
+            ? const [
+                'https://openrouter.ai/api/v1/audio/transcriptions',
+                'https://openrouter.ai/api/v1/audio/speech',
+                'https://openrouter.ai/api/v1/chat/completions',
+              ]
+            : [provider.defaultEndpoint],
+        'allowed_scopes': voiceOnly
+            ? const <String>['voice']
+            : const <String>[],
       },
     });
   }

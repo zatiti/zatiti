@@ -94,6 +94,7 @@ var operationSchemaBodies = map[string]opSchemas{
 	"_connections.validate":          {schemaCandidateIn, schemaValidateOut},
 	"_connections.validation.record": {schemaMCPCallbackIn, schemaGetOut("Connection")},
 	"_connections.discovery.record":  {schemaMCPCallbackIn, schemaGetOut("Connection")},
+	"_connections.voice.resolve":     {`{"type":"object","additionalProperties":false,"properties":{"scope":{"$ref":"#/$defs/Scope"},"connection":{"$ref":"#/$defs/Ref"},"destination":{"type":"string","enum":["https://openrouter.ai/api/v1/audio/transcriptions","https://openrouter.ai/api/v1/audio/speech","https://openrouter.ai/api/v1/chat/completions"]}},"required":["scope","connection","destination"]}`, `{"type":"object","additionalProperties":false,"properties":{"credential_ref":{"type":"string","maxLength":8192}},"required":["credential_ref"]}`},
 	"_connections.tool.resolve":      {`{"type":"object","additionalProperties":false,"properties":{"scope":{"$ref":"#/$defs/Scope"},"tool_id":{"type":"string","format":"uuid"}},"required":["scope","tool_id"]}`, `{"type":"object","additionalProperties":false,"properties":{"connection":{"$ref":"#/$defs/Connection"},"tool":{"$ref":"#/$defs/Tool"}},"required":["connection","tool"]}`},
 
 	// connection.*

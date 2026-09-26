@@ -647,12 +647,16 @@ func TestLocalIOMutationLifecycle(t *testing.T) {
 		// The bootstrap ran through the same IO service; every phase assertion
 		// below reads the delta over that baseline.
 		basePrep, basePerform, baseFinish := e.io.calls()
+		e.io.persistentData = json.RawMessage(`{"safe":true}`)
 		res, err := e.invoke(t, e.actor(), "artifact.upload.finish", "io-1", map[string]any{})
 		if err != nil {
 			t.Fatalf("io mutation: %v", err)
 		}
 		if res.Status != contract.StatusCompleted {
 			t.Fatalf("io status %q, want completed", res.Status)
+		}
+		if string(res.Data) == string(e.io.persistentData) {
+			t.Fatal("first IO result should return its immediate data")
 		}
 		prep, perform, finish := e.io.calls()
 		if prep != basePrep+1 || perform != basePerform+1 || finish != baseFinish+1 {
@@ -669,6 +673,9 @@ func TestLocalIOMutationLifecycle(t *testing.T) {
 		}
 		if replay.CommandID != res.CommandID || replay.Status != contract.StatusCompleted {
 			t.Fatalf("io replay envelope %+v, want original %+v", replay.Payload, res.Payload)
+		}
+		if string(replay.Data) != string(e.io.persistentData) {
+			t.Fatalf("replay data %s, want redacted durable data %s", replay.Data, e.io.persistentData)
 		}
 		if _, p, _ := e.io.calls(); p != basePerform+1 {
 			t.Fatalf("io replay ran Perform again (%d calls over baseline %d)", p, basePerform)

@@ -1087,9 +1087,10 @@ type fakeLocalIO struct {
 	// failPerform makes Perform return an inspectable artifact fault.
 	failPerform bool
 	// finishFault makes Finish refuse, rolling the Finish transaction back.
-	finishFault *contract.Fault
-	sawOpenTx   atomic.Bool
-	panicMask   atomic.Bool
+	finishFault    *contract.Fault
+	persistentData json.RawMessage
+	sawOpenTx      atomic.Bool
+	panicMask      atomic.Bool
 }
 
 func (f *fakeLocalIO) Prepare(ctx context.Context, u contract.Unit, inv contract.Invocation) (contract.IOPlan, error) {
@@ -1132,7 +1133,10 @@ func (f *fakeLocalIO) Perform(ctx context.Context, plan contract.IOPlan) (contra
 			Code: contract.CodeArtifactFault, Message: "injected local IO fault",
 		}}, nil
 	}
-	return contract.IOResult{Data: mustMarshal(map[string]any{"performed": true, "plan": string(plan.ID)})}, nil
+	return contract.IOResult{
+		Data:           mustMarshal(map[string]any{"performed": true, "plan": string(plan.ID)}),
+		PersistentData: f.persistentData,
+	}, nil
 }
 
 func (f *fakeLocalIO) Finish(ctx context.Context, u contract.Unit, plan contract.IOPlan, result contract.IOResult) (contract.Payload, error) {

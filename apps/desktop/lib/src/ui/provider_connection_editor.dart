@@ -31,6 +31,7 @@ class _ProviderConnectionEditorState extends State<_ProviderConnectionEditor> {
   late final Future<List<wire.ProviderDescriptor>> _providers;
   final TextEditingController _account = TextEditingController();
   wire.ProviderDescriptor? _provider;
+  bool _voiceOnly = false;
   String? _status;
   bool _busy = false;
   bool _unknown = false;
@@ -87,6 +88,10 @@ class _ProviderConnectionEditorState extends State<_ProviderConnectionEditor> {
       setState(() => _status = 'Choose a provider.');
       return;
     }
+    if (_voiceOnly && provider.id != 'openrouter') {
+      setState(() => _status = 'Voice mode requires OpenRouter.');
+      return;
+    }
     if (_account.text.trim().isEmpty) {
       setState(() => _status = 'Enter the expected provider account identity.');
       return;
@@ -102,6 +107,7 @@ class _ProviderConnectionEditorState extends State<_ProviderConnectionEditor> {
       _stage = source.prepareProviderConnection(
         provider: provider,
         accountIdentity: _account.text,
+        voiceOnly: _voiceOnly,
       );
       if (!await _send(_stage!, 'stage', source)) return;
       await _planDraft(source);
@@ -232,7 +238,7 @@ class _ProviderConnectionEditorState extends State<_ProviderConnectionEditor> {
               children: [
                 DropdownButtonFormField<String>(
                   value: _provider?.id,
-                  decoration: const InputDecoration(labelText: 'Provider'),
+                  decoration: InputDecoration(labelText: 'Provider'),
                   items: [
                     for (final p in providers)
                       DropdownMenuItem(value: p.id, child: Text(p.displayName)),
@@ -252,14 +258,26 @@ class _ProviderConnectionEditorState extends State<_ProviderConnectionEditor> {
                     style: Theme.of(context).textTheme.bodySmall,
                   ),
                 ],
+                CheckboxListTile(
+                  contentPadding: EdgeInsets.zero,
+                  value: _voiceOnly,
+                  onChanged: _busy
+                      ? null
+                      : (value) => setState(() => _voiceOnly = value ?? false),
+                  title: const Text('Dedicated voice key'),
+                  subtitle: const Text(
+                    'Restrict this OpenRouter connection to speech endpoints. It cannot be used for worker reasoning.',
+                  ),
+                ),
                 const SizedBox(height: Space.md),
                 TextField(
                   controller: _account,
                   enabled: !_busy,
-                  decoration: const InputDecoration(
+                  decoration: InputDecoration(
                     labelText: 'Expected provider account identity',
-                    helperText:
-                        'The controller checks this against the account observed during key validation.',
+                    helperText: _voiceOnly
+                        ? 'Label only. Voice-only keys are not probed with a reasoning endpoint.'
+                        : 'The controller checks this against the account observed during key validation.',
                   ),
                 ),
                 const SizedBox(height: Space.md),

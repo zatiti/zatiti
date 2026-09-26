@@ -2058,6 +2058,78 @@
           "context_capture"
         ]
       },
+      "ExecutionProfileCandidate": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "executor": {
+            "type": "string",
+            "enum": [
+              "hosted",
+              "cooperative"
+            ]
+          },
+          "model": {
+            "type": "string",
+            "maxLength": 8192
+          },
+          "connection_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "provider_destination": {
+            "type": "string",
+            "maxLength": 8192
+          },
+          "capabilities": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 8192
+            },
+            "maxItems": 4096
+          },
+          "cost_bound": {
+            "$ref": "#/$defs/Money"
+          },
+          "classification": {
+            "type": "string",
+            "enum": [
+              "internal",
+              "public",
+              "restricted"
+            ]
+          },
+          "context_capture": {
+            "type": "string",
+            "enum": [
+              "complete",
+              "partial",
+              "advisory"
+            ]
+          },
+          "adapter_profile": {
+            "$ref": "#/$defs/ResponsesProfileDraft"
+          },
+          "connection_version": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9223372036854775807
+          }
+        },
+        "required": [
+          "executor",
+          "model",
+          "connection_id",
+          "provider_destination",
+          "capabilities",
+          "cost_bound",
+          "classification",
+          "context_capture",
+          "adapter_profile",
+          "connection_version"
+        ]
+      },
       "Fault": {
         "type": "object",
         "additionalProperties": false,
@@ -2304,6 +2376,85 @@
           "delegation_depth",
           "attempt_seconds",
           "root_deadline"
+        ]
+      },
+      "MCPDiscoveredTool": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 8192
+          },
+          "input_schema": {
+            "type": "object",
+            "description": "Inert JSON data bounded by the enclosing size limit; never executable authority."
+          },
+          "input_schema_digest": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9223372036854775807
+          },
+          "discovered_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "discovery_operation_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "title": {
+            "type": "string",
+            "maxLength": 8192
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 8192
+          },
+          "output_schema": {
+            "type": "object",
+            "description": "Inert JSON data bounded by the enclosing size limit; never executable authority."
+          },
+          "annotations": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "title": {
+                "type": "string",
+                "maxLength": 8192
+              },
+              "read_only_hint": {
+                "type": "boolean"
+              },
+              "destructive_hint": {
+                "type": "boolean"
+              },
+              "idempotent_hint": {
+                "type": "boolean"
+              },
+              "open_world_hint": {
+                "type": "boolean"
+              }
+            },
+            "required": []
+          }
+        },
+        "required": [
+          "name",
+          "input_schema",
+          "input_schema_digest",
+          "id",
+          "version",
+          "discovered_at",
+          "discovery_operation_id"
         ]
       },
       "MemoryBinding": {
@@ -3118,6 +3269,78 @@
           "explanation"
         ]
       },
+      "QualifiedExecutionProfile": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "executor": {
+            "type": "string",
+            "enum": [
+              "hosted",
+              "cooperative"
+            ]
+          },
+          "model": {
+            "type": "string",
+            "maxLength": 8192
+          },
+          "connection_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "provider_destination": {
+            "type": "string",
+            "maxLength": 8192
+          },
+          "capabilities": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 8192
+            },
+            "maxItems": 4096
+          },
+          "cost_bound": {
+            "$ref": "#/$defs/Money"
+          },
+          "classification": {
+            "type": "string",
+            "enum": [
+              "internal",
+              "public",
+              "restricted"
+            ]
+          },
+          "context_capture": {
+            "type": "string",
+            "enum": [
+              "complete",
+              "partial",
+              "advisory"
+            ]
+          },
+          "adapter_profile": {
+            "$ref": "#/$defs/ResponsesProfile"
+          },
+          "connection_version": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9223372036854775807
+          }
+        },
+        "required": [
+          "executor",
+          "model",
+          "connection_id",
+          "provider_destination",
+          "capabilities",
+          "cost_bound",
+          "classification",
+          "context_capture",
+          "adapter_profile",
+          "connection_version"
+        ]
+      },
       "Ref": {
         "type": "object",
         "additionalProperties": false,
@@ -3274,6 +3497,274 @@
           },
           {
             "$ref": "#/$defs/ResponsesProfileV2"
+          }
+        ]
+      },
+      "ResponsesProfileDraft": {
+        "oneOf": [
+          {
+            "$ref": "#/$defs/ResponsesProfileDraftV1"
+          },
+          {
+            "$ref": "#/$defs/ResponsesProfileDraftV2"
+          }
+        ]
+      },
+      "ResponsesProfileDraftV1": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "schema": {
+            "const": "zatiti.responses/v1",
+            "type": "string"
+          },
+          "endpoint": {
+            "type": "string",
+            "format": "uri",
+            "pattern": "^https://",
+            "maxLength": 2048
+          },
+          "model": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "connection_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "max_input_tokens": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10000000
+          },
+          "max_output_tokens": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000000
+          },
+          "max_response_bytes": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 268435456
+          },
+          "timeout_seconds": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1800
+          },
+          "currency": {
+            "type": "string",
+            "pattern": "^[A-Z]{3}$"
+          },
+          "input_rate": {
+            "$ref": "#/$defs/ResponsesRate"
+          },
+          "output_rate": {
+            "$ref": "#/$defs/ResponsesRate"
+          },
+          "enforcement": {
+            "$ref": "#/$defs/ResponsesEnforcement"
+          }
+        },
+        "required": [
+          "schema",
+          "endpoint",
+          "model",
+          "connection_id",
+          "max_input_tokens",
+          "max_output_tokens",
+          "max_response_bytes",
+          "timeout_seconds",
+          "currency",
+          "input_rate",
+          "output_rate",
+          "enforcement"
+        ]
+      },
+      "ResponsesProfileDraftV2": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "schema": {
+            "const": "zatiti.responses/v2",
+            "type": "string"
+          },
+          "endpoint": {
+            "type": "string",
+            "format": "uri",
+            "pattern": "^https://",
+            "maxLength": 2048
+          },
+          "model": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "connection_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "max_input_tokens": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10000000
+          },
+          "max_output_tokens": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000000
+          },
+          "max_response_bytes": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 268435456
+          },
+          "timeout_seconds": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1800
+          },
+          "currency": {
+            "type": "string",
+            "pattern": "^[A-Z]{3}$"
+          },
+          "input_rate": {
+            "$ref": "#/$defs/ResponsesRate"
+          },
+          "output_rate": {
+            "$ref": "#/$defs/ResponsesRate"
+          },
+          "enforcement": {
+            "$ref": "#/$defs/ResponsesEnforcement"
+          },
+          "provider": {
+            "type": "string",
+            "enum": [
+              "openai",
+              "openrouter",
+              "experiential"
+            ]
+          },
+          "session_mode": {
+            "type": "string",
+            "enum": [
+              "provider_conversation",
+              "stateless"
+            ]
+          },
+          "routing": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {},
+                "required": []
+              },
+              {
+                "$ref": "#/$defs/ResponsesRoutingOpenRouter"
+              },
+              {
+                "$ref": "#/$defs/ResponsesRoutingExperiential"
+              }
+            ]
+          }
+        },
+        "required": [
+          "schema",
+          "endpoint",
+          "model",
+          "connection_id",
+          "max_input_tokens",
+          "max_output_tokens",
+          "max_response_bytes",
+          "timeout_seconds",
+          "currency",
+          "input_rate",
+          "output_rate",
+          "enforcement",
+          "provider",
+          "session_mode",
+          "routing"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "provider": {
+                  "const": "openai"
+                }
+              },
+              "required": [
+                "provider"
+              ]
+            },
+            "then": {
+              "properties": {
+                "session_mode": {
+                  "const": "provider_conversation"
+                },
+                "endpoint": {
+                  "const": "https://api.openai.com/v1/responses"
+                },
+                "routing": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {},
+                  "required": []
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "provider": {
+                  "const": "openrouter"
+                }
+              },
+              "required": [
+                "provider"
+              ]
+            },
+            "then": {
+              "properties": {
+                "session_mode": {
+                  "const": "stateless"
+                },
+                "endpoint": {
+                  "const": "https://openrouter.ai/api/v1/responses"
+                },
+                "routing": {
+                  "$ref": "#/$defs/ResponsesRoutingOpenRouter"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "provider": {
+                  "const": "experiential"
+                }
+              },
+              "required": [
+                "provider"
+              ]
+            },
+            "then": {
+              "properties": {
+                "session_mode": {
+                  "const": "stateless"
+                },
+                "endpoint": {
+                  "const": "https://api.experientiallabs.ai/v1/responses"
+                },
+                "routing": {
+                  "$ref": "#/$defs/ResponsesRoutingExperiential"
+                }
+              }
+            }
           }
         ]
       },
@@ -4692,6 +5183,123 @@
           "classification"
         ]
       },
+      "VoiceSession": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "conversation_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "active",
+              "ended",
+              "expired"
+            ]
+          },
+          "settings": {
+            "$ref": "#/$defs/VoiceSettings"
+          },
+          "reserved_micro_units": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9223372036854775807
+          },
+          "calls": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9223372036854775807
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "conversation_id",
+          "state",
+          "settings",
+          "reserved_micro_units",
+          "calls",
+          "expires_at"
+        ]
+      },
+      "VoiceSettings": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "input_connection": {
+            "$ref": "#/$defs/Ref"
+          },
+          "output_connection": {
+            "$ref": "#/$defs/Ref"
+          },
+          "transcription_model": {
+            "type": "string",
+            "enum": [
+              "openai/whisper-large-v3-turbo"
+            ]
+          },
+          "speech_model": {
+            "type": "string",
+            "enum": [
+              "hexgrad/kokoro-82m",
+              "deepgram/flux-tts:free"
+            ]
+          },
+          "voice": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "language": {
+            "type": "string",
+            "maxLength": 8
+          },
+          "style": {
+            "type": "string",
+            "enum": [
+              "conversational",
+              "agent-update",
+              "coach",
+              "verbatim"
+            ]
+          },
+          "budget_micro_units": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10000000
+          },
+          "call_allowance_micro_units": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100000
+          },
+          "advisory_cost_acknowledged": {
+            "const": true,
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "input_connection",
+          "output_connection",
+          "transcription_model",
+          "speech_model",
+          "voice",
+          "language",
+          "style",
+          "budget_micro_units",
+          "call_allowance_micro_units",
+          "advisory_cost_acknowledged"
+        ]
+      },
       "Worker": {
         "type": "object",
         "additionalProperties": false,
@@ -4777,497 +5385,6 @@
           "bindings",
           "profile",
           "limits"
-        ]
-      },
-      "ExecutionProfileCandidate": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "executor": {
-            "type": "string",
-            "enum": [
-              "hosted",
-              "cooperative"
-            ]
-          },
-          "model": {
-            "type": "string",
-            "maxLength": 8192
-          },
-          "connection_id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "provider_destination": {
-            "type": "string",
-            "maxLength": 8192
-          },
-          "capabilities": {
-            "type": "array",
-            "items": {
-              "type": "string",
-              "maxLength": 8192
-            },
-            "maxItems": 4096
-          },
-          "cost_bound": {
-            "$ref": "#/$defs/Money"
-          },
-          "classification": {
-            "type": "string",
-            "enum": [
-              "internal",
-              "public",
-              "restricted"
-            ]
-          },
-          "context_capture": {
-            "type": "string",
-            "enum": [
-              "complete",
-              "partial",
-              "advisory"
-            ]
-          },
-          "adapter_profile": {
-            "$ref": "#/$defs/ResponsesProfileDraft"
-          },
-          "connection_version": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 9223372036854775807
-          }
-        },
-        "required": [
-          "executor",
-          "model",
-          "connection_id",
-          "provider_destination",
-          "capabilities",
-          "cost_bound",
-          "classification",
-          "context_capture",
-          "adapter_profile",
-          "connection_version"
-        ]
-      },
-      "ResponsesProfileDraft": {
-        "oneOf": [
-          {
-            "$ref": "#/$defs/ResponsesProfileDraftV1"
-          },
-          {
-            "$ref": "#/$defs/ResponsesProfileDraftV2"
-          }
-        ]
-      },
-      "ResponsesProfileDraftV2": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "schema": {
-            "const": "zatiti.responses/v2",
-            "type": "string"
-          },
-          "endpoint": {
-            "type": "string",
-            "format": "uri",
-            "pattern": "^https://",
-            "maxLength": 2048
-          },
-          "model": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 256
-          },
-          "connection_id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "max_input_tokens": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 10000000
-          },
-          "max_output_tokens": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 1000000
-          },
-          "max_response_bytes": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 268435456
-          },
-          "timeout_seconds": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 1800
-          },
-          "currency": {
-            "type": "string",
-            "pattern": "^[A-Z]{3}$"
-          },
-          "input_rate": {
-            "$ref": "#/$defs/ResponsesRate"
-          },
-          "output_rate": {
-            "$ref": "#/$defs/ResponsesRate"
-          },
-          "enforcement": {
-            "$ref": "#/$defs/ResponsesEnforcement"
-          },
-          "provider": {
-            "type": "string",
-            "enum": [
-              "openai",
-              "openrouter",
-              "experiential"
-            ]
-          },
-          "session_mode": {
-            "type": "string",
-            "enum": [
-              "provider_conversation",
-              "stateless"
-            ]
-          },
-          "routing": {
-            "oneOf": [
-              {
-                "type": "object",
-                "additionalProperties": false,
-                "properties": {},
-                "required": []
-              },
-              {
-                "$ref": "#/$defs/ResponsesRoutingOpenRouter"
-              },
-              {
-                "$ref": "#/$defs/ResponsesRoutingExperiential"
-              }
-            ]
-          }
-        },
-        "required": [
-          "schema",
-          "endpoint",
-          "model",
-          "connection_id",
-          "max_input_tokens",
-          "max_output_tokens",
-          "max_response_bytes",
-          "timeout_seconds",
-          "currency",
-          "input_rate",
-          "output_rate",
-          "enforcement",
-          "provider",
-          "session_mode",
-          "routing"
-        ],
-        "allOf": [
-          {
-            "if": {
-              "properties": {
-                "provider": {
-                  "const": "openai"
-                }
-              },
-              "required": [
-                "provider"
-              ]
-            },
-            "then": {
-              "properties": {
-                "session_mode": {
-                  "const": "provider_conversation"
-                },
-                "endpoint": {
-                  "const": "https://api.openai.com/v1/responses"
-                },
-                "routing": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "properties": {},
-                  "required": []
-                }
-              }
-            }
-          },
-          {
-            "if": {
-              "properties": {
-                "provider": {
-                  "const": "openrouter"
-                }
-              },
-              "required": [
-                "provider"
-              ]
-            },
-            "then": {
-              "properties": {
-                "session_mode": {
-                  "const": "stateless"
-                },
-                "endpoint": {
-                  "const": "https://openrouter.ai/api/v1/responses"
-                },
-                "routing": {
-                  "$ref": "#/$defs/ResponsesRoutingOpenRouter"
-                }
-              }
-            }
-          },
-          {
-            "if": {
-              "properties": {
-                "provider": {
-                  "const": "experiential"
-                }
-              },
-              "required": [
-                "provider"
-              ]
-            },
-            "then": {
-              "properties": {
-                "session_mode": {
-                  "const": "stateless"
-                },
-                "endpoint": {
-                  "const": "https://api.experientiallabs.ai/v1/responses"
-                },
-                "routing": {
-                  "$ref": "#/$defs/ResponsesRoutingExperiential"
-                }
-              }
-            }
-          }
-        ]
-      },
-      "ResponsesProfileDraftV1": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "schema": {
-            "const": "zatiti.responses/v1",
-            "type": "string"
-          },
-          "endpoint": {
-            "type": "string",
-            "format": "uri",
-            "pattern": "^https://",
-            "maxLength": 2048
-          },
-          "model": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 256
-          },
-          "connection_id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "max_input_tokens": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 10000000
-          },
-          "max_output_tokens": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 1000000
-          },
-          "max_response_bytes": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 268435456
-          },
-          "timeout_seconds": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 1800
-          },
-          "currency": {
-            "type": "string",
-            "pattern": "^[A-Z]{3}$"
-          },
-          "input_rate": {
-            "$ref": "#/$defs/ResponsesRate"
-          },
-          "output_rate": {
-            "$ref": "#/$defs/ResponsesRate"
-          },
-          "enforcement": {
-            "$ref": "#/$defs/ResponsesEnforcement"
-          }
-        },
-        "required": [
-          "schema",
-          "endpoint",
-          "model",
-          "connection_id",
-          "max_input_tokens",
-          "max_output_tokens",
-          "max_response_bytes",
-          "timeout_seconds",
-          "currency",
-          "input_rate",
-          "output_rate",
-          "enforcement"
-        ]
-      },
-      "QualifiedExecutionProfile": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "executor": {
-            "type": "string",
-            "enum": [
-              "hosted",
-              "cooperative"
-            ]
-          },
-          "model": {
-            "type": "string",
-            "maxLength": 8192
-          },
-          "connection_id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "provider_destination": {
-            "type": "string",
-            "maxLength": 8192
-          },
-          "capabilities": {
-            "type": "array",
-            "items": {
-              "type": "string",
-              "maxLength": 8192
-            },
-            "maxItems": 4096
-          },
-          "cost_bound": {
-            "$ref": "#/$defs/Money"
-          },
-          "classification": {
-            "type": "string",
-            "enum": [
-              "internal",
-              "public",
-              "restricted"
-            ]
-          },
-          "context_capture": {
-            "type": "string",
-            "enum": [
-              "complete",
-              "partial",
-              "advisory"
-            ]
-          },
-          "adapter_profile": {
-            "$ref": "#/$defs/ResponsesProfile"
-          },
-          "connection_version": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 9223372036854775807
-          }
-        },
-        "required": [
-          "executor",
-          "model",
-          "connection_id",
-          "provider_destination",
-          "capabilities",
-          "cost_bound",
-          "classification",
-          "context_capture",
-          "adapter_profile",
-          "connection_version"
-        ]
-      },
-      "MCPDiscoveredTool": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "name": {
-            "type": "string",
-            "maxLength": 8192
-          },
-          "input_schema": {
-            "type": "object",
-            "description": "Inert JSON data bounded by the enclosing size limit; never executable authority."
-          },
-          "input_schema_digest": {
-            "type": "string",
-            "pattern": "^[0-9a-f]{64}$"
-          },
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "version": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 9223372036854775807
-          },
-          "discovered_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "discovery_operation_id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "title": {
-            "type": "string",
-            "maxLength": 8192
-          },
-          "description": {
-            "type": "string",
-            "maxLength": 8192
-          },
-          "output_schema": {
-            "type": "object",
-            "description": "Inert JSON data bounded by the enclosing size limit; never executable authority."
-          },
-          "annotations": {
-            "type": "object",
-            "additionalProperties": false,
-            "properties": {
-              "title": {
-                "type": "string",
-                "maxLength": 8192
-              },
-              "read_only_hint": {
-                "type": "boolean"
-              },
-              "destructive_hint": {
-                "type": "boolean"
-              },
-              "idempotent_hint": {
-                "type": "boolean"
-              },
-              "open_world_hint": {
-                "type": "boolean"
-              }
-            },
-            "required": []
-          }
-        },
-        "required": [
-          "name",
-          "input_schema",
-          "input_schema_digest",
-          "id",
-          "version",
-          "discovered_at",
-          "discovery_operation_id"
         ]
       }
     }
@@ -19593,6 +19710,341 @@
         },
         "required": [
           "resource"
+        ]
+      },
+      "completion": null,
+      "expected_version": false,
+      "scope_required": [
+        "installation_id"
+      ]
+    },
+    {
+      "id": "voice.session.begin",
+      "version": 1,
+      "owner": "voice",
+      "visibility": "public",
+      "mode": "mutation",
+      "effect": "local",
+      "cli": [
+        "voice",
+        "session",
+        "begin"
+      ],
+      "mcp": "zatiti_voice_session_begin",
+      "submission_key": true,
+      "description": "Start a human-only voice session bound to this actor, conversation and controller generation, with separate voice-only connections, explicit disclosure consent and advisory budget. No model work occurs in this transaction.",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "scope": {
+            "$ref": "#/$defs/Scope"
+          },
+          "conversation_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "settings": {
+            "$ref": "#/$defs/VoiceSettings"
+          }
+        },
+        "required": [
+          "scope",
+          "conversation_id",
+          "settings"
+        ]
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "resource": {
+            "$ref": "#/$defs/VoiceSession"
+          }
+        },
+        "required": [
+          "resource"
+        ]
+      },
+      "completion": null,
+      "expected_version": false,
+      "scope_required": [
+        "installation_id"
+      ]
+    },
+    {
+      "id": "voice.session.end",
+      "version": 1,
+      "owner": "voice",
+      "visibility": "public",
+      "mode": "mutation",
+      "effect": "local",
+      "cli": [
+        "voice",
+        "session",
+        "end"
+      ],
+      "mcp": "zatiti_voice_session_end",
+      "submission_key": true,
+      "description": "Read or end the actor-owned scoped voice session. End fences late audio and does not cancel accepted worker tasks.",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "scope": {
+            "$ref": "#/$defs/Scope"
+          },
+          "session_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "scope",
+          "session_id"
+        ]
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "resource": {
+            "$ref": "#/$defs/VoiceSession"
+          }
+        },
+        "required": [
+          "resource"
+        ]
+      },
+      "completion": null,
+      "expected_version": false,
+      "scope_required": [
+        "installation_id"
+      ]
+    },
+    {
+      "id": "voice.session.get",
+      "version": 1,
+      "owner": "voice",
+      "visibility": "public",
+      "mode": "query",
+      "effect": "local",
+      "cli": [
+        "voice",
+        "session",
+        "get"
+      ],
+      "mcp": "zatiti_voice_session_get",
+      "submission_key": false,
+      "description": "Read or end the actor-owned scoped voice session. End fences late audio and does not cancel accepted worker tasks.",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "scope": {
+            "$ref": "#/$defs/Scope"
+          },
+          "session_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "scope",
+          "session_id"
+        ]
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "resource": {
+            "$ref": "#/$defs/VoiceSession"
+          }
+        },
+        "required": [
+          "resource"
+        ]
+      },
+      "completion": null,
+      "expected_version": false,
+      "scope_required": [
+        "installation_id"
+      ]
+    },
+    {
+      "id": "voice.speak",
+      "version": 1,
+      "owner": "voice",
+      "visibility": "public",
+      "mode": "mutation",
+      "effect": "disclosure",
+      "cli": [
+        "voice",
+        "speak"
+      ],
+      "mcp": "zatiti_voice_speak",
+      "submission_key": true,
+      "description": "Read an actually disclosed worker reply from the bound conversation. Narrate supplies canonical craft; optional bounded craft rewrite and speech calls use voice credentials only. No tools or approvals. Durable intent, no retries, late results fenced by session/generation.",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "scope": {
+            "$ref": "#/$defs/Scope"
+          },
+          "session_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "message_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "scope",
+          "session_id",
+          "message_id"
+        ]
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "call_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "text": {
+            "type": "string",
+            "maxLength": 8192
+          },
+          "audio": {
+            "type": "string",
+            "maxLength": 12000000
+          },
+          "media_type": {
+            "type": "string",
+            "maxLength": 8192
+          },
+          "billing": {
+            "type": "string",
+            "enum": [
+              "estimated",
+              "unknown",
+              "no_charge"
+            ]
+          },
+          "reserved_micro_units": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9223372036854775807
+          }
+        },
+        "required": [
+          "session_id",
+          "call_id",
+          "text",
+          "audio",
+          "media_type",
+          "billing",
+          "reserved_micro_units"
+        ]
+      },
+      "completion": null,
+      "expected_version": false,
+      "scope_required": [
+        "installation_id"
+      ]
+    },
+    {
+      "id": "voice.transcribe",
+      "version": 1,
+      "owner": "voice",
+      "visibility": "public",
+      "mode": "mutation",
+      "effect": "disclosure",
+      "cli": [
+        "voice",
+        "transcribe"
+      ],
+      "mcp": "zatiti_voice_transcribe",
+      "submission_key": true,
+      "description": "Human-only bounded WAV transcription, separate voice credential, durable intent and conservative accounting reservation. Exactly one network call outside Unit; no retries or fallback. Transcript is not sent until ordinary conversation.message.send.",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "scope": {
+            "$ref": "#/$defs/Scope"
+          },
+          "session_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "audio": {
+            "type": "string",
+            "minLength": 60,
+            "maxLength": 700000
+          }
+        },
+        "required": [
+          "scope",
+          "session_id",
+          "audio"
+        ]
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "call_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "text": {
+            "type": "string",
+            "maxLength": 8192
+          },
+          "audio": {
+            "type": "string",
+            "maxLength": 12000000
+          },
+          "media_type": {
+            "type": "string",
+            "maxLength": 8192
+          },
+          "billing": {
+            "type": "string",
+            "enum": [
+              "estimated",
+              "unknown",
+              "no_charge"
+            ]
+          },
+          "reserved_micro_units": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9223372036854775807
+          }
+        },
+        "required": [
+          "session_id",
+          "call_id",
+          "text",
+          "audio",
+          "media_type",
+          "billing",
+          "reserved_micro_units"
         ]
       },
       "completion": null,
