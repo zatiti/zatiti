@@ -377,17 +377,17 @@ type wireResponsesEvidence struct {
 }
 
 type wireResponsesEvidenceV2 struct {
-	Schema          string                   `json:"schema"`
-	Kind            string                   `json:"kind,omitempty"`
+	Schema          string                       `json:"schema"`
+	Kind            string                       `json:"kind,omitempty"`
 	Qualification   *wireQualificationMetadataV2 `json:"qualification,omitempty"`
-	PhysicalCall    wirePhysicalCallEvidence `json:"physical_call"`
-	SessionHandle   string                   `json:"session_handle,omitempty"`
-	ResponseID      string                   `json:"response_id,omitempty"`
-	Output          *wireModelOutput         `json:"output,omitempty"`
-	StagedOutputs   []wireStagedOutput       `json:"staged_outputs"`
-	OutputArtifacts []wireArtifactRef        `json:"output_artifacts,omitempty"`
-	SessionMode     string                   `json:"session_mode"`
-	SessionID       string                   `json:"session_id,omitempty"`
+	PhysicalCall    wirePhysicalCallEvidence     `json:"physical_call"`
+	SessionHandle   string                       `json:"session_handle,omitempty"`
+	ResponseID      string                       `json:"response_id,omitempty"`
+	Output          *wireModelOutput             `json:"output,omitempty"`
+	StagedOutputs   []wireStagedOutput           `json:"staged_outputs"`
+	OutputArtifacts []wireArtifactRef            `json:"output_artifacts,omitempty"`
+	SessionMode     string                       `json:"session_mode"`
+	SessionID       string                       `json:"session_id,omitempty"`
 }
 
 type wireQualificationMetadataV2 struct {

@@ -41,10 +41,14 @@ class CredentialCaptureResult {
       CredentialCaptureStatus.completed: {'none'},
       CredentialCaptureStatus.cancelled: {'none'},
       CredentialCaptureStatus.retryable: {
-        'busy', 'timeout', 'controller_unavailable',
+        'busy',
+        'timeout',
+        'controller_unavailable',
       },
       CredentialCaptureStatus.repairRequired: {
-        'helper_unavailable', 'helper_untrusted', 'invalid_result',
+        'helper_unavailable',
+        'helper_untrusted',
+        'invalid_result',
         'installation_mismatch',
       },
     };

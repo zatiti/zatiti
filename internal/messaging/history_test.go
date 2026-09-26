@@ -30,7 +30,7 @@ func TestMessagingHistoryIsChronologicalAndMembershipBound(t *testing.T) {
 	})
 	var out struct {
 		Items    []*wireMessage `json:"items"`
-		Complete bool          `json:"complete"`
+		Complete bool           `json:"complete"`
 	}
 	env.decode(payload.Data, &out)
 	if !out.Complete || len(out.Items) != 2 {
@@ -55,7 +55,7 @@ func TestMessagingHistorySignalsIncompleteAtBound(t *testing.T) {
 	})
 	var out struct {
 		Items    []*wireMessage `json:"items"`
-		Complete bool          `json:"complete"`
+		Complete bool           `json:"complete"`
 	}
 	env.decode(payload.Data, &out)
 	if out.Complete || len(out.Items) != 200 {
