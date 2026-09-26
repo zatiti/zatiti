@@ -50,7 +50,9 @@ func (c *Controller) routeFor(operation contract.ID, op wireOperation, action wi
 		case ownerMemory:
 			return &route{Owner: ownerMemory, JobID: job.ID}
 		case ownerConnections:
-			return &route{Owner: ownerConnections, JobID: job.ID, Connection: action.Connection}
+			if job.Operation == "connection.validate" || job.Operation == "connection.discover" {
+				return &route{Owner: ownerConnections, JobID: job.ID, Connection: action.Connection, ProbeKind: job.Operation}
+			}
 		case configurationOwner:
 			if job.Operation == "execution_profile.qualify" && job.State == jobStatePending {
 				var params qualificationProbeParameters
@@ -166,11 +168,26 @@ func (c *Controller) deliver(ctx context.Context, sess *session, e *entry) {
 		})
 	case ownerConnections:
 		err = c.write(func() error {
-			return c.call(ctx, sess, "_connections.validation.record", validationRecordInput{
-				ConnectionID:    e.Route.Connection.ID,
-				ExpectedVersion: e.Route.Connection.Version,
-				Observation:     normalized,
-			}, nil)
+			input := connectionRecordInput{
+				OperationID: e.OperationID, AttemptID: e.AttemptID,
+				ConnectionID: e.Route.Connection.ID, ExpectedVersion: e.Route.Connection.Version,
+				Observation: normalized,
+			}
+			probeKind := e.Route.ProbeKind
+			if probeKind == "" {
+				// Before probe_kind was journaled, every connections callback
+				// was a validation callback. Keep those durable entries
+				// deliverable across upgrades.
+				probeKind = "connection.validate"
+			}
+			switch probeKind {
+			case "connection.validate":
+				return c.call(ctx, sess, "_connections.validation.record", validationRecordInput(input), nil)
+			case "connection.discover":
+				return c.call(ctx, sess, "_connections.discovery.record", discoveryRecordInput(input), nil)
+			default:
+				return internalFault("journal entry names unsupported connection callback %q", e.Route.ProbeKind)
+			}
 		})
 	case ownerQualification:
 		err = c.deliverQualification(ctx, sess, e, normalized)

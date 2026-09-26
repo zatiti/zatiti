@@ -412,20 +412,66 @@ func TestOutcomeDeliveryToOwners(t *testing.T) {
 			t.Fatalf("records %d claims %d; a network job waits on its effect and is not claimed", f.called("_memory.record"), f.called("_execution.job.claim"))
 		}
 	})
-	t.Run("connection probe", func(t *testing.T) {
-		f := newFx(t)
-		f.adapter("synthetic")
-		connection := contract.NewID()
-		op := contract.NewID()
-		f.exec(`INSERT INTO effects_operations (id, version, state, action, adapter) VALUES (?, 1, 'prepared', ?, 'synthetic')`,
-			string(op), string(f.action(nil, connection)))
-		f.job("connections", "connection.validate", op)
-		c, sess := f.started()
-		if err := f.pass(c, sess); err != nil {
-			t.Fatalf("tick: %v", err)
-		}
-		if got := f.queryString(`SELECT connection_id || ':' || expected_version || ':' || disposition FROM connections_validations`); got != string(connection)+":3:succeeded" {
-			t.Fatalf("validation record %s", got)
+	t.Run("connection validate and discover callbacks preserve effect identity", func(t *testing.T) {
+		for _, tc := range []struct {
+			operation string
+			callback  string
+			table     string
+		}{
+			{"connection.validate", "_connections.validation.record", "connections_validations"},
+			{"connection.discover", "_connections.discovery.record", "connections_discoveries"},
+		} {
+			t.Run(tc.operation, func(t *testing.T) {
+				f := newFx(t)
+				f.adapter("synthetic")
+				connection, op := contract.NewID(), contract.NewID()
+				f.exec(`INSERT INTO effects_operations (id, version, state, action, adapter) VALUES (?, 1, 'prepared', ?, 'synthetic')`,
+					string(op), string(f.action(nil, connection)))
+				job := f.job("connections", tc.operation, op)
+				c, sess := f.started()
+				if tc.operation == "connection.discover" {
+					f.arm(tc.callback, injection{loseAck: true})
+				}
+				if err := f.pass(c, sess); err != nil {
+					t.Fatalf("tick: %v", err)
+				}
+				if tc.operation == "connection.discover" {
+					// The owner commit survived its lost acknowledgement. Restart
+					// recovers the journaled callback and exercises exact replay.
+					f.restart()
+					c, sess = f.started()
+					for i := 0; i < 2; i++ {
+						if err := f.pass(c, sess); err != nil {
+							t.Fatalf("recovery tick: %v", err)
+						}
+					}
+				}
+				attempt := f.queryString(`SELECT id FROM effects_attempts WHERE operation_id = ?`, string(op))
+				query := `SELECT operation_id || ':' || attempt_id || ':' || connection_id || ':' || expected_version || ':' || disposition FROM ` + tc.table
+				want := string(op) + ":" + attempt + ":" + string(connection) + ":3:succeeded"
+				if got := f.queryString(query); got != want {
+					t.Fatalf("callback identity %s, want %s", got, want)
+				}
+				if got := f.queryInt(`SELECT COUNT(*) FROM ` + tc.table); got != 1 {
+					t.Fatalf("callback replay wrote %d rows, want 1", got)
+				}
+				if tc.operation == "connection.discover" && f.called(tc.callback) < 2 {
+					t.Fatalf("recovered callback was not redelivered: %d calls", f.called(tc.callback))
+				}
+				if tc.operation == "connection.validate" && f.called(tc.callback) != 1 {
+					t.Fatalf("validation callback calls %d", f.called(tc.callback))
+				}
+				otherCallback := "_connections.discovery.record"
+				if tc.operation == "connection.discover" {
+					otherCallback = "_connections.validation.record"
+				}
+				if got := f.called(otherCallback); got != 0 {
+					t.Fatalf("misrouted callback %s called %d times", otherCallback, got)
+				}
+				if f.jobState(job) != "pending" {
+					t.Fatalf("network callback unexpectedly claimed/finished linked job: %s", f.jobState(job))
+				}
+			})
 		}
 	})
 	t.Run("durable owner refusal is reported once and not retried", func(t *testing.T) {

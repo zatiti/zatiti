@@ -138,6 +138,10 @@ type route struct {
 	Provider      string      `json:"provider,omitempty"`
 	// Connection is the connection a probe validated.
 	Connection wireRef `json:"connection,omitempty"`
+	// ProbeKind selects the connections-owned callback for a persisted
+	// connection job. It is journaled with the operation and attempt so a
+	// recovered callback cannot be re-derived as a different operation.
+	ProbeKind string `json:"probe_kind,omitempty"`
 	// ProposalID names the WorkerTurn proposal (owner execution_proposal)
 	// this effect's outcome completes.
 	ProposalID string `json:"proposal_id,omitempty"`

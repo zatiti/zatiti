@@ -150,6 +150,24 @@ type validationRecordInput struct {
 	Observation     contract.Observation `json:"observation"`
 }
 
+type discoveryRecordInput struct {
+	OperationID     contract.ID          `json:"operation_id,omitempty"`
+	AttemptID       contract.ID          `json:"attempt_id,omitempty"`
+	ConnectionID    contract.ID          `json:"connection_id"`
+	ExpectedVersion int64                `json:"expected_version"`
+	Observation     contract.Observation `json:"observation"`
+}
+
+// connectionRecordInput is the common frozen payload for connection probe
+// callbacks; the concrete type determines the owner operation.
+type connectionRecordInput struct {
+	OperationID     contract.ID
+	AttemptID       contract.ID
+	ConnectionID    contract.ID
+	ExpectedVersion int64
+	Observation     contract.Observation
+}
+
 type artifactsPublishInput struct {
 	Scope          contract.Scope  `json:"scope"`
 	Digest         contract.Digest `json:"digest"`
