@@ -3,10 +3,16 @@
 import 'package:flutter/material.dart';
 
 import '../app/credential_store.dart';
+import '../app/installed_credential_capture.dart';
+import '../api/models.dart' as wire;
+import '../state/live_source.dart';
 import '../state/workspace_controller.dart';
 import '../state/workspace_source.dart';
 import 'theme.dart';
 import 'widgets.dart';
+import 'provider_model_editor.dart';
+import 'provider_connection_editor.dart';
+import 'provider_profile_setup.dart';
 
 /// Appearance follows the operating system unless the person chooses.
 class AppSettings extends ChangeNotifier {
@@ -57,11 +63,87 @@ class WorkspaceSettings extends StatefulWidget {
 class _WorkspaceSettingsState extends State<WorkspaceSettings> {
   final TextEditingController _credential = TextEditingController();
   String? _credentialStatus;
+  Future<List<wire.Connection>>? _connections;
+  Future<List<wire.ProviderDescriptor>>? _providers;
+  Future<List<wire.ExecutionProfile>>? _profiles;
+  String? _providerKeyStatus;
+  bool _capturingProviderKey = false;
 
   @override
   void initState() {
     super.initState();
     _describeStored();
+    _refreshConnections();
+    final source = widget.controller.source;
+    if (source is LiveWorkspaceSource && source.installedMac) {
+      _providers = source.api.modelProviders();
+      _profiles = source.api.executionProfiles();
+    }
+  }
+
+  void _refreshConnections() {
+    final source = widget.controller.source;
+    if (source is LiveWorkspaceSource && source.installedMac) {
+      _connections = source.api.connections();
+    }
+  }
+
+  Future<void> _captureProviderKey(wire.Connection connection) async {
+    final source = widget.controller.source;
+    if (source is! LiveWorkspaceSource ||
+        !source.installedMac ||
+        _capturingProviderKey) {
+      return;
+    }
+    setState(() {
+      _capturingProviderKey = true;
+      _providerKeyStatus = null;
+    });
+    String status;
+    try {
+      final result = await const InstalledCredentialCapture().capture(
+        installedMac: source.installedMac,
+        installationId: source.installationId,
+        connectionId: connection.id,
+      );
+      // A helper disposition is not proof that the provider is ready.
+      final current = await source.api.connectionGet(connection.id);
+      await widget.controller.reconnect();
+      _refreshConnections();
+      status = switch (result.status) {
+        CredentialCaptureStatus.completed
+            when current.validationState ==
+                wire.ConnectionValidationState.valid =>
+          'Provider connection validated.',
+        CredentialCaptureStatus.completed =>
+          'Key submitted. Provider connection is still ${current.validationState.name}.',
+        CredentialCaptureStatus.cancelled => 'Key entry cancelled.',
+        CredentialCaptureStatus.retryable =>
+          'Key entry could not finish. Please try again.',
+        CredentialCaptureStatus.repairRequired =>
+          'Credential helper needs repair before key entry can continue.',
+      };
+    } on Exception {
+      status = 'Key entry could not start. Check the local installation.';
+    }
+    if (mounted) {
+      setState(() {
+        _capturingProviderKey = false;
+        _providerKeyStatus = status;
+      });
+    }
+  }
+
+  Future<void> _addProvider() async {
+    final source = widget.controller.source;
+    if (source is! LiveWorkspaceSource || !source.installedMac) return;
+    final applied = await showProviderConnectionEditor(
+      context,
+      controller: widget.controller,
+    );
+    if (applied == true && mounted) {
+      setState(() => _connections = source.api.connections());
+    }
   }
 
   Future<void> _describeStored() async {
@@ -185,7 +267,176 @@ class _WorkspaceSettingsState extends State<WorkspaceSettings> {
                   'Demo data has no controller and no credential.',
                   style: text.bodySmall,
                 )
-              else ...[
+              else if (widget.credentials!.authorizationManaged) ...[
+                const Text(
+                  'This Mac keeps the owner credential in Keychain. Zatiti '
+                  'reads it when connecting to the local service.',
+                ),
+                if (_connections != null) ...[
+                  const SizedBox(height: Space.xl),
+                  const SectionLabel('Provider connections'),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: OutlinedButton.icon(
+                      key: const ValueKey('add-provider'),
+                      onPressed: _capturingProviderKey ? null : _addProvider,
+                      icon: const Icon(Icons.add),
+                      label: const Text('Add provider'),
+                    ),
+                  ),
+                  FutureBuilder<List<wire.Connection>>(
+                    future: _connections,
+                    builder: (context, snapshot) {
+                      if (snapshot.hasError) {
+                        return const Text('Connections could not be loaded.');
+                      }
+                      if (!snapshot.hasData) {
+                        return const Text('Loading connections…');
+                      }
+                      final connections = snapshot.data!;
+                      if (connections.isEmpty) {
+                        return const Text(
+                          'No provider connections are configured yet.',
+                        );
+                      }
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          for (final connection in connections)
+                            ListTile(
+                              contentPadding: EdgeInsets.zero,
+                              title: Text(connection.provider),
+                              subtitle: Text(
+                                '${connection.accountIdentity} · '
+                                '${connection.validationState.name}',
+                              ),
+                              trailing: TextButton(
+                                key: ValueKey(
+                                  'capture-provider-${connection.id}',
+                                ),
+                                onPressed: _capturingProviderKey
+                                    ? null
+                                    : () => _captureProviderKey(connection),
+                                child: const Text('Set API key'),
+                              ),
+                            ),
+                        ],
+                      );
+                    },
+                  ),
+                  if (_providerKeyStatus != null)
+                    Text(_providerKeyStatus!, style: text.bodySmall),
+                  const SizedBox(height: Space.xl),
+                  const SectionLabel('Provider and model profiles'),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: OutlinedButton.icon(
+                      key: const ValueKey('set-up-model-profile'),
+                      onPressed: () async {
+                        final source = widget.controller.source;
+                        final applied = await showProviderProfileSetup(
+                          context,
+                          controller: widget.controller,
+                          credentials: widget.credentials,
+                        );
+                        if (applied == true &&
+                            mounted &&
+                            source is LiveWorkspaceSource) {
+                          setState(
+                            () => _profiles = source.api.executionProfiles(),
+                          );
+                        }
+                      },
+                      icon: const Icon(Icons.auto_awesome),
+                      label: const Text('Set up a model'),
+                    ),
+                  ),
+                  const SizedBox(height: Space.sm),
+                  FutureBuilder<List<wire.ProviderDescriptor>>(
+                    future: _providers,
+                    builder: (context, snapshot) {
+                      if (snapshot.hasError) {
+                        return const Text(
+                          'Provider choices are unavailable from this controller.',
+                        );
+                      }
+                      if (!snapshot.hasData) {
+                        return const Text('Loading provider choices…');
+                      }
+                      final providers = snapshot.data!;
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          for (final provider in providers)
+                            ListTile(
+                              contentPadding: EdgeInsets.zero,
+                              title: Text(provider.displayName),
+                              subtitle: Text(
+                                '${provider.defaultEndpoint} · ${provider.sessionMode}',
+                              ),
+                            ),
+                        ],
+                      );
+                    },
+                  ),
+                  const SizedBox(height: Space.md),
+                  FutureBuilder<List<wire.ExecutionProfile>>(
+                    future: _profiles,
+                    builder: (context, snapshot) {
+                      if (snapshot.hasError) {
+                        return const Text(
+                          'Saved profiles could not be loaded.',
+                        );
+                      }
+                      if (!snapshot.hasData) {
+                        return const Text('Loading saved profiles…');
+                      }
+                      final profiles = snapshot.data!;
+                      if (profiles.isEmpty) {
+                        return const Text(
+                          'No controller-configured model profiles are available.',
+                        );
+                      }
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          for (final profile in profiles)
+                            ListTile(
+                              contentPadding: EdgeInsets.zero,
+                              title: Text(profile.model),
+                              subtitle: Text(
+                                '${profile.provider ?? 'Provider not reported'} · '
+                                '${profile.contextCapture} context capture · '
+                                'cost ${profile.costEnforcement ?? 'not reported'} · '
+                                '${profile.costBound.format()}',
+                              ),
+                            ),
+                          if (widget.controller.snapshot.installedChiefWorkerId
+                              case final workerId?)
+                            Align(
+                              alignment: Alignment.centerLeft,
+                              child: OutlinedButton.icon(
+                                key: const ValueKey(
+                                  'select-chief-model-profile',
+                                ),
+                                onPressed: () => showProviderModelEditor(
+                                  context,
+                                  controller: widget.controller,
+                                  workerId: workerId,
+                                  credentials: widget.credentials,
+                                ),
+                                icon: const Icon(Icons.tune),
+                                label: const Text(
+                                  'Choose model for personal chief',
+                                ),
+                              ),
+                            ),
+                        ],
+                      );
+                    },
+                  ),
+                ],
+              ] else ...[
                 Text(_credentialStatus ?? 'Checking…', style: text.bodySmall),
                 const SizedBox(height: Space.md),
                 Semantics(

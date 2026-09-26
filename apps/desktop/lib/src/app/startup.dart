@@ -1,6 +1,9 @@
-// Startup configuration. The connection profile comes from the environment;
-// secrets come from secure storage. The demo source is never the default in
-// a release build: it needs the explicit compile-time flag there.
+// Explicit development profiles come from the environment. An installed Mac
+// reads the controller's protected, nonsecret discovery record by default.
+
+import 'desktop_discovery.dart';
+import '../api/controller_api.dart';
+import '../transport/controller_client.dart';
 
 /// `--dart-define=ZATITI_DEMO=true` selects the labeled demo source.
 const bool demoFlag = bool.fromEnvironment('ZATITI_DEMO');
@@ -11,6 +14,8 @@ class ConnectionProfile {
     required this.installationId,
     this.socketPath,
     this.remoteUrl,
+    this.keychainService,
+    this.keychainAccount,
   });
 
   final String profile;
@@ -22,6 +27,12 @@ class ConnectionProfile {
 
   /// An explicitly configured remote controller, https only.
   final Uri? remoteUrl;
+
+  /// Nonsecret locator for the installed Mac owner's existing Keychain item.
+  final String? keychainService;
+  final String? keychainAccount;
+
+  bool get installed => keychainService != null;
 }
 
 sealed class StartupPlan {
@@ -40,9 +51,29 @@ final class StartDemo extends StartupPlan {
 /// Nothing is configured. The app explains what is missing and provides the
 /// setup path. [demoOffered] is true only outside release builds.
 final class NeedsConfiguration extends StartupPlan {
-  const NeedsConfiguration(this.missing, {required this.demoOffered});
+  const NeedsConfiguration(
+    this.missing, {
+    required this.demoOffered,
+    this.issue,
+  });
   final List<String> missing;
   final bool demoOffered;
+  final StartupIssue? issue;
+}
+
+enum StartupIssue {
+  missingDiscovery,
+  unreadableDiscovery,
+  malformedDiscovery,
+  unsafeDiscovery,
+  awaitingBootstrap,
+  missingCredential,
+  lockedKeychain,
+  refusedKeychain,
+  malformedCredential,
+  staleSocket,
+  identityMismatch,
+  authenticationFailed,
 }
 
 const envSocket = 'ZATITI_SOCKET';
@@ -105,3 +136,114 @@ StartupPlan resolveStartup({
     ),
   );
 }
+
+/// Resolves one installed launch. Any explicit endpoint/installation override
+/// keeps the existing advanced profile path and never mixes it with discovery.
+Future<StartupPlan> resolveStartupPlan({
+  required Map<String, String> environment,
+  required bool releaseMode,
+  required bool demoRequested,
+  required bool macOS,
+  DesktopDiscoveryReader? reader,
+}) async {
+  if (demoRequested ||
+      !macOS ||
+      [
+        envSocket,
+        envRemoteUrl,
+        envInstallation,
+      ].any((key) => environment[key]?.trim().isNotEmpty ?? false)) {
+    return resolveStartup(
+      environment: environment,
+      releaseMode: releaseMode,
+      demoRequested: demoRequested,
+    );
+  }
+  final DesktopDiscovery? discovery;
+  try {
+    discovery = await (reader ?? DesktopDiscoveryReader()).read();
+  } on DiscoveryException catch (e) {
+    final issue = switch (e.kind) {
+      DiscoveryFailure.unreadable => StartupIssue.unreadableDiscovery,
+      DiscoveryFailure.malformed => StartupIssue.malformedDiscovery,
+      DiscoveryFailure.unsafe => StartupIssue.unsafeDiscovery,
+    };
+    return NeedsConfiguration(
+      [_messageFor(issue)],
+      demoOffered: !releaseMode,
+      issue: issue,
+    );
+  }
+  if (discovery == null) {
+    return NeedsConfiguration(
+      [_messageFor(StartupIssue.missingDiscovery)],
+      demoOffered: !releaseMode,
+      issue: StartupIssue.missingDiscovery,
+    );
+  }
+  if (!discovery.initialized) {
+    return NeedsConfiguration(
+      [_messageFor(StartupIssue.awaitingBootstrap)],
+      demoOffered: !releaseMode,
+      issue: StartupIssue.awaitingBootstrap,
+    );
+  }
+  return StartLive(
+    ConnectionProfile(
+      profile: 'default',
+      installationId: discovery.installationId!,
+      socketPath: discovery.socketPath,
+      keychainService: discovery.keychainService,
+      keychainAccount: discovery.keychainAccount,
+    ),
+  );
+}
+
+NeedsConfiguration installedStartupFailure(
+  StartupIssue issue, {
+  required bool releaseMode,
+}) => NeedsConfiguration(
+  [_messageFor(issue)],
+  demoOffered: !releaseMode,
+  issue: issue,
+);
+
+/// Authenticated identity gate before any cached workspace state is opened.
+Future<StartupIssue?> verifyInstalledController(
+  ControllerClient client,
+  String expectedInstallationId,
+) async {
+  final status = await ControllerApi(client).installationStatus();
+  if (status.installationId != expectedInstallationId) {
+    return StartupIssue.identityMismatch;
+  }
+  if (!status.initialized) return StartupIssue.awaitingBootstrap;
+  return null;
+}
+
+String _messageFor(StartupIssue issue) => switch (issue) {
+  StartupIssue.missingDiscovery =>
+    'Zatiti’s local service has not published its connection yet.',
+  StartupIssue.unreadableDiscovery =>
+    'Zatiti cannot read its protected connection information.',
+  StartupIssue.malformedDiscovery =>
+    'Zatiti’s connection information is damaged or from an unsupported version.',
+  StartupIssue.unsafeDiscovery =>
+    'Zatiti’s connection information has unsafe permissions or location.',
+  StartupIssue.awaitingBootstrap =>
+    'The local service is ready for workspace setup.',
+  StartupIssue.missingCredential =>
+    'The owner credential is missing from Keychain. Repair the installation.',
+  StartupIssue.lockedKeychain =>
+    'Unlock your Mac Keychain, then reopen Zatiti.',
+  StartupIssue.refusedKeychain =>
+    'Keychain refused access to Zatiti’s owner credential.',
+  StartupIssue.malformedCredential =>
+    'The stored owner credential is damaged. Repair the installation.',
+  StartupIssue.staleSocket =>
+    'Zatiti’s local service is unavailable. Restart the service and retry.',
+  StartupIssue.identityMismatch =>
+    'The local service belongs to a different installation. Repair the connection.',
+  StartupIssue.authenticationFailed =>
+    'The local service refused the owner credential. Repair the installation.',
+};

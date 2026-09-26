@@ -203,6 +203,47 @@ CREATE INDEX configuration_export_jobs_install_idx
 	ON configuration_export_jobs (installation_id, resource_id);
 `
 
+// Revision 12 adds the immutable, secret-free provider profile and the exact
+// connection version used by new editable execution profiles. NULL preserves
+// legacy rows as readable but unresolved.
+const migrationV3 = `
+ALTER TABLE configuration_execution_profiles ADD COLUMN adapter_profile_json TEXT;
+ALTER TABLE configuration_execution_profiles ADD COLUMN connection_version INTEGER CHECK (connection_version IS NULL OR connection_version >= 1);
+CREATE TABLE configuration_execution_profile_versions (
+ id TEXT NOT NULL, version INTEGER NOT NULL CHECK (version >= 1), installation_id TEXT NOT NULL,
+ executor TEXT NOT NULL, model TEXT NOT NULL, connection_id TEXT NOT NULL, provider_destination TEXT NOT NULL,
+ capabilities_json TEXT NOT NULL, cost_bound_json TEXT NOT NULL, classification TEXT NOT NULL,
+ context_capture TEXT NOT NULL, adapter_profile_json TEXT, connection_version INTEGER,
+ state TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+ PRIMARY KEY (installation_id, id, version)
+);
+INSERT INTO configuration_execution_profile_versions
+ (id, version, installation_id, executor, model, connection_id, provider_destination, capabilities_json,
+  cost_bound_json, classification, context_capture, adapter_profile_json, connection_version, state, created_at, updated_at)
+ SELECT id, version, installation_id, executor, model, connection_id, provider_destination, capabilities_json,
+  cost_bound_json, classification, context_capture, adapter_profile_json, connection_version, state, created_at, updated_at
+ FROM configuration_execution_profiles;
+`
+
+const migrationV4 = `
+CREATE TABLE configuration_profile_qualifications (
+	qualification_id TEXT PRIMARY KEY,
+	installation_id TEXT NOT NULL,
+	scope_json TEXT NOT NULL,
+	candidate_json TEXT NOT NULL,
+	profile_digest TEXT NOT NULL,
+	state TEXT NOT NULL CHECK (state IN ('pending', 'succeeded', 'failed', 'outcome_unknown')),
+	effect_operation_id TEXT NOT NULL DEFAULT '',
+	job_id TEXT NOT NULL DEFAULT '',
+	job_version INTEGER NOT NULL DEFAULT 0,
+	result_json TEXT,
+	created_at TEXT NOT NULL,
+	updated_at TEXT NOT NULL
+);
+CREATE UNIQUE INDEX configuration_profile_qualifications_job_idx
+	ON configuration_profile_qualifications (job_id) WHERE job_id <> '';
+`
+
 // Migrations returns the owned migration set. Bodies are pinned by digest so
 // storage refuses any later byte change.
 func configurationMigrations() []contract.Migration {
@@ -216,6 +257,16 @@ func configurationMigrations() []contract.Migration {
 		Version: 2,
 		SQL:     migrationV2,
 		SHA256:  contract.Digest(hashHex(migrationV2)),
+	}, {
+		Owner:   "configuration",
+		Version: 3,
+		SQL:     migrationV3,
+		SHA256:  contract.Digest(hashHex(migrationV3)),
+	}, {
+		Owner:   "configuration",
+		Version: 4,
+		SQL:     migrationV4,
+		SHA256:  contract.Digest(hashHex(migrationV4)),
 	}}
 }
 

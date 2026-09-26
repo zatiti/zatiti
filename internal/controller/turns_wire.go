@@ -83,14 +83,17 @@ type wireWorkItem struct {
 }
 
 type wireContextPlan struct {
-	ID                    contract.ID    `json:"id"`
-	TurnID                contract.ID    `json:"turn_id"`
-	ExpectedVersion       int64          `json:"expected_version"`
-	Generation            int64          `json:"generation"`
-	Refs                  []wireArtifact `json:"refs"`
-	ConfigurationRevision int64          `json:"configuration_revision"`
-	ByteBound             int64          `json:"byte_bound"`
-	TokenBound            int64          `json:"token_bound"`
+	ID                    contract.ID     `json:"id"`
+	TurnID                contract.ID     `json:"turn_id"`
+	ExpectedVersion       int64           `json:"expected_version"`
+	Generation            int64           `json:"generation"`
+	Scope                 contract.Scope  `json:"scope"`
+	AttemptID             contract.ID     `json:"attempt_id,omitempty"`
+	Refs                  []wireArtifact  `json:"refs"`
+	ConfigurationRevision int64           `json:"configuration_revision"`
+	ByteBound             int64           `json:"byte_bound"`
+	TokenBound            int64           `json:"token_bound"`
+	Recipe                json.RawMessage `json:"recipe"`
 }
 
 // wireCallbackRoute mirrors $defs/CallbackRoute: kind plus whichever of
@@ -176,6 +179,13 @@ type contextCommitInput struct {
 	ExpectedVersion int64               `json:"expected_version"`
 	Generation      int64               `json:"generation"`
 	StagedContext   wireArtifactLocator `json:"staged_context"`
+}
+
+type turnObservationInput struct {
+	TurnID      contract.ID          `json:"turn_id"`
+	StepIndex   int64                `json:"step_index"`
+	OperationID contract.ID          `json:"operation_id"`
+	Observation contract.Observation `json:"observation"`
 }
 
 type proposalPrepareInput struct {

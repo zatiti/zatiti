@@ -108,6 +108,8 @@ type wireExecutionProfile struct {
 	CostBound           wireMoney        `json:"cost_bound"`
 	Classification      string           `json:"classification"`
 	ContextCapture      string           `json:"context_capture"`
+	ConnectionVersion   contract.Version `json:"connection_version,omitempty"`
+	AdapterProfile      json.RawMessage  `json:"adapter_profile,omitempty"`
 }
 
 type wireWorker struct {
@@ -380,10 +382,13 @@ type wireContextPlan struct {
 	TurnID                contract.ID       `json:"turn_id"`
 	ExpectedVersion       contract.Version  `json:"expected_version"`
 	Generation            int64             `json:"generation"`
+	Scope                 contract.Scope    `json:"scope"`
+	AttemptID             contract.ID       `json:"attempt_id,omitempty"`
 	Refs                  []wireArtifactRef `json:"refs"`
 	ConfigurationRevision contract.Version  `json:"configuration_revision"`
 	ByteBound             int64             `json:"byte_bound"`
 	TokenBound            int64             `json:"token_bound"`
+	Recipe                json.RawMessage   `json:"recipe"`
 }
 
 // wireWorkItem mirrors WorkItem.
@@ -468,21 +473,28 @@ func proposalOut(p *proposalRow) wireProposalRecord {
 }
 
 // contextPlanOut renders a context plan row as its wire shape.
-func contextPlanOut(p *contextPlanRow) wireContextPlan {
+func contextPlanOut(p *contextPlanRow) (wireContextPlan, error) {
+	recipe, err := json.Marshal(p.Recipe)
+	if err != nil {
+		return wireContextPlan{}, err
+	}
 	out := wireContextPlan{
 		TurnID:                p.TurnID,
 		ExpectedVersion:       p.ExpectedVersion,
 		Generation:            p.Generation,
+		Scope:                 p.Recipe.Scope,
+		AttemptID:             p.Recipe.AttemptID,
 		Refs:                  p.Refs,
 		ConfigurationRevision: p.ConfigurationRevision,
 		ByteBound:             p.ByteBound,
 		TokenBound:            p.TokenBound,
+		Recipe:                recipe,
 	}
 	out.ID = p.ID
 	if out.Refs == nil {
 		out.Refs = []wireArtifactRef{}
 	}
-	return out
+	return out, nil
 }
 
 // workItemOut renders one turn as a work item of the given kind.

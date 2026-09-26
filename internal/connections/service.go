@@ -43,6 +43,8 @@ var opMetas = []opMeta{
 		expectedVersion: true, callers: []string{"effects", "controller"}},
 
 	// connection.*
+	{id: "model.provider.list", visibility: "public", mode: "query", effect: "local",
+		cli: "model provider list"},
 	{id: "connection.archive", visibility: "public", mode: "mutation", effect: "local",
 		submission: true, expectedVersion: true, cli: "connection archive"},
 	{id: "connection.create", visibility: "public", mode: "mutation", effect: "local",
@@ -215,6 +217,7 @@ var handlers = map[string]handlerFunc{
 	"connection.tools":          handleToolsList,
 	"connection.update":         handleUpdate,
 	"connection.validate":       handleValidatePublic,
+	"model.provider.list":       handleModelProviderList,
 
 	"tool.bind":   handleToolBind,
 	"tool.get":    handleToolGet,

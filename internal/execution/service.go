@@ -36,6 +36,7 @@ const (
 	opTick              = "_execution.tick"
 	opVerificationRec   = "_execution.verification.record"
 	opTurnAdmit         = "_execution.turn.admit"
+	opTurnObservation   = "_execution.turn.observation"
 	opWorkPending       = "_execution.work.pending"
 	opWorkClaim         = "_execution.work.claim"
 	opContextPrepare    = "_execution.context.prepare"
@@ -63,15 +64,16 @@ const (
 	opWorkerPause       = "worker.pause"
 	opWorkerResume      = "worker.resume"
 
-	peerConfigSnapshot     = "_configuration.snapshot"
-	peerAccountReserve     = "_accounting.reserve"
-	peerAccountSettle      = "_accounting.settle"
-	peerArtifactsMeta      = "_artifacts.metadata"
-	peerEffectsPrepare     = "_effects.prepare"
-	peerTasksReady         = "_tasks.ready"
-	peerTasksSnapshot      = "_tasks.snapshot"
-	peerTasksTransit       = "_tasks.transition"
-	peerMessagingProcessed = "_messaging.processed"
+	peerConfigSnapshot       = "_configuration.snapshot"
+	peerConfigProfileResolve = "_configuration.execution_profile.resolve"
+	peerAccountReserve       = "_accounting.reserve"
+	peerAccountSettle        = "_accounting.settle"
+	peerArtifactsMeta        = "_artifacts.metadata"
+	peerEffectsPrepare       = "_effects.prepare"
+	peerTasksReady           = "_tasks.ready"
+	peerTasksSnapshot        = "_tasks.snapshot"
+	peerTasksTransit         = "_tasks.transition"
+	peerMessagingProcessed   = "_messaging.processed"
 
 	// P18: driving independent verification to a bound task success
 	// transition publishes the sealed verification request as a real
@@ -84,6 +86,7 @@ const (
 	// memory's authorized bindings and connections' validated tool/
 	// connection resolution.
 	peerMessagingPending       = "_messaging.pending"
+	peerMessagingHistory       = "_messaging.history"
 	peerMemorySelect           = "_memory.select"
 	peerConnectionsResolve     = "_connections.resolve"
 	peerConnectionsToolResolve = "_connections.tool.resolve"
@@ -134,6 +137,8 @@ var opMetas = []opMeta{
 
 	{id: opTurnAdmit, visibility: "internal", mode: "mutation",
 		callers: []string{"controller", "scheduling"}},
+	{id: opTurnObservation, visibility: "internal", mode: "mutation",
+		callers: []string{"controller"}},
 	{id: opWorkPending, visibility: "internal", mode: "query",
 		callers: []string{"controller"}},
 	{id: opWorkClaim, visibility: "internal", mode: "mutation", expected: true,
@@ -195,6 +200,7 @@ type Service struct {
 
 // Compile-time proof that *Service implements the shared Module contract.
 var _ contract.Module = (*Service)(nil)
+var _ contract.ContextPerformer = (*Service)(nil)
 
 // New constructs the execution owner. It never queries peers, touches
 // storage or starts goroutines; all runtime coupling arrives through deps.
@@ -328,6 +334,8 @@ func (s *Service) bindHandler(d contract.Descriptor) (contract.Handler, error) {
 		return bind(d, s.handleVerificationRecord)
 	case opTurnAdmit:
 		return bind(d, s.handleTurnAdmit)
+	case opTurnObservation:
+		return bind(d, s.handleTurnObservation)
 	case opWorkPending:
 		return bind(d, s.handleWorkPending)
 	case opWorkClaim:

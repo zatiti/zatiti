@@ -856,8 +856,24 @@ func (f *fx) validationRecord(ctx context.Context, u contract.Unit, input json.R
 	if err := decode(input, &in); err != nil {
 		return nil, err
 	}
-	_, err := u.ExecContext(ctx, `INSERT INTO connections_validations (connection_id, expected_version, disposition) VALUES (?, ?, ?)`,
-		string(in.ConnectionID), in.ExpectedVersion, in.Observation.Disposition)
+	_, err := u.ExecContext(ctx, `INSERT INTO connections_validations (connection_id, expected_version, disposition, operation_id, attempt_id) VALUES (?, ?, ?, ?, ?)
+		ON CONFLICT(operation_id, attempt_id) DO NOTHING`,
+		string(in.ConnectionID), in.ExpectedVersion, in.Observation.Disposition, string(in.OperationID), string(in.AttemptID))
+	return map[string]any{"resource": map[string]any{
+		"id": in.ConnectionID, "version": in.ExpectedVersion + 1, "scope": f.scope(), "provider": "synthetic",
+		"account_identity": "synthetic-account", "credential_ref": "secret-ref-synthetic",
+		"destinations": []string{}, "allowed_scopes": []string{}, "validation_state": "valid",
+	}}, err
+}
+
+func (f *fx) discoveryRecord(ctx context.Context, u contract.Unit, input json.RawMessage) (any, error) {
+	var in discoveryRecordInput
+	if err := decode(input, &in); err != nil {
+		return nil, err
+	}
+	_, err := u.ExecContext(ctx, `INSERT INTO connections_discoveries (connection_id, expected_version, disposition, operation_id, attempt_id) VALUES (?, ?, ?, ?, ?)
+		ON CONFLICT(operation_id, attempt_id) DO NOTHING`,
+		string(in.ConnectionID), in.ExpectedVersion, in.Observation.Disposition, string(in.OperationID), string(in.AttemptID))
 	return map[string]any{"resource": map[string]any{
 		"id": in.ConnectionID, "version": in.ExpectedVersion + 1, "scope": f.scope(), "provider": "synthetic",
 		"account_identity": "synthetic-account", "credential_ref": "secret-ref-synthetic",

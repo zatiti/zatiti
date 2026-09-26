@@ -19,6 +19,8 @@ const (
 	// (P16 interpretExternalTool), not a fresh model step, and the owner's
 	// turn/proposal record -- not an attempt -- is what advances.
 	ownerExecutionProposal = "execution_proposal"
+	ownerExecutionTurn     = "execution_turn"
+	ownerQualification     = "configuration_qualification"
 )
 
 // stagedOutput mirrors the adapter StagedOutput handoff: bytes an adapter
@@ -48,7 +50,17 @@ func (c *Controller) routeFor(operation contract.ID, op wireOperation, action wi
 		case ownerMemory:
 			return &route{Owner: ownerMemory, JobID: job.ID}
 		case ownerConnections:
-			return &route{Owner: ownerConnections, JobID: job.ID, Connection: action.Connection, ProbeKind: job.Operation}
+			if job.Operation == "connection.validate" || job.Operation == "connection.discover" {
+				return &route{Owner: ownerConnections, JobID: job.ID, Connection: action.Connection, ProbeKind: job.Operation}
+			}
+		case configurationOwner:
+			if job.Operation == "execution_profile.qualify" && job.State == jobStatePending {
+				var params qualificationProbeParameters
+				if json.Unmarshal(action.Parameters, &params) == nil &&
+					params.ProfileDigest != "" && params.Provider != "" {
+					return &route{Owner: ownerQualification, JobID: job.ID, JobVersion: job.Version, ProfileDigest: params.ProfileDigest, Provider: params.Provider}
+				}
+			}
 		}
 	}
 	if len(op.CallbackRoute) > 0 {
@@ -88,7 +100,15 @@ func (c *Controller) routeWorkerTurn(operation contract.ID, cb wireCallbackRoute
 		return &route{Owner: ownerExecutionProposal, ProposalID: ref.ProposalID}
 	}
 	if attemptID, ok := c.turnAttempts[cb.TurnID]; ok {
-		return &route{Owner: ownerExecution, AttemptID: attemptID}
+		info := c.turnInfos[cb.TurnID]
+		step := info.StepIndex
+		if cb.StepIndex != nil {
+			step = *cb.StepIndex
+		}
+		return &route{Owner: ownerExecution, AttemptID: attemptID, TurnID: cb.TurnID, StepIndex: step}
+	}
+	if _, ok := c.turnInfos[cb.TurnID]; ok && cb.StepIndex != nil {
+		return &route{Owner: ownerExecutionTurn, TurnID: cb.TurnID, StepIndex: *cb.StepIndex}
 	}
 	return nil
 }
@@ -119,6 +139,16 @@ func (c *Controller) deliver(ctx context.Context, sess *session, e *entry) {
 		if err == nil {
 			c.observeTurnDelivery(ctx, sess, e, normalized)
 		}
+	case ownerExecutionTurn:
+		err = c.write(func() error {
+			return c.call(ctx, sess, "_execution.turn.observation", turnObservationInput{
+				TurnID: e.Route.TurnID, StepIndex: e.Route.StepIndex,
+				OperationID: e.OperationID, Observation: normalized,
+			}, nil)
+		})
+		if err == nil {
+			c.observeTurnDelivery(ctx, sess, e, normalized)
+		}
 	case ownerExecutionProposal:
 		c.turnsMu.Lock()
 		expected := c.turnProposals[e.OperationID].ExpectedVersion
@@ -138,17 +168,29 @@ func (c *Controller) deliver(ctx context.Context, sess *session, e *entry) {
 		})
 	case ownerConnections:
 		err = c.write(func() error {
-			operation := "_connections.validation.record"
-			if e.Route.ProbeKind == "connection.discover" {
-				operation = "_connections.discovery.record"
-			}
-			return c.call(ctx, sess, operation, validationRecordInput{
+			input := connectionRecordInput{
 				OperationID: e.OperationID, AttemptID: e.AttemptID,
-				ConnectionID:    e.Route.Connection.ID,
-				ExpectedVersion: e.Route.Connection.Version,
-				Observation:     normalized,
-			}, nil)
+				ConnectionID: e.Route.Connection.ID, ExpectedVersion: e.Route.Connection.Version,
+				Observation: normalized,
+			}
+			probeKind := e.Route.ProbeKind
+			if probeKind == "" {
+				// Before probe_kind was journaled, every connections callback
+				// was a validation callback. Keep those durable entries
+				// deliverable across upgrades.
+				probeKind = "connection.validate"
+			}
+			switch probeKind {
+			case "connection.validate":
+				return c.call(ctx, sess, "_connections.validation.record", validationRecordInput(input), nil)
+			case "connection.discover":
+				return c.call(ctx, sess, "_connections.discovery.record", discoveryRecordInput(input), nil)
+			default:
+				return internalFault("journal entry names unsupported connection callback %q", e.Route.ProbeKind)
+			}
 		})
+	case ownerQualification:
+		err = c.deliverQualification(ctx, sess, e, normalized)
 	default:
 		err = internalFault("journal entry names unknown callback owner %q", e.Route.Owner)
 	}

@@ -68,6 +68,19 @@ func (e *testEnv) installProductToolBinding(workerID contract.ID, profile *wireE
 	return toolID, inputSchema
 }
 
+// businessEffectsPrepared counts model-proposed external effects only; the
+// synthetic Responses dispatch that obtains each model observation is part
+// of turn execution and must not be mistaken for a tool proposal.
+func (e *testEnv) businessEffectsPrepared() int {
+	count := 0
+	for _, call := range e.ports.EffectsPrepared() {
+		if call.ActionKind() != "model_step" && call.ActionKind() != "prepare_session" {
+			count++
+		}
+	}
+	return count
+}
+
 // sealedToolID recomputes one sealed local decision tool's deterministic
 // id, exactly as context_build.go's localDecisionTools/interpret.go's
 // localDecisionToolID do.
@@ -121,6 +134,7 @@ func newTurnFixture(t *testing.T) *turnFixture {
 	worker := e.ids.New()
 	profile := fixtureHostedProfile(worker)
 	e.installWorkerSnapshot(worker, profile)
+	e.installModelToolBinding(worker, profile)
 	localToolID, localSchema := e.installProductToolBinding(worker, profile, "org-task-management", "local")
 	httpToolID, httpSchema := e.installProductToolBinding(worker, profile, "http-read", "external_read")
 
@@ -247,7 +261,7 @@ func TestModelResponseSequenceReachesRealDomainOwnersWithOneFinalReport(t *testi
 		mustMarshal(t, map[string]string{"value": "https://example.invalid/doc"}), ctx2)
 	f.deliver(t, buildModelOutput(t, ctx2, []wireModelToolProposal{call2}))
 
-	if got := len(e.ports.PreparedOps()); got != 1 {
+	if got := e.businessEffectsPrepared(); got != 1 {
 		t.Fatalf("_effects.prepare called %d times after the HTTP read proposal, want exactly 1", got)
 	}
 	turnAfterStep2 := e.readTurn(f.turnID)
@@ -313,8 +327,8 @@ func TestModelResponseSequenceReachesRealDomainOwnersWithOneFinalReport(t *testi
 			Usage: wireUsage{Currency: "USD"},
 		},
 	}, contract.CodeConflict)
-	if len(e.ports.PreparedOps()) != 1 {
-		t.Fatalf("replay after the final report prepared %d effects, want the original 1 unchanged", len(e.ports.PreparedOps()))
+	if e.businessEffectsPrepared() != 1 {
+		t.Fatalf("replay after the final report prepared %d effects, want the original 1 unchanged", e.businessEffectsPrepared())
 	}
 	stillReporting := e.readTurn(f.turnID)
 	if stillReporting.StepsUsed != 3 {
@@ -356,8 +370,8 @@ func TestModelResponseAttackShapesProduceZeroEffects(t *testing.T) {
 		if got := e.countProposalsForTest(f.turnID); got != 1 {
 			t.Fatalf("proposal rows after replay: %d, want exactly 1 (no duplicate row)", got)
 		}
-		if len(e.ports.prepared) != 0 {
-			t.Fatalf("replay prepared %d effects, want 0 (the local operation is never effects-routed)", len(e.ports.prepared))
+		if e.businessEffectsPrepared() != 0 {
+			t.Fatalf("replay prepared %d effects, want 0 (the local operation is never effects-routed)", e.businessEffectsPrepared())
 		}
 	})
 
@@ -407,7 +421,7 @@ func TestModelResponseAttackShapesProduceZeroEffects(t *testing.T) {
 		if np.Kind != "refused" || np.RefusalCode != refusalUnauthorizedTool {
 			t.Fatalf("escalation interpreted as %+v, want refused/%s", np, refusalUnauthorizedTool)
 		}
-		if got := len(e.ports.prepared); got != 1 {
+		if got := e.businessEffectsPrepared(); got != 1 {
 			t.Fatalf("effects prepared %d, want exactly 1 (only the legitimate HTTP read, never the escalation)", got)
 		}
 	})
@@ -443,8 +457,8 @@ func TestModelResponseAttackShapesProduceZeroEffects(t *testing.T) {
 		// No caller ever performed the outside-unit WorkerOperator call in
 		// this sub-test: proving the fabricated explanation alone produced
 		// zero effects requires that nothing besides interpretation ran.
-		if len(e.ports.prepared) != 0 {
-			t.Fatalf("prepared %d effects from a still-prepared local operation, want 0", len(e.ports.prepared))
+		if e.businessEffectsPrepared() != 0 {
+			t.Fatalf("prepared %d effects from a still-prepared local operation, want 0", e.businessEffectsPrepared())
 		}
 		if got := e.readTurn(f.turnID).State; got != "proposal_pending" {
 			t.Fatalf("turn state %q, want proposal_pending: the operation is staged, never fabricated as already-approved and complete", got)
@@ -474,8 +488,8 @@ func TestModelResponseAttackShapesProduceZeroEffects(t *testing.T) {
 		if np.Kind != "refused" || np.RefusalCode != refusalUnauthorizedTool {
 			t.Fatalf("interpretation %+v, want refused/%s", np, refusalUnauthorizedTool)
 		}
-		if len(e.ports.prepared) != 0 {
-			t.Fatalf("forged connection prepared %d effects, want 0", len(e.ports.prepared))
+		if e.businessEffectsPrepared() != 0 {
+			t.Fatalf("forged connection prepared %d effects, want 0", e.businessEffectsPrepared())
 		}
 	})
 }

@@ -5,8 +5,8 @@ package serenity
 // source is unqualified and is refused.
 const (
 	pinnedModule   = "github.com/sirerun/serenity"
-	pinnedCommit   = "f5a5154e1c4d808e10b495fca3bd50d842f0aa92"
-	pinnedDescribe = "v0.1.1-240-gf5a5154"
+	pinnedCommit   = "b4febdf7bbc0d3c33f9939c79099dc64cce89e84"
+	pinnedDescribe = "v0.1.10-hosted-candidate"
 
 	// pinnedProtocolRevision names the served memory protocol and its only
 	// transports' protocol: MEMORY_VERBS v1 over MCP 2025-11-25.
@@ -27,8 +27,9 @@ const (
 	kindExportRevision = "export_revision"
 )
 
-// Named upstream gaps. Each is a row of PROTOCOL.md's capability table; the
-// names are stable so a refusal can be matched to the requirement it blocks.
+// Named upstream gaps are unmet parts of Zatiti's frozen contract, even
+// where HEAD supplies a narrower related tool. They remain stable so a
+// refusal can be matched to the requirement it blocks.
 const (
 	gapSingleRequestCallPath  = "single_request_call_path"
 	gapUUIDClaimIdentity      = "uuid_claim_identity"
@@ -56,8 +57,8 @@ type operationCapability struct {
 	// Supported is true only when the pinned upstream provides everything
 	// the frozen action and evidence schemas need for this kind.
 	Supported bool `json:"supported"`
-	// UpstreamVerb is the closest MEMORY_VERBS v1 tool, or empty when the
-	// pinned upstream has no related call at all.
+	// UpstreamVerb is the closest MEMORY_VERBS tool or additive extension,
+	// or empty when the pinned upstream has no related call at all.
 	UpstreamVerb string `json:"upstream_verb,omitempty"`
 	// Missing names the upstream gaps that block this kind.
 	Missing []string `json:"missing"`
@@ -74,8 +75,8 @@ func pinnedOperations() []operationCapability {
 			gapMinimumFreshness, gapCostBound, gapDisclosureDestinations}},
 		{Kind: kindRemember, UpstreamVerb: "remember", Missing: []string{
 			gapSingleRequestCallPath, gapUUIDClaimIdentity, gapClaimConfidenceFresh,
-			gapCommandIdentity, gapCommandStatusLookup, gapIdempotentReplay}},
-		{Kind: kindInspect, Missing: []string{
+			gapCommandStatusLookup}},
+		{Kind: kindInspect, UpstreamVerb: "read_memory_fact", Missing: []string{
 			gapSingleRequestCallPath, gapFetchClaimByID, gapUUIDClaimIdentity,
 			gapClaimConfidenceFresh, gapMinimumFreshness}},
 		{Kind: kindPromote, Missing: []string{

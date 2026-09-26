@@ -1,13 +1,18 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -93,12 +98,8 @@ func TestMintHelperReceiptVerifiesAgainstConnectionsAlgorithm(t *testing.T) {
 	}
 }
 
-// TestEnsureHelperReceiptKeyMintsAndReusesWithinOneInvocation proves
-// ensureHelperReceiptKey returns a stored key when one already resolves,
-// and otherwise mints a fresh 32-byte key usable for signing within this
-// same invocation (see the KNOWN GAP documented in helper.go: a *later*,
-// separate Get(helperReceiptKeyRef) is not guaranteed to find what Put
-// stored, so this test pins only what this package can actually promise).
+// TestEnsureHelperReceiptKeyMintsAndReusesWithinOneInvocation proves the
+// signer reuses a durable key even when its name differs from its opaque ref.
 func TestEnsureHelperReceiptKeyMintsAndReusesWithinOneInvocation(t *testing.T) {
 	secrets := newFakeSecretStore()
 	key1, err := ensureHelperReceiptKey(context.Background(), secrets)
@@ -108,16 +109,26 @@ func TestEnsureHelperReceiptKeyMintsAndReusesWithinOneInvocation(t *testing.T) {
 	if len(key1) != helperReceiptKeyBytes {
 		t.Fatalf("minted key is %d bytes, want %d", len(key1), helperReceiptKeyBytes)
 	}
-	// fakeSecretStore.Put is identity-preserving (like internal/connections'
-	// own test fake), so a second call against the SAME fake finds it again
-	// -- confirming ensureHelperReceiptKey's "read first" branch works when
-	// the backend's reference semantics cooperate.
+	if ref, err := secrets.Lookup(context.Background(), helperReceiptKeyRef); err != nil || ref == helperReceiptKeyRef {
+		t.Fatalf("expected an opaque receipt key reference, got %q, %v", ref, err)
+	}
 	key2, err := ensureHelperReceiptKey(context.Background(), secrets)
 	if err != nil {
 		t.Fatalf("ensureHelperReceiptKey (second call): %v", err)
 	}
 	if string(key1) != string(key2) {
 		t.Fatal("ensureHelperReceiptKey minted a second key instead of reusing the stored one")
+	}
+}
+
+func TestEnsureHelperReceiptKeyFailsClosedWhenStoreUnavailable(t *testing.T) {
+	secrets := newFakeSecretStore()
+	secrets.lookupErr = &contract.Fault{Code: contract.CodeControllerUnavailable}
+	if _, err := ensureHelperReceiptKey(context.Background(), secrets); err == nil {
+		t.Fatal("unavailable store must not mint an unpersisted signing key")
+	}
+	if len(secrets.store) != 0 {
+		t.Fatal("unavailable store must not write a replacement signing key")
 	}
 }
 
@@ -141,22 +152,47 @@ func TestRunConnectionHelperNeverPrintsTheCredential(t *testing.T) {
 	expiresAt := time.Now().UTC().Add(30 * time.Minute).Truncate(time.Second)
 
 	var completeInput map[string]any
+	completed := false
+	credentialRef := ""
 	op := &fakeOperator{fn: func(_ context.Context, operation string, req contract.Request) (contract.Result, error) {
 		switch operation {
 		case "connection.get":
 			return contract.Result{Payload: contract.Payload{Status: contract.StatusCompleted,
-				Data: mustJSON(t, map[string]any{"resource": map[string]any{"version": 1, "account_identity": "acct-1"}}),
+				Data: mustJSON(t, map[string]any{"resource": map[string]any{"version": 1, "account_identity": "acct-1", "credential_ref": credentialRef}}),
 			}}, nil
+		case "command.get":
+			return contract.Result{Payload: contract.Payload{Status: contract.StatusFailed, Error: &contract.Fault{Code: contract.CodeNotFound}}}, nil
 		case "connection.setup.begin":
+			if req.SubmissionKey == "" {
+				t.Fatal("setup.begin has no submission key")
+			}
 			return contract.Result{Payload: contract.Payload{Status: contract.StatusCompleted,
 				Data: mustJSON(t, map[string]any{"resource": map[string]any{
 					"id": challengeID, "version": 1, "expires_at": expiresAt.Format(time.RFC3339),
 				}}),
 			}}, nil
+		case "connection.setup.status":
+			state := "external_action_required"
+			if completed {
+				state = "completed"
+			}
+			return contract.Result{Payload: contract.Payload{Status: contract.StatusCompleted,
+				Data: mustJSON(t, map[string]any{"resource": map[string]any{"id": challengeID, "version": 1, "connection_id": connectionID, "state": state, "expires_at": expiresAt.Format(time.RFC3339)}}),
+			}}, nil
 		case "connection.setup.complete":
+			if req.SubmissionKey == "" {
+				t.Fatal("setup.complete has no submission key")
+			}
 			if err := json.Unmarshal(req.Input, &completeInput); err != nil {
 				t.Fatalf("decoding connection.setup.complete input: %v", err)
 			}
+			rest := strings.TrimPrefix(completeInput["helper_ref"].(string), helperReceiptPrefix)
+			body, _, _ := strings.Cut(rest, ".")
+			payloadBytes, _ := base64.RawURLEncoding.DecodeString(body)
+			var payload helperPayload
+			_ = json.Unmarshal(payloadBytes, &payload)
+			credentialRef = payload.CredentialRef
+			completed = true
 			return contract.Result{Payload: contract.Payload{Status: contract.StatusCompleted,
 				Data: mustJSON(t, map[string]any{"resource": map[string]any{"id": connectionID}}),
 			}}, nil
@@ -237,21 +273,377 @@ func TestRunConnectionHelperNeverPrintsTheCredential(t *testing.T) {
 	}
 }
 
-// fakeSecretStore is a minimal in-memory contract.SecretStore whose Put is
-// identity-preserving (returns its own reference argument unchanged) --
-// the same convention internal/connections/helpers_test.go's own fake
-// uses, and the one internal/connections' production code actually
-// assumes (see helper.go's KNOWN GAP doc comment: the real platform
-// backends do NOT preserve identity, which is exactly the gap).
-type fakeSecretStore struct {
-	store map[string][]byte
+func TestReadSecretLineEnforcesUTF8ByteLimit(t *testing.T) {
+	for _, tc := range []struct {
+		name, input string
+		valid       bool
+	}{
+		{"exact bound", strings.Repeat("x", 4096) + "\n", true},
+		{"over bound", strings.Repeat("x", 4097) + "\n", false},
+		{"multibyte over bound", strings.Repeat("é", 2049) + "\n", false},
+		{"invalid utf8", string([]byte{0xff, '\n'}), false},
+		{"empty", "\n", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := readSecretLine(strings.NewReader(tc.input))
+			if (err == nil) != tc.valid {
+				t.Fatalf("valid=%t, error=%v", tc.valid, err)
+			}
+			if tc.valid && len(got) != 4096 {
+				t.Fatalf("got %d bytes", len(got))
+			}
+		})
+	}
 }
 
-func newFakeSecretStore() *fakeSecretStore { return &fakeSecretStore{store: map[string][]byte{}} }
+func TestHelperIntentRejectsSymlinkAndPermissiveFile(t *testing.T) {
+	store, err := newHelperIntentStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := string(contract.NewID())
+	path := filepath.Join(store.dir, id+".json")
+	if err := os.Symlink(filepath.Join(t.TempDir(), "outside"), path); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.read(id); err == nil {
+		t.Fatal("symlinked intent accepted")
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.read(id); err == nil {
+		t.Fatal("permissive intent accepted")
+	}
+}
 
-func (s *fakeSecretStore) Put(_ context.Context, reference string, secret []byte) (string, error) {
-	s.store[reference] = append([]byte(nil), secret...)
-	return reference, nil
+func TestHelperBeginIntentIsBoundBeforeAmbiguousDispatch(t *testing.T) {
+	root := t.TempDir()
+	store, err := newHelperIntentStore(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	installationID, connectionID := contract.NewID(), contract.NewID()
+	beginCalls := 0
+	op := &fakeOperator{fn: func(_ context.Context, operation string, req contract.Request) (contract.Result, error) {
+		switch operation {
+		case "connection.get":
+			return contract.Result{Payload: contract.Payload{Status: contract.StatusCompleted, Data: mustJSON(t, map[string]any{"resource": map[string]any{"version": 1, "account_identity": "acct"}})}}, nil
+		case "command.get":
+			return contract.Result{Payload: contract.Payload{Status: contract.StatusFailed, Error: &contract.Fault{Code: contract.CodeNotFound}}}, nil
+		case "connection.setup.begin":
+			beginCalls++
+			intent, err := store.read(string(connectionID))
+			if err != nil || intent == nil {
+				t.Fatalf("intent before begin: %+v %v", intent, err)
+			}
+			if got := helperMutationDigest(operation, req.SubmissionKey, req.Input); got != intent.BeginRequestSHA256 {
+				t.Fatal("begin request was not durably bound before dispatch")
+			}
+			return contract.Result{}, errors.New("response lost")
+		default:
+			t.Fatalf("unexpected %s", operation)
+			return contract.Result{}, nil
+		}
+	}}
+	if _, _, _, err := helperPrepareLocked(context.Background(), store, op, newFakeSecretStore(), installationID, connectionID); err == nil {
+		t.Fatal("ambiguous begin claimed success")
+	}
+	intent, err := store.read(string(connectionID))
+	if err != nil || intent == nil {
+		t.Fatalf("read pending: %+v %v", intent, err)
+	}
+	intent.ConnectionVersion++
+	if err := store.write(*intent); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, err := helperPrepareLocked(context.Background(), store, op, newFakeSecretStore(), installationID, connectionID); err == nil || !strings.Contains(err.Error(), "request changed") {
+		t.Fatalf("changed request should fail before replay: %v", err)
+	}
+	if beginCalls != 1 {
+		t.Fatalf("begin calls after changed request: %d", beginCalls)
+	}
+}
+
+func TestHelperIntentRejectsPartialPhases(t *testing.T) {
+	store, err := newHelperIntentStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	intent := helperIntent{Schema: helperIntentSchema, InstallationID: string(contract.NewID()), ConnectionID: string(contract.NewID()), ConnectionVersion: 1,
+		AccountIdentity: "acct", BeginKey: "begin", CompleteKey: "complete", CredentialName: "connections/credential/" + string(contract.NewID())}
+	raw, err := helperBeginRequest(intent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	intent.BeginRequestSHA256 = helperMutationDigest("connection.setup.begin", intent.BeginKey, raw)
+	if err := store.write(intent); err != nil {
+		t.Fatal(err)
+	}
+	for _, mutate := range []func(*helperIntent){
+		func(i *helperIntent) { i.ChallengeVersion = 1 },
+		func(i *helperIntent) { i.CredentialRef = "opaque-ref" },
+		func(i *helperIntent) { i.CompleteRequestSHA256 = strings.Repeat("a", 64) },
+		func(i *helperIntent) { i.BeginRequestSHA256 = "malformed" },
+	} {
+		broken := intent
+		mutate(&broken)
+		if err := store.write(broken); err == nil {
+			t.Fatalf("partial intent accepted: %+v", broken)
+		}
+	}
+	path, err := store.path(intent.ConnectionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	good, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	duplicate := bytes.Replace(good, []byte(`"schema":"zatiti.helper_intent/v1"`), []byte(`"schema":"zatiti.helper_intent/v1","schema":"zatiti.helper_intent/v1"`), 1)
+	if bytes.Equal(duplicate, good) {
+		t.Fatal("fixture did not add duplicate field")
+	}
+	if err := os.WriteFile(path, duplicate, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.read(intent.ConnectionID); err == nil {
+		t.Fatal("duplicate field was accepted")
+	}
+}
+
+type countingSecrets struct {
+	*fakeSecretStore
+	puts int
+}
+
+func (s *countingSecrets) Put(ctx context.Context, name string, b []byte) (string, error) {
+	s.puts++
+	return s.fakeSecretStore.Put(ctx, name, b)
+}
+
+func TestHelperUnknownCompletionReconcilesWithoutSecondCredentialWrite(t *testing.T) {
+	root := t.TempDir()
+	secrets := &countingSecrets{fakeSecretStore: newFakeSecretStore()}
+	installationID, connectionID, challengeID := contract.NewID(), contract.NewID(), contract.NewID()
+	expires := time.Now().UTC().Add(time.Hour).Truncate(time.Second)
+	var beginKey, completeKey, effectiveRef string
+	completed := false
+	completeCalls := 0
+	op := &fakeOperator{fn: func(_ context.Context, operation string, req contract.Request) (contract.Result, error) {
+		switch operation {
+		case "command.get":
+			return contract.Result{Payload: contract.Payload{Status: contract.StatusFailed, Error: &contract.Fault{Code: contract.CodeNotFound}}}, nil
+		case "connection.get":
+			return contract.Result{Payload: contract.Payload{Status: contract.StatusCompleted, Data: mustJSON(t, map[string]any{"resource": map[string]any{"version": 1, "account_identity": "acct", "credential_ref": effectiveRef}})}}, nil
+		case "connection.setup.begin":
+			if req.SubmissionKey == "" {
+				t.Fatal("unkeyed begin")
+			}
+			beginKey = req.SubmissionKey
+			return contract.Result{Payload: contract.Payload{Status: contract.StatusCompleted, Data: mustJSON(t, map[string]any{"resource": map[string]any{"id": challengeID, "version": 1, "expires_at": expires}})}}, nil
+		case "connection.setup.status":
+			state := "external_action_required"
+			if completed {
+				state = "completed"
+			}
+			return contract.Result{Payload: contract.Payload{Status: contract.StatusCompleted, Data: mustJSON(t, map[string]any{"resource": map[string]any{"id": challengeID, "version": 1, "connection_id": connectionID, "state": state, "expires_at": expires}})}}, nil
+		case "connection.setup.complete":
+			if req.SubmissionKey == "" || req.SubmissionKey == beginKey {
+				t.Fatal("missing or reused completion key")
+			}
+			pendingStore, err := newHelperIntentStore(root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			pending, err := pendingStore.read(string(connectionID))
+			if err != nil || pending == nil || pending.CompleteRequestSHA256 != helperMutationDigest(operation, req.SubmissionKey, req.Input) {
+				t.Fatalf("complete request not durably bound before dispatch: %+v %v", pending, err)
+			}
+			completeKey = req.SubmissionKey
+			completeCalls++
+			var input struct {
+				HelperRef string `json:"helper_ref"`
+			}
+			if err := json.Unmarshal(req.Input, &input); err != nil {
+				t.Fatal(err)
+			}
+			parts := strings.Split(strings.TrimPrefix(input.HelperRef, helperReceiptPrefix), ".")
+			body, _ := base64.RawURLEncoding.DecodeString(parts[0])
+			var payload helperPayload
+			_ = json.Unmarshal(body, &payload)
+			effectiveRef = payload.CredentialRef
+			completed = true
+			return contract.Result{}, errors.New("lost acknowledgment")
+		default:
+			t.Fatalf("unexpected operation %s", operation)
+			return contract.Result{}, nil
+		}
+	}}
+	const marker = "secret-never-public"
+	var diagnostics lockedBuffer
+	if err := runHelperEngine(context.Background(), root, op, secrets, strings.NewReader(marker+"\n"), &diagnostics, installationID, connectionID); err == nil {
+		t.Fatal("lost acknowledgment reported success")
+	}
+	if beginKey == "" || completeKey == "" || secrets.puts != 2 {
+		t.Fatalf("keys=%q,%q puts=%d", beginKey, completeKey, secrets.puts)
+	} // credential + receipt key
+	if err := runHelperEngine(context.Background(), root, op, secrets, strings.NewReader("different-secret\n"), &diagnostics, installationID, connectionID); err != nil {
+		t.Fatalf("recovery: %v", err)
+	}
+	if completeCalls != 1 || secrets.puts != 2 {
+		t.Fatalf("completion calls=%d, secret writes=%d", completeCalls, secrets.puts)
+	}
+	if strings.Contains(diagnostics.String(), marker) {
+		t.Fatal("credential leaked to diagnostics")
+	}
+	store, _ := newHelperIntentStore(root)
+	if pending, err := store.read(string(connectionID)); err != nil || pending != nil {
+		t.Fatalf("pending after recovery: %+v %v", pending, err)
+	}
+}
+
+func TestHelperRejectsChangedReceiptAfterAmbiguousCompletion(t *testing.T) {
+	root := t.TempDir()
+	secrets := newFakeSecretStore()
+	installationID, connectionID, challengeID := contract.NewID(), contract.NewID(), contract.NewID()
+	expires := time.Now().UTC().Add(time.Hour).Truncate(time.Second)
+	completeCalls := 0
+	op := &fakeOperator{fn: func(_ context.Context, operation string, req contract.Request) (contract.Result, error) {
+		switch operation {
+		case "connection.get":
+			return contract.Result{Payload: contract.Payload{Status: contract.StatusCompleted, Data: mustJSON(t, map[string]any{"resource": map[string]any{"version": 1, "account_identity": "acct"}})}}, nil
+		case "command.get":
+			return contract.Result{Payload: contract.Payload{Status: contract.StatusFailed, Error: &contract.Fault{Code: contract.CodeNotFound}}}, nil
+		case "connection.setup.begin":
+			return contract.Result{Payload: contract.Payload{Status: contract.StatusCompleted, Data: mustJSON(t, map[string]any{"resource": map[string]any{"id": challengeID, "version": 1, "expires_at": expires}})}}, nil
+		case "connection.setup.status":
+			return contract.Result{Payload: contract.Payload{Status: contract.StatusCompleted, Data: mustJSON(t, map[string]any{"resource": map[string]any{"id": challengeID, "version": 1, "connection_id": connectionID, "state": "external_action_required", "expires_at": expires}})}}, nil
+		case "connection.setup.complete":
+			completeCalls++
+			return contract.Result{}, errors.New("response lost before acceptance is known")
+		default:
+			t.Fatalf("unexpected %s", operation)
+			return contract.Result{}, nil
+		}
+	}}
+	if err := runHelperEngine(context.Background(), root, op, secrets, strings.NewReader("synthetic-key\n"), io.Discard, installationID, connectionID); err == nil {
+		t.Fatal("ambiguous completion claimed success")
+	}
+	store, err := newHelperIntentStore(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pending, err := store.read(string(connectionID))
+	if err != nil || pending == nil || pending.CompleteRequestSHA256 == "" {
+		t.Fatalf("missing bound completion: %+v %v", pending, err)
+	}
+	keyRef := secrets.names[helperReceiptKeyRef]
+	if keyRef == "" {
+		t.Fatal("no receipt key")
+	}
+	secrets.store[keyRef] = bytes.Repeat([]byte{0x5a}, len(secrets.store[keyRef]))
+	if err := runHelperEngine(context.Background(), root, op, secrets, strings.NewReader("different-key\n"), io.Discard, installationID, connectionID); err == nil || !strings.Contains(err.Error(), "request changed") {
+		t.Fatalf("changed receipt should block same-key replay: %v", err)
+	}
+	if completeCalls != 1 {
+		t.Fatalf("completion replayed with changed receipt: %d", completeCalls)
+	}
+}
+
+func TestHelperResumesCrashAfterPutBeforeIntentReference(t *testing.T) {
+	root := t.TempDir()
+	store, err := newHelperIntentStore(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secrets := &countingSecrets{fakeSecretStore: newFakeSecretStore()}
+	installationID, connectionID, challengeID := contract.NewID(), contract.NewID(), contract.NewID()
+	expires := time.Now().UTC().Add(time.Hour).Truncate(time.Second)
+	intent := helperIntent{Schema: helperIntentSchema, InstallationID: string(installationID), ConnectionID: string(connectionID), ConnectionVersion: 1, AccountIdentity: "acct", BeginKey: "begin-key", ChallengeID: string(challengeID), ChallengeVersion: 1, ExpiresAt: expires, CredentialName: "connections/credential/" + string(contract.NewID()), CompleteKey: "complete-key"}
+	beginRaw, err := helperBeginRequest(intent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	intent.BeginRequestSHA256 = helperMutationDigest("connection.setup.begin", intent.BeginKey, beginRaw)
+	if err := store.write(intent); err != nil {
+		t.Fatal(err)
+	}
+	ref, err := secrets.Put(context.Background(), intent.CredentialName, []byte("already-custodied"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var effectiveRef string
+	completed := false
+	op := &fakeOperator{fn: func(_ context.Context, operation string, req contract.Request) (contract.Result, error) {
+		switch operation {
+		case "command.get":
+			return contract.Result{Payload: contract.Payload{Status: contract.StatusFailed, Error: &contract.Fault{Code: contract.CodeNotFound}}}, nil
+		case "connection.get":
+			return contract.Result{Payload: contract.Payload{Status: contract.StatusCompleted, Data: mustJSON(t, map[string]any{"resource": map[string]any{"version": 1, "account_identity": "acct", "credential_ref": effectiveRef}})}}, nil
+		case "connection.setup.status":
+			state := "external_action_required"
+			if completed {
+				state = "completed"
+			}
+			return contract.Result{Payload: contract.Payload{Status: contract.StatusCompleted, Data: mustJSON(t, map[string]any{"resource": map[string]any{"id": challengeID, "version": 1, "connection_id": connectionID, "state": state, "expires_at": expires}})}}, nil
+		case "connection.setup.complete":
+			if req.SubmissionKey != intent.CompleteKey {
+				t.Fatal("completion key changed")
+			}
+			if strings.Contains(string(req.Input), "already-custodied") {
+				t.Fatal("credential leaked into operation")
+			}
+			effectiveRef = ref
+			completed = true
+			return contract.Result{Payload: contract.Payload{Status: contract.StatusCompleted}}, nil
+		default:
+			t.Fatalf("unexpected operation %s", operation)
+			return contract.Result{}, nil
+		}
+	}}
+	var diagnostics lockedBuffer
+	if err := runHelperEngine(context.Background(), root, op, secrets, strings.NewReader("different-secret\n"), &diagnostics, installationID, connectionID); err != nil {
+		t.Fatal(err)
+	}
+	if secrets.puts != 2 {
+		t.Fatalf("credential was overwritten: puts=%d", secrets.puts)
+	} // existing credential + receipt key
+	if strings.Contains(diagnostics.String(), "already-custodied") {
+		t.Fatal("credential leaked")
+	}
+}
+
+// fakeSecretStore models the real distinction between trusted name and
+// opaque reference.
+type fakeSecretStore struct {
+	store     map[string][]byte
+	names     map[string]string
+	lookupErr error
+}
+
+func newFakeSecretStore() *fakeSecretStore {
+	return &fakeSecretStore{store: map[string][]byte{}, names: map[string]string{}}
+}
+
+func (s *fakeSecretStore) Put(_ context.Context, name string, secret []byte) (string, error) {
+	ref := "fake:" + name
+	s.names[name] = ref
+	s.store[ref] = append([]byte(nil), secret...)
+	return ref, nil
+}
+func (s *fakeSecretStore) Lookup(_ context.Context, name string) (string, error) {
+	if s.lookupErr != nil {
+		return "", s.lookupErr
+	}
+	ref, ok := s.names[name]
+	if !ok {
+		return "", &contract.Fault{Code: contract.CodeNotFound}
+	}
+	return ref, nil
 }
 func (s *fakeSecretStore) Get(_ context.Context, reference string) ([]byte, error) {
 	v, ok := s.store[reference]

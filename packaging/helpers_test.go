@@ -67,8 +67,9 @@ func newFixture(t *testing.T, version, goos string) fixture {
 	helper := SecureHelper{Kind: HelperHeadlessMasterKey}
 	if goos == "darwin" {
 		helper = SecureHelper{Kind: HelperOSKeychain, Path: "/usr/bin/security"}
+		writeFile(t, filepath.Join(root, "bin", "zatiti-credential-helper"), []byte("synthetic credential helper"), 0o755)
 	}
-	return fixture{root: root, input: BuildInput{
+	f := fixture{root: root, input: BuildInput{
 		Root:           root,
 		Distribution:   DistributionController,
 		Version:        version,
@@ -97,6 +98,11 @@ func newFixture(t *testing.T, version, goos string) fixture {
 		},
 		SecureHelper: helper,
 	}}
+	if goos == "darwin" {
+		f.input.Kinds["bin/zatiti-credential-helper"] = KindCredentialHelper
+		f.input.Attestations = []Attestation{{Kind: AttestationCodeSignature, Subject: "bin/zatiti-credential-helper", Evidence: "evidence/serenity.json"}}
+	}
+	return f
 }
 
 func (f fixture) build(t *testing.T) Manifest {

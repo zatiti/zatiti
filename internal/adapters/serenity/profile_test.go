@@ -73,7 +73,7 @@ func TestNewNeedsNoDependency(t *testing.T) {
 func TestProfileSchemaViolationsRejected(t *testing.T) {
 	cases := map[string]func(map[string]any){
 		"unknown field":     func(m map[string]any) { m["endpoint_override"] = "http://127.0.0.1:1/mcp" },
-		"wrong schema":      func(m map[string]any) { m["schema"] = "zatiti.serenity/v2" },
+		"wrong schema":      func(m map[string]any) { m["schema"] = "zatiti.serenity/v1" },
 		"missing freshness": func(m map[string]any) { delete(m, "freshness") },
 		"zero timeout":      func(m map[string]any) { m["timeout_seconds"] = 0 },
 		"unknown operation": func(m map[string]any) { m["supported_operations"] = []string{"synthesize"} },
@@ -194,5 +194,73 @@ func TestBrainMappingsValidated(t *testing.T) {
 	raw := profileJSON(t, func(w *wireSerenityProfile) { w.BrainMappings = append(w.BrainMappings, second) })
 	if err := newFromProfile(raw); err != nil {
 		t.Fatalf("two brains on distinct endpoints must load: %v", err)
+	}
+}
+
+func TestHostedBrainMappingIsRecognizedButNotDispatched(t *testing.T) {
+	hosted := wireBrainMapping{BrainID: testBrainID, HostedProjectID: "ABCDEFGHIJKLMNOP", ConnectionID: contract.ID("33333333-3333-4333-8333-333333333333"),
+		Endpoint: "https://serenity.sire.run/mcp", Classification: "internal"}
+	raw := profileJSON(t, func(w *wireSerenityProfile) { w.BrainMappings = []wireBrainMapping{hosted} })
+	a, probes := newTestAdapter(t, raw)
+	profile := a.(*Adapter).profile
+	if got := profile.Brains[testBrainID]; got.HostedProjectID != hosted.HostedProjectID || got.ConnectionID != hosted.ConnectionID {
+		t.Fatalf("hosted identity was not retained: %+v", got)
+	}
+	d := testDispatch(t, recallAction(testBrainID))
+	requireFault(t, func() error { _, err := a.Invoke(context.Background(), d); return err }(), contract.CodeCapabilityUnsupported)
+	if probes.total() != 0 {
+		t.Fatalf("unsupported hosted call made %d outward calls", probes.total())
+	}
+}
+
+func TestHostedMappingRejectsMismatchedAndDuplicateIdentities(t *testing.T) {
+	first := wireBrainMapping{BrainID: testBrainID, HostedProjectID: "ABCDEFGHIJKLMNOP", ConnectionID: contract.ID("33333333-3333-4333-8333-333333333333"),
+		Endpoint: "https://serenity.sire.run/mcp", Classification: "internal"}
+	second := wireBrainMapping{BrainID: testOtherBrainID, HostedProjectID: "QRSTUVWXYZabcdef", ConnectionID: contract.ID("44444444-4444-4444-8444-444444444444"),
+		Endpoint: first.Endpoint, Classification: "restricted"}
+	if err := newFromProfile(profileJSON(t, func(w *wireSerenityProfile) { w.BrainMappings = []wireBrainMapping{first, second} })); err != nil {
+		t.Fatalf("distinct hosted mappings rejected: %v", err)
+	}
+	cases := map[string]func(*wireSerenityProfile){
+		"same local brain": func(w *wireSerenityProfile) {
+			dup := second
+			dup.BrainID = first.BrainID
+			w.BrainMappings = []wireBrainMapping{first, dup}
+		},
+		"same hosted project": func(w *wireSerenityProfile) {
+			dup := second
+			dup.HostedProjectID = first.HostedProjectID
+			w.BrainMappings = []wireBrainMapping{first, dup}
+		},
+		"same connection grant": func(w *wireSerenityProfile) {
+			dup := second
+			dup.ConnectionID = first.ConnectionID
+			w.BrainMappings = []wireBrainMapping{first, dup}
+		},
+		"hosted and local same brain": func(w *wireSerenityProfile) {
+			w.BrainMappings = []wireBrainMapping{first, {BrainID: first.BrainID, Endpoint: testEndpoint, RootRef: "brain:other", WriterOwner: testWriterOwner, Classification: "internal"}}
+		},
+		"wrong hosted endpoint": func(w *wireSerenityProfile) {
+			dup := first
+			dup.Endpoint = "https://elsewhere.example/mcp"
+			w.BrainMappings = []wireBrainMapping{dup}
+		},
+		"local fields on hosted mapping": func(w *wireSerenityProfile) {
+			dup := first
+			dup.RootRef = "brain:other"
+			w.BrainMappings = []wireBrainMapping{dup}
+		},
+		"uuid-shaped hosted project": func(w *wireSerenityProfile) {
+			dup := first
+			dup.HostedProjectID = string(testBrainID)
+			w.BrainMappings = []wireBrainMapping{dup}
+		},
+	}
+	for name, edit := range cases {
+		t.Run(name, func(t *testing.T) {
+			if err := newFromProfile(profileJSON(t, edit)); err == nil {
+				t.Fatal("mismatched mapping accepted")
+			}
+		})
 	}
 }

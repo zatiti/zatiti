@@ -303,7 +303,6 @@
       "connections",
       "effects",
       "httpread",
-      "mcpclient",
       "integration"
     ],
     "setup": "A discovered tool or HTTP response advertises a callback, redirect, external server or subprocess.",
@@ -386,7 +385,6 @@
       "responses",
       "github",
       "httpread",
-      "mcpclient",
       "integration"
     ],
     "setup": "Qualified adapters use a provider simulator with transient errors, timeouts and connection resets.",
@@ -1819,12 +1817,12 @@
       "controller",
       "serenity"
     ],
-    "setup": "Build the documented macOS release artifacts with pinned Go/dependency/protocol/service versions and licenses.",
-    "action": "Install on a clean supported macOS host, bootstrap, run CLI/MCP/desktop journeys, stop/restart controller, back up/restore and uninstall according to documentation.",
+    "setup": "Build signed and notarized macOS release artifacts for native arm64 and amd64 with pinned Go/dependency/protocol/service versions and licenses.",
+    "action": "Install on clean native Apple Silicon and Intel macOS hosts without developer tools; bootstrap, complete provider and limits setup in the desktop, receive a real first reply, run CLI/MCP/desktop journeys, stop/restart controller, back up/restore and uninstall according to documentation.",
     "expected": [
       "Documented installation commands work from actual artifacts; private socket, secure-store and local-lock behavior are exercised.",
-      "Serenity process packaging and one-writer lifecycle work with the controller/desktop.",
-      "Release evidence identifies exact OS/architecture/artifact/source/tool versions and observed results; compile success is not platform qualification."
+      "Hosted Serenity OAuth, verified existing-brain binding, scoped memory and reconnection work with the controller/desktop; no local Serenity process is required in hosted mode.",
+      "Both native architectures pass with signed/notarized installed artifacts; release evidence identifies exact OS/architecture/artifact/source/tool versions and observed results. One architecture or compile success alone is not Mac release qualification."
     ]
   },
   {
@@ -1838,7 +1836,7 @@
       "controller",
       "serenity"
     ],
-    "setup": "Build the documented Linux release artifacts with pinned dependencies and an explicitly provisioned supported secret source.",
+    "setup": "After the Mac release, build the documented Linux release artifacts with pinned dependencies and an explicitly provisioned supported secret source. Linux support remains unadvertised until this separate qualification passes.",
     "action": "Install on a clean supported Linux host and run the same controller, CLI/MCP, desktop, restart and backup/restore journeys.",
     "expected": [
       "Documented artifact installation and headless/desktop credential prerequisites work without secret exposure.",
@@ -2144,103 +2142,311 @@
     ]
   },
   {
-    "id": "Z05.mcp_discovery_grants_nothing",
-    "gate": "Z05",
+    "id": "QUALIFICATION.macos_pkg_binding",
+    "gate": "QUALIFICATION",
     "owners": [
-      "connections",
-      "policy",
-      "mcpclient",
-      "integration"
+      "distribution",
+      "ci",
+      "qualification"
     ],
-    "setup": "A validated mcp connection whose server advertises tools A and B with read_only_hint true on B; the profile allowlist names A only and the worker binding names A.",
-    "action": "Run connection.discover, then have the worker propose call_tool for B, and call_tool for A with arguments that fail the pinned input schema.",
+    "setup": "Build one final signed/notarized pkg for each native Mac architecture, with exact component archives, signed release descriptor/delivery record, external Team ID pin and a clean user account. Include synthetic tampered fixtures.",
+    "action": "Inspect the real package payload and signer, run fixed current-user installer on clean hosts, rehash installed inbox, activate and audit both trees/launcher, then inject crash after package staging and after Apply before watermark publication.",
     "expected": [
-      "Discovery records A and B with pinned schema digests and annotations but changes no binding, policy or classification.",
-      "call_tool for B is refused permission_denied before any request; the read_only_hint changes nothing.",
-      "call_tool for A with non-conforming arguments is refused invalid_input before any request and the pinned digest matches the recorded catalog."
+      "Exact three-file package inbox and acyclic binding match the signed inner descriptor and both downloaded archives; scripts, extra choices/paths, wrong signer/arch and tampered payload are rejected before activation.",
+      "Only audited active trees advance the protected fence; rerun after each crash preserves state and neither replays an ambiguous activation blindly nor treats a package receipt as evidence.",
+      "Signed/notarized and Gatekeeper evidence is recorded for Intel and Apple Silicon with actual OS/tool/artifact versions; Xcode is not needed on the destination, and inability to use the fixed per-user target blocks release."
     ]
   },
   {
-    "id": "Z06.mcp_one_request_per_call",
-    "gate": "Z06",
+    "id": "QUALIFICATION.macos_gui_secret_helper",
+    "gate": "QUALIFICATION",
     "owners": [
+      "zatiti",
+      "platform",
+      "connections",
+      "desktop",
+      "distribution",
+      "qualification"
+    ],
+    "setup": "Install the signed architecture-matched controller helper and Flutter Runner with a provisioned default login Keychain on clean Intel and Apple Silicon accounts; use synthetic credentials until explicit live-provider qualification.",
+    "action": "Capture, cancel, lock/refuse Keychain, invoke helper from an unsigned/other-team parent, lose setup.begin and setup.complete responses, crash after SecretStore.Put, then upgrade and reopen the app. Inspect argv/environment/channel/log/public-operation bytes.",
+    "expected": [
+      "Dart, argv, environment, output, logs and public operation inputs contain no raw provider key; native request/result fields are strictly bounded and redacted.",
+      "Only the signed Runner launches the declared helper; wrong caller/signature, missing master item, locked Keychain and stale installation identity fail closed without plaintext fallback.",
+      "Durable submission keys and challenge/connection status reconcile lost acknowledgements; the effective credential is retained, a stale orphan is removed only after authoritative check, and no second challenge/key is silently minted.",
+      "Real signed GUI and Keychain ACL continuity pass separately on both native architectures; fake UI/store tests alone are not qualification."
+    ]
+  },
+  {
+    "id": "QUALIFICATION.macos_serenity_hard_gate",
+    "gate": "QUALIFICATION",
+    "owners": [
+      "serenity",
+      "memory",
+      "accounting",
+      "qualification",
+      "distribution"
+    ],
+    "setup": "Pin and verify the public hosted Serenity build/protocol and obtain an OAuth grant to an existing personal brain on clean native Intel and Apple Silicon hosts.",
+    "action": "Prove bearer-authenticated grant/brain identity, scoped recall and write/curation, canonical hosted writer, authoritative command disposition after lost acknowledgement, bounded spend/disclosure behavior, immutable exportable backup revision and paused restore reconciliation through public interfaces.",
+    "expected": [
+      "Each required guarantee has observed versioned evidence, including physical call counts and crash/unknown cases; a missing upstream method or missing qualification blocks the first-chat release.",
+      "No reduced-capability preview, fake success, private Serenity API or empty-brain backup substitutes for the full requirement."
+    ]
+  },
+  {
+    "id": "QUALIFICATION.macos_bootstrap_entrypoint",
+    "gate": "QUALIFICATION",
+    "owners": [
+      "distribution",
+      "ci",
+      "zatiti",
+      "qualification"
+    ],
+    "setup": "Build and host final script plus signed/notarized universal bootstrap app using external trusted signing inputs, then publish a literal command pinned to the exact script SHA on a reviewed release page.",
+    "action": "On clean native Intel and Apple Silicon hosts without developer tools, run the literal command, tamper each script/app archive hash and signature, attempt redirect and Rosetta execution, and inspect the selected signed delivery assets.",
+    "expected": [
+      "The command never executes network script bytes before verifying its literal SHA; the script verifies a separately pinned bootstrap app archive and exact code-signing/notarization identity before launch.",
+      "The bootstrap app embeds trusted Ed25519 roots, never adopts a fetched key, detects native hardware under Rosetta and downloads only the matching controller/desktop/pkg assets.",
+      "Actual hosted bytes, URL, command hash, Team ID, OS/arch and installer evidence are recorded; any missing artifact or failed clean-host run blocks the advertised one-line installation claim."
+    ]
+  },
+  {
+    "id": "QUALIFICATION.macos_install_to_first_chat",
+    "gate": "QUALIFICATION",
+    "owners": [
+      "qualification",
+      "ci",
+      "distribution",
+      "zatiti",
+      "desktop",
+      "serenity"
+    ],
+    "setup": "Prepare the final signed release delivery, literal bootstrap script and universal app, both architecture-specific signed packages and a clean native Intel or Apple Silicon account without developer tools; provide qualified live provider and full public Serenity capabilities.",
+    "action": "On each native host run the exact one-line command, verify installed inbox and active tree/launcher/master Keychain against the same signed bytes, sign in to hosted Serenity through the system browser and verify the selected existing personal brain, capture a provider credential in the signed helper, send the first chief chat, and read the response and Serenity effects back from authoritative controller state. Repeat on the other native architecture and aggregate the two redacted host reports.",
+    "expected": [
+      "Each host records a unique host-run ID, native OS build, fixed installer invocation, actual signer Team ID/certificate, descriptor/delivery/script/universal-bootstrap digests and that host's package/controller/desktop/helper digests, with no credential or raw model text.",
+      "The same run links package payload and installed inbox checks, retained master key, active trees/LaunchAgent, verified hosted OAuth account/project/scopes, real provider response readback and every full Serenity writer, memory, reconciliation, cost/disclosure and backup-revision guarantee; a synthetic or independent case cannot substitute.",
+      "Both native reports agree on shared release identity and hashes, differ by host-run ID, and pass the linked case. Missing fields, Rosetta, skipped/not-run cases, no installed artifact, or unavailable upstream guarantee blocks the first-chat release and public one-line command."
+    ]
+  },
+  {
+    "id": "QUALIFICATION.macos_hosted_serenity_oauth",
+    "gate": "QUALIFICATION",
+    "owners": [
+      "qualification",
+      "serenity",
+      "connections",
+      "zatiti",
+      "desktop",
+      "platform",
+      "memory"
+    ],
+    "setup": "A clean installed Mac account has access to an already populated hosted Serenity personal project and an installed signed Zatiti helper.",
+    "action": "Sign in through the system browser, select that project and read/write consent, complete the exact loopback callback, verify bearer-bound account/project/scopes, recall an existing fact, write and read back a new fact, then revoke/reconnect and exercise denied, expired, wrong-project and ambiguous-refresh cases.",
+    "expected": [
+      "No code/token/verifier reaches Dart, argv, public operations, logs or model context; the trusted connection records only observed grant metadata and a protected credential reference.",
+      "The personal chief uses the selected pre-existing hosted brain, while unrelated scopes cannot read it; revocation and account/project substitution fail closed.",
+      "Real hosted capability, command-status, spend/disclosure and immutable backup-revision evidence is required before the first-chat gate passes."
+    ]
+  },
+  {
+    "id": "P12.responses_v1_recovery",
+    "gate": "Z18",
+    "owners": [
+      "configuration",
+      "connections",
+      "effects",
+      "execution",
+      "accounting",
+      "controller",
+      "integration"
+    ],
+    "setup": "A persisted v1 profile/action/evidence fixture is replayed under revision 12.",
+    "action": "Exercise the revision 12 contract with synthetic immutable fixtures.",
+    "expected": [
+      "Strict v1 decoding succeeds unchanged and preserves its original evidence."
+    ]
+  },
+  {
+    "id": "P12.stateless_action",
+    "gate": "Z18",
+    "owners": [
+      "configuration",
+      "connections",
+      "effects",
+      "execution",
+      "accounting",
+      "controller",
+      "integration"
+    ],
+    "setup": "A stateless OpenRouter or Experiential action includes a continuation/session handle or omits required context.",
+    "action": "Exercise the revision 12 contract with synthetic immutable fixtures.",
+    "expected": [
+      "Strict schema rejects session_handle and continuation_reference in stateless mode, and rejects missing context or output bounds."
+    ]
+  },
+  {
+    "id": "P12.pinned_profile_recovery",
+    "gate": "Z18",
+    "owners": [
+      "configuration",
+      "connections",
+      "effects",
+      "execution",
+      "accounting",
+      "controller",
+      "integration"
+    ],
+    "setup": "A worker profile changes after an operation was prepared.",
+    "action": "Exercise the revision 12 contract with synthetic immutable fixtures.",
+    "expected": [
+      "Claim and reconciliation return the exact historical adapter profile and connection version; no latest profile is substituted."
+    ]
+  },
+  {
+    "id": "P12.turn_without_task",
+    "gate": "Z18",
+    "owners": [
+      "configuration",
+      "connections",
+      "effects",
+      "execution",
+      "accounting",
+      "controller",
+      "integration"
+    ],
+    "setup": "A chief chat model response is observed with no task or Attempt.",
+    "action": "Exercise the revision 12 contract with synthetic immutable fixtures.",
+    "expected": [
+      "The controller-only callback records the fenced WorkerTurn observation idempotently by operation ID."
+    ]
+  },
+  {
+    "id": "P12.provider_metadata",
+    "gate": "Z18",
+    "owners": [
+      "configuration",
+      "connections",
+      "effects",
+      "execution",
+      "accounting",
+      "controller",
+      "integration"
+    ],
+    "setup": "An authenticated client queries supported model providers.",
+    "action": "Exercise the revision 12 contract with synthetic immutable fixtures.",
+    "expected": [
+      "The fixed three provider presets and their session modes are returned without network access or credential/account claims."
+    ]
+  },
+  {
+    "id": "P12.exact_cost",
+    "gate": "Z18",
+    "owners": [
+      "configuration",
+      "connections",
+      "effects",
+      "execution",
+      "accounting",
+      "controller",
+      "integration"
+    ],
+    "setup": "Provider cost is absent, malformed, overflowing, fractional at micro-unit precision, or from BYOK upstream.",
+    "action": "Exercise the revision 12 contract with synthetic immutable fixtures.",
+    "expected": [
+      "Checked decimal arithmetic rounds upward; invalid/overflow/unpriced costs remain unknown/advisory and source decimal evidence is retained."
+    ]
+  },
+  {
+    "id": "P15.profile_qualification_requires_evidence_free_candidate",
+    "gate": "Z18",
+    "owners": [
+      "configuration",
+      "connections",
       "effects",
       "controller",
-      "mcpclient",
       "integration"
     ],
-    "setup": "A controlled MCP server records every HTTP request; a session was opened by an admitted open_session effect.",
-    "action": "Dispatch one call_tool, one list_tools and one close_session attempt with zero control-reply allowance; then dispatch open_session against a fresh server. Repeat calls with explicit refusal-reply limits 1, 4 and 16 and excess server requests.",
+    "setup": "An authenticated human has an active provider connection and submits a candidate model profile for qualification.",
+    "action": "Attempt to include capability_evidence in the qualification candidate, then submit the strict evidence-free candidate bound to the exact connection version.",
     "expected": [
-      "With zero control-reply allowance, call_tool, list_tools and close_session each produce exactly one primary HTTP request per claimed attempt; next_cursor is never followed by the adapter.",
-      "open_session produces at most the three handshake requests the pinned SDK makes (server/discover probe, initialize, initialized), every one listed in evidence.handshake in order; no GET listening stream is opened.",
-      "SDK retry and reconnect are disabled; a permitted retry is a new authorized recorded attempt.",
-      "Explicit bounded method-not-found replies are the only additional POSTs: limits 1, 4 and 16 allow at most 2, 5 and 17 total call exchanges respectively. Exhaustion aborts and evicts locally without cleanup requests.",
-      "Every dispatched reply has pre-send context and exchange evidence and consumes the declared per-reply cost bound; no hidden reply, retry or fabricated status is allowed."
+      "Client-authored capability evidence is rejected by schema validation.",
+      "The accepted candidate is pinned to the exact connection, model, endpoint, route and profile digest; no credential is returned or accepted in the public operation."
     ]
   },
   {
-    "id": "Z08.mcp_lost_tool_call_response",
-    "gate": "Z08",
+    "id": "P15.profile_qualification_cost_and_authority",
+    "gate": "Z18",
     "owners": [
+      "identity",
+      "configuration",
+      "policy",
       "effects",
-      "mcpclient",
+      "accounting",
+      "responses",
+      "controller",
       "integration"
     ],
-    "setup": "The controlled server accepts a tools/call, applies its side effect, then stalls past the profile timeout or returns a body above max_response_bytes.",
-    "action": "Observe the attempt and request reconciliation.",
+    "setup": "A profile candidate has explicit token/rate bounds and the caller has scope-limited provider disclosure authority.",
+    "action": "Qualify the exact profile with a maximum probe cost, and vary the current grant, destination, classification, profile digest and available budget before claim.",
     "expected": [
-      "The attempt is recorded outcome_unknown with request_sent yes and the staged request context retained; nothing is resent.",
-      "Reconcile returns capability_unsupported and the reservation stays until a separately admitted linked operation resolves it."
+      "The one probe is admitted only under current authority, exact bound destination and classification, and sufficient reserved budget.",
+      "Observed charge is settled against that probe; a profile mismatch or a charge beyond the configured bound never yields qualified evidence."
     ]
   },
   {
-    "id": "Z13.mcp_credential_confined",
-    "gate": "Z13",
+    "id": "P15.profile_qualification_unknown_never_replays",
+    "gate": "Z18",
     "owners": [
-      "mcpclient",
-      "connections",
+      "configuration",
+      "effects",
+      "responses",
+      "controller",
       "integration"
     ],
-    "setup": "A bearer-credential mcp connection with a resolvable credential_ref; a profile naming credential_kind bearer.",
-    "action": "Dispatch open_session and call_tool; inspect the staged request record, evidence, faults, logs and the connection export. Then bind a profile whose endpoint carries the key in its path.",
+    "setup": "A qualification request may lose its provider response or controller acknowledgement after request bytes are sent.",
+    "action": "Crash or drop the response at each provider boundary, restart the controller and inspect/retry the same qualification job.",
     "expected": [
-      "Credential bytes appear only in the Authorization header on the wire; the staged request record, evidence, faults, logs and export contain neither the bytes nor the raw Mcp-Session-Id.",
-      "The credential-in-path profile is refused capability_unsupported at construction; the OAuth code flow is likewise refused rather than improvised."
+      "Possible-send outcomes remain outcome_unknown on the same job and are not automatically resent.",
+      "Unknown, failed, stale-connection and stale-profile outcomes never produce a QualifiedExecutionProfile; a new probe requires authoritative proof the previous request was not sent."
     ]
   },
   {
-    "id": "Z05.mcp_server_requests_refused",
-    "gate": "Z05",
+    "id": "P15.desktop_model_profile_setup_and_first_chat",
+    "gate": "Z21",
     "owners": [
-      "mcpclient",
-      "integration"
-    ],
-    "setup": "The controlled server responds to a tools/call with a sampling/createMessage request, an elicitation request and a resource_link content item during the same response stream.",
-    "action": "Dispatch the call_tool attempt.",
-    "expected": [
-      "Each server-to-client request is answered method-not-found and named in refused_server_requests; no model call, no user prompt and no resource fetch happens.",
-      "The resource_link is recorded as an opaque reference in the staged tool_result; fetching it would require a separate governed read."
-    ]
-  },
-  {
-    "id": "Z05.mcp_governed_probe_and_catalog",
-    "gate": "Z05",
-    "owners": [
+      "configuration",
       "connections",
       "effects",
       "execution",
       "controller",
-      "mcpclient",
-      "integration"
+      "desktop",
+      "qualification"
     ],
-    "setup": "An unverified MCP connection binds an installed synthetic profile; ordinary effect policy and accounting are configured.",
-    "action": "Prepare validation through its public owner operation, attempt a cloned public effect, record a real attempt observation, discover tools, then change the catalog after admitting a tool call and before claiming it.",
+    "setup": "A live controller and Desktop have a usable secure credential helper, an active provider connection and sufficient explicit cost budget.",
+    "action": "In Desktop, configure a model/rates/resource bounds, approve one qualification spend bound, wait for the trusted result, review and apply the profile, then send a first chat.",
     "expected": [
-      "Only the exact durable owner intent permits initial validation without prior freshness; its job links the governed effect.",
-      "Callbacks read the recorded observation for the exact operation and attempt; supplied JSON cannot invent validation or discovery truth.",
-      "Discovered tools expose the full pinned adapter envelope and nonzero configured cost bound, with explicit endpoint and connection bindings.",
-      "Claim rejects a changed catalog version before dispatch and does not consume the claim."
+      "Desktop submits no capability evidence and reconciles a lost acknowledgement through the same job/submission identity.",
+      "The user reviews and applies the qualified profile through the ordinary compiler path; the first chat uses that exact qualified profile and complete persisted context.",
+      "The reply is read back from authoritative controller conversation state, and provider request/response cost and unknown outcome behavior remain visible and bounded."
+    ]
+  },
+  {
+    "id": "P15.complete_authorized_chat_history",
+    "gate": "Z21",
+    "owners": [
+      "messaging",
+      "execution",
+      "controller",
+      "qualification"
+    ],
+    "setup": "A worker is a current participant in a conversation with more than one previously admitted message, including a group conversation with historical membership changes.",
+    "action": "Send another chat turn and inspect the persisted context artifact and provider dispatch boundary.",
+    "expected": [
+      "The context contains the worker-visible sent and admitted messages in chronological order, deduplicated with the triggering inbox message.",
+      "Messages outside the worker current membership interval are not disclosed.",
+      "If authorized history exceeds the bound or cannot be fully read, no provider effect is dispatched and context is not labeled complete."
     ]
   }
 ]

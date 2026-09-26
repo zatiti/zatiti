@@ -2,13 +2,55 @@
 
 This directory holds two workflows and the Go command that validates them and
 makes their decisions. Neither workflow publishes, releases, signs, tags, or
-deploys, and neither references a secret.
+deploys, and neither references a secret. The release workflow retains unsigned
+native build candidates for later review; those files are not release assets.
 
 | File | Starts on | Purpose |
 |---|---|---|
 | `ci.yml` | Pull requests, pushes to `main` | Specification drift check, workflow validation, static checks, Go build and tests, and the Flutter desktop client on Linux and macOS. |
 | `release-qualification.yml` | A version tag push, or a manual dispatch started from a version tag | Decides whether the tagged commit is qualified. Produces a verdict and evidence only. |
 | `cigate/` | Called by both workflows with `go run` | Policy validation, release verdict, qualification-evidence enumeration and freshness, bounded test evidence, input resolution, Flutter SDK pin, lock and drift checks. Standard library only. |
+
+The release workflow's native `build` and `flutter` matrix jobs now retain the
+actual controller executable and a deterministic archive of the complete
+Flutter `.app`, respectively, for each Mac architecture. The workflow records
+the source SHA, archive digest and size, license digest, and the digest and CPU
+slices of every Mach-O it finds. It refuses a missing or wrong-architecture
+controller, app runner, framework, or dylib before upload. The archiver is
+`zatiti-pack assemble-bundle`; the audit is `cigate candidate`. The retained
+directories also include `LICENSE` and the dependency lock report, with
+`pubspec.lock` for the desktop. They are unsigned, lack a matched four-part
+release descriptor and installer package, and carry no notarization evidence.
+
+The rev9 qualification job runs independently on native Intel and Apple
+Silicon. `cigate qualevidence` requires unique passed records for
+`Z21.first_conversation`, `QUALIFICATION.macos_pkg_binding`,
+`QUALIFICATION.macos_gui_secret_helper`,
+`QUALIFICATION.macos_serenity_hard_gate`, and
+`QUALIFICATION.macos_bootstrap_entrypoint` on **each** architecture. It checks
+the source and dependency revision, host platform, and nonempty expected,
+observed, and linked evidence; an explicitly synthetic case cannot pass.
+These live rev9 cases are not implemented in `tests/qualification` yet, so the
+release verdict remains blocked. GitHub-hosted Mac runners have developer
+tools: a passing runner test by itself cannot prove the separate clean-host,
+signed/notarized package, hosted bootstrap, or real provider/Serenity gates.
+The qualification owner must provide and verify that evidence in those cases
+before the workflow can claim them. No workflow here signs or publishes assets.
+
+`qualification_matrix` downloads the two native `release-report.json` files
+from this run and requires the planned rev10
+`QUALIFICATION.macos_install_to_first_chat` case on each. Each report must add
+`mac_release` using `zatiti.ci.mac_release_host/v1`: version, positive release
+sequence, native arch, distinct host-run UUID, OS build, `developer_tools_absent`,
+Team ID and application/installer certificate SHA-256s; shared descriptor,
+delivery, script and universal bootstrap ZIP SHA-256s; and that host's final
+installer, controller, desktop and helper SHA-256s. The clean-host case's
+`evidence` must repeat its host-run ID and seven script/bootstrap/delivery and
+selected-asset hashes. The matrix checks source and `go.mod` against the tag,
+requires both reports to refer to the same signed release, and allows the
+native asset hashes to differ. Missing or legacy reports block. The rev10 case
+and producer fields are pending specification and real clean-host evidence;
+this consumer does not turn the current unsigned candidates into release assets.
 
 ## Validate locally
 
@@ -44,7 +86,12 @@ one property at a time and requires each rule to fire.
   `release-qualification.yml` accepts `workflow_dispatch` with a required
   `version` input and `push` of `v*` tags only. `pull_request_target` and
   every other trigger are rejected.
-- Runners are the pinned images `ubuntu-24.04` and `macos-15`.
+- Runners are the pinned OS labels `ubuntu-24.04`, `macos-15` (Apple
+  Silicon), and `macos-15-intel` (Intel). GitHub documents the two Mac
+  architectures in its [hosted-runner reference](https://docs.github.com/en/actions/reference/runners/github-hosted-runners).
+  Matrix jobs also check `RUNNER_OS`, `RUNNER_ARCH`, and `uname -m` before
+  installing toolchains or running tests. CI retains Linux development jobs;
+  the first-release qualification matrix requires both native Mac images.
 - Every job has `timeout-minutes` of at most 60, starts with checkout using
   `persist-credentials: false`, verifies the toolchain and dependency lock,
   and ends by retaining evidence with `if: always()`, `if-no-files-found:
@@ -96,7 +143,7 @@ The workflow fails closed when its inputs are absent:
   `verification_failed`.
 
 Required gates: `inputs`, `spec`, `workflows`, `static`, `test`, `flutter`,
-`qualification`, `build`. The list is compiled into
+`qualification`, `build`, `candidate_matrix`. The list is compiled into
 `cigate gate`, so removing a job from the workflow produces a `missing` gate
 and blocks the verdict. Only `success` passes; `failure`, `cancelled`,
 `skipped`, and unrecognized results block. The platform gates run on both
@@ -237,15 +284,21 @@ so it cannot dirty the tree that drift and provenance checks inspect.
 | `qualification-cases/release-report.json`, `qualification-cases/<case>.json` | `tests/qualification`'s own per-case evidence and gate rollup (see "Qualification evidence enumeration and freshness"). |
 | `qualification-verdict.json` | `cigate qualevidence`'s enumeration-and-freshness verdict against the required gate list. |
 
-Console output is a bounded summary. Candidate binaries are not uploaded;
-`provenance.json` records the `zatiti` binary's digest, toolchain,
-dependencies, and commit.
+Console output is a bounded summary. The release workflow retains unsigned
+native candidate binaries and complete desktop archives alongside their
+provenance. Its `candidate_matrix` gate downloads the four fixed artifact
+names from the same workflow run, checks them against the checked-out commit
+and lock files, parses each archive without extraction, and writes a bounded
+`unsigned-candidate-matrix.json`. This index is neither a signed release
+descriptor nor an installer or publication artifact.
 
 ## Verified pins
 
-Each commit was resolved with `git ls-remote` against the upstream repository
-on 2026-09-18, and the inputs used here were read from `action.yml` at that
-commit. All four tags are lightweight tags, so the tag object is the commit.
+The original four commits were resolved with `git ls-remote` against their
+upstream repositories on 2026-09-18. The download action v8.0.0 tag was
+resolved from its upstream repository on 2026-09-23. Actions use immutable
+commit pins; the workflow linter checks the version annotation against the
+table.
 
 | Action | Version | Commit |
 |---|---|---|
@@ -253,6 +306,7 @@ commit. All four tags are lightweight tags, so the tag object is the commit.
 | `actions/setup-go` | v7.0.0 | `b7ad1dad31e06c5925ef5d2fc7ad053ef454303e` |
 | `actions/cache` | v6.1.0 | `55cc8345863c7cc4c66a329aec7e433d2d1c52a9` |
 | `actions/upload-artifact` | v7.0.1 | `043fb46d1a93c77aae656e7c1c64a875d1fc6a0a` |
+| `actions/download-artifact` | v8.0.0 | `70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3` |
 
 To change a pin:
 
@@ -290,9 +344,9 @@ These items are stated so that nobody reads them as qualified:
   revision differs, so a wrong assumption blocks instead of passing.
 - The Flutter SDK's own artifact downloads (Dart SDK, engine) come from the
   SDK's pinned manifests, not from this policy.
-- `macos-15` runners are `arm64` and `ubuntu-24.04` runners are `amd64`. No
-  job covers `darwin/amd64` or `linux/arm64`. Windows, remote MCP, and
-  contained runners are not release targets and have no job.
+- `macos-15` runs native `arm64`, `macos-15-intel` runs native `amd64`,
+  and `ubuntu-24.04` runs `amd64`. No job covers `linux/arm64`. Windows,
+  remote MCP, and contained runners are not release targets and have no job.
 - The `qualification` gate references no credentials. When operator-provided
   test accounts exist, add them through a protected environment in a reviewed
   change to this policy; until then, tests that need them skip and the strict

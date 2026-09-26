@@ -2,9 +2,16 @@
 // credential profile is startup configuration and never an operation
 // argument. The stored value is the complete Authorization header value.
 
+import 'dart:convert';
+
+import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 abstract interface class CredentialStore {
+  /// The installed owner credential is managed by the controller's Keychain
+  /// item and cannot be replaced from the settings form.
+  bool get authorizationManaged;
+
   /// The stored Authorization header value, or null when none is stored.
   Future<String?> read();
 
@@ -42,6 +49,15 @@ class CredentialKeys {
 
   /// One JSON object of conversation id to unsent draft text.
   String get drafts => 'zatiti.$profile.drafts';
+
+  /// One bounded provider-profile setup recovery record. It contains no
+  /// credential bytes; the exact mutation request is retained only in secure storage.
+  String get modelSetup => 'zatiti.$profile.model_setup';
+
+  /// One bounded personal-chief profile assignment recovery record. It is
+  /// separate from profile qualification so the two setup flows cannot
+  /// overwrite each other's uncertain command identity.
+  String get workerProfileSetup => 'zatiti.$profile.worker_profile_setup';
 }
 
 /// Keychain on macOS, libsecret on Linux, Credential Manager on Windows.
@@ -59,6 +75,9 @@ class SecureCredentialStore implements CredentialStore {
 
   final CredentialKeys _keys;
   final FlutterSecureStorage _storage;
+
+  @override
+  bool get authorizationManaged => false;
 
   @override
   CredentialKeys get keys => _keys;
@@ -88,6 +107,101 @@ class SecureCredentialStore implements CredentialStore {
   Future<String?> readPem(String key) => readNamed(key);
 }
 
+enum MacCredentialFailure { missing, locked, refused, malformed }
+
+class MacCredentialException implements Exception {
+  const MacCredentialException(this.kind);
+  final MacCredentialFailure kind;
+}
+
+/// Reads the controller's existing login-Keychain item without copying it to
+/// another item. Named drafts/TLS settings remain in this app's own store.
+class MacOwnerCredentialStore implements CredentialStore {
+  MacOwnerCredentialStore({
+    required this.service,
+    required this.account,
+    String profile = 'default',
+    FlutterSecureStorage? ownerStorage,
+    SecureCredentialStore? namedStorage,
+  }) : _ownerStorage =
+           ownerStorage ??
+           FlutterSecureStorage(
+             mOptions: MacOsOptions(
+               accountName: service,
+               usesDataProtectionKeychain: false,
+             ),
+           ),
+       _namedStorage = namedStorage ?? SecureCredentialStore(profile);
+
+  final String service;
+  final String account;
+  final FlutterSecureStorage _ownerStorage;
+  final SecureCredentialStore _namedStorage;
+
+  @override
+  bool get authorizationManaged => true;
+
+  @override
+  CredentialKeys get keys => _namedStorage.keys;
+
+  @override
+  Future<String?> read() async {
+    final String? encoded;
+    try {
+      encoded = await _ownerStorage.read(key: account);
+    } on PlatformException catch (e) {
+      final status = e.details;
+      throw MacCredentialException(
+        status == -25308
+            ? MacCredentialFailure.locked
+            : MacCredentialFailure.refused,
+      );
+    } on Exception {
+      throw const MacCredentialException(MacCredentialFailure.refused);
+    }
+    if (encoded == null) {
+      throw const MacCredentialException(MacCredentialFailure.missing);
+    }
+    try {
+      final bytes = base64.decode(encoded);
+      if (base64.encode(bytes) != encoded) {
+        throw const FormatException('noncanonical base64');
+      }
+      final header = utf8.decode(bytes, allowMalformed: false);
+      if (!RegExp(r'^Bearer [A-Za-z0-9_-]{43}$').hasMatch(header)) {
+        throw const FormatException('invalid header');
+      }
+      final token = header.substring(7);
+      final secret = base64Url.decode('$token=');
+      if (secret.length != 32 ||
+          base64Url.encode(secret).replaceAll('=', '') != token) {
+        throw const FormatException('invalid token');
+      }
+      return header;
+    } on FormatException {
+      throw const MacCredentialException(MacCredentialFailure.malformed);
+    }
+  }
+
+  @override
+  Future<void> write(String value) =>
+      Future.error(const MacCredentialException(MacCredentialFailure.refused));
+
+  @override
+  Future<void> delete() =>
+      Future.error(const MacCredentialException(MacCredentialFailure.refused));
+
+  @override
+  Future<String?> readNamed(String key) => _namedStorage.readNamed(key);
+
+  @override
+  Future<void> writeNamed(String key, String value) =>
+      _namedStorage.writeNamed(key, value);
+
+  @override
+  Future<void> deleteNamed(String key) => _namedStorage.deleteNamed(key);
+}
+
 /// Holds a credential for the life of the process only. Used by tests and by
 /// the demo, which has no credential at all.
 class MemoryCredentialStore implements CredentialStore {
@@ -96,6 +210,9 @@ class MemoryCredentialStore implements CredentialStore {
   String? _value;
   final Map<String, String> _named = {};
   final CredentialKeys _keys;
+
+  @override
+  bool get authorizationManaged => false;
 
   @override
   CredentialKeys get keys => _keys;

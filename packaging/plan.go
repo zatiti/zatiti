@@ -15,6 +15,7 @@ const (
 	PlanInstall   = "install"
 	PlanUpgrade   = "upgrade"
 	PlanUninstall = "uninstall"
+	PlanNoop      = "noop"
 )
 
 // Step actions.
@@ -82,6 +83,10 @@ type Plan struct {
 	// the exact state directory.
 	RemovesState bool
 	Notices      []string
+	// ExpectedManifest is set only for a verified, same-version no-op.
+	ExpectedManifest  []byte
+	ExpectedLaunchers map[string][]byte
+	ExpectedLinks     map[string]string
 }
 
 // Installed is what Inspect finds in a layout.
@@ -166,6 +171,13 @@ func PlanInstallation(in InstallInput) (Plan, error) {
 	if err != nil {
 		return Plan{}, err
 	}
+	if in.Installed.Current == m.Version {
+		expected := make(map[string][]byte, len(units))
+		for _, u := range units {
+			expected[filepath.Join(l.UnitDir, u.FileName)] = u.Content
+		}
+		return verifiedNoop(l, m, expected)
+	}
 	plan, err := planRelease(l, m, in.SourceRoot, in.Installed)
 	if err != nil {
 		return Plan{}, err
@@ -199,7 +211,7 @@ func planRelease(l Layout, m Manifest, sourceRoot string, installed Installed) (
 	if prev := installed.Current; prev != "" {
 		switch c := compareVersions(m.Version, prev); {
 		case c == 0:
-			return Plan{}, errf(CodeConflict, "release %s is already the active release", m.Version)
+			return Plan{}, errf(CodeConflict, "same-version installation must be verified before planning")
 		case c < 0:
 			return Plan{}, errf(CodeCapabilityUnsupported, "release %s is older than the active release; state written by a later release cannot be downgraded, restore a backup instead", m.Version)
 		}
@@ -250,7 +262,7 @@ func planRelease(l Layout, m Manifest, sourceRoot string, installed Installed) (
 
 // planUnits renders the launchers and binds them to this layout: the
 // controller launcher runs the binary behind the active link and owns the
-// state directory, and a Serenity launcher runs the pinned runtime.
+// state directory. A local-mode Serenity launcher runs its pinned runtime.
 func planUnits(l Layout, m Manifest, specs []ServiceSpec) ([]Unit, error) {
 	if err := ValidateServices(specs); err != nil {
 		return nil, err
@@ -268,6 +280,9 @@ func planUnits(l Layout, m Manifest, specs []ServiceSpec) ([]Unit, error) {
 				return nil, errf(CodeInvalidInput, "the controller service must run the installed controller binary and own the state directory")
 			}
 		case RoleSerenity:
+			if m.Target.OS == "darwin" && m.Serenity == (SerenityPin{}) {
+				return nil, errf(CodeInvalidInput, "hosted Mac installation must not launch a local Serenity service")
+			}
 			if s.Executable != filepath.Join(l.Current, filepath.FromSlash(m.Serenity.Runtime)) {
 				return nil, errf(CodeInvalidInput, "a Serenity service must run the pinned Serenity runtime from the installed release")
 			}

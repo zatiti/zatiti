@@ -420,6 +420,11 @@ func (v *sliceValidator) validateProfileChange(path string, c wireChange) {
 		v.diag(path+".definition", "decode", "execution profile definition is not decodable")
 		return
 	}
+	if c.Action == actionCreate || c.Action == actionUpdate {
+		if err := validateEditableProfile(def); err != nil {
+			v.diag(path+".definition", "adapter_profile", err.Error())
+		}
+	}
 	v.out.Requirements = append(v.out.Requirements, requirement(contract.CodePrerequisiteMissing,
 		"execution profile "+string(def.ID)+" requires a resolved connection "+
 			string(def.ConnectionID)+" and a priced cost bound before executable use",

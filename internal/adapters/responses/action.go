@@ -6,6 +6,20 @@ import (
 	"github.com/zatiti/zatiti/internal/contract"
 )
 
+func validProfileDigest(d contract.Digest) bool {
+	if len(d) != 64 {
+		return false
+	}
+	for _, r := range d {
+		switch {
+		case '0' <= r && r <= '9', 'a' <= r && r <= 'f':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
 // The two action kinds the frozen zatiti.responses.action/v1 schema
 // accepts, revision 3's kind-discriminated oneOf of
 // ResponsesPrepareSessionParameters and ResponsesModelStepParameters (see
@@ -13,8 +27,10 @@ import (
 // Adapter.Invoke performs exactly one of the two physical calls the split
 // requires, never both.
 const (
-	kindPrepareSession = "prepare_session"
-	kindModelStep      = "model_step"
+	kindPrepareSession          = "prepare_session"
+	kindModelStep               = "model_step"
+	kindQualificationProbe      = "qualification_probe"
+	qualificationExpectedOutput = "ZATITI_MODEL_QUALIFIED"
 )
 
 // decodeAction validates raw against the zatiti.responses.action/v1 schema
@@ -24,7 +40,16 @@ const (
 // pins the same tool twice: a tool closure with two versions of one tool
 // cannot identify which contract a model proposal was made under.
 func decodeAction(raw json.RawMessage) (*wireResponsesParameters, error) {
+	var head struct {
+		Schema string `json:"schema"`
+	}
+	if err := json.Unmarshal(raw, &head); err != nil {
+		return nil, invalidInput("responses action must be a JSON object")
+	}
 	schema, err := parametersSchema()
+	if head.Schema == "zatiti.responses.action/v2" {
+		schema, err = parametersSchemaV2()
+	}
 	if err != nil {
 		return nil, internalError("responses parameters schema composition failed: %v", err)
 	}

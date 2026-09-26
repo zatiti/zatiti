@@ -66,7 +66,10 @@ func operationUnsupported(op operationCapability) *contract.Fault {
 // request was built or sent, so the original effect's outcome is unchanged:
 // it stays unknown until explicit reconciliation outside this adapter.
 func lookupUnsupported(kind string) *contract.Fault {
-	missing := []string{gapCommandStatusLookup, gapCommandIdentity}
+	missing := []string{gapCommandStatusLookup}
+	if kind != kindRemember {
+		missing = append(missing, gapCommandIdentity)
+	}
 	f := capabilityUnsupported(
 		"serenity reconcile of %s is unavailable: the pinned upstream %s@%s does not provide %v; nothing was sent or repeated and the original outcome stays unknown; see PROTOCOL.md",
 		kind, pinnedModule, pinnedCommit[:12], missing)

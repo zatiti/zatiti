@@ -230,23 +230,44 @@ func (p *fakePorts) failOn(op string, f *contract.Fault) {
 // and a read log for custody assertions.
 type fakeSecrets struct {
 	mu    sync.Mutex
-	store map[string][]byte
+	store map[string][]byte // opaque reference -> value
+	keys  map[string]string // stable name -> opaque reference
+	next  int
 	gets  []string
 	fail  map[string]error
 }
 
 func newFakeSecrets() *fakeSecrets {
-	return &fakeSecrets{store: map[string][]byte{}, fail: map[string]error{}}
+	return &fakeSecrets{store: map[string][]byte{}, keys: map[string]string{}, fail: map[string]error{}}
 }
 
-func (s *fakeSecrets) Put(ctx context.Context, reference string, secret []byte) (string, error) {
+func (s *fakeSecrets) Put(ctx context.Context, key string, secret []byte) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if err := s.fail[reference]; err != nil {
+	if err := s.fail[key]; err != nil {
 		return "", err
 	}
-	s.store[reference] = append([]byte(nil), secret...)
-	return reference, nil
+	ref := s.keys[key]
+	if ref == "" {
+		s.next++
+		ref = fmt.Sprintf("fake-secret-ref:%d", s.next)
+		s.keys[key] = ref
+	}
+	s.store[ref] = append([]byte(nil), secret...)
+	return ref, nil
+}
+
+func (s *fakeSecrets) Lookup(ctx context.Context, key string) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.fail[key]; err != nil {
+		return "", err
+	}
+	ref := s.keys[key]
+	if ref == "" {
+		return "", fmt.Errorf("fake secrets: unknown key %s", key)
+	}
+	return ref, nil
 }
 
 func (s *fakeSecrets) Get(ctx context.Context, reference string) ([]byte, error) {
@@ -267,15 +288,30 @@ func (s *fakeSecrets) Delete(ctx context.Context, reference string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.store, reference)
+	for key, ref := range s.keys {
+		if ref == reference {
+			delete(s.keys, key)
+		}
+	}
 	return nil
 }
 
-// seed puts material under a reference, failing the test on error.
+// seed plants material already held under a provider's opaque reference.
 func (s *fakeSecrets) seed(t *testing.T, reference string, material []byte) {
 	t.Helper()
-	if _, err := s.Put(context.Background(), reference, material); err != nil {
-		t.Fatalf("seed secret %s: %v", reference, err)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.store[reference] = append([]byte(nil), material...)
+}
+
+// seedNamed provisions a stable local name through the actual Put contract.
+func (s *fakeSecrets) seedNamed(t *testing.T, key string, material []byte) string {
+	t.Helper()
+	ref, err := s.Put(context.Background(), key, material)
+	if err != nil {
+		t.Fatalf("seed named secret %s: %v", key, err)
 	}
+	return ref
 }
 
 // getsOf returns the references read so far.

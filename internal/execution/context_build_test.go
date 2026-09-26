@@ -14,12 +14,18 @@ import (
 //   - TestContextPrepareRefusesBeforeAnyNetworkIO
 //   - TestContextAdvanceKeepsToolResultOnceAndPriorContextBytesImmutable
 
-// admitClaimedTurn admits a message-sourced turn for worker and drives it
-// to claimed, returning the loaded row.
+// admitClaimedTurn admits a turn for worker and drives it to claimed,
+// returning the loaded row. When a pending message fixture exists, use its
+// exact durable message ID as the source; otherwise this is a continuation
+// turn and must not fabricate a message reference.
 func (e *testEnv) admitClaimedTurn(worker contract.ID) *turnRow {
 	e.t.Helper()
+	source := wireTurnSource{Kind: "continuation", SourceID: e.ids.New(), SourceVersion: 1}
+	if pending := e.ports.messages[worker]; len(pending) > 0 {
+		source = wireTurnSource{Kind: "message", SourceID: pending[0].ID, SourceVersion: pending[0].Version}
+	}
 	payload := e.mustOK(opTurnAdmit, turnAdmitInput{
-		Source:      wireTurnSource{Kind: "message", SourceID: e.ids.New(), SourceVersion: 1},
+		Source:      source,
 		WorkerID:    worker,
 		Scope:       e.scope,
 		RequesterID: e.ids.New(),
@@ -241,6 +247,45 @@ func TestContextCommitProducesSchemaValidOrderedContextAndModelStepAction(t *tes
 	}
 }
 
+func TestQualifiedStatelessProfileDispatchesTheCommittedCompleteContext(t *testing.T) {
+	turnID := contract.NewID()
+	toolID, connectionID := contract.NewID(), contract.NewID()
+	plan := &contextPlanRow{Recipe: contextRecipe{
+		AdapterProfile: json.RawMessage(`{"schema":"zatiti.responses/v2","provider":"openrouter","session_mode":"stateless","max_input_tokens":32768,"max_output_tokens":2048}`),
+		Components: []contextComponent{{
+			Kind: "tool", IsModelTool: true, ToolID: toolID, ToolVersion: 3,
+			ConnectionID: connectionID, ConnectionVersion: 2,
+			AccountIdentity: "acct-verified", Name: "model-responses",
+		}},
+	}}
+	mode, schema, outputLimit, err := modelDispatchProfile(plan)
+	if err != nil {
+		t.Fatalf("modelDispatchProfile: %v", err)
+	}
+	if mode != "stateless" || schema != "zatiti.responses/v2" || outputLimit != 2048 {
+		t.Fatalf("profile dispatch mode/schema/output = %q/%q/%d", mode, schema, outputLimit)
+	}
+	context := wireArtifactRef{ID: contract.NewID(), Digest: contract.Hash([]byte("committed complete context"))}
+	parameters, tool, connection, account, err := buildResponsesModelStepActionV2(
+		plan, context, "", mode, outputLimit, turnID,
+	)
+	if err != nil {
+		t.Fatalf("buildResponsesModelStepActionV2: %v", err)
+	}
+	if parameters["schema"] != "zatiti.responses.action/v2" || parameters["kind"] != "model_step" ||
+		parameters["session_mode"] != "stateless" || parameters["session_id"] != string(turnID) ||
+		parameters["session_handle"] != nil || parameters["max_output_tokens"] != float64(2048) {
+		t.Fatalf("stateless model step has incorrect pinned execution metadata: %#v", parameters)
+	}
+	gotContext, ok := parameters["context_artifact"].(map[string]any)
+	if !ok || gotContext["id"] != string(context.ID) || gotContext["digest"] != string(context.Digest) {
+		t.Fatalf("model step does not name the committed context artifact: %#v", parameters["context_artifact"])
+	}
+	if tool.ID != toolID || tool.Version != 3 || connection.ID != connectionID || connection.Version != 2 || account != "acct-verified" {
+		t.Fatalf("dispatch identity was not resolved from the pinned tool binding: tool=%+v connection=%+v account=%q", tool, connection, account)
+	}
+}
+
 // TestContextPrepareRefusesBeforeAnyNetworkIO proves the three named
 // refusal conditions -- missing instruction bytes, stale pinned
 // configuration and an out-of-scope memory binding -- refuse
@@ -313,6 +358,38 @@ func TestContextPrepareRefusesBeforeAnyNetworkIO(t *testing.T) {
 		}
 		if after := e.readTurn(turn.ID); after.State != "claimed" {
 			t.Fatalf("turn state %q after refused prepare, want claimed (never advanced)", after.State)
+		}
+	})
+
+	t.Run("authorized memory is not silently omitted", func(t *testing.T) {
+		e := newEnv(t)
+		worker := e.ids.New()
+		profile := fixtureHostedProfile(worker)
+		e.installWorkerSnapshot(worker, profile)
+		snap := e.ports.snapshots[e.install]
+		memoryBindingID := e.ids.New()
+		snap.Worker.Bindings = append(snap.Worker.Bindings, memoryBindingID)
+		snap.Bindings = append(snap.Bindings, wireBinding{
+			ID: memoryBindingID, Version: 1, Scope: e.scope, Kind: "memory",
+			TargetID: e.ids.New(), Permissions: []string{"read"},
+		})
+		e.ports.memoryBindings[memoryBindingID] = wireMemoryBinding{
+			ID: memoryBindingID, Version: 1, Scope: e.scope, BrainID: e.ids.New(),
+			Permissions: []string{"read"}, Classification: "internal",
+		}
+		turn := e.admitClaimedTurn(worker)
+
+		f := e.expectFault(opContextPrepare, contextPrepareInput{
+			TurnID: turn.ID, ExpectedVersion: turn.Version, Generation: turn.Generation,
+		}, contract.CodePrerequisiteMissing)
+		if !strings.Contains(f.Message, "hosted memory recall") {
+			t.Fatalf("fault %q does not identify the missing recall prerequisite", f.Message)
+		}
+		if after := e.readTurn(turn.ID); after.State != "claimed" {
+			t.Fatalf("turn state %q after refused prepare, want claimed (never advanced)", after.State)
+		}
+		if published := e.ports.Published(); len(published) != 0 {
+			t.Fatalf("refused memory context published %d artifacts before recall", len(published))
 		}
 	})
 }

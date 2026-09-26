@@ -83,6 +83,73 @@ func TestAdmitCallsPeersInOrder(t *testing.T) {
 	}
 }
 
+func TestMCPValidationIntentCarriesExactOperationAndAction(t *testing.T) {
+	env := newEnv(t)
+	env.ports.mu.Lock()
+	env.ports.connState = "unverified"
+	env.ports.connValidationIntent = true
+	env.ports.mu.Unlock()
+	action := env.action()
+	o := env.prepareOp(env.scope, action, env.ids.New())
+	admitted := env.admitOp(o.ID, o.Version)
+	if len(admitted.AttemptIDs) != 1 {
+		t.Fatalf("validation intent admitted %d attempts, want one", len(admitted.AttemptIDs))
+	}
+	checkResolve := func(call contract.Invocation) {
+		t.Helper()
+		var in connectionsResolveInput
+		if err := json.Unmarshal(call.Input, &in); err != nil {
+			t.Fatal(err)
+		}
+		if in.OperationID != o.ID {
+			t.Fatalf("resolve operation_id %s, want %s", in.OperationID, o.ID)
+		}
+		want, err := canonicalJSON(action)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(in.Action) != string(want) {
+			t.Fatalf("resolve action differs from immutable action bytes:\n got %s\nwant %s", in.Action, want)
+		}
+	}
+	resolves := env.ports.callsOf(opConnectionsResolve)
+	if len(resolves) != 1 {
+		t.Fatalf("admission performed %d resolves, want one", len(resolves))
+	}
+	checkResolve(resolves[0])
+	dispatch := env.claimOp(o.ID, admitted.AttemptIDs[0], 1)
+	if dispatch.OperationID != o.ID {
+		t.Fatalf("claim operation %s, want %s", dispatch.OperationID, o.ID)
+	}
+	resolves = env.ports.callsOf(opConnectionsResolve)
+	if len(resolves) != 2 {
+		t.Fatalf("admission and claim performed %d resolves, want two", len(resolves))
+	}
+	checkResolve(resolves[1])
+}
+
+func TestOrdinaryConnectionProbeRequiresFreshValidation(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		state      string
+		validUntil *time.Time
+	}{
+		{name: "never validated", state: "unverified"},
+		{name: "expired freshness", state: connStateValid, validUntil: func() *time.Time { v := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC); return &v }()},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			env := newEnv(t)
+			env.ports.mu.Lock()
+			env.ports.connState = tc.state
+			env.ports.connValidUntil = tc.validUntil
+			env.ports.connValidationIntent = false
+			env.ports.mu.Unlock()
+			o := env.staged()
+			_ = env.expectFault(opAdmit, admitInput{OperationID: o.ID, ExpectedVersion: o.Version}, contract.CodePrerequisiteMissing)
+		})
+	}
+}
+
 func TestAdmitTransitionsReadyAndReserves(t *testing.T) {
 	env := newEnv(t)
 	o, attempt := env.admitted()

@@ -83,11 +83,17 @@ func TestWriterCapabilityReportIsTruthful(t *testing.T) {
 			t.Fatalf("%s does not name %s", op.Kind, gapSingleRequestCallPath)
 		}
 	}
-	for _, write := range []string{kindRemember, kindPromote, kindRetract} {
+	for _, write := range []string{kindPromote, kindRetract} {
 		op, _ := capabilityFor(write)
 		if !slices.Contains(op.Missing, gapCommandIdentity) || !slices.Contains(op.Missing, gapCommandStatusLookup) {
 			t.Fatalf("write kind %s must name the command identity and lookup gaps: %v", write, op.Missing)
 		}
+	}
+	if op, _ := capabilityFor(kindRemember); slices.Contains(op.Missing, gapCommandIdentity) || slices.Contains(op.Missing, gapIdempotentReplay) || !slices.Contains(op.Missing, gapCommandStatusLookup) {
+		t.Fatalf("keyed remember has replay protection but no status lookup: %v", op.Missing)
+	}
+	if op, _ := capabilityFor(kindInspect); op.UpstreamVerb != "read_memory_fact" || !slices.Contains(op.Missing, gapFetchClaimByID) {
+		t.Fatalf("exact fact read cannot fetch a versioned Zatiti claim: %+v", op)
 	}
 	if op, _ := capabilityFor(kindRecall); !slices.Contains(op.Missing, gapCostBound) || !slices.Contains(op.Missing, gapDisclosureDestinations) {
 		t.Fatalf("recall may disclose and incur charges upstream; its row must name both bound gaps: %v", op.Missing)
@@ -271,8 +277,12 @@ func TestReconcileRetainsUnknown(t *testing.T) {
 			if err := json.Unmarshal(f.Details, &details); err != nil {
 				t.Fatalf("fault details: %v", err)
 			}
+			wantMissing := []string{gapCommandStatusLookup, gapCommandIdentity}
+			if kind == kindRemember {
+				wantMissing = []string{gapCommandStatusLookup}
+			}
 			if details.Kind != kind || details.UpstreamCommit != pinnedCommit || details.OriginalOutcome != "retained_unknown" ||
-				!slices.Equal(details.Missing, []string{gapCommandStatusLookup, gapCommandIdentity}) {
+				!slices.Equal(details.Missing, wantMissing) {
 				t.Fatalf("fault details = %+v", details)
 			}
 			if !strings.Contains(f.Message, "stays unknown") || !strings.Contains(f.Message, gapCommandStatusLookup) {

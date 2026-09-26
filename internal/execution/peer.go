@@ -69,6 +69,17 @@ type peerScopeSnapshot struct {
 	Bindings []wireBinding    `json:"bindings"`
 }
 
+// resolveExecutionProfile loads the exact immutable hosted model profile.
+// It is deliberately separate from the current worker snapshot so an in-flight
+// turn can never silently adopt a newer profile version.
+func (s *Service) resolveExecutionProfile(ctx context.Context, unit contract.Unit, scope contract.Scope, ref wireRef) (wireExecutionProfile, error) {
+	data, err := s.callPeer(ctx, unit, peerConfigProfileResolve, map[string]any{"scope": scope, "profile": ref})
+	if err != nil {
+		return wireExecutionProfile{}, err
+	}
+	return decodeResource[wireExecutionProfile]("execution profile", data)
+}
+
 // callScopeSnapshot reads configuration's scope snapshot.
 func (s *Service) callScopeSnapshot(ctx context.Context, unit contract.Unit, scope contract.Scope) (peerScopeSnapshot, error) {
 	data, err := s.callPeer(ctx, unit, peerConfigSnapshot, map[string]any{"scope": scope})
@@ -142,6 +153,23 @@ func (s *Service) callMessagingPending(ctx context.Context, unit contract.Unit, 
 		return nil, fmt.Errorf("execution: decode messaging pending response: %w", err)
 	}
 	return body.Items, nil
+}
+
+func (s *Service) callMessagingHistory(ctx context.Context, unit contract.Unit, scope contract.Scope, conversationID, workerID contract.ID, limit int64) ([]wireMessage, bool, error) {
+	data, err := s.callPeer(ctx, unit, peerMessagingHistory, map[string]any{
+		"scope": scope, "conversation_id": conversationID, "worker_id": workerID, "limit": limit,
+	})
+	if err != nil {
+		return nil, false, err
+	}
+	var body struct {
+		Items    []wireMessage `json:"items"`
+		Complete bool          `json:"complete"`
+	}
+	if err := contract.DecodeStrict(data, &body); err != nil {
+		return nil, false, fmt.Errorf("execution: decode messaging history response: %w", err)
+	}
+	return body.Items, body.Complete, nil
 }
 
 // callMemorySelect filters the current authorized bindings before any

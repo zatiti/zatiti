@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"net/http"
 	"os"
@@ -19,40 +20,76 @@ import (
 	"github.com/zatiti/zatiti/internal/contract"
 )
 
-// Adapter profiles are trusted local configuration: one strictly validated,
-// secret-free JSON profile per adapter at <state-dir>/adapters/<name>.json.
-// An adapter with no profile is not registered and a dispatch naming it is
-// recorded not_sent with capability_unsupported by the controller; it is
-// never guessed at. A profile is loaded only if it validates in full
-// against its adapter's frozen schema (responses: zatiti.responses/v1,
-// self-binding capability_evidence included); an invalid or partial
-// profile fails startup rather than silently constructing a degraded
-// adapter or falling back to any default provider/model/price (P24 item 1).
+// Tool adapter profiles are trusted local configuration: one strictly
+// validated, secret-free JSON profile per tool adapter at
+// <state-dir>/adapters/<name>.json. Hosted model profiles are durable
+// execution configuration, resolved per dispatch by the controller through
+// responsesAdapterFactory; they are not loaded from a process-global file.
+// No provider, model or price is guessed when a pinned profile is absent.
 
 // adapterConstructors maps the landed adapter names to their constructors.
 var adapterConstructors = map[string]func(contract.AdapterDependencies, json.RawMessage) (contract.Adapter, error){
-	"github":    github.New,
-	"httpread":  httpread.New,
-	"mcp":       mcpclient.New,
-	"responses": responses.New,
-	"serenity":  serenity.New,
+	"github":   github.New,
+	"httpread": httpread.New,
+	"mcp":      mcpclient.New,
+	"serenity": serenity.New,
 }
 
 // unimplementedAdapters names adapters the product wires by design whose
-// package has not landed. serve reports them at startup. Empty on this
-// tree: every adapter the product names (github, httpread, responses,
-// serenity) has a landed constructor above.
+// package has not landed. serve reports them at startup. Empty on this tree:
+// every tool adapter is landed, and responses is supplied by its per-dispatch
+// factory.
 var unimplementedAdapters = []string{}
 
 // maxAdapterProfileBytes bounds one profile file.
 const maxAdapterProfileBytes = 1 << 20
 
-// loadAdapters constructs every adapter that has a profile in dir. A
-// profile for an unknown adapter, or one its constructor refuses, fails
-// startup: silently serving without it would hide a configuration defect.
-// It returns the registered adapters and the names of landed adapters that
-// have no profile.
-func loadAdapters(dir string, deps contract.AdapterDependencies) (map[string]contract.Adapter, []string, error) {
+// readMCPAdmissionProfile reads the single trusted installation-local MCP
+// adapter profile. The same immutable bytes are passed to connections for
+// admission and to mcpclient for dispatch; neither side rereads the path.
+// Missing configuration leaves MCP unavailable, while malformed filesystem
+// objects fail startup without including profile contents in an error.
+func readMCPAdmissionProfile(dir string) (raw json.RawMessage, retErr error) {
+	path := filepath.Join(dir, "mcp.json")
+	info, err := os.Lstat(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("inspecting MCP adapter profile: %w", err)
+	}
+	if !info.Mode().IsRegular() || info.Size() > maxAdapterProfileBytes {
+		return nil, fmt.Errorf("MCP adapter profile must be a regular file no larger than %d bytes", maxAdapterProfileBytes)
+	}
+
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("opening MCP adapter profile failed")
+	}
+	defer func() {
+		if closeErr := f.Close(); closeErr != nil && retErr == nil {
+			retErr = fmt.Errorf("closing MCP adapter profile failed")
+		}
+	}()
+	opened, err := f.Stat()
+	if err != nil || !opened.Mode().IsRegular() || !os.SameFile(info, opened) || opened.Size() > maxAdapterProfileBytes {
+		return nil, fmt.Errorf("MCP adapter profile changed or is not a bounded regular file")
+	}
+	raw, err = io.ReadAll(io.LimitReader(f, maxAdapterProfileBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("reading MCP adapter profile failed")
+	}
+	if len(raw) > maxAdapterProfileBytes {
+		return nil, fmt.Errorf("MCP adapter profile must be no larger than %d bytes", maxAdapterProfileBytes)
+	}
+	return json.RawMessage(raw), nil
+}
+
+// loadAdaptersWithMCPProfile constructs the MCP adapter from the exact profile
+// bytes already supplied to connections at installation assembly. An empty
+// profile explicitly means MCP is not configured; this function does not
+// inspect mcp.json again, even if it changed after assembly.
+func loadAdaptersWithMCPProfile(dir string, deps contract.AdapterDependencies, mcpProfile json.RawMessage) (map[string]contract.Adapter, []string, error) {
 	entries, err := os.ReadDir(dir)
 	if errors.Is(err, fs.ErrNotExist) {
 		entries = nil
@@ -65,6 +102,18 @@ func loadAdapters(dir string, deps contract.AdapterDependencies) (map[string]con
 			continue
 		}
 		name := strings.TrimSuffix(e.Name(), ".json")
+		// MCP is constructed below from the assembly snapshot, not from a
+		// second read of this mutable path.
+		if name == "mcp" {
+			continue
+		}
+		// Responses providers are selected by the durable execution profile
+		// on each dispatch. The former responses.json file is retained only
+		// as an explicit legacy/import source; it must never select or
+		// override a provider for a running controller.
+		if name == "responses" {
+			continue
+		}
 		construct, ok := adapterConstructors[name]
 		if !ok {
 			return nil, nil, fmt.Errorf("adapter profile %q names no landed adapter (landed: %s)", e.Name(), strings.Join(landedAdapterNames(), ", "))
@@ -90,6 +139,18 @@ func loadAdapters(dir string, deps contract.AdapterDependencies) (map[string]con
 		}
 		adapters[adapter.Name()] = adapter
 	}
+	if len(mcpProfile) > 0 {
+		adapter, err := mcpclient.New(deps, append(json.RawMessage(nil), mcpProfile...))
+		if err != nil {
+			// Constructor errors are deliberately redacted at this boundary:
+			// startup diagnostics must never echo profile material.
+			return nil, nil, fmt.Errorf("adapter mcp: invalid installation profile")
+		}
+		if adapter == nil || adapter.Name() != "mcp" {
+			return nil, nil, fmt.Errorf("adapter mcp: constructor returned an unexpected adapter")
+		}
+		adapters["mcp"] = adapter
+	}
 	var missing []string
 	for _, name := range landedAdapterNames() {
 		if _, ok := adapters[name]; !ok {
@@ -97,6 +158,25 @@ func loadAdapters(dir string, deps contract.AdapterDependencies) (map[string]con
 		}
 	}
 	return adapters, missing, nil
+}
+
+// newResponsesAdapter constructs a Responses adapter for the immutable
+// profile pinned to one execution dispatch. It deliberately takes the
+// profile as an argument instead of loading process-global configuration,
+// so changing a durable model profile takes effect without restarting the
+// controller. The adapter resolves its credential from the installation's
+// protected SecretStore through these dependencies.
+func newResponsesAdapter(deps contract.AdapterDependencies, rawProfile json.RawMessage) (contract.Adapter, error) {
+	return responses.New(deps, rawProfile)
+}
+
+// responsesAdapterFactory closes over installation-scoped dependencies and
+// is attached to the controller. The controller supplies the exact,
+// revision-pinned profile on every dispatch.
+func responsesAdapterFactory(deps contract.AdapterDependencies) func(json.RawMessage) (contract.Adapter, error) {
+	return func(rawProfile json.RawMessage) (contract.Adapter, error) {
+		return newResponsesAdapter(deps, rawProfile)
+	}
 }
 
 func landedAdapterNames() []string {
@@ -118,28 +198,4 @@ func adapterDependencies(h *installationHandle) contract.AdapterDependencies {
 		Clock:   h.clock,
 		Blobs:   h.plat.Blobs(),
 	}
-}
-
-// Read only the secret-free admission profile. The adapter constructor repeats
-// full validation at startup; digest-pinned actions refuse any intervening drift.
-func readMCPAdmissionProfile(dir string) (json.RawMessage, error) {
-	path := filepath.Join(dir, "mcp.json")
-	info, err := os.Lstat(path)
-	if errors.Is(err, fs.ErrNotExist) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	if !info.Mode().IsRegular() || info.Size() > maxAdapterProfileBytes {
-		return nil, fmt.Errorf("MCP profile must be a bounded regular file")
-	}
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	if len(raw) > maxAdapterProfileBytes {
-		return nil, fmt.Errorf("MCP profile exceeds size bound")
-	}
-	return raw, nil
 }

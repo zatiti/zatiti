@@ -293,9 +293,9 @@ func (c *Controller) claim(ctx, workCtx context.Context, sess *session, e entry)
 		c.unsent(ctx, sess, e, internalFault("claimed dispatch does not match attempt %s of generation %d", e.AttemptID, sess.generation))
 		return false
 	}
-	adapter, ok := c.adapters[d.Adapter]
-	if !ok {
-		c.unsent(ctx, sess, e, capabilityUnsupported("adapter %q is not registered with this controller", d.Adapter))
+	adapter, err := c.adapterForDispatch(d)
+	if err != nil {
+		c.unsent(ctx, sess, e, faultOf(err))
 		return false
 	}
 	if !d.Deadline.IsZero() && !c.now().Before(d.Deadline) {

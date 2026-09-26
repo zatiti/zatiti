@@ -410,6 +410,13 @@ const schemaV6 = `
 ALTER TABLE execution_runs ADD COLUMN model_steps_used INTEGER NOT NULL DEFAULT 0;
 `
 
+// schemaV7 binds each persisted turn dispatch to the model-step index named
+// by its callback route. A callback can therefore be checked against both
+// its operation reference and the exact step that was admitted for dispatch.
+const schemaV7 = `
+ALTER TABLE execution_turn_dispatches ADD COLUMN step_index INTEGER NOT NULL DEFAULT 0;
+`
+
 // migrations returns the execution-owned migration set. Bodies are pinned
 // by SHA-256 so storage can detect any drift from the reviewed schema.
 func migrations() []contract.Migration {
@@ -443,5 +450,10 @@ func migrations() []contract.Migration {
 		Version: 6,
 		SQL:     schemaV6,
 		SHA256:  contract.Hash([]byte(schemaV6)),
+	}, {
+		Owner:   owner,
+		Version: 7,
+		SQL:     schemaV7,
+		SHA256:  contract.Hash([]byte(schemaV7)),
 	}}
 }

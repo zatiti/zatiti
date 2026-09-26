@@ -26,7 +26,7 @@ func TestZ01CredentialCustody(t *testing.T) {
 	env := newEnv(t)
 	conn := env.seedConnection(nil)
 	env.secrets.seed(t, conn.CredentialRef, []byte(markedSecret))
-	env.secrets.seed(t, helperReceiptKeyRef, helperReceiptKeyMaterial)
+	keyRef := env.secrets.seedNamed(t, helperReceiptKeyName, helperReceiptKeyMaterial)
 
 	run := env.beginChallenge(conn, methodStoreReference)
 	ch := env.challengeOf(run.Payload)
@@ -61,7 +61,7 @@ func TestZ01CredentialCustody(t *testing.T) {
 		if ref == conn.CredentialRef {
 			credentialRead = true
 		}
-		if ref == helperReceiptKeyRef {
+		if ref == keyRef {
 			keyRead = true
 		}
 	}
@@ -108,7 +108,7 @@ func TestChallengeExpiryCancelReplay(t *testing.T) {
 	env := newEnv(t)
 	conn := env.seedConnection(nil)
 	env.seedBrowserCredential(conn.CredentialRef)
-	env.secrets.seed(t, helperReceiptKeyRef, helperReceiptKeyMaterial)
+	env.secrets.seedNamed(t, helperReceiptKeyName, helperReceiptKeyMaterial)
 	ch := env.challengeOf(env.beginChallenge(conn, methodBrowser).Payload)
 
 	env.clock.Advance(challengeExpiry + time.Minute)
@@ -170,7 +170,7 @@ func TestHelperForgeryRefuses(t *testing.T) {
 	env := newEnv(t)
 	conn := env.seedConnection(nil)
 	env.seedBrowserCredential(conn.CredentialRef)
-	env.secrets.seed(t, helperReceiptKeyRef, helperReceiptKeyMaterial)
+	env.secrets.seedNamed(t, helperReceiptKeyName, helperReceiptKeyMaterial)
 
 	// The genuine receipt passes first.
 	ch := env.challengeOf(env.beginChallenge(conn, methodBrowser).Payload)
@@ -459,7 +459,7 @@ func TestSetupCompleteAppliesVerifiedCredentialReference(t *testing.T) {
 	env := newEnv(t)
 	conn := env.seedConnection(nil)
 	env.secrets.seed(t, conn.CredentialRef, []byte(markedSecret))
-	env.secrets.seed(t, helperReceiptKeyRef, helperReceiptKeyMaterial)
+	env.secrets.seedNamed(t, helperReceiptKeyName, helperReceiptKeyMaterial)
 	rotated := "connections/credentials/" + string(env.ids.New())
 	env.secrets.seed(t, rotated, []byte("rotated-material"))
 
@@ -505,7 +505,7 @@ func TestSetupCompleteRefusesChangedConnection(t *testing.T) {
 	env := newEnv(t)
 	conn := env.seedConnection(nil)
 	env.secrets.seed(t, conn.CredentialRef, []byte(markedSecret))
-	env.secrets.seed(t, helperReceiptKeyRef, helperReceiptKeyMaterial)
+	env.secrets.seedNamed(t, helperReceiptKeyName, helperReceiptKeyMaterial)
 	ch := env.challengeOf(env.beginChallenge(conn, methodStoreReference).Payload)
 
 	// The connection changes after begin, before complete: destinations move
@@ -547,7 +547,7 @@ func TestHelperReceiptReplayRefuses(t *testing.T) {
 	env := newEnv(t)
 	conn := env.seedConnection(nil)
 	env.secrets.seed(t, conn.CredentialRef, []byte(markedSecret))
-	env.secrets.seed(t, helperReceiptKeyRef, helperReceiptKeyMaterial)
+	env.secrets.seedNamed(t, helperReceiptKeyName, helperReceiptKeyMaterial)
 	ch := env.challengeOf(env.beginChallenge(conn, methodStoreReference).Payload)
 	receipt := mintReceipt(helperReceiptKeyMaterial, helperPayload{
 		ChallengeID: ch.ID, CredentialRef: conn.CredentialRef, AccountIdentity: conn.AccountIdentity,

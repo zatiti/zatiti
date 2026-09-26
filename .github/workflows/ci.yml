@@ -180,6 +180,7 @@ jobs:
         os:
           - ubuntu-24.04
           - macos-15
+          - macos-15-intel
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     steps:
@@ -187,6 +188,19 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Verify native runner architecture
+        env:
+          EXPECTED_IMAGE: ${{ matrix.os }}
+        run: |
+          case "$EXPECTED_IMAGE" in
+            ubuntu-24.04) expected_os=Linux; expected_runner=X64; expected_uname=x86_64 ;;
+            macos-15) expected_os=macOS; expected_runner=ARM64; expected_uname=arm64 ;;
+            macos-15-intel) expected_os=macOS; expected_runner=X64; expected_uname=x86_64 ;;
+            *) exit 1 ;;
+          esac
+          test "$RUNNER_OS" = "$expected_os"
+          test "$RUNNER_ARCH" = "$expected_runner"
+          test "$(uname -m)" = "$expected_uname"
       - name: Install the pinned Go toolchain
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
@@ -219,6 +233,11 @@ jobs:
           mkdir -p /tmp/zt
           go run ./.github/workflows/cigate gotest -name unit -require-tests "github.com/zatiti/zatiti/internal/platform#TestListenPrivateRefusesSymlinkedRunDirectory,github.com/zatiti/zatiti/internal/platform#TestBlobTamperedObjectFailsPublishOverExisting" -out-dir "$EVIDENCE" -- -timeout 30m ./...
       - name: Test with the race detector
+        # The full race suite passes on Linux x86_64 and macOS arm64. Running
+        # this database-heavy suite on the slower macOS Intel runner exceeds
+        # the Go test timeout; Intel still runs the complete unit/integration
+        # suite above and its native build/desktop checks.
+        if: matrix.os != 'macos-15-intel'
         env:
           TMPDIR: /tmp/zt
         run: |
@@ -242,6 +261,7 @@ jobs:
         os:
           - ubuntu-24.04
           - macos-15
+          - macos-15-intel
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     steps:
@@ -249,6 +269,19 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Verify native runner architecture
+        env:
+          EXPECTED_IMAGE: ${{ matrix.os }}
+        run: |
+          case "$EXPECTED_IMAGE" in
+            ubuntu-24.04) expected_os=Linux; expected_runner=X64; expected_uname=x86_64 ;;
+            macos-15) expected_os=macOS; expected_runner=ARM64; expected_uname=arm64 ;;
+            macos-15-intel) expected_os=macOS; expected_runner=X64; expected_uname=x86_64 ;;
+            *) exit 1 ;;
+          esac
+          test "$RUNNER_OS" = "$expected_os"
+          test "$RUNNER_ARCH" = "$expected_runner"
+          test "$(uname -m)" = "$expected_uname"
       - name: Install the pinned Go toolchain
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:

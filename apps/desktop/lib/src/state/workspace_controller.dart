@@ -141,6 +141,13 @@ class WorkspaceController extends ChangeNotifier {
   WorkspaceSnapshot snapshot = WorkspaceSnapshot.empty;
 
   bool get isOnline => connection == ConnectionPhase.online;
+  bool get canCompose => !snapshot.installedMac || snapshot.installedChiefReady;
+  String? get installedReadinessIssue => snapshot.installedMac
+      ? snapshot.installedChiefIssue ??
+            (snapshot.installedChiefReady
+                ? null
+                : 'The personal-chief chat is not ready.')
+      : null;
 
   /// True while the view may be out of date and must say so.
   bool get showsSavedView =>
@@ -264,19 +271,30 @@ class WorkspaceController extends ChangeNotifier {
       final restoreWorker = _restoreWorkerId;
       _restoreGroupId = null;
       _restoreWorkerId = null;
-      if (restoreGroup != null &&
+      if ((!next.installedMac || next.installedChiefWorkerId != null) &&
+          restoreGroup != null &&
           next.conversation(ConversationId(restoreGroup))?.kind ==
               ConversationKind.group) {
         selectedGroup = ConversationId(restoreGroup);
-      } else if (restoreWorker != null &&
+      } else if ((!next.installedMac || next.installedChiefWorkerId != null) &&
+          restoreWorker != null &&
           next.worker(WorkerId(restoreWorker)) != null) {
         selectedWorker = WorkerId(restoreWorker);
       }
     }
+    if (next.installedMac && next.installedChiefWorkerId == null) {
+      selectedGroup = null;
+      selectedWorker = null;
+    }
     if (selectedGroup == null &&
         (selectedWorker == null || next.worker(selectedWorker!) == null)) {
-      final roots = next.childrenOf(null);
-      selectedWorker = roots.isEmpty ? null : roots.first.id;
+      if (next.installedMac) {
+        final chief = next.installedChiefWorkerId;
+        selectedWorker = chief == null ? null : WorkerId(chief);
+      } else {
+        final roots = next.childrenOf(null);
+        selectedWorker = roots.isEmpty ? null : roots.first.id;
+      }
     }
     // An overlay that only echoed an acknowledgment retires once the
     // controller's own record says the same.
@@ -858,6 +876,7 @@ class WorkspaceController extends ChangeNotifier {
   /// Sends the conversation's draft. Offline, the message is kept and shown
   /// as unsent; it is never queued for automatic delivery.
   Future<void> sendDraft(ConversationId id) async {
+    if (!canCompose) return;
     final body = draftFor(id).trim();
     if (body.isEmpty) return;
     _drafts.remove(id);
@@ -876,6 +895,7 @@ class WorkspaceController extends ChangeNotifier {
 
   /// Sends one unsent message because the person asked to.
   Future<void> sendUnsent(String localId) async {
+    if (!canCompose) return;
     final message = _outgoingById(localId);
     if (message == null || !isOnline) return;
     if (message.phase != OutgoingPhase.unsentDraft) return;

@@ -48,6 +48,11 @@ abstract final class Operations {
   );
   static const workerList = OperationDescriptor.query('worker.list');
   static const workerCreate = OperationDescriptor.mutation('worker.create');
+  static const workerGet = OperationDescriptor.query('worker.get');
+  static const workerUpdate = OperationDescriptor.mutation(
+    'worker.update',
+    expectedVersion: true,
+  );
 
   static const conversationList = OperationDescriptor.query(
     'conversation.list',
@@ -113,6 +118,22 @@ abstract final class Operations {
   static const usageGet = OperationDescriptor.query('usage.get');
   static const budgetGet = OperationDescriptor.query('budget.get');
   static const connectionList = OperationDescriptor.query('connection.list');
+  static const connectionGet = OperationDescriptor.query('connection.get');
+  static const connectionCreate = OperationDescriptor.mutation(
+    'connection.create',
+  );
+  static const modelProviderList = OperationDescriptor.query(
+    'model.provider.list',
+  );
+  static const executionProfileList = OperationDescriptor.query(
+    'execution_profile.list',
+  );
+  static const executionProfileCreate = OperationDescriptor.mutation(
+    'execution_profile.create',
+  );
+  static const executionProfileQualify = OperationDescriptor.mutation(
+    'execution_profile.qualify',
+  );
   static const installationVerifierList = OperationDescriptor.query(
     'installation.verifier.list',
   );
@@ -125,6 +146,7 @@ abstract final class Operations {
   static const memoryList = OperationDescriptor.query('memory.list');
   static const memoryRetract = OperationDescriptor.mutation('memory.retract');
   static const memoryJobGet = OperationDescriptor.query('memory.job.get');
+  static const jobGet = OperationDescriptor.query('job.get');
 
   // ---- responsibility-to-schedule links -----------------------------------
 
@@ -149,6 +171,8 @@ abstract final class Operations {
     organizationCreate,
     workerList,
     workerCreate,
+    workerGet,
+    workerUpdate,
     conversationList,
     conversationMessageList,
     conversationMessageSend,
@@ -175,11 +199,18 @@ abstract final class Operations {
     usageGet,
     budgetGet,
     connectionList,
+    connectionGet,
+    connectionCreate,
+    modelProviderList,
+    executionProfileList,
+    executionProfileCreate,
+    executionProfileQualify,
     installationVerifierList,
     memoryBindingList,
     memoryList,
     memoryRetract,
     memoryJobGet,
+    jobGet,
     scheduleList,
     autonomyQualificationList,
     runList,

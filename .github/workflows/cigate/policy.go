@@ -19,10 +19,11 @@ type pin struct {
 }
 
 var verifiedPins = map[string]pin{
-	"actions/checkout":        {SHA: "3d3c42e5aac5ba805825da76410c181273ba90b1", Version: "v7.0.1"},
-	"actions/setup-go":        {SHA: "b7ad1dad31e06c5925ef5d2fc7ad053ef454303e", Version: "v7.0.0"},
-	"actions/cache":           {SHA: "55cc8345863c7cc4c66a329aec7e433d2d1c52a9", Version: "v6.1.0"},
-	"actions/upload-artifact": {SHA: "043fb46d1a93c77aae656e7c1c64a875d1fc6a0a", Version: "v7.0.1"},
+	"actions/checkout":          {SHA: "3d3c42e5aac5ba805825da76410c181273ba90b1", Version: "v7.0.1"},
+	"actions/setup-go":          {SHA: "b7ad1dad31e06c5925ef5d2fc7ad053ef454303e", Version: "v7.0.0"},
+	"actions/cache":             {SHA: "55cc8345863c7cc4c66a329aec7e433d2d1c52a9", Version: "v6.1.0"},
+	"actions/upload-artifact":   {SHA: "043fb46d1a93c77aae656e7c1c64a875d1fc6a0a", Version: "v7.0.1"},
+	"actions/download-artifact": {SHA: "70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3", Version: "v8.0.0"},
 }
 
 // profile selects the workflow-specific rules applied on top of the rules
@@ -48,7 +49,8 @@ var registeredWorkflows = map[string]profile{
 // weakening it.
 var requiredReleaseGates = []string{
 	"inputs", "spec", "workflows", "static", "test",
-	"flutter", "qualification", "build",
+	"flutter", "qualification", "build", "candidate_matrix",
+	"qualification_matrix",
 }
 
 // platformReleaseGates must run on every supported release platform.
@@ -69,7 +71,21 @@ var requiredPlatformRegressionTests = []string{
 	"github.com/zatiti/zatiti/internal/platform#TestBlobTamperedObjectFailsPublishOverExisting",
 }
 
-var supportedRunners = []string{"ubuntu-24.04", "macos-15"}
+// macos-15 is GitHub's native Apple Silicon image; macos-15-intel is its
+// native Intel image. The runtime architecture step below catches a runner
+// label whose actual host does not match its documented architecture.
+var supportedRunners = []string{"ubuntu-24.04", "macos-15", "macos-15-intel"}
+var requiredMacRunners = []string{"macos-15", "macos-15-intel"}
+
+// These are separate live rev9 release cases. The existing synthetic
+// distribution fixture cannot satisfy any of them by passing a broad gate.
+var requiredMacReleaseCases = []string{
+	"Z21.first_conversation",
+	"QUALIFICATION.macos_pkg_binding",
+	"QUALIFICATION.macos_gui_secret_helper",
+	"QUALIFICATION.macos_serenity_hard_gate",
+	"QUALIFICATION.macos_bootstrap_entrypoint",
+}
 
 const (
 	verdictJob       = "verdict"
@@ -106,6 +122,7 @@ var (
 	ciOnlyStepConditions = map[string]bool{
 		"runner.os == 'Linux' && steps.layout.outputs.integration_test == 'true'": true,
 		"runner.os == 'macOS' && steps.layout.outputs.integration_test == 'true'": true,
+		"matrix.os != 'macos-15-intel'":                                           true,
 	}
 	allowedTopKeys  = set("name", "on", "permissions", "concurrency", "defaults", "env", "jobs")
 	allowedJobKeys  = set("name", "needs", "if", "runs-on", "timeout-minutes", "strategy", "steps", "outputs", "env", "permissions")
@@ -354,12 +371,37 @@ func (l *linter) checkJob(j entry) {
 	if !sawLock {
 		l.add(j.Line, "toolchain-lock", "job %s must verify the toolchain and dependency lock with \"cigate lock\"", j.Key)
 	}
+	if runner, _ := job.get("runs-on").scalar(); runner == matrixRunner {
+		l.checkNativeArchitecture(j.Key, steps)
+	}
 	if name, _ := actionName(steps.Items[0]); name != "actions/checkout" {
 		l.add(steps.Items[0].Line, "steps", "job %s: the first step must check out the source", j.Key)
 	}
 	last := steps.Items[len(steps.Items)-1]
 	if name, _ := actionName(last); name != "actions/upload-artifact" {
 		l.add(last.Line, "evidence", "job %s: the last step must retain evidence with actions/upload-artifact", j.Key)
+	}
+}
+
+// checkNativeArchitecture requires an early, unconditional host check in
+// every matrix job. A runner label alone is insufficient evidence that a
+// Go or Flutter build actually ran on the requested native CPU.
+func (l *linter) checkNativeArchitecture(jobName string, steps *node) {
+	if len(steps.Items) < 2 {
+		l.add(steps.Line, "runner-arch", "job %s must check its native host architecture", jobName)
+		return
+	}
+	st := steps.Items[1]
+	name, _ := st.get("name").scalar()
+	run, _ := st.get("run").scalar()
+	image, _ := st.path("env", "EXPECTED_IMAGE").scalar()
+	if name != "Verify native runner architecture" || image != matrixRunner || st.get("if") != nil ||
+		!strings.Contains(run, `macos-15) expected_os=macOS; expected_runner=ARM64; expected_uname=arm64`) ||
+		!strings.Contains(run, `macos-15-intel) expected_os=macOS; expected_runner=X64; expected_uname=x86_64`) ||
+		!strings.Contains(run, `test "$RUNNER_OS" = "$expected_os"`) ||
+		!strings.Contains(run, `test "$RUNNER_ARCH" = "$expected_runner"`) ||
+		!strings.Contains(run, `test "$(uname -m)" = "$expected_uname"`) {
+		l.add(st.Line, "runner-arch", "job %s must verify the native OS and CPU against its matrix image immediately after checkout", jobName)
 	}
 }
 
@@ -390,6 +432,13 @@ func (l *linter) checkRunner(jobName string, job *node) {
 	for _, r := range runners {
 		if !contains(supportedRunners, r) {
 			l.add(job.Line, "runner", "job %s: runner %q is not a pinned supported image (%s)", jobName, r, strings.Join(supportedRunners, ", "))
+		}
+	}
+	if l.prof == profileCI && (jobName == "test" || jobName == flutterJob) {
+		for _, r := range requiredMacRunners {
+			if !contains(runners, r) {
+				l.add(job.Line, "runner", "job %s must run on native Mac image %s", jobName, r)
+			}
 		}
 	}
 }
@@ -661,13 +710,58 @@ func (l *linter) checkReleaseGates(jobs *node) {
 			l.add(jobs.Line, "release-gates", "required release gate %q is missing", g)
 		}
 	}
+	if matrix, ok := byName["qualification_matrix"]; ok {
+		needs := needsOf(matrix.Value)
+		if !contains(needs, "qualification") || !contains(needs, "spec") {
+			l.add(matrix.Line, "native-evidence", "native qualification matrix must depend on both qualification and specification")
+		}
+		var intel, silicon, compare bool
+		for _, st := range matrix.Value.get("steps").items() {
+			name, _ := st.path("with", "name").scalar()
+			switch name {
+			case "release-evidence-qualification-macos-15-intel":
+				intel = true
+			case "release-evidence-qualification-macos-15":
+				silicon = true
+			}
+			if run, _ := st.get("run").scalar(); strings.Contains(run, "cigate qualmatrix") && strings.Contains(run, `-amd64-report "$RUNNER_TEMP/native-reports/amd64/qualification-cases/release-report.json"`) && strings.Contains(run, `-arm64-report "$RUNNER_TEMP/native-reports/arm64/qualification-cases/release-report.json"`) {
+				compare = true
+			}
+		}
+		if !intel || !silicon || !compare {
+			l.add(matrix.Line, "native-evidence", "native qualification matrix must download and compare both exact architecture reports")
+		}
+	}
+	// The native Security.framework Keychain writer is built only with cgo.
+	// A controller candidate without it cannot complete installed setup.
+	if build, ok := byName["build"]; ok {
+		var nativeController bool
+		for _, st := range build.Value.get("steps").items() {
+			name, _ := st.get("name").scalar()
+			if name != "Build from the unmodified tagged commit" {
+				continue
+			}
+			nativeController = true
+			cgo, _ := st.path("env", "CGO_ENABLED").scalar()
+			run, _ := st.get("run").scalar()
+			if cgo != "1" || !strings.Contains(run, `test "$(go env CGO_ENABLED)" = 1`) ||
+				!strings.Contains(run, `go version -m "$RUNNER_TEMP/candidate/zatiti" | grep -Eq '^[[:space:]]*build[[:space:]]+CGO_ENABLED=1$'`) ||
+				!strings.Contains(run, `nm "$RUNNER_TEMP/candidate/zatiti" | grep -F '_SecItemAdd' >/dev/null`) ||
+				!strings.Contains(run, `nm "$RUNNER_TEMP/candidate/zatiti" | grep -F '_SecItemUpdate' >/dev/null`) {
+				l.add(st.Line, "native-keychain", "native Mac controller candidate must build with cgo and verify its Keychain symbols")
+			}
+		}
+		if !nativeController {
+			l.add(build.Line, "native-keychain", "native Mac controller build step is missing")
+		}
+	}
 	for _, g := range platformReleaseGates {
 		j, ok := byName[g]
 		if !ok {
 			continue
 		}
 		runners, _ := j.Value.path("strategy", "matrix", "os").strings()
-		for _, r := range supportedRunners {
+		for _, r := range requiredMacRunners {
 			if !contains(runners, r) {
 				l.add(j.Line, "release-gates", "gate %s must run on %s", g, r)
 			}
@@ -677,13 +771,24 @@ func (l *linter) checkReleaseGates(jobs *node) {
 		}
 		if g == qualificationJob {
 			var sawQualEvidence bool
+			var sawNativeArch bool
 			for _, st := range j.Value.get("steps").items() {
+				if run, _ := st.get("run").scalar(); strings.Contains(run, `echo "QUALIFICATION_ARCH=$arch" >> "$GITHUB_ENV"`) && strings.Contains(run, `case "$RUNNER_ARCH" in ARM64) arch=arm64 ;; X64) arch=amd64`) {
+					sawNativeArch = true
+				}
 				if run, _ := st.get("run").scalar(); strings.Contains(run, "cigate qualevidence") {
 					sawQualEvidence = true
+					want := `-require-case "` + strings.Join(requiredMacReleaseCases, ",") + `"`
+					if !strings.Contains(run, want) || !strings.Contains(run, `-platform "darwin/$QUALIFICATION_ARCH"`) {
+						l.add(st.Line, "release-cases", "qualification must require every live Mac release case and native platform evidence")
+					}
 				}
 			}
 			if !sawQualEvidence {
 				l.add(j.Line, "release-gates", "gate %s must enforce case enumeration and evidence freshness with \"cigate qualevidence\"", g)
+			}
+			if !sawNativeArch {
+				l.add(j.Line, "release-cases", "qualification must derive its evidence platform from the verified native runner architecture")
 			}
 		}
 	}

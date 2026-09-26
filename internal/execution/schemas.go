@@ -75,6 +75,7 @@ const (
 
 	// Revision 3: the durable worker turn pipeline.
 	schemaInExecutionTurnAdmit           = `{"type":"object","additionalProperties":false,"properties":{"source":{"$ref":"#/$defs/TurnSource"},"worker_id":{"type":"string","format":"uuid"},"scope":{"$ref":"#/$defs/Scope"},"requester_id":{"type":"string","format":"uuid"}},"required":["source","worker_id","scope","requester_id"]}`
+	schemaInExecutionTurnObservation     = `{"type":"object","additionalProperties":false,"properties":{"turn_id":{"type":"string","format":"uuid"},"step_index":{"type":"integer","minimum":0,"maximum":9223372036854775807},"operation_id":{"type":"string","format":"uuid"},"observation":{"type":"object","description":"Inert JSON data bounded by the enclosing size limit; never executable authority."}},"required":["turn_id","step_index","operation_id","observation"]}`
 	schemaInExecutionWorkPending         = `{"type":"object","additionalProperties":false,"properties":{"limit":{"type":"integer","minimum":1,"maximum":100}},"required":["limit"]}`
 	schemaInExecutionWorkClaim           = `{"type":"object","additionalProperties":false,"properties":{"work_id":{"type":"string","format":"uuid"},"expected_version":{"type":"integer","minimum":1,"maximum":9223372036854775807},"generation":{"type":"integer","minimum":1,"maximum":9223372036854775807}},"required":["work_id","expected_version","generation"]}`
 	schemaInExecutionContextPrepare      = `{"type":"object","additionalProperties":false,"properties":{"turn_id":{"type":"string","format":"uuid"},"expected_version":{"type":"integer","minimum":1,"maximum":9223372036854775807},"generation":{"type":"integer","minimum":1,"maximum":9223372036854775807}},"required":["turn_id","expected_version","generation"]}`
@@ -130,6 +131,7 @@ var opSchemas = map[string][2]string{
 	"worker.resume":                  {schemaInWorkerResume, schemaOutDisposition},
 
 	"_execution.turn.admit":           {schemaInExecutionTurnAdmit, schemaOutExecutionTurn},
+	"_execution.turn.observation":     {schemaInExecutionTurnObservation, schemaOutExecutionTurn},
 	"_execution.work.pending":         {schemaInExecutionWorkPending, schemaOutExecutionWorkPending},
 	"_execution.work.claim":           {schemaInExecutionWorkClaim, schemaOutExecutionWorkClaim},
 	"_execution.context.prepare":      {schemaInExecutionContextPrepare, schemaOutExecutionContextPlan},

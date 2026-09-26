@@ -18,11 +18,11 @@ That is source inspection, not qualification of a running service.
 |---|---|
 | Module | `github.com/sirerun/serenity` |
 | Remote | `github.com/sirerun/serenity` |
-| Commit | `f5a5154e1c4d808e10b495fca3bd50d842f0aa92` |
-| Commit date | 2026-09-07 |
-| Branch | `main`, equal to `origin/main` when inspected |
-| `git describe` | `v0.1.1-240-gf5a5154` |
-| Go directive | `go 1.26` |
+| Commit | `b4febdf7bbc0d3c33f9939c79099dc64cce89e84` |
+| Commit date | 2026-09-24 |
+| Checkout | Public `main` HEAD supplied for inspection; local shallow checkout contains no `f5a5154` object |
+| `git describe` | `v0.1.10-hosted-candidate` (candidate tag at this commit) |
+| Go directive | `go 1.26.5` |
 | License | Apache License 2.0 (`LICENSE`) |
 | Memory protocol | MEMORY_VERBS v1, domain `protocol_version` integer `1` |
 | Transport protocol | MCP `2025-11-25` (`internal/server/mcp/tools.go:19`) |
@@ -30,22 +30,21 @@ That is source inspection, not qualification of a running service.
 
 Pin caveats:
 
-- **No release contains this protocol.** The newest tag, `v0.1.1`
-  (`a27c43e5`, 2026-08-28), has neither `internal/server/mcp/http.go` nor
-  `internal/server/memory/remember.go`. The memory protocol exists only on
-  untagged `main`, 240 commits past the tag.
+- **A candidate tag is not qualification.** This commit has the tag
+  `v0.1.10-hosted-candidate`; its existence does not prove a running binary,
+  signed release, or Zatiti's required behavior. The older `f5a5154` object
+  is absent from this shallow checkout, so the prior inspected evidence in
+  this document, rather than a local Git diff, is the comparison baseline.
 - **A running build cannot prove its commit.** `internal/cli/root.go:11`
-  declares `var Version = "dev"`, and the `Makefile` sets no version linker
-  flag. MCP `initialize` returns that string as `serverInfo.version`
+  declares `var Version = "dev"`; this checkout's `Makefile` does not inject a
+  source commit into it. MCP `initialize` returns the value as
+  `serverInfo.version`
   (`internal/server/mcp/server.go:152`). No public call reports the source
   commit, so an adapter cannot verify at run time that it talks to this pin.
-- **Upstream documents disagree at this commit.** `README.md:147-149` says the
-  MCP tool registry "is currently empty; memory and direction tools are not
-  exposed yet", and `internal/server/memory/README.md:57-58` says its checks
-  "do not establish an HTTP MCP endpoint". `docs/operator/mcp.md`,
-  `docs/protocol/MEMORY_VERBS_v1.md`, and the code
-  (`internal/cli/serve.go:105-146`, `internal/cli/serve.go:178-231`) show five
-  tools served over both transports. This document follows the code.
+- **The frozen Zatiti contract has not changed.** New upstream extension
+  tools are source-backed observations, not proof that their responses fit
+  Zatiti's UUID claim/version/freshness schemas or that an operation can be
+  dispatched through this adapter.
 
 ## What Serenity serves
 
@@ -57,17 +56,19 @@ Pin caveats:
 - `--stdio`: newline-delimited JSON-RPC MCP over the process's standard
   streams. No authentication; the spawning process is the trust boundary.
 - `--http`: MCP Streamable HTTP at the single route `/mcp`
-  (`internal/cli/serve.go:123-125`), loopback by default, with optional LAN
+  (`internal/cli/serve.go:163`), loopback by default, with optional LAN
   bind and mutual TLS (`docs/operator/server.md`).
 
-Both transports serve the same registry: the five MEMORY_VERBS v1 tools
-`recall`, `remember`, `entity`, `synthesize`, `forget`
-(`internal/server/memory/`). No other memory operation is served.
+Both transports serve the five MEMORY_VERBS v1 tools `recall`, `remember`,
+`entity`, `synthesize`, `forget` plus the additive
+`cancel_memory_operation` and `read_memory_fact` tools
+(`internal/cli/serve.go:282-283`, `internal/server/memory/cancel.go:24-32`).
+The extensions must be discovered; they are not part of the five-verb v1
+baseline (`docs/protocol/MEMORY_VERBS_v1.md:277-352`).
 
-Two more protocols are documented, DISPOSITION v1 and DIRECTION v1
-(`docs/protocol/`), but `--http` does not serve them:
-`docs/operator/mcp.md:79-83` calls their daemon assembly "separate,
-still-outstanding work". They are not part of this pin.
+`--http` also registers DISPOSITION and DIRECTION routes when a brain and
+index are available (`internal/cli/serve.go:164-168`). Those are distinct
+protocols, not Zatiti's MEMORY_VERBS action surface.
 
 ### HTTP transport rules
 
@@ -75,10 +76,15 @@ Source: `internal/server/mcp/http.go`, `internal/server/server.go:105-130`,
 `docs/operator/mcp.md`.
 
 - Every route requires `Authorization: Bearer <token>`, compared in constant
-  time; a missing or wrong token gets `401`. The token is minted by
-  `serenity init` into the OS keychain of the Serenity host and is read on
-  every request. `serenity connect` reports only whether the token exists
-  (`internal/cli/connect.go:59-62`); no public command prints it.
+  time; a missing or wrong token gets `401`. The legacy token is minted by
+  `serenity init` into the host OS keychain. A named credential profile can
+  instead be provisioned with
+  `serenity connect --credential-profile NAME --provision-token`, and
+  `serve --http --credential-profile NAME` uses that
+  separate keychain slot (`internal/cli/connect.go:68-110`,
+  `internal/cli/serve.go:145-151`). The profile name is operator-selected,
+  not a stored per-brain binding; no public command exports token bytes into
+  a Zatiti `credential_ref`.
 - Only `POST` and `DELETE` are implemented; `GET` gets `405`. A request with an
   `Origin` header gets `403`. `Content-Type` must be `application/json`, else
   `415`. The body limit is 1 MiB (`internal/server/mcp/server.go:15`), else
@@ -87,12 +93,11 @@ Source: `internal/server/mcp/http.go`, `internal/server/server.go:105-130`,
   event stream and has no resumption.
 - **A tool call needs a three-request session handshake.** A `POST` without
   `Mcp-Session-Id` must be `initialize`, else `400`
-  (`internal/server/mcp/http.go:241-250`). The response carries a fresh
+  (`internal/server/mcp/http.go:230-233,335-379`). The response carries a fresh
   `Mcp-Session-Id`. The client must then `POST` a
   `notifications/initialized` message on that session (`202`), because
   `tools/call` is refused with JSON-RPC `-32600 "Initialization required"`
-  until the session reaches state 2 (`internal/server/mcp/server.go:80-82`,
-  `internal/server/mcp/server.go:185-189`). Only the third request can reach a
+  until the session reaches state 2 (`internal/server/mcp/server.go:76-86,185-189`). Only the third request can reach a
   tool. The stdio transport runs the same state machine.
 - Sessions live in the server process's memory. The server evicts a session
   after 30 idle minutes, holds at most 64, and loses all of them on restart
@@ -100,7 +105,7 @@ Source: `internal/server/mcp/http.go`, `internal/server/server.go:105-130`,
 - **A dropped connection does not stop a call.** An accepted `tools/call` runs
   under the handler's lifetime context, not the request's. When the client
   disconnects, the call keeps running and its result is undeliverable
-  (`internal/server/mcp/http.go:77-87`, `internal/server/mcp/http.go:226-232`).
+  (`internal/server/mcp/http.go:77-87,270-272,320-328`).
   A client-side timeout therefore cannot mean the write did not happen.
 
 ### Tool result encoding
@@ -140,14 +145,33 @@ has `id` (integer, legacy), `fact_id` (string), `fact`, `kind`, `entity_slug`,
 creation time, a confidence, a version, a source revision, or an index
 revision.
 
-`remember` (`internal/server/memory/remember.go:15-33`). Request: `fact` and
+`remember` (`internal/server/memory/remember.go:17-38`). Request: `fact` and
 `provenance` (both required; provenance is free text of at most 500
-characters), optional `ttl`, `entity`, `kind`, `visibility`. Response:
+characters), optional `ttl`, `entity`, `kind`, `visibility`, and
+`operation_key` (1..128 ASCII letters, digits, dot, colon, underscore or
+hyphen). A keyed request must omit `ttl` or use an absolute timestamp.
+Response:
 `protocol_version`, `id`, `status` (`inserted`, `duplicate`, or `superseded`),
-`status_text`, `entity_slug`, `valid_until`, and `degraded_dedup`, which this
-server always sets to `true` (`internal/server/memory/remember.go:146`). The
-returned `id` is the lowercase hexadecimal SHA-256 of the stored source
+`status_text`, `entity_slug`, `valid_until`, optional `search_state` and
+`expired`, and `degraded_dedup` (set to true in this handler). The returned
+`id` is the lowercase hexadecimal SHA-256 of the stored source
 (`internal/server/memory/README.md:16-18`).
+
+`cancel_memory_operation` (`internal/server/memory/cancel.go:14-49`) accepts
+the original `operation_key` and optional `reason`. It durably fences that key
+even if no fact exists, and responds with `canceled: true`, the fact SHA-256
+`id` or an empty id, and whether an active fact was expired. A matching keyed
+remember cannot create a canceled absent fact; a replay of an already written
+matching fact can recover its now-expired id. It is not a status lookup for
+an unrelated or still-running request.
+
+`read_memory_fact` (`internal/server/memory/readfact.go:12-25,77-165`)
+accepts only an exact lowercase 64-character fact SHA-256 id and returns
+one live, world-visible fact's content, kind, visibility, entity slug,
+provenance, valid-until and `content_untrusted: true`. Missing, private,
+expired, forgotten and canceled facts all return `unavailable`; oversized
+MCP results are also refused. It does not return Zatiti's claim UUID,
+version, confidence, observed time, source revision or index revision.
 
 `forget` (`internal/server/memory/forget.go`). Request: `id` (required, the
 SHA-256 fact id) and optional `reason`. Response: `protocol_version`, `id`,
@@ -165,55 +189,48 @@ signal, not an invoice" (`docs/protocol/MEMORY_VERBS_v1.md:175`).
 `entity`. Looks up one entity page by name. Not required by this adapter.
 
 Error envelope (`internal/server/memory/memory.go:57-63`): `protocol_version`,
-`error`, `message`, `suggestion`, optional `detail`. Codes: `invalid_params`,
+`error`, `message`, `suggestion`, optional `detail`. Codes include
+`invalid_params`, `operation_conflict`, `operation_canceled`,
 `provenance_required`, `not_found`, `scope_denied`, `unavailable`,
 `budget_unsatisfiable` (reserved, never emitted), `internal`.
 
 ### Command identity and idempotency
 
-No MEMORY_VERBS request carries a caller-chosen command identity, idempotency
-key, or request id that the server stores. The JSON-RPC `id` lives only while
-the call is in flight.
-
-`remember` has exact-content deduplication, not command idempotency. The key
-covers fact text, provenance, entity type and slug, kind, visibility, and the
-resolved expiry instant (`internal/writer/memoryfact.go:90`). It compares only
-against facts that are still active (`internal/store/memoryfact.go:421-436`).
-Three consequences:
-
-- An identical replay while the first fact is active returns
-  `status: "duplicate"` with the existing id.
-- An identical replay after that fact was forgotten, or after its expiry,
-  inserts a second fact. A blind repeat can therefore resurrect retracted
-  content.
-- A request with a relative `ttl` resolves to a different expiry instant on
-  each call, so its replay never deduplicates.
-
-Deduplication also holds only inside one writer process: "Independent writer
-processes do not share this queue" (`internal/server/memory/README.md:28-30`).
-
-`forget` is idempotent by design.
+`remember` now accepts a caller-chosen durable, brain-scoped `operation_key`.
+The writer records it in the canonical source and, under its queue, compares
+the normalized payload of every replay even after expiry or withdrawal:
+matching bytes recover the same source id; changed bytes conflict
+(`internal/writer/memoryfact.go:88-119`,
+`internal/store/memoryfact.go:83-106`). A keyed relative TTL is rejected
+before writing. `cancel_memory_operation` writes a durable cancellation fence
+even for a missing key (`internal/writer/memoryfact.go:255-285`). These are
+meaningful improvements over the previous pin's active-fact-only dedup.
+They cover keyed `remember`, not every Zatiti action; `forget` remains
+idempotent by fact id without a command key. The JSON-RPC `id` is still only
+an in-flight transport identity.
 
 ### Reconciling a lost acknowledgement
 
-No call answers "did command X commit?". The closest read is `recall`, whose
-facts echo `provenance`. It is not an authoritative lookup: it returns only
-active, world-visible facts, newest first, cut at `limit`, with no filter on
-provenance or fact id. Finding a fact proves it exists. Not finding one proves
-nothing, because the fact may be expired, private, beyond the cap, or still
-being written by a call that outlived its connection.
+No public read answers "did command X commit?" by `operation_key` and returns
+an authoritative terminal status. Retrying the same keyed `remember` can
+recover an already committed fact id without inserting another, but is a
+second physical mutation call and cannot be smuggled into Zatiti's
+`Reconcile` read. `cancel_memory_operation` can prevent a future write for
+one key, but does not prove whether the original call is still in flight.
+`read_memory_fact` requires the fact id that a lost acknowledgement may have
+hidden. `recall` absence is still non-authoritative.
 
 ### Single writer
 
-Each `serve` process owns one in-process writer queue
-(`internal/cli/serve.go:189-198`). ADR 012 states the rule that exactly one
-process writes a brain (`docs/adr/012-embedded-read-facade-single-writer.md`,
-decision 4). Nothing at this pin enforces it for `serve`: the only pidfile
-guard belongs to the scheduler daemon (`internal/server/daemon.go:153-166`),
-and `serenity sync` or a second `serve` can open another queue on the same
-brain. One writer per brain is a deployment obligation, not an upstream
-guarantee. A `serve` process also serves exactly one brain root and takes no
-brain selector on any request, so one endpoint is one brain.
+`serve` now holds `writer.AcquireBrain(root)` while its writer queue and
+index are open (`internal/cli/serve.go:228-249`). This takes an exclusive
+nonblocking advisory lock on `.serenity/writer.lock` on Darwin/Linux;
+cooperating CLI write commands use the same helper
+(`internal/writer/ownership_unix.go:15-55`, `internal/cli/ownership.go:13-54`).
+It prevents a second cooperating local writer, including another `serve`,
+from owning the brain concurrently. It does not fence arbitrary processes
+that bypass the lock or prove cross-host filesystem behavior. Each self-hosted
+`serve` still serves one brain root; requests carry no brain selector.
 
 ### Cost and disclosure
 
@@ -249,7 +266,7 @@ Serenity's own ledger, and takes no spend bound. Its citations carry
 `claim_id`, `confidence` (a float), and `observed_at`, which is more than the
 wire protocol returns. This adapter cannot use it: the package's only allowed
 production import is `internal/contract`, integration owns `go.mod`, and the
-facade exists only at an untagged commit.
+candidate tag has not been qualified for Zatiti.
 
 ## Required capability versus the pin
 
@@ -262,40 +279,40 @@ upstream call exists but cannot satisfy the frozen schema truthfully.
 | 1 | One `Invoke` is one accounted physical request; no preflight inside it | **No** | Every tool call needs `initialize`, then `notifications/initialized`, then `tools/call`. The frozen action kinds include no session action, so the handshake cannot be its own governed attempt. |
 | 2 | `recall` | **Partly** | The verb exists. Its facts cannot populate `MemoryClaim`: `id` must be a UUID and upstream ids are 64-character SHA-256 strings; `confidence` and `freshness` are required and absent upstream. |
 | 3 | `remember` | **Partly** | The verb exists. The result has a SHA-256 id, no version, and no UUID, so the memory owner receives no addressable claim. Sources must collapse into 500 characters of free-text provenance. |
-| 4 | `inspect` one claim by id and version | **No** | No fetch-by-id verb; `entity` reads entity pages. |
+| 4 | `inspect` one claim by id and version | **Partly** | `read_memory_fact` returns one active, world-visible fact by exact SHA-256 id without search/model calls (`internal/server/memory/readfact.go:77-165`). It has no Zatiti UUID/version and deliberately returns `unavailable` for private, expired, forgotten or canceled facts. |
 | 5 | `promote` with source brain, claim, curator, and redaction lineage | **No** | No promotion verb and no lineage fields. `remember` could carry a pointer in provenance only. |
 | 6 | `retract`, active recall only | **Partly** | `forget` matches the semantics, and history is preserved. It needs the SHA-256 fact id, and the frozen `SerenityRetract` action carries only a UUID `VersionRef`. No single call resolves one to the other. |
 | 7 | `export_revision` and backup revision protocol | **No** | No revision is reported or exported. |
-| 8 | Brain selected per request by `brain_id` | **No** | One `serve` process serves one brain root; brain identity is the endpoint. A profile mapping of brain to endpoint covers this only by deployment. |
-| 9 | Stable `adapter_command_id` honored upstream | **No** | No request field stores a caller identity. |
-| 10 | Authoritative command status lookup after a lost acknowledgement | **No** | No lookup. `recall` absence proves nothing. Calls outlive dropped connections. |
-| 11 | Safe idempotent replay | **No** | Content deduplication covers active facts in one process only; replay after a forget inserts again. |
+| 8 | Brain selected per request by `brain_id` | **No** | Self-hosted `serve` serves one brain root; brain identity is the endpoint. A profile mapping of brain to endpoint covers this only by deployment. The separately hosted gateway selects by credential binding, not a self-hosted MEMORY_VERBS `brain_id` field. |
+| 9 | Stable `adapter_command_id` honored upstream | **Partly** | `remember.operation_key` durably binds a bounded caller key to normalized payload, with replay/conflict behavior (`internal/server/memory/remember.go:17-24,73-77`; `internal/writer/memoryfact.go:88-119`). Other action kinds have no equivalent caller key. |
+| 10 | Authoritative command status lookup after a lost acknowledgement | **No** | No public read/status lookup by `operation_key`. A keyed remember replay is another physical write call; cancellation fences a key but does not establish whether an in-flight original committed. |
+| 11 | Safe idempotent replay | **Partly** | A keyed `remember` with absolute/omitted TTL returns the same fact id after expiry/withdrawal and conflicts on changed payload; canceled absent keys stay canceled (`internal/writer/memoryfact.go:88-119,255-285`). This does not cover every Zatiti action or supply read-only reconciliation. |
 | 12 | Enforceable per-call cost bound | **No** | No bound parameter; the handlers do not consult `internal/spend`. |
 | 13 | Enforceable disclosure destinations | **No** | Provider endpoints are Serenity-side configuration; responses do not name the provider that received data. |
 | 14 | Usage reporting | **Partly** | `synthesize` alone reports best-effort tokens and a floating-point dollar estimate. `recall` reports none even when it embeds the query. |
 | 15 | Source, scope, version, confidence, and freshness on results | **Partly** | Free-text `provenance` and `visibility` only. |
 | 16 | Source and index revision, enforceable minimum freshness | **No** | Not reported; ADR 012 decision 6 disclaims it. |
-| 17 | Exactly one writer per brain | **No** | Documented rule; no lock enforces it for `serve`. |
+| 17 | Exactly one writer per brain | **Partly** | `serve` and cooperating CLI writers hold an advisory Darwin/Linux `.serenity/writer.lock` (`internal/cli/serve.go:228-249`; `internal/writer/ownership_unix.go:15-55`). Arbitrary writers and cross-host filesystem behavior are outside that guarantee. |
 | 18 | Verifiable running version or commit | **No** | `serverInfo.version` is `dev`. |
 | 19 | Go read facade for compatible reads | **Partly** | Exists upstream; unusable under this package's import allowlist and the current `go.mod`. |
-| 20 | Credential through a Zatiti `credential_ref` | **Partly** | Bearer token is supported on the wire. No public command releases the token from the Serenity host's keychain, so provisioning it into Zatiti's secret store has no documented path. |
+| 20 | Credential through a Zatiti `credential_ref` | **Partly** | Bearer auth and named host-Keychain credential profiles exist (`internal/cli/connect.go:68-110`; `internal/cli/serve.go:145-151`), but no public token handoff into Zatiti custody is documented and a profile name is not persistently bound to a brain. |
 
 ## Consequence for this adapter
 
 Row 1 blocks every operation, independently of rows 2 to 20: against this pin,
 no `Invoke` can reach a Serenity tool in one physical request. Rows 2 to 7
 also show that no operation's result fits the frozen evidence schema without
-inventing identifiers or values. This adapter therefore sends nothing. It
-validates and digest-binds the profile, rejects any profile that claims a
+inventing identifiers or values; the exact fact read and keyed write extensions
+do not change that. This adapter therefore sends nothing. It validates and
+digest-binds the profile, rejects any profile that claims a
 capability this table marks as not provided, and refuses each operation with a
-named fault after the local checks that can run. `Reconcile` reports the
-outcome as unknown with a non-authoritative lookup and sends nothing, because
-no lookup exists.
+named fault after the local checks that can run. `Reconcile` reports the outcome as unknown and sends nothing, because no
+authoritative lookup exists.
 
 This document's scope ends at what upstream would need for each row to become
 "Provided". The smallest set is: a sessionless call path or a contract that
-admits an accounted handshake; a stored caller command identity with a status
-lookup; UUID-compatible or contract-accepted claim identities with version,
-confidence, and observed time on results; a revision report; per-call spend
-and destination bounds or a truthful report of what was spent and where; and a
-build that reports its commit.
+admits an accounted handshake; an authoritative read-only status lookup for
+the now-stored keyed `remember` identity and equivalent identities for other
+writes; UUID-compatible or contract-accepted claim identities with version,
+confidence, and observed time on results; a revision report; enforceable
+per-call spend and destination bounds; and a build that reports its commit.

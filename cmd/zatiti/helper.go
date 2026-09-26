@@ -14,8 +14,8 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/spf13/cobra"
 
@@ -73,34 +73,9 @@ import (
 // building; flagged in the P24 handoff as a prerequisite gap for whichever
 // card owns the OAuth flow's exact metadata shape.
 //
-// KNOWN GAP (verified, not fixable from cmd/zatiti -- see the P24 handoff):
-// internal/connections/localio.go:495 reads the shared HMAC receipt key
-// with `s.secrets.Get(ctx, helperReceiptKeyRef)`, passing the literal
-// constant string directly as the reference. Neither landed
-// contract.SecretStore backend (internal/platform/secret.go's
-// keychainSecrets, internal/platform/secret_headless.go's headlessSecrets)
-// returns that string from Put: keychainSecrets.Put deterministically
-// returns "kc1:"+base64(key) (secret.go:146-158), and
-// headlessSecrets.Put returns a random "hl1:"+hex(16) per call
-// (secret_headless.go:80-119) -- never the key argument itself. So no
-// caller, including this helper, can ever make a later
-// Get(ctx, helperReceiptKeyRef) succeed against a real installation;
-// internal/connections' own tests never catch this because
-// internal/connections/helpers_test.go's fakeSecrets.Put returns its
-// reference argument unchanged (identity), masking the mismatch. This
-// command still calls ensureHelperReceiptKey (best effort: reads, then
-// mints and stores a fresh key if absent) and keeps the freshly minted key
-// in memory to sign THIS invocation's receipt correctly, but
-// connection.setup.complete's own server-side verification
-// (internal/connections/localio.go:480-530) will report
-// prerequisite_missing "the helper receipt key is not provisioned" against
-// a real platform-backed installation regardless, until internal/connections
-// or internal/platform (both outside cmd/zatiti's write scope) close this
-// gap -- for example by internal/connections storing and re-resolving the
-// opaque reference Put actually returns, the way this command's own
-// credential_ref handling already does correctly (see runConnectionHelper
-// below: it uses secrets.Put's *return value*, never its own invented
-// label, as the credential_ref the receipt names).
+// The shared receipt key is resolved by its trusted name through
+// SecretStore.Lookup. The opaque reference returned by the store is the
+// only value passed to Get; neither a receipt nor a caller chooses it.
 
 const (
 	// helperReceiptPrefix and helperReceiptKeyRef MUST stay byte-for-byte
@@ -115,9 +90,10 @@ const (
 	// deliberate, documented wire-format mirror -- the same pattern
 	// internal/controller's own wire.go already uses for frozen
 	// cross-package shapes it does not import Go types for.
-	helperReceiptPrefix   = "zatiti-helper/v1."
-	helperReceiptKeyRef   = "connections/helper/receipt-key"
-	helperReceiptKeyBytes = 32
+	helperReceiptPrefix      = "zatiti-helper/v1."
+	helperReceiptKeyRef      = "connections/helper/receipt-key"
+	helperReceiptKeyBytes    = 32
+	maxHelperCredentialBytes = 4096
 )
 
 // helperPayload mirrors internal/connections/localio.go:54-59's unexported
@@ -129,45 +105,61 @@ type helperPayload struct {
 	ExpiresAt       time.Time   `json:"expires_at"`
 }
 
-// helperReceiptKeyProvisioned reports whether the shared HMAC receipt key
-// is retrievable at its well-known reference right now, without creating
-// it. Given the verified gap documented above, this reports false on
-// essentially every real installation today; it is still computed
-// honestly (a direct Get, not a hardcoded false) so it starts reporting
-// true the moment the underlying gap closes, with no readiness-logic
-// change needed here.
+// helperReceiptKeyProvisioned checks the trusted name without creating it.
 func helperReceiptKeyProvisioned(ctx context.Context, secrets contract.SecretStore) bool {
 	if secrets == nil {
 		return false
 	}
-	key, err := secrets.Get(ctx, helperReceiptKeyRef)
+	ref, err := secrets.Lookup(ctx, helperReceiptKeyRef)
+	if err != nil {
+		return false
+	}
+	key, err := secrets.Get(ctx, ref)
 	defer zero(key)
 	return err == nil && len(key) > 0
 }
 
-// ensureHelperReceiptKey returns the shared HMAC key for this invocation:
-// the stored one if Get(helperReceiptKeyRef) already resolves, else a
-// freshly minted 32-byte random key, best-effort stored (see the package
-// doc comment's KNOWN GAP for why a later Get by the same literal
-// reference is not guaranteed to find it again). The returned bytes must
-// be zeroed by the caller once the receipt is signed.
+// ensureHelperReceiptKey returns the shared HMAC key for this invocation.
+// A missing key is provisioned durably before any receipt is signed.
 func ensureHelperReceiptKey(ctx context.Context, secrets contract.SecretStore) ([]byte, error) {
-	if key, err := secrets.Get(ctx, helperReceiptKeyRef); err == nil && len(key) > 0 {
+	ref, err := secrets.Lookup(ctx, helperReceiptKeyRef)
+	if err == nil {
+		key, getErr := secrets.Get(ctx, ref)
+		if getErr != nil {
+			return nil, fmt.Errorf("reading the helper receipt key: %w", getErr)
+		}
+		if len(key) == 0 {
+			return nil, errors.New("the helper receipt key is empty")
+		}
 		return key, nil
+	}
+	var fault *contract.Fault
+	code := platform.Code(err)
+	if code == "" && errors.As(err, &fault) {
+		code = fault.Code
+	}
+	if code != contract.CodeNotFound {
+		return nil, fmt.Errorf("looking up the helper receipt key: %w", err)
 	}
 	key := make([]byte, helperReceiptKeyBytes)
 	if _, err := rand.Read(key); err != nil {
 		return nil, fmt.Errorf("generating the helper receipt key: %w", err)
 	}
-	// Best effort: this Put succeeds and stores the key, but under an
-	// opaque reference platform mints (never helperReceiptKeyRef itself);
-	// a later, separate process's Get(helperReceiptKeyRef) is not
-	// guaranteed to find it. Ignoring a Put failure here is deliberate:
-	// this invocation's own receipt is still signed correctly below from
-	// the in-memory key regardless of whether storing it for reuse
-	// succeeds.
-	_, _ = secrets.Put(ctx, helperReceiptKeyRef, key)
-	return key, nil
+	if _, err := secrets.Put(ctx, helperReceiptKeyRef, key); err != nil {
+		zero(key)
+		return nil, fmt.Errorf("storing the helper receipt key: %w", err)
+	}
+	zero(key)
+	ref, err = secrets.Lookup(ctx, helperReceiptKeyRef)
+	if err != nil {
+		return nil, fmt.Errorf("confirming the helper receipt key: %w", err)
+	}
+	stored, err := secrets.Get(ctx, ref)
+	if err != nil || len(stored) == 0 {
+		zero(stored)
+		return nil, errors.New("the helper receipt key could not be verified after storage")
+	}
+	return stored, nil
 }
 
 // mintHelperReceipt builds the opaque receipt string
@@ -261,94 +253,23 @@ func runConnectionHelper(ctx context.Context, cfg *config, op contract.Operator,
 		return fmt.Errorf("opening the local secret store: %w", err)
 	}
 	defer func() { _ = plat.Close() }()
-	secrets := plat.Secrets()
-
-	scope := map[string]any{"installation_id": installationID}
-
-	getRes, err := callOperation(ctx, op, "connection.get", map[string]any{"scope": scope, "id": connectionID})
-	if err != nil {
-		return fmt.Errorf("connection.get: %w", err)
-	}
-	var conn struct {
-		Resource struct {
-			Version         int64  `json:"version"`
-			AccountIdentity string `json:"account_identity"`
-		} `json:"resource"`
-	}
-	if err := json.Unmarshal(getRes.Data, &conn); err != nil {
-		return fmt.Errorf("decoding connection.get: %w", err)
-	}
-
-	beginRes, err := callOperation(ctx, op, "connection.setup.begin", map[string]any{
-		"scope": scope, "connection_id": connectionID, "expected_version": conn.Resource.Version, "method": "store_reference",
-	})
-	if err != nil {
-		return fmt.Errorf("connection.setup.begin: %w", err)
-	}
-	var challenge struct {
-		Resource struct {
-			ID        contract.ID `json:"id"`
-			Version   int64       `json:"version"`
-			ExpiresAt time.Time   `json:"expires_at"`
-		} `json:"resource"`
-	}
-	if err := json.Unmarshal(beginRes.Data, &challenge); err != nil {
-		return fmt.Errorf("decoding connection.setup.begin: %w", err)
-	}
-
-	_, _ = fmt.Fprintf(streams.Err, "zatiti: enter the credential for connection %s (account %s); input is not echoed and never leaves this terminal as an operation argument\n", connectionID, conn.Resource.AccountIdentity)
-	secret, err := readSecretLine(streams.In)
-	if err != nil {
-		return fmt.Errorf("reading the credential: %w", err)
-	}
-	defer zero(secret)
-	if len(secret) == 0 {
-		return errors.New("an empty credential was entered; setup cancelled")
-	}
-
-	// credentialRef is the store's OWN opaque return value, never a label
-	// this command invents: connection.setup.complete's Perform phase later
-	// calls secrets.Get(ctx, payload.CredentialRef) with exactly what this
-	// receipt names, so it must be the reference platform.Secrets().Put
-	// actually returns (contract.SecretStore.Put's opaque-reference
-	// contract, internal/contract/stores.go:11).
-	credentialRef, err := secrets.Put(ctx, "connections/credential/"+string(contract.NewID()), secret)
-	if err != nil {
-		return fmt.Errorf("writing the credential to the local secret store: %w", err)
-	}
-
-	key, err := ensureHelperReceiptKey(ctx, secrets)
-	if err != nil {
-		return err
-	}
-	defer zero(key)
-	receipt, err := mintHelperReceipt(key, helperPayload{
-		ChallengeID: challenge.Resource.ID, CredentialRef: credentialRef,
-		AccountIdentity: conn.Resource.AccountIdentity, ExpiresAt: challenge.Resource.ExpiresAt,
-	})
-	if err != nil {
-		return err
-	}
-
-	if _, err := callOperation(ctx, op, "connection.setup.complete", map[string]any{
-		"scope": scope, "challenge_id": challenge.Resource.ID, "expected_version": challenge.Resource.Version, "helper_ref": receipt,
-	}); err != nil {
-		return fmt.Errorf("connection.setup.complete: %w", err)
-	}
-	_, _ = fmt.Fprintf(streams.Err, "zatiti: connection %s setup complete\n", connectionID)
-	return nil
+	return runHelperEngine(ctx, cfg.StateDir, op, plat.Secrets(), streams.In, streams.Err, installationID, connectionID)
 }
 
 // callOperation runs one operation call and normalizes a non-completed
 // outcome (a transport error, or a completed transport carrying a fault)
 // into a single Go error the caller can wrap and exitFor can map to a CLI
 // exit code.
-func callOperation(ctx context.Context, op contract.Operator, operation string, input map[string]any) (contract.Result, error) {
+func callOperation(ctx context.Context, op contract.Operator, operation string, input map[string]any, submissionKey string) (contract.Result, error) {
 	raw, err := json.Marshal(input)
 	if err != nil {
 		return contract.Result{}, fmt.Errorf("encoding request input: %w", err)
 	}
-	res, err := op.Call(ctx, operation, contract.Request{Schema: contract.SchemaRequest, Input: raw})
+	return callOperationRaw(ctx, op, operation, raw, submissionKey)
+}
+
+func callOperationRaw(ctx context.Context, op contract.Operator, operation string, raw []byte, submissionKey string) (contract.Result, error) {
+	res, err := op.Call(ctx, operation, contract.Request{Schema: contract.SchemaRequest, SubmissionKey: submissionKey, Input: raw})
 	if err != nil {
 		return contract.Result{}, err
 	}
@@ -366,13 +287,34 @@ func callOperation(ctx context.Context, op contract.Operator, operation string, 
 func readSecretLine(in io.Reader) ([]byte, error) {
 	restore := suppressTerminalEcho()
 	defer restore()
-	reader := bufio.NewReader(in)
-	line, err := reader.ReadString('\n')
-	if err != nil && !errors.Is(err, io.EOF) {
-		return nil, err
+	reader := bufio.NewReaderSize(in, 512)
+	secret := make([]byte, 0, 128)
+	for {
+		b, err := reader.ReadByte()
+		if err != nil {
+			if !errors.Is(err, io.EOF) {
+				zero(secret)
+				return nil, err
+			}
+			break
+		}
+		if b == '\n' {
+			break
+		}
+		if len(secret) == maxHelperCredentialBytes+1 {
+			zero(secret)
+			return nil, errors.New("credential exceeds the 4096-byte limit")
+		}
+		secret = append(secret, b)
 	}
-	line = strings.TrimRight(line, "\r\n")
-	return []byte(line), nil
+	if len(secret) > 0 && secret[len(secret)-1] == '\r' {
+		secret = secret[:len(secret)-1]
+	}
+	if len(secret) == 0 || len(secret) > maxHelperCredentialBytes || !utf8.Valid(secret) {
+		zero(secret)
+		return nil, errors.New("credential must be 1..4096 valid UTF-8 bytes")
+	}
+	return secret, nil
 }
 
 // suppressTerminalEcho best-effort disables local terminal echo on

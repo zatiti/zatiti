@@ -21,6 +21,14 @@ const (
 // profile. Every provider-specific value the adapter uses -- endpoint,
 // model, prices, bounds -- is read from here; none has a default.
 type responsesProfile struct {
+	Version string
+	// QualificationOnly marks the evidence-free profile draft accepted only
+	// for the single fixed qualification probe. It must never authorize a
+	// model step, session creation, or reconciliation.
+	QualificationOnly  bool
+	Provider           string
+	SessionMode        string
+	Routing            json.RawMessage
 	Endpoint           string
 	Model              string
 	ConnectionID       contract.ID
@@ -62,6 +70,9 @@ func (p *responsesProfile) protocolProfile() protocolProfile {
 		Model:          p.Model,
 		MaxInputTokens: p.MaxInputTokens,
 		Capabilities:   p.CapabilityEvidence.Capabilities,
+		Provider:       p.Provider,
+		SessionMode:    p.SessionMode,
+		Routing:        p.Routing,
 	}
 }
 
@@ -73,16 +84,43 @@ func (p *responsesProfile) protocolProfile() protocolProfile {
 // currency agreement, a credential-free endpoint inside the declared
 // disclosure destinations, and enforceable cost/disclosure bounds.
 func loadProfile(raw json.RawMessage) (*responsesProfile, error) {
+	var head struct {
+		Schema string `json:"schema"`
+	}
+	if err := json.Unmarshal(raw, &head); err != nil {
+		return nil, invalidInput("responses profile must be a JSON object")
+	}
+	var qualificationProbe struct {
+		CapabilityEvidence json.RawMessage `json:"capability_evidence"`
+	}
+	if err := json.Unmarshal(raw, &qualificationProbe); err == nil && len(qualificationProbe.CapabilityEvidence) == 0 {
+		return loadQualificationDraft(raw, head.Schema)
+	}
 	schema, err := profileSchema()
+	var v2 wireResponsesProfileV2
+	if head.Schema == "zatiti.responses/v2" {
+		schema, err = profileSchemaV2()
+	}
 	if err != nil {
 		return nil, internalError("responses profile schema composition failed: %v", err)
 	}
 	if err := contract.ValidateSchema(schema, raw); err != nil {
-		return nil, invalidInput("responses profile does not match the zatiti.responses/v1 schema: %v", err)
+		return nil, invalidInput("responses profile does not match the %s schema: %v", head.Schema, err)
 	}
 	var w wireResponsesProfile
-	if err := contract.DecodeStrict(raw, &w); err != nil {
+	var provider, sessionMode string
+	var routing json.RawMessage
+	if head.Schema == "zatiti.responses/v2" {
+		if err := contract.DecodeStrict(raw, &v2); err != nil {
+			return nil, invalidInput("responses v2 profile decode failed: %v", err)
+		}
+		w = wireResponsesProfile{Schema: v2.Schema, Endpoint: v2.Endpoint, Model: v2.Model, ConnectionID: v2.ConnectionID, MaxInputTokens: v2.MaxInputTokens, MaxOutputTokens: v2.MaxOutputTokens, MaxResponseBytes: v2.MaxResponseBytes, TimeoutSeconds: v2.TimeoutSeconds, Currency: v2.Currency, InputRate: v2.InputRate, OutputRate: v2.OutputRate, Enforcement: v2.Enforcement, CapabilityEvidence: v2.CapabilityEvidence}
+		provider, sessionMode, routing = v2.Provider, v2.SessionMode, v2.Routing
+	} else if err := contract.DecodeStrict(raw, &w); err != nil {
 		return nil, invalidInput("responses profile decode failed: %v", err)
+	}
+	if head.Schema != "zatiti.responses/v1" && head.Schema != "zatiti.responses/v2" {
+		return nil, invalidInput("unsupported Responses profile schema %q", head.Schema)
 	}
 
 	digest, err := profileDigestWithoutCapabilityEvidence(raw)
@@ -116,6 +154,11 @@ func loadProfile(raw json.RawMessage) (*responsesProfile, error) {
 	if w.Enforcement.Disclosure == enforcementUnsupported {
 		return nil, capabilityUnsupported("responses profile declares disclosure bounds unsupported; a model step requires enforced or explicitly advisory disclosure bounds")
 	}
+	if head.Schema == "zatiti.responses/v2" {
+		if err := validateV2Pricing(provider, sessionMode, routing, w); err != nil {
+			return nil, err
+		}
+	}
 
 	endpoint, err := parseEndpoint(w.Endpoint)
 	if err != nil {
@@ -138,6 +181,7 @@ func loadProfile(raw json.RawMessage) (*responsesProfile, error) {
 	}
 
 	return &responsesProfile{
+		Version: head.Schema, Provider: provider, SessionMode: sessionMode, Routing: routing,
 		Endpoint:           w.Endpoint,
 		Model:              w.Model,
 		ConnectionID:       w.ConnectionID,
@@ -155,6 +199,101 @@ func loadProfile(raw json.RawMessage) (*responsesProfile, error) {
 		CapabilityEvidence: w.CapabilityEvidence,
 		Digest:             digest,
 	}, nil
+}
+
+// loadQualificationDraft accepts only the evidence-free v2 draft emitted by
+// configuration's qualification candidate. This in-memory adapter profile
+// has no pre-authorized capabilities: New pairs it with an action-level gate
+// that permits exactly the fixed, one-request qualification probe.
+func loadQualificationDraft(raw json.RawMessage, schemaName string) (*responsesProfile, error) {
+	if schemaName != "zatiti.responses/v2" {
+		return nil, invalidInput("qualification requires an evidence-free zatiti.responses/v2 profile draft")
+	}
+	var draft struct {
+		Schema           string           `json:"schema"`
+		Endpoint         string           `json:"endpoint"`
+		Model            string           `json:"model"`
+		ConnectionID     contract.ID      `json:"connection_id"`
+		MaxInputTokens   int64            `json:"max_input_tokens"`
+		MaxOutputTokens  int64            `json:"max_output_tokens"`
+		MaxResponseBytes int64            `json:"max_response_bytes"`
+		TimeoutSeconds   int64            `json:"timeout_seconds"`
+		Currency         string           `json:"currency"`
+		InputRate        wireRationalRate `json:"input_rate"`
+		OutputRate       wireRationalRate `json:"output_rate"`
+		Enforcement      struct {
+			Cost                 string    `json:"cost"`
+			Disclosure           string    `json:"disclosure"`
+			MaximumCost          wireMoney `json:"maximum_cost"`
+			ProviderDestinations []string  `json:"provider_destinations"`
+		} `json:"enforcement"`
+		Provider    string          `json:"provider"`
+		SessionMode string          `json:"session_mode"`
+		Routing     json.RawMessage `json:"routing"`
+	}
+	if err := contract.DecodeStrict(raw, &draft); err != nil {
+		return nil, invalidInput("qualification profile draft decode failed: %v", err)
+	}
+	if draft.Schema != schemaName || draft.Model == "" || draft.ConnectionID == "" || draft.Endpoint == "" ||
+		draft.MaxInputTokens < 1 || draft.MaxOutputTokens < 1 || draft.MaxResponseBytes < 1 ||
+		draft.TimeoutSeconds < 1 || draft.Currency == "" || draft.InputRate.Unit != "input_token" ||
+		draft.OutputRate.Unit != "output_token" || draft.Enforcement.MaximumCost.Currency != draft.Currency ||
+		draft.Enforcement.Cost == enforcementUnsupported || draft.Enforcement.Disclosure == enforcementUnsupported {
+		return nil, invalidInput("qualification profile draft is incomplete or has unsupported bounds")
+	}
+	if draft.Enforcement.Cost != enforcementEnforced && draft.Enforcement.Cost != enforcementAdvisory {
+		return nil, invalidInput("qualification profile draft has an unsupported cost enforcement mode")
+	}
+	if draft.Enforcement.Disclosure != enforcementEnforced && draft.Enforcement.Disclosure != enforcementAdvisory {
+		return nil, invalidInput("qualification profile draft has an unsupported disclosure enforcement mode")
+	}
+	switch draft.Provider {
+	case "openai":
+		if draft.Endpoint != "https://api.openai.com/v1/responses" || draft.SessionMode != "provider_conversation" || len(draft.Routing) > 0 && string(draft.Routing) != "{}" {
+			return nil, invalidInput("OpenAI qualification draft endpoint, session mode or routing is invalid")
+		}
+	case "openrouter":
+		if draft.Endpoint != "https://openrouter.ai/api/v1/responses" || draft.SessionMode != "stateless" {
+			return nil, invalidInput("OpenRouter qualification draft endpoint or session mode is invalid")
+		}
+	case "experiential":
+		if draft.Endpoint != "https://api.experientiallabs.ai/v1/responses" || draft.SessionMode != "stateless" {
+			return nil, invalidInput("Experiential qualification draft endpoint or session mode is invalid")
+		}
+	default:
+		return nil, invalidInput("qualification profile draft names an unsupported provider")
+	}
+	endpoint, err := parseEndpoint(draft.Endpoint)
+	if err != nil {
+		return nil, err
+	}
+	permitted := false
+	for _, destination := range draft.Enforcement.ProviderDestinations {
+		if destinationPermits(destination, endpoint) {
+			permitted = true
+			break
+		}
+	}
+	if !permitted {
+		return nil, permissionDenied("qualification endpoint is not inside enforcement.provider_destinations")
+	}
+	if draft.InputRate.Unit != "input_token" || draft.OutputRate.Unit != "output_token" || draft.InputRate.DenominatorUnits < 1 || draft.OutputRate.DenominatorUnits < 1 {
+		return nil, invalidInput("qualification profile rates must be valid input/output token rates")
+	}
+	protocolRevision := map[string]string{
+		"openai": openaiProtocolRevision, "openrouter": openRouterProtocolRevision, "experiential": experientialProtocolRevision,
+	}[draft.Provider]
+	p := &responsesProfile{
+		Version: draft.Schema, QualificationOnly: true, Provider: draft.Provider, SessionMode: draft.SessionMode,
+		Routing: draft.Routing, Endpoint: draft.Endpoint, Model: draft.Model, ConnectionID: draft.ConnectionID,
+		MaxInputTokens: draft.MaxInputTokens, MaxOutputTokens: draft.MaxOutputTokens,
+		MaxResponseBytes: draft.MaxResponseBytes, Timeout: time.Duration(draft.TimeoutSeconds) * time.Second,
+		Currency: draft.Currency, InputRate: draft.InputRate, OutputRate: draft.OutputRate,
+		CostMode: draft.Enforcement.Cost, MaximumCost: draft.Enforcement.MaximumCost.MicroUnits,
+		Classifications: map[string]bool{"internal": true}, Destinations: draft.Enforcement.ProviderDestinations,
+		CapabilityEvidence: wireCapabilityEvidence{ProtocolRevision: protocolRevision}, Digest: contract.Hash(raw),
+	}
+	return p, nil
 }
 
 // profileDigestWithoutCapabilityEvidence computes the canonical-JSON SHA-256

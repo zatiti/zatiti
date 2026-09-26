@@ -12,6 +12,8 @@ import (
 // against schemaDefs; withDefs composes the complete document at
 // registration time so contract.ValidateSchema sees document-local defs.
 const (
+	schemaMCPDiscoveredToolDef = `{"type":"object","additionalProperties":false,"properties":{"name":{"type":"string","maxLength":8192},"input_schema":{"type":"object","description":"Inert JSON data bounded by the enclosing size limit; never executable authority."},"input_schema_digest":{"type":"string","pattern":"^[0-9a-f]{64}$"},"id":{"type":"string","format":"uuid"},"version":{"type":"integer","minimum":1,"maximum":9223372036854775807},"discovered_at":{"type":"string","format":"date-time"},"discovery_operation_id":{"type":"string","format":"uuid"},"title":{"type":"string","maxLength":8192},"description":{"type":"string","maxLength":8192},"output_schema":{"type":"object","description":"Inert JSON data bounded by the enclosing size limit; never executable authority."},"annotations":{"type":"object","additionalProperties":false,"properties":{"title":{"type":"string","maxLength":8192},"read_only_hint":{"type":"boolean"},"destructive_hint":{"type":"boolean"},"idempotent_hint":{"type":"boolean"},"open_world_hint":{"type":"boolean"}},"required":[]}},"required":["name","input_schema","input_schema_digest","id","version","discovered_at","discovery_operation_id"]}`
+
 	schemaCandidateIn = `{"type":"object","additionalProperties":false,"properties":{"candidate":{"$ref":"#/$defs/Candidate"}},"required":["candidate"]}`
 	schemaValidateOut = `{"type":"object","additionalProperties":false,"properties":{"resource":{"$ref":"#/$defs/Validation"}},"required":["resource"]}`
 	schemaActivateOut = `{"type":"object","additionalProperties":false,"properties":{"versions":{"type":"array","items":{"$ref":"#/$defs/Ref"},"maxItems":4096}},"required":["versions"]}`
@@ -34,11 +36,14 @@ const (
 
 	schemaSetupStatusIn = `{"type":"object","additionalProperties":false,"properties":{"scope":{"$ref":"#/$defs/Scope"},"challenge_id":{"type":"string","format":"uuid"}},"required":["scope","challenge_id"]}`
 
-	schemaValidationRecordIn = `{"type":"object","additionalProperties":false,"properties":{"connection_id":{"type":"string","format":"uuid"},"expected_version":{"type":"integer","minimum":1,"maximum":9223372036854775807},"observation":{"$ref":"#/$defs/Observation"},"operation_id":{"type":"string","format":"uuid"},"attempt_id":{"type":"string","format":"uuid"}},"required":["connection_id","expected_version","observation"]}`
-
-	// schemaToolsIn mirrors connection.list's paging shape and adds the
-	// required connection_id pin; filters refuse as unsupported at the handler.
-	schemaToolsIn = `{"type":"object","additionalProperties":false,"properties":{"scope":{"$ref":"#/$defs/Scope"},"cursor":{"type":"string","maxLength":8192},"limit":{"type":"integer","minimum":1,"maximum":200},"filter":{"type":"object","additionalProperties":false,"properties":{"state":{"type":"string","maxLength":8192},"key":{"type":"string","maxLength":8192},"parent_id":{"type":"string","format":"uuid"},"worker_id":{"type":"string","format":"uuid"},"task_id":{"type":"string","format":"uuid"},"organization_id":{"type":"string","format":"uuid"},"descendants":{"type":"boolean"},"needs_you":{"type":"boolean"}},"required":[]},"connection_id":{"type":"string","format":"uuid"}},"required":["scope","connection_id"]}`
+	schemaMCPResolveIn      = `{"type":"object","additionalProperties":false,"properties":{"scope":{"$ref":"#/$defs/Scope"},"connection":{"$ref":"#/$defs/Ref"},"tool":{"$ref":"#/$defs/Ref"},"destination":{"type":"string","maxLength":8192},"operation_id":{"type":"string","format":"uuid"},"action":{"$ref":"#/$defs/Action"}},"required":["scope","connection","tool","destination"]}`
+	schemaMCPResolveOut     = `{"type":"object","additionalProperties":false,"properties":{"connection":{"$ref":"#/$defs/Connection"},"tool":{"$ref":"#/$defs/Tool"},"validation_intent":{"type":"boolean"}},"required":["connection","tool"]}`
+	schemaMCPCallbackIn     = `{"type":"object","additionalProperties":false,"properties":{"connection_id":{"type":"string","format":"uuid"},"expected_version":{"type":"integer","minimum":1,"maximum":9223372036854775807},"observation":{"$ref":"#/$defs/Observation"},"operation_id":{"type":"string","format":"uuid"},"attempt_id":{"type":"string","format":"uuid"}},"required":["connection_id","expected_version","observation"]}`
+	schemaMCPToolResolveIn  = `{"type":"object","additionalProperties":false,"properties":{"scope":{"$ref":"#/$defs/Scope"},"tool_id":{"type":"string","format":"uuid"}},"required":["scope","tool_id"]}`
+	schemaMCPToolResolveOut = `{"type":"object","additionalProperties":false,"properties":{"connection":{"$ref":"#/$defs/Connection"},"tool":{"$ref":"#/$defs/Tool"}},"required":["connection","tool"]}`
+	schemaMCPDiscoverIn     = `{"type":"object","additionalProperties":false,"properties":{"scope":{"$ref":"#/$defs/Scope"},"id":{"type":"string","format":"uuid"},"expected_version":{"type":"integer","minimum":1,"maximum":9223372036854775807}},"required":["scope","id","expected_version"]}`
+	schemaMCPToolsIn        = `{"type":"object","additionalProperties":false,"properties":{"scope":{"$ref":"#/$defs/Scope"},"cursor":{"type":"string","maxLength":8192},"limit":{"type":"integer","minimum":1,"maximum":200},"filter":{"type":"object","additionalProperties":false,"properties":{"state":{"type":"string","maxLength":8192},"key":{"type":"string","maxLength":8192},"parent_id":{"type":"string","format":"uuid"},"worker_id":{"type":"string","format":"uuid"},"task_id":{"type":"string","format":"uuid"},"organization_id":{"type":"string","format":"uuid"},"descendants":{"type":"boolean"},"needs_you":{"type":"boolean"}},"required":[]},"connection_id":{"type":"string","format":"uuid"}},"required":["scope","connection_id"]}`
+	schemaMCPToolsOut       = `{"type":"object","additionalProperties":false,"properties":{"items":{"type":"array","items":{"$ref":"#/$defs/MCPDiscoveredTool"},"maxItems":500}},"required":["items"]}`
 
 	schemaConnectionDef = `{"type":"object","additionalProperties":false,"properties":{"scope":{"$ref":"#/$defs/Scope"},"provider":{"type":"string","maxLength":8192},"account_identity":{"type":"string","maxLength":8192},"credential_ref":{"type":"string","maxLength":8192},"destinations":{"type":"array","items":{"type":"string","maxLength":8192},"maxItems":4096},"allowed_scopes":{"type":"array","items":{"type":"string","maxLength":8192},"maxItems":4096}},"required":["scope","provider","account_identity","credential_ref","destinations","allowed_scopes"]}`
 
@@ -68,6 +73,11 @@ var (
 	}
 )
 
+const (
+	schemaModelProviderListIn  = `{"type":"object","additionalProperties":false,"properties":{"scope":{"$ref":"#/$defs/Scope"}},"required":["scope"]}`
+	schemaModelProviderListOut = `{"type":"object","additionalProperties":false,"properties":{"items":{"type":"array","items":{"$ref":"#/$defs/ProviderDescriptor"},"maxItems":3}},"required":["items"]}`
+)
+
 // opSchema is one operation's declared input/output bodies.
 type opSchemas struct {
 	input  string
@@ -77,18 +87,19 @@ type opSchemas struct {
 // operationSchemaBodies holds every operation catalog entry exactly as the
 // assignment embeds it. Internal operations precede public ones.
 var operationSchemaBodies = map[string]opSchemas{
-	"_connections.tool.resolve": {`{"type":"object","additionalProperties":false,"properties":{"scope":{"$ref":"#/$defs/Scope"},"tool_id":{"type":"string","format":"uuid"}},"required":["scope","tool_id"]}`, `{"type":"object","additionalProperties":false,"properties":{"connection":{"$ref":"#/$defs/Connection"},"tool":{"$ref":"#/$defs/Tool"}},"required":["connection","tool"]}`},
+	"model.provider.list": {schemaModelProviderListIn, schemaModelProviderListOut},
 	// Internal operations.
 	"_connections.activate":          {schemaCandidateIn, schemaActivateOut},
 	"_connections.resolve":           {`{"type":"object","additionalProperties":false,"properties":{"scope":{"$ref":"#/$defs/Scope"},"connection":{"$ref":"#/$defs/Ref"},"tool":{"$ref":"#/$defs/Ref"},"destination":{"type":"string","maxLength":8192},"operation_id":{"type":"string","format":"uuid"},"action":{"$ref":"#/$defs/Action"}},"required":["scope","connection","tool","destination"]}`, `{"type":"object","additionalProperties":false,"properties":{"connection":{"$ref":"#/$defs/Connection"},"tool":{"$ref":"#/$defs/Tool"},"validation_intent":{"type":"boolean"}},"required":["connection","tool"]}`},
 	"_connections.validate":          {schemaCandidateIn, schemaValidateOut},
-	"_connections.validation.record": {schemaValidationRecordIn, schemaGetOut("Connection")},
-	"_connections.discovery.record":  {schemaValidationRecordIn, schemaGetOut("Connection")},
+	"_connections.validation.record": {schemaMCPCallbackIn, schemaGetOut("Connection")},
+	"_connections.discovery.record":  {schemaMCPCallbackIn, schemaGetOut("Connection")},
+	"_connections.tool.resolve":      {`{"type":"object","additionalProperties":false,"properties":{"scope":{"$ref":"#/$defs/Scope"},"tool_id":{"type":"string","format":"uuid"}},"required":["scope","tool_id"]}`, `{"type":"object","additionalProperties":false,"properties":{"connection":{"$ref":"#/$defs/Connection"},"tool":{"$ref":"#/$defs/Tool"}},"required":["connection","tool"]}`},
 
 	// connection.*
 	"connection.archive":  {schemaArchiveIn, schemaCreateOut("Connection")},
 	"connection.create":   {schemaCreateIn(schemaConnectionDef), schemaCreateOut("Connection")},
-	"connection.discover": {schemaRevokeIn, schemaGetOut("Job")},
+	"connection.discover": {`{"type":"object","additionalProperties":false,"properties":{"scope":{"$ref":"#/$defs/Scope"},"id":{"type":"string","format":"uuid"},"expected_version":{"type":"integer","minimum":1,"maximum":9223372036854775807}},"required":["scope","id","expected_version"]}`, `{"type":"object","additionalProperties":false,"properties":{"resource":{"$ref":"#/$defs/Job"}},"required":["resource"]}`},
 	"connection.get":      {schemaGetIn, schemaGetOut("Connection")},
 	"connection.list":     {schemaListIn, schemaListOut("Connection")},
 	"connection.revoke":   {schemaRevokeIn, schemaGetOut("Disposition")},
@@ -100,7 +111,7 @@ var operationSchemaBodies = map[string]opSchemas{
 	"connection.setup.cancel":   {schemaSetupCancelIn, schemaSetupOut},
 	"connection.setup.complete": {schemaSetupCompleteIn, schemaSetupOut},
 	"connection.setup.status":   {schemaSetupStatusIn, schemaGetOut("Challenge")},
-	"connection.tools":          {schemaToolsIn, schemaListOut("MCPDiscoveredTool")},
+	"connection.tools":          {`{"type":"object","additionalProperties":false,"properties":{"scope":{"$ref":"#/$defs/Scope"},"cursor":{"type":"string","maxLength":8192},"limit":{"type":"integer","minimum":1,"maximum":200},"filter":{"type":"object","additionalProperties":false,"properties":{"state":{"type":"string","maxLength":8192},"key":{"type":"string","maxLength":8192},"parent_id":{"type":"string","format":"uuid"},"worker_id":{"type":"string","format":"uuid"},"task_id":{"type":"string","format":"uuid"},"organization_id":{"type":"string","format":"uuid"},"descendants":{"type":"boolean"},"needs_you":{"type":"boolean"}},"required":[]},"connection_id":{"type":"string","format":"uuid"}},"required":["scope","connection_id"]}`, `{"type":"object","additionalProperties":false,"properties":{"items":{"type":"array","items":{"$ref":"#/$defs/MCPDiscoveredTool"},"maxItems":500}},"required":["items"]}`},
 	"connection.update":         {schemaUpdateIn(schemaConnectionDef), schemaCreateOut("Connection")},
 	"connection.validate":       {schemaRevokeIn, schemaGetOut("Job")},
 
@@ -115,12 +126,12 @@ var operationSchemaBodies = map[string]opSchemas{
 // completionOps maps the asynchronous operations to their eventual job result
 // schema, declared separately from the immediate response.
 var completionOps = map[string]string{
-	"connection.rotate":         `{"type":"object","additionalProperties":false,"properties":{"resource":{"$ref":"#/$defs/Connection"}},"required":["resource"]}`,
-	"connection.validate":       `{"type":"object","additionalProperties":false,"properties":{"resource":{"$ref":"#/$defs/Connection"}},"required":["resource"]}`,
 	"connection.discover":       `{"type":"object","additionalProperties":false,"properties":{"resource":{"$ref":"#/$defs/Connection"}},"required":["resource"]}`,
+	"connection.rotate":         `{"type":"object","additionalProperties":false,"properties":{"resource":{"$ref":"#/$defs/Connection"}},"required":["resource"]}`,
 	"connection.setup.begin":    `{"type":"object","additionalProperties":false,"properties":{"resource":{"$ref":"#/$defs/Challenge"}},"required":["resource"]}`,
 	"connection.setup.cancel":   `{"type":"object","additionalProperties":false,"properties":{"resource":{"$ref":"#/$defs/Challenge"}},"required":["resource"]}`,
 	"connection.setup.complete": `{"type":"object","additionalProperties":false,"properties":{"resource":{"$ref":"#/$defs/Challenge"}},"required":["resource"]}`,
+	"connection.validate":       `{"type":"object","additionalProperties":false,"properties":{"resource":{"$ref":"#/$defs/Connection"}},"required":["resource"]}`,
 }
 
 // composedSchemas lazily composes every operation schema document with the
@@ -145,6 +156,19 @@ func composeSchemas() {
 		if !ok {
 			panic("connections: embedded $defs catalog has no $defs object")
 		}
+		// MCP's discovered catalog result is defined by the operations catalog,
+		// rather than the adapter-profile catalog. Inject that exact definition
+		// locally so connection.tools remains a self-contained schema document.
+		var localDefs map[string]json.RawMessage
+		if err := contract.DecodeStrict(defs, &localDefs); err != nil {
+			panic("connections: embedded $defs catalog cannot be extended: " + err.Error())
+		}
+		localDefs["MCPDiscoveredTool"] = json.RawMessage(schemaMCPDiscoveredToolDef)
+		extendedDefs, err := json.Marshal(localDefs)
+		if err != nil {
+			panic("connections: extended $defs catalog cannot be encoded: " + err.Error())
+		}
+		defs = extendedDefs
 		composedIn = make(map[string]json.RawMessage, len(operationSchemaBodies))
 		composedOut = make(map[string]json.RawMessage, len(operationSchemaBodies))
 		for id, bodies := range operationSchemaBodies {

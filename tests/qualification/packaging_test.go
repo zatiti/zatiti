@@ -244,6 +244,12 @@ func packagingDescriptor(t *testing.T, root, controllerBinPath, version, goos, a
 		}
 	}
 	write("bin/zatiti", controllerBytes, 0o755)
+	if goos == "darwin" {
+		// Structural fixture only. The native signed AppKit helper is a
+		// separate release prerequisite, never supplied by this test tree.
+		write("bin/zatiti-credential-helper", []byte("qualification-synthetic credential helper; no AppKit or signature"), 0o755)
+		write("evidence/helper-signature.synthetic.json", []byte(`{"synthetic":true,"reason":"structural manifest fixture only; no code signature"}`), 0o644)
+	}
 	write("serenity/serenity", []byte("qualification-synthetic serenity runtime (real Serenity pin unresolved)"), 0o755)
 	write("serenity/read-facade", []byte("qualification-synthetic serenity read facade"), 0o755)
 	write("LICENSE", license, 0o644)
@@ -253,7 +259,7 @@ func packagingDescriptor(t *testing.T, root, controllerBinPath, version, goos, a
 	write("evidence/serenity.json", []byte(`{"synthetic":true,"reason":"the real Serenity dependency pin is unresolved on this tree"}`), 0o644)
 
 	serenityRevision := strings.Repeat("cd", 20) // 40 hex chars, synthetic
-	return map[string]any{
+	descriptor := map[string]any{
 		"distribution": "controller", "version": version,
 		"target":          map[string]any{"os": goos, "arch": arch},
 		"source_revision": rawGitRevision(), "toolchain": runtime.Version(),
@@ -279,6 +285,13 @@ func packagingDescriptor(t *testing.T, root, controllerBinPath, version, goos, a
 		},
 		"secure_helper": map[string]any{"kind": "headless_master_key"},
 	}
+	if goos == "darwin" {
+		kinds := descriptor["kinds"].(map[string]string)
+		kinds["bin/zatiti-credential-helper"] = "credential_helper"
+		kinds["evidence/helper-signature.synthetic.json"] = "attestation_evidence"
+		descriptor["attestations"] = []map[string]any{{"kind": "code_signature", "subject": "bin/zatiti-credential-helper", "evidence": "evidence/helper-signature.synthetic.json"}}
+	}
+	return descriptor
 }
 
 // waitForSocket polls until path exists as a socket or deadline elapses.
@@ -315,6 +328,9 @@ func qualifyDistribution(t *testing.T, caseID, goos string) {
 	c.version("target_os", goos)
 	c.version("target_arch", arch)
 	c.attach("native_host", native)
+	if goos == "darwin" {
+		c.attach("synthetic_credential_helper", true)
+	}
 	c.attach("unproven_on_this_host", []string{
 		"a real launchd/systemd actually accepting and supervising the rendered launcher (packaging/QUALIFICATION.md §3; this harness uses a recording stand-in and, where native, runs the binary directly instead)",
 		"the real OS keychain custodying a secret (this profile declares headless_master_key, never os_keychain, so no real keychain is touched)",
@@ -325,6 +341,12 @@ func qualifyDistribution(t *testing.T, caseID, goos string) {
 	work, err := os.MkdirTemp("", "ztqpack")
 	if err != nil {
 		c.fail("temp root: %v", err)
+	}
+	// macOS may return /var/... while /var itself is a symlink to
+	// /private/var. Exercise the installer with a real, canonical home path.
+	work, err = filepath.EvalSymlinks(work)
+	if err != nil {
+		c.fail("canonical temp root: %v", err)
 	}
 	defer func() { _ = os.RemoveAll(work) }()
 
@@ -441,6 +463,17 @@ func qualifyDistribution(t *testing.T, caseID, goos string) {
 	wantBytes, _ := os.ReadFile(controllerBin)
 	if !bytes.Equal(installedBytes, wantBytes) {
 		c.fail("the installed controller binary does not match the produced artifact byte-for-byte")
+	}
+	if goos == "darwin" {
+		stagedHelper, err := os.ReadFile(filepath.Join(releaseRoot, "bin", "zatiti-credential-helper"))
+		if err != nil {
+			c.fail("reading synthetic helper fixture: %v", err)
+		}
+		installedHelper, err := os.ReadFile(filepath.Join(layout.current, "bin", "zatiti-credential-helper"))
+		if err != nil || !bytes.Equal(installedHelper, stagedHelper) {
+			c.fail("installed synthetic helper differs from manifest fixture: %v", err)
+		}
+		c.observe("credential_helper kind installs byte-identically at its fixed Mac controller path; fixture and signature attestation are synthetic and provide no signed-helper evidence")
 	}
 	packagingAssertServiceLoaded(t, fakeToolStateDir, controllerServiceLabel, true)
 	c.observe("install: the real produced %s/%s zatiti binary is installed byte-identical at %s; the recording service manager reports %s loaded", goos, arch, layout.controllerExecutable, controllerServiceLabel)
