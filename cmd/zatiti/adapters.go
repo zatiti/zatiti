@@ -49,7 +49,7 @@ const maxAdapterProfileBytes = 1 << 20
 // admission and to mcpclient for dispatch; neither side rereads the path.
 // Missing configuration leaves MCP unavailable, while malformed filesystem
 // objects fail startup without including profile contents in an error.
-func readMCPAdmissionProfile(dir string) (json.RawMessage, error) {
+func readMCPAdmissionProfile(dir string) (raw json.RawMessage, retErr error) {
 	path := filepath.Join(dir, "mcp.json")
 	info, err := os.Lstat(path)
 	if errors.Is(err, fs.ErrNotExist) {
@@ -66,12 +66,16 @@ func readMCPAdmissionProfile(dir string) (json.RawMessage, error) {
 	if err != nil {
 		return nil, fmt.Errorf("opening MCP adapter profile failed")
 	}
-	defer f.Close()
+	defer func() {
+		if closeErr := f.Close(); closeErr != nil && retErr == nil {
+			retErr = fmt.Errorf("closing MCP adapter profile failed")
+		}
+	}()
 	opened, err := f.Stat()
 	if err != nil || !opened.Mode().IsRegular() || !os.SameFile(info, opened) || opened.Size() > maxAdapterProfileBytes {
 		return nil, fmt.Errorf("MCP adapter profile changed or is not a bounded regular file")
 	}
-	raw, err := io.ReadAll(io.LimitReader(f, maxAdapterProfileBytes+1))
+	raw, err = io.ReadAll(io.LimitReader(f, maxAdapterProfileBytes+1))
 	if err != nil {
 		return nil, fmt.Errorf("reading MCP adapter profile failed")
 	}
@@ -79,19 +83,6 @@ func readMCPAdmissionProfile(dir string) (json.RawMessage, error) {
 		return nil, fmt.Errorf("MCP adapter profile must be no larger than %d bytes", maxAdapterProfileBytes)
 	}
 	return json.RawMessage(raw), nil
-}
-
-// loadAdapters constructs every adapter that has a profile in dir. A
-// profile for an unknown adapter, or one its constructor refuses, fails
-// startup: silently serving without it would hide a configuration defect.
-// It returns the registered adapters and the names of landed adapters that
-// have no profile.
-func loadAdapters(dir string, deps contract.AdapterDependencies) (map[string]contract.Adapter, []string, error) {
-	profile, err := readMCPAdmissionProfile(dir)
-	if err != nil {
-		return nil, nil, err
-	}
-	return loadAdaptersWithMCPProfile(dir, deps, profile)
 }
 
 // loadAdaptersWithMCPProfile constructs the MCP adapter from the exact profile

@@ -90,16 +90,16 @@ var operationSchemaBodies = map[string]opSchemas{
 	"model.provider.list": {schemaModelProviderListIn, schemaModelProviderListOut},
 	// Internal operations.
 	"_connections.activate":          {schemaCandidateIn, schemaActivateOut},
-	"_connections.resolve":           {schemaMCPResolveIn, schemaMCPResolveOut},
+	"_connections.resolve":           {`{"type":"object","additionalProperties":false,"properties":{"scope":{"$ref":"#/$defs/Scope"},"connection":{"$ref":"#/$defs/Ref"},"tool":{"$ref":"#/$defs/Ref"},"destination":{"type":"string","maxLength":8192},"operation_id":{"type":"string","format":"uuid"},"action":{"$ref":"#/$defs/Action"}},"required":["scope","connection","tool","destination"]}`, `{"type":"object","additionalProperties":false,"properties":{"connection":{"$ref":"#/$defs/Connection"},"tool":{"$ref":"#/$defs/Tool"},"validation_intent":{"type":"boolean"}},"required":["connection","tool"]}`},
 	"_connections.validate":          {schemaCandidateIn, schemaValidateOut},
 	"_connections.validation.record": {schemaMCPCallbackIn, schemaGetOut("Connection")},
 	"_connections.discovery.record":  {schemaMCPCallbackIn, schemaGetOut("Connection")},
-	"_connections.tool.resolve":      {schemaMCPToolResolveIn, schemaMCPToolResolveOut},
+	"_connections.tool.resolve":      {`{"type":"object","additionalProperties":false,"properties":{"scope":{"$ref":"#/$defs/Scope"},"tool_id":{"type":"string","format":"uuid"}},"required":["scope","tool_id"]}`, `{"type":"object","additionalProperties":false,"properties":{"connection":{"$ref":"#/$defs/Connection"},"tool":{"$ref":"#/$defs/Tool"}},"required":["connection","tool"]}`},
 
 	// connection.*
 	"connection.archive":  {schemaArchiveIn, schemaCreateOut("Connection")},
 	"connection.create":   {schemaCreateIn(schemaConnectionDef), schemaCreateOut("Connection")},
-	"connection.discover": {schemaMCPDiscoverIn, schemaGetOut("Job")},
+	"connection.discover": {`{"type":"object","additionalProperties":false,"properties":{"scope":{"$ref":"#/$defs/Scope"},"id":{"type":"string","format":"uuid"},"expected_version":{"type":"integer","minimum":1,"maximum":9223372036854775807}},"required":["scope","id","expected_version"]}`, `{"type":"object","additionalProperties":false,"properties":{"resource":{"$ref":"#/$defs/Job"}},"required":["resource"]}`},
 	"connection.get":      {schemaGetIn, schemaGetOut("Connection")},
 	"connection.list":     {schemaListIn, schemaListOut("Connection")},
 	"connection.revoke":   {schemaRevokeIn, schemaGetOut("Disposition")},
@@ -111,7 +111,7 @@ var operationSchemaBodies = map[string]opSchemas{
 	"connection.setup.cancel":   {schemaSetupCancelIn, schemaSetupOut},
 	"connection.setup.complete": {schemaSetupCompleteIn, schemaSetupOut},
 	"connection.setup.status":   {schemaSetupStatusIn, schemaGetOut("Challenge")},
-	"connection.tools":          {schemaMCPToolsIn, schemaMCPToolsOut},
+	"connection.tools":          {`{"type":"object","additionalProperties":false,"properties":{"scope":{"$ref":"#/$defs/Scope"},"cursor":{"type":"string","maxLength":8192},"limit":{"type":"integer","minimum":1,"maximum":200},"filter":{"type":"object","additionalProperties":false,"properties":{"state":{"type":"string","maxLength":8192},"key":{"type":"string","maxLength":8192},"parent_id":{"type":"string","format":"uuid"},"worker_id":{"type":"string","format":"uuid"},"task_id":{"type":"string","format":"uuid"},"organization_id":{"type":"string","format":"uuid"},"descendants":{"type":"boolean"},"needs_you":{"type":"boolean"}},"required":[]},"connection_id":{"type":"string","format":"uuid"}},"required":["scope","connection_id"]}`, `{"type":"object","additionalProperties":false,"properties":{"items":{"type":"array","items":{"$ref":"#/$defs/MCPDiscoveredTool"},"maxItems":500}},"required":["items"]}`},
 	"connection.update":         {schemaUpdateIn(schemaConnectionDef), schemaCreateOut("Connection")},
 	"connection.validate":       {schemaRevokeIn, schemaGetOut("Job")},
 
@@ -128,10 +128,10 @@ var operationSchemaBodies = map[string]opSchemas{
 var completionOps = map[string]string{
 	"connection.discover":       `{"type":"object","additionalProperties":false,"properties":{"resource":{"$ref":"#/$defs/Connection"}},"required":["resource"]}`,
 	"connection.rotate":         `{"type":"object","additionalProperties":false,"properties":{"resource":{"$ref":"#/$defs/Connection"}},"required":["resource"]}`,
-	"connection.validate":       `{"type":"object","additionalProperties":false,"properties":{"resource":{"$ref":"#/$defs/Connection"}},"required":["resource"]}`,
 	"connection.setup.begin":    `{"type":"object","additionalProperties":false,"properties":{"resource":{"$ref":"#/$defs/Challenge"}},"required":["resource"]}`,
 	"connection.setup.cancel":   `{"type":"object","additionalProperties":false,"properties":{"resource":{"$ref":"#/$defs/Challenge"}},"required":["resource"]}`,
 	"connection.setup.complete": `{"type":"object","additionalProperties":false,"properties":{"resource":{"$ref":"#/$defs/Challenge"}},"required":["resource"]}`,
+	"connection.validate":       `{"type":"object","additionalProperties":false,"properties":{"resource":{"$ref":"#/$defs/Connection"}},"required":["resource"]}`,
 }
 
 // composedSchemas lazily composes every operation schema document with the

@@ -5190,6 +5190,85 @@
           "adapter_profile",
           "connection_version"
         ]
+      },
+      "MCPDiscoveredTool": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 8192
+          },
+          "input_schema": {
+            "type": "object",
+            "description": "Inert JSON data bounded by the enclosing size limit; never executable authority."
+          },
+          "input_schema_digest": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9223372036854775807
+          },
+          "discovered_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "discovery_operation_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "title": {
+            "type": "string",
+            "maxLength": 8192
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 8192
+          },
+          "output_schema": {
+            "type": "object",
+            "description": "Inert JSON data bounded by the enclosing size limit; never executable authority."
+          },
+          "annotations": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "title": {
+                "type": "string",
+                "maxLength": 8192
+              },
+              "read_only_hint": {
+                "type": "boolean"
+              },
+              "destructive_hint": {
+                "type": "boolean"
+              },
+              "idempotent_hint": {
+                "type": "boolean"
+              },
+              "open_world_hint": {
+                "type": "boolean"
+              }
+            },
+            "required": []
+          }
+        },
+        "required": [
+          "name",
+          "input_schema",
+          "input_schema_digest",
+          "id",
+          "version",
+          "discovered_at",
+          "discovery_operation_id"
+        ]
       }
     }
   },
@@ -8766,6 +8845,72 @@
       ]
     },
     {
+      "id": "connection.discover",
+      "version": 1,
+      "owner": "connections",
+      "visibility": "public",
+      "mode": "mutation",
+      "effect": "external_read",
+      "cli": [
+        "connection",
+        "discover"
+      ],
+      "mcp": "zatiti_connection_discover",
+      "submission_key": true,
+      "description": "Admit one bounded, separately authorized MCP tools/list catalog read for the selected connection. It installs no authority; each discovered tool needs an explicit binding and profile allowlist entry.",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "scope": {
+            "$ref": "#/$defs/Scope"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9223372036854775807
+          }
+        },
+        "required": [
+          "scope",
+          "id",
+          "expected_version"
+        ]
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "resource": {
+            "$ref": "#/$defs/Job"
+          }
+        },
+        "required": [
+          "resource"
+        ]
+      },
+      "completion": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "resource": {
+            "$ref": "#/$defs/Connection"
+          }
+        },
+        "required": [
+          "resource"
+        ]
+      },
+      "expected_version": true,
+      "scope_required": [
+        "installation_id"
+      ]
+    },
+    {
       "id": "connection.get",
       "version": 1,
       "owner": "connections",
@@ -9338,6 +9483,105 @@
         },
         "required": [
           "resource"
+        ]
+      },
+      "completion": null,
+      "expected_version": false,
+      "scope_required": [
+        "installation_id"
+      ]
+    },
+    {
+      "id": "connection.tools",
+      "version": 1,
+      "owner": "connections",
+      "visibility": "public",
+      "mode": "query",
+      "effect": "local",
+      "cli": [
+        "connection",
+        "tools"
+      ],
+      "mcp": "zatiti_connection_tools",
+      "submission_key": false,
+      "description": "List the locally recorded discovered tool catalog under current authorization; this operation makes no live provider call. Filters are structured exact-match fields (AND semantics); unsupported fields for this resource refuse invalid_input. Never interpolate filter strings as SQL.",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "scope": {
+            "$ref": "#/$defs/Scope"
+          },
+          "cursor": {
+            "type": "string",
+            "maxLength": 8192
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200
+          },
+          "filter": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "state": {
+                "type": "string",
+                "maxLength": 8192
+              },
+              "key": {
+                "type": "string",
+                "maxLength": 8192
+              },
+              "parent_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "worker_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "task_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "organization_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "descendants": {
+                "type": "boolean"
+              },
+              "needs_you": {
+                "type": "boolean"
+              }
+            },
+            "required": []
+          },
+          "connection_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "scope",
+          "connection_id"
+        ]
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/MCPDiscoveredTool"
+            },
+            "maxItems": 500
+          }
+        },
+        "required": [
+          "items"
         ]
       },
       "completion": null,

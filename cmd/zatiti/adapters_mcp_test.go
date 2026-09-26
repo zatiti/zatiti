@@ -54,7 +54,13 @@ func mcpAssemblyProfile(t *testing.T) json.RawMessage {
 			"capabilities": []string{"call_tool"}, "limitations": []string{},
 		},
 	}
-	unsigned, err := contract.Canonicalize(mcpAssemblyMustJSON(t, profile))
+	unsignedProfile := make(map[string]any, len(profile)-1)
+	for key, value := range profile {
+		if key != "capability_evidence" {
+			unsignedProfile[key] = value
+		}
+	}
+	unsigned, err := contract.Canonicalize(mcpAssemblyMustJSON(t, unsignedProfile))
 	if err != nil {
 		t.Fatal(err)
 	}
