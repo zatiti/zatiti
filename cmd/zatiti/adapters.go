@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"net/http"
 	"os"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/zatiti/zatiti/internal/adapters/github"
 	"github.com/zatiti/zatiti/internal/adapters/httpread"
+	"github.com/zatiti/zatiti/internal/adapters/mcpclient"
 	"github.com/zatiti/zatiti/internal/adapters/responses"
 	"github.com/zatiti/zatiti/internal/adapters/serenity"
 	"github.com/zatiti/zatiti/internal/contract"
@@ -29,6 +31,7 @@ import (
 var adapterConstructors = map[string]func(contract.AdapterDependencies, json.RawMessage) (contract.Adapter, error){
 	"github":   github.New,
 	"httpread": httpread.New,
+	"mcp":      mcpclient.New,
 	"serenity": serenity.New,
 }
 
@@ -41,12 +44,61 @@ var unimplementedAdapters = []string{}
 // maxAdapterProfileBytes bounds one profile file.
 const maxAdapterProfileBytes = 1 << 20
 
+// readMCPAdmissionProfile reads the single trusted installation-local MCP
+// adapter profile. The same immutable bytes are passed to connections for
+// admission and to mcpclient for dispatch; neither side rereads the path.
+// Missing configuration leaves MCP unavailable, while malformed filesystem
+// objects fail startup without including profile contents in an error.
+func readMCPAdmissionProfile(dir string) (json.RawMessage, error) {
+	path := filepath.Join(dir, "mcp.json")
+	info, err := os.Lstat(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("inspecting MCP adapter profile: %w", err)
+	}
+	if !info.Mode().IsRegular() || info.Size() > maxAdapterProfileBytes {
+		return nil, fmt.Errorf("MCP adapter profile must be a regular file no larger than %d bytes", maxAdapterProfileBytes)
+	}
+
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("opening MCP adapter profile failed")
+	}
+	defer f.Close()
+	opened, err := f.Stat()
+	if err != nil || !opened.Mode().IsRegular() || !os.SameFile(info, opened) || opened.Size() > maxAdapterProfileBytes {
+		return nil, fmt.Errorf("MCP adapter profile changed or is not a bounded regular file")
+	}
+	raw, err := io.ReadAll(io.LimitReader(f, maxAdapterProfileBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("reading MCP adapter profile failed")
+	}
+	if len(raw) > maxAdapterProfileBytes {
+		return nil, fmt.Errorf("MCP adapter profile must be no larger than %d bytes", maxAdapterProfileBytes)
+	}
+	return json.RawMessage(raw), nil
+}
+
 // loadAdapters constructs every adapter that has a profile in dir. A
 // profile for an unknown adapter, or one its constructor refuses, fails
 // startup: silently serving without it would hide a configuration defect.
 // It returns the registered adapters and the names of landed adapters that
 // have no profile.
 func loadAdapters(dir string, deps contract.AdapterDependencies) (map[string]contract.Adapter, []string, error) {
+	profile, err := readMCPAdmissionProfile(dir)
+	if err != nil {
+		return nil, nil, err
+	}
+	return loadAdaptersWithMCPProfile(dir, deps, profile)
+}
+
+// loadAdaptersWithMCPProfile constructs the MCP adapter from the exact profile
+// bytes already supplied to connections at installation assembly. An empty
+// profile explicitly means MCP is not configured; this function does not
+// inspect mcp.json again, even if it changed after assembly.
+func loadAdaptersWithMCPProfile(dir string, deps contract.AdapterDependencies, mcpProfile json.RawMessage) (map[string]contract.Adapter, []string, error) {
 	entries, err := os.ReadDir(dir)
 	if errors.Is(err, fs.ErrNotExist) {
 		entries = nil
@@ -59,6 +111,11 @@ func loadAdapters(dir string, deps contract.AdapterDependencies) (map[string]con
 			continue
 		}
 		name := strings.TrimSuffix(e.Name(), ".json")
+		// MCP is constructed below from the assembly snapshot, not from a
+		// second read of this mutable path.
+		if name == "mcp" {
+			continue
+		}
 		// Responses providers are selected by the durable execution profile
 		// on each dispatch. The former responses.json file is retained only
 		// as an explicit legacy/import source; it must never select or
@@ -90,6 +147,18 @@ func loadAdapters(dir string, deps contract.AdapterDependencies) (map[string]con
 			return nil, nil, fmt.Errorf("adapter profile %s constructed an adapter named %q", e.Name(), adapter.Name())
 		}
 		adapters[adapter.Name()] = adapter
+	}
+	if len(mcpProfile) > 0 {
+		adapter, err := mcpclient.New(deps, append(json.RawMessage(nil), mcpProfile...))
+		if err != nil {
+			// Constructor errors are deliberately redacted at this boundary:
+			// startup diagnostics must never echo profile material.
+			return nil, nil, fmt.Errorf("adapter mcp: invalid installation profile")
+		}
+		if adapter == nil || adapter.Name() != "mcp" {
+			return nil, nil, fmt.Errorf("adapter mcp: constructor returned an unexpected adapter")
+		}
+		adapters["mcp"] = adapter
 	}
 	var missing []string
 	for _, name := range landedAdapterNames() {

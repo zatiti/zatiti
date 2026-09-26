@@ -129,7 +129,7 @@ func logPendingRestoreMarker(ctx context.Context, h *installationHandle, log *sl
 // controller.ErrRestoreHandoff. h is never opened or closed here: runServe
 // owns h's lifetime across every call this loop makes.
 func runServeOnce(ctx context.Context, cfg config, h *installationHandle, log *slog.Logger, opts serveOptions) error {
-	adapters, missing, err := loadAdapters(cfg.adaptersDir(), adapterDependencies(h))
+	adapters, missing, err := loadAdaptersWithMCPProfile(cfg.adaptersDir(), adapterDependencies(h), h.mcpProfile)
 	if err != nil {
 		return err
 	}

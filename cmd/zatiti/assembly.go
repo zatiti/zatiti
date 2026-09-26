@@ -189,8 +189,11 @@ type installationHandle struct {
 	identity     *identity.Service
 	installation *installation.Service
 	secrets      contract.SecretStore
-	clock        contract.Clock
-	generation   int64
+	// mcpProfile is the one installation-local MCP profile snapshot shared
+	// by connections admission and the adapter instance for this lifetime.
+	mcpProfile json.RawMessage
+	clock      contract.Clock
+	generation int64
 	// jobRunners is every constructed module that implements
 	// contract.LocalJobRunner, keyed by owner/module name (modules()'s
 	// third return value). superviseController turns it into the
@@ -258,7 +261,8 @@ func (h *installationHandle) assemble(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	mods, idn, jobRunners, err := modules(router, h.clock, randomIDs{}, h.secrets, h.plat.Blobs(), databaseBackup{db: h.db}, profile)
+	h.mcpProfile = append(json.RawMessage(nil), profile...)
+	mods, idn, jobRunners, err := modules(router, h.clock, randomIDs{}, h.secrets, h.plat.Blobs(), databaseBackup{db: h.db}, h.mcpProfile)
 	if err != nil {
 		return err
 	}
