@@ -546,6 +546,58 @@ func TestSerenitySetupPersistsOnlyVerifiedHostedBinding(t *testing.T) {
 	}}, contract.CodeInvalidInput)
 }
 
+func TestSerenitySetupRejectsProjectSubstitutionOnReconnect(t *testing.T) {
+	env := newEnv(t)
+	conn := env.seedConnection(func(w *wireConnection) {
+		w.Provider = "serenity"
+		w.AccountIdentity = ""
+		w.CredentialRef = ""
+		w.Destinations = []string{"serenity.sire.run"}
+		w.AllowedScopes = []string{"memory:read", "memory:write"}
+	})
+	env.secrets.seedNamed(t, helperReceiptKeyName, helperReceiptKeyMaterial)
+
+	firstCredential := "connections/serenity/credential-1"
+	env.secrets.seed(t, firstCredential, []byte("synthetic-token-1"))
+	firstChallenge := env.challengeOf(env.beginChallenge(conn, methodBrowser).Payload)
+	firstGrant := &wireHostedMemoryGrant{
+		Issuer: serenityIssuer, Resource: serenityResource, AccountID: "hosted-account-1",
+		ProjectID: "existing-personal-brain", Scopes: []string{"memory:read", "memory:write"}, VerifiedAt: env.clock.Now(),
+	}
+	firstReceipt := mintReceipt(helperReceiptKeyMaterial, helperPayload{
+		ChallengeID: firstChallenge.ID, CredentialRef: firstCredential, AccountIdentity: firstGrant.AccountID,
+		ExpiresAt: firstChallenge.ExpiresAt, HostedGrant: firstGrant, HostedGrantID: "synthetic-grant-1",
+		AccountState: "active", ProjectState: "ready", RevocationEpoch: 0,
+	})
+	env.mustIO("connection.setup.complete", completeInput{
+		Scope: env.scope, ChallengeID: firstChallenge.ID, ExpectedVersion: firstChallenge.Version, HelperRef: firstReceipt,
+	})
+	var bound resourceOut
+	env.decode(env.mustOK("connection.get", connGetIn{Scope: env.scope, ID: conn.ID}).Data, &bound)
+
+	secondCredential := "connections/serenity/credential-2"
+	env.secrets.seed(t, secondCredential, []byte("synthetic-token-2"))
+	secondChallenge := env.challengeOf(env.beginChallenge(bound.Resource, methodBrowser).Payload)
+	secondGrant := *firstGrant
+	secondGrant.ProjectID = "another-brain-in-same-account"
+	secondGrant.VerifiedAt = env.clock.Now()
+	secondReceipt := mintReceipt(helperReceiptKeyMaterial, helperPayload{
+		ChallengeID: secondChallenge.ID, CredentialRef: secondCredential, AccountIdentity: firstGrant.AccountID,
+		ExpiresAt: secondChallenge.ExpiresAt, HostedGrant: &secondGrant, HostedGrantID: "synthetic-grant-2",
+		AccountState: "active", ProjectState: "ready", RevocationEpoch: 0,
+	})
+	_ = env.expectIOFault("connection.setup.complete", completeInput{
+		Scope: env.scope, ChallengeID: secondChallenge.ID, ExpectedVersion: secondChallenge.Version, HelperRef: secondReceipt,
+	}, contract.CodeVerificationFailed)
+
+	var after resourceOut
+	env.decode(env.mustOK("connection.get", connGetIn{Scope: env.scope, ID: conn.ID}).Data, &after)
+	if after.Resource.HostedMemoryGrant == nil || after.Resource.HostedMemoryGrant.ProjectID != firstGrant.ProjectID ||
+		after.Resource.CredentialRef != firstCredential {
+		t.Fatalf("reconnect changed the active project or credential after substitution refusal: %+v", after.Resource)
+	}
+}
+
 func TestSerenitySetupRejectsMissingOrStaleBindingProof(t *testing.T) {
 	for name, mutate := range map[string]func(*helperPayload){
 		"missing grant":          func(p *helperPayload) { p.HostedGrant = nil },

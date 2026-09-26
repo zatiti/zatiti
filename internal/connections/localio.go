@@ -48,6 +48,7 @@ type ioPrivate struct {
 	CredentialRef   string                 `json:"credential_ref,omitempty"`
 	AccountIdentity string                 `json:"account_identity,omitempty"`
 	Provider        string                 `json:"provider,omitempty"`
+	HostedProjectID string                 `json:"hosted_project_id,omitempty"`
 	ExpiresAt       *time.Time             `json:"expires_at,omitempty"`
 	ConsentURL      string                 `json:"consent_url,omitempty"`
 	Receipt         *helperPayload         `json:"receipt,omitempty"`
@@ -222,8 +223,9 @@ func (s *Service) prepareBegin(ctx context.Context, unit contract.Unit, inv cont
 	prepared, err := marshalData(ioEnvelope{
 		Resource: challenge.wireAddr(),
 		XConnections: &ioPrivate{
-			CredentialRef: row.CredentialRef,
-			Provider:      row.Provider,
+			CredentialRef:   row.CredentialRef,
+			Provider:        row.Provider,
+			HostedProjectID: hostedProjectID(row.HostedMemoryGrant),
 		},
 	})
 	if err != nil {
@@ -369,6 +371,7 @@ func (s *Service) transitionPlan(ctx context.Context, unit contract.Unit, inv co
 		private.CredentialRef = conn.CredentialRef
 		private.AccountIdentity = row.AccountIdentity
 		private.Provider = conn.Provider
+		private.HostedProjectID = hostedProjectID(conn.HostedMemoryGrant)
 		expires := row.ExpiresAt
 		private.ExpiresAt = &expires
 	}
@@ -540,6 +543,10 @@ func (s *Service) performComplete(ctx context.Context, plan contract.IOPlan) (co
 			return contract.IOResult{Fault: verificationFailed(
 				"helper receipt does not contain a current verified Serenity account/project binding")}, nil
 		}
+		if private.HostedProjectID != "" && private.HostedProjectID != payload.HostedGrant.ProjectID {
+			return contract.IOResult{Fault: verificationFailed(
+				"helper receipt selects a different hosted project; project substitution requires a new explicit binding")}, nil
+		}
 		if private.AccountIdentity != "" && private.AccountIdentity != payload.HostedGrant.AccountID {
 			return contract.IOResult{Fault: verificationFailed(
 				"helper receipt account differs from the expected account; substitution is refused")}, nil
@@ -576,6 +583,13 @@ func (s *Service) performComplete(ctx context.Context, plan contract.IOPlan) (co
 		return contract.IOResult{}, err
 	}
 	return contract.IOResult{Data: data}, nil
+}
+
+func hostedProjectID(grant *wireHostedMemoryGrant) string {
+	if grant == nil {
+		return ""
+	}
+	return grant.ProjectID
 }
 
 func validHostedGrant(payload *helperPayload, now time.Time) bool {

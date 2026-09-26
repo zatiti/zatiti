@@ -242,17 +242,18 @@ type wireAuthority struct {
 // wireConnection decodes the _connections.resolve connection fields this
 // package dispatches with.
 type wireConnection struct {
-	Scope           wireScope   `json:"scope"`
-	Provider        string      `json:"provider"`
-	AccountIdentity string      `json:"account_identity"`
-	Destinations    []string    `json:"destinations"`
-	AllowedScopes   []string    `json:"allowed_scopes"`
-	ValidatedAt     *time.Time  `json:"validated_at,omitempty"`
-	ID              contract.ID `json:"id"`
-	Version         int64       `json:"version"`
-	CredentialRef   string      `json:"credential_ref"`
-	ValidationState string      `json:"validation_state"`
-	ValidUntil      *time.Time  `json:"valid_until,omitempty"`
+	Scope             wireScope       `json:"scope"`
+	Provider          string          `json:"provider"`
+	AccountIdentity   string          `json:"account_identity"`
+	Destinations      []string        `json:"destinations"`
+	AllowedScopes     []string        `json:"allowed_scopes"`
+	ValidatedAt       *time.Time      `json:"validated_at,omitempty"`
+	ID                contract.ID     `json:"id"`
+	Version           int64           `json:"version"`
+	CredentialRef     string          `json:"credential_ref"`
+	ValidationState   string          `json:"validation_state"`
+	ValidUntil        *time.Time      `json:"valid_until,omitempty"`
+	HostedMemoryGrant json.RawMessage `json:"hosted_memory_grant,omitempty"`
 }
 
 // wireTool decodes the _connections.resolve tool fields this package uses
