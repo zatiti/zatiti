@@ -1,3 +1,35 @@
+# Implementation assignment: `internal/voice`
+
+Generated specification revision 19; source digest `3c050769e50c3874a3d19859a6ad5d5c0f8667c00109bc80d49c808c5e9530b1`. This file is committed implementation context. Do not independently edit it. Everything required from the product specification and adjacent interfaces is embedded below; no RFC copy is required.
+
+## Mission and scope
+
+Own human conversational voice sessions, admission and speech evidence.
+
+Write scope: **`internal/voice/` only**, excluding this generated AGENTS.md. Go package name: `voice`. Ownership kind: domain; integration wave: 2.
+
+Allowed production imports from this repository: `github.com/zatiti/zatiti/internal/contract`. Tests may use interfaces/fakes defined locally and, once available, storage-backed temporary fixtures; integration owns cross-package tests. No sibling raw SQL. No root dependency edits except the integration exception stated in its own brief.
+
+## Implementation decisions and acceptance focus
+
+Own voice_* session and call tables. Register voice.session.begin/get/end and voice.transcribe/speak. Human-only, actor/scope/conversation/generation bound sessions expire after one hour. Explicit dedicated OpenRouter voice connections never fall back to worker or ambient keys. Use Narrate as a Go library for craft and bounded single-attempt speech transport. Interactive voice is a declared LocalIO exception with durable intent and accounting reservation before network I/O, authorization recheck before disclosure, and no retries after ambiguity. Budget counters remain conservative across unknown outcomes; expose advisory billing honestly. No raw input audio in event logs. Synthesized audio is returned once to the live caller; durable command replay and evidence retain call metadata only. No sibling SQL. No automatic transmission of a transcript as a command. Bounded capture and output only; native playback interruption never claims task cancellation.
+
+Local proving focus: Credential separation, actor and scope isolation, disclosure intervals, malformed WAV and bounds, accounting admission, same-key no second Perform, generation and late-result fences, cancellation and unknown billing.
+
+## Incoming and outgoing boundaries
+
+Incoming callers: application (authenticated public operations).
+
+Outgoing owner calls: `_accounting.reserve`, `_accounting.settle`, `_connections.voice.resolve`, `_messaging.voice.read`. Each exact input/output schema appears below. Calls retain current Unit/authority; owner allowlists are mandatory.
+
+Expose `New(contract.Dependencies) (*Service,error)`; `*Service` implements `contract.Module` with Name `voice`, owner-prefixed migrations, all owned descriptors, and strict dispatch. No calls/goroutines during construction. Implement optional authentication/LocalIO interfaces where specified in the common contract. Tables are private under `voice_`; external callers rely only on methods and schemas.
+
+### Imported package APIs and behavior
+
+These briefs are embedded so you need not read a sibling prompt to discover its incoming API. Implement only your own package.
+
+## Shared foundation contract
+
 # Frozen implementation contract, revision 19
 
 Revision 19 adds human conversational voice through the `voice` owner. The explicitly registered `voice.transcribe` and `voice.speak` operations use the phased IO boundary for bounded interactive external speech, with durable intent and separate accounting admission before leaving the transaction. They are not worker execution profiles or autonomous tool effects. Every session requires explicit disclosure consent and acknowledgment that OpenRouter speech billing is advisory (transcription routing cannot enforce a provider price cap). Dedicated voice-only connections exclude `/responses`; raw keys remain in SecretStore. The phase's accepted command is never automatically retried after a crash or ambiguous response. Unknown reservations remain visible. Narrate owns craft and provider transport, while Zatiti owns current-authority checks, accounting, conversation identity and session fencing. Desktop only captures and plays audio and uses catalogued operations; no direct model calls or sidecar. Native Mac permission, echo and latency testing remains qualification work.
@@ -469,3 +501,161 @@ This serialized amendment resolves Z-M2's independent review counterexamples. It
 Executable regression coverage must include unverified bootstrap through effects and callback, forged/replayed/stale intent rejection, catalog mutation between admit/claim, full-envelope tampering, lost handshake response, staged-context failure, callback bounds zero/one/sixteen and overflow with server-counted requests. Controlled fixtures are not live-provider or release qualification.
 
 Revision 4 integration details: a connections callback uses the recorded effects observation for outcome and provenance. If the observation contains staged outputs, the owner verifies the controller's publication mapping against artifact metadata (scope, digest, size, media type, classification and availability), reconstructs only the permitted locator substitutions, and persists that normalized recorded evidence. Callback-supplied outcome, usage or tool facts never replace recorded truth. The controller defers an explicit connection callback operation before admission if its linked job is absent from the current bounded scan; absence is not permission to discard the callback. Generic MCP cannot attest same-account credential rotation: `connection.rotate` returns `capability_unsupported` for MCP and leaves any existing intent untouched; a separately reviewed connection is required.
+
+## Owned product requirements
+
+This foundation/support scope fulfills the shared contract and the specific ownership/acceptance brief above.
+## Exact operation and dependency schemas
+
+### `_accounting.reserve` v1 — accounting / internal / mutation / local
+
+Allowed internal callers: effects, execution, tasks, scheduling, voice. Submission key: not required at this internal/query/bootstrap boundary.
+
+Reserve enforceable cost and concurrency in stable installation→ancestor organizations→project→worker→root order, inside caller transaction. All dimensions atomic; reject unknown price/advisory hard-cap claim.
+
+Input schema:
+```json
+{"type":"object","additionalProperties":false,"properties":{"scope":{"$ref":"#/$defs/Scope"},"root_task_id":{"type":"string","format":"uuid"},"operation_id":{"type":"string","format":"uuid"},"amount":{"$ref":"#/$defs/Money"},"limits":{"$ref":"#/$defs/Limits"}},"required":["scope","operation_id","amount","limits"]}
+```
+Output data schema:
+```json
+{"type":"object","additionalProperties":false,"properties":{"resource":{"$ref":"#/$defs/Reservation"}},"required":["resource"]}
+```
+
+### `_accounting.settle` v1 — accounting / internal / mutation / local
+
+Allowed internal callers: effects, execution, installation, voice. Submission key: not required at this internal/query/bootstrap boundary.
+
+Settle observed cost or retain unknown reservation; release only proven unused portion and conclusive no-effect/no-cost evidence. Check currency and overflow.
+
+Input schema:
+```json
+{"type":"object","additionalProperties":false,"properties":{"reservation_id":{"type":"string","format":"uuid"},"expected_version":{"type":"integer","minimum":1,"maximum":9223372036854775807},"usage":{"$ref":"#/$defs/Usage"},"authoritative_nonexecution":{"type":"boolean"}},"required":["reservation_id","expected_version","usage","authoritative_nonexecution"]}
+```
+Output data schema:
+```json
+{"type":"object","additionalProperties":false,"properties":{"resource":{"$ref":"#/$defs/Reservation"}},"required":["resource"]}
+```
+
+### `_connections.voice.resolve` v1 — connections / internal / query / local
+
+Allowed internal callers: voice. Submission key: not required at this internal/query/bootstrap boundary.
+
+Resolve current voice-only OpenRouter connection, exact version, scope, revocation and destination. This explicit interactive advisory mode permits a captured unverified credential; no successful probe is invented. Voice-only destinations exclude reasoning endpoints.
+
+Input schema:
+```json
+{"type":"object","additionalProperties":false,"properties":{"scope":{"$ref":"#/$defs/Scope"},"connection":{"$ref":"#/$defs/Ref"},"destination":{"type":"string","enum":["https://openrouter.ai/api/v1/audio/transcriptions","https://openrouter.ai/api/v1/audio/speech","https://openrouter.ai/api/v1/chat/completions"]}},"required":["scope","connection","destination"]}
+```
+Output data schema:
+```json
+{"type":"object","additionalProperties":false,"properties":{"credential_ref":{"type":"string","maxLength":8192}},"required":["credential_ref"]}
+```
+
+### `_messaging.voice.read` v1 — messaging / internal / query / local
+
+Allowed internal callers: voice. Submission key: not required at this internal/query/bootstrap boundary.
+
+Verify current actor is a participant and requested reply was actually disclosed to that actor; reject own messages and inaccessible history. With no message, validate conversation only.
+
+Input schema:
+```json
+{"type":"object","additionalProperties":false,"properties":{"scope":{"$ref":"#/$defs/Scope"},"conversation_id":{"type":"string","format":"uuid"},"message_id":{"type":"string","format":"uuid"}},"required":["scope","conversation_id"]}
+```
+Output data schema:
+```json
+{"type":"object","additionalProperties":false,"properties":{"text":{"type":"string","maxLength":8192}},"required":["text"]}
+```
+
+### `voice.session.begin` v1 — voice / public / mutation / local
+
+CLI `zatiti voice session begin`; MCP `zatiti_voice_session_begin`. Submission key: required.
+
+Start a human-only voice session bound to this actor, conversation and controller generation, with separate voice-only connections, explicit disclosure consent and advisory budget. No model work occurs in this transaction.
+
+Input schema:
+```json
+{"type":"object","additionalProperties":false,"properties":{"scope":{"$ref":"#/$defs/Scope"},"conversation_id":{"type":"string","format":"uuid"},"settings":{"$ref":"#/$defs/VoiceSettings"}},"required":["scope","conversation_id","settings"]}
+```
+Output data schema:
+```json
+{"type":"object","additionalProperties":false,"properties":{"resource":{"$ref":"#/$defs/VoiceSession"}},"required":["resource"]}
+```
+
+### `voice.session.end` v1 — voice / public / mutation / local
+
+CLI `zatiti voice session end`; MCP `zatiti_voice_session_end`. Submission key: required.
+
+Read or end the actor-owned scoped voice session. End fences late audio and does not cancel accepted worker tasks.
+
+Input schema:
+```json
+{"type":"object","additionalProperties":false,"properties":{"scope":{"$ref":"#/$defs/Scope"},"session_id":{"type":"string","format":"uuid"}},"required":["scope","session_id"]}
+```
+Output data schema:
+```json
+{"type":"object","additionalProperties":false,"properties":{"resource":{"$ref":"#/$defs/VoiceSession"}},"required":["resource"]}
+```
+
+### `voice.session.get` v1 — voice / public / query / local
+
+CLI `zatiti voice session get`; MCP `zatiti_voice_session_get`. Submission key: not required at this internal/query/bootstrap boundary.
+
+Read or end the actor-owned scoped voice session. End fences late audio and does not cancel accepted worker tasks.
+
+Input schema:
+```json
+{"type":"object","additionalProperties":false,"properties":{"scope":{"$ref":"#/$defs/Scope"},"session_id":{"type":"string","format":"uuid"}},"required":["scope","session_id"]}
+```
+Output data schema:
+```json
+{"type":"object","additionalProperties":false,"properties":{"resource":{"$ref":"#/$defs/VoiceSession"}},"required":["resource"]}
+```
+
+### `voice.speak` v1 — voice / public / mutation / disclosure
+
+CLI `zatiti voice speak`; MCP `zatiti_voice_speak`. Submission key: required.
+
+Read an actually disclosed worker reply from the bound conversation. Narrate supplies canonical craft; optional bounded craft rewrite and speech calls use voice credentials only. No tools or approvals. Durable intent, no retries, late results fenced by session/generation.
+
+Input schema:
+```json
+{"type":"object","additionalProperties":false,"properties":{"scope":{"$ref":"#/$defs/Scope"},"session_id":{"type":"string","format":"uuid"},"message_id":{"type":"string","format":"uuid"}},"required":["scope","session_id","message_id"]}
+```
+Output data schema:
+```json
+{"type":"object","additionalProperties":false,"properties":{"session_id":{"type":"string","format":"uuid"},"call_id":{"type":"string","format":"uuid"},"text":{"type":"string","maxLength":8192},"audio":{"type":"string","maxLength":12000000},"media_type":{"type":"string","maxLength":8192},"billing":{"type":"string","enum":["estimated","unknown","no_charge"]},"reserved_micro_units":{"type":"integer","minimum":0,"maximum":9223372036854775807}},"required":["session_id","call_id","text","audio","media_type","billing","reserved_micro_units"]}
+```
+
+### `voice.transcribe` v1 — voice / public / mutation / disclosure
+
+CLI `zatiti voice transcribe`; MCP `zatiti_voice_transcribe`. Submission key: required.
+
+Human-only bounded WAV transcription, separate voice credential, durable intent and conservative accounting reservation. Exactly one network call outside Unit; no retries or fallback. Transcript is not sent until ordinary conversation.message.send.
+
+Input schema:
+```json
+{"type":"object","additionalProperties":false,"properties":{"scope":{"$ref":"#/$defs/Scope"},"session_id":{"type":"string","format":"uuid"},"audio":{"type":"string","minLength":60,"maxLength":700000}},"required":["scope","session_id","audio"]}
+```
+Output data schema:
+```json
+{"type":"object","additionalProperties":false,"properties":{"session_id":{"type":"string","format":"uuid"},"call_id":{"type":"string","format":"uuid"},"text":{"type":"string","maxLength":8192},"audio":{"type":"string","maxLength":12000000},"media_type":{"type":"string","maxLength":8192},"billing":{"type":"string","enum":["estimated","unknown","no_charge"]},"reserved_micro_units":{"type":"integer","minimum":0,"maximum":9223372036854775807}},"required":["session_id","call_id","text","audio","media_type","billing","reserved_micro_units"]}
+```
+
+### Local schema definitions
+
+The schemas above resolve exclusively against this embedded `$defs` object. Input objects reject additional properties except explicitly open schema/data fields. Field semantics are completed by the owned requirements and operation descriptions. Output `resource`, `items`, `draft`, `job`, etc. are literal keys. Pagination cursor lives in the common envelope.
+
+```json
+{"$defs":{"Limits":{"type":"object","additionalProperties":false,"properties":{"currency":{"type":"string","pattern":"^[A-Z]{3}$"},"spend_micro_units":{"type":"integer","minimum":0,"maximum":9223372036854775807},"concurrency":{"type":"integer","minimum":1,"maximum":9223372036854775807},"model_steps":{"type":"integer","minimum":1,"maximum":9223372036854775807},"child_count":{"type":"integer","minimum":0,"maximum":9223372036854775807},"delegation_depth":{"type":"integer","minimum":0,"maximum":9223372036854775807},"attempt_seconds":{"type":"integer","minimum":1,"maximum":9223372036854775807},"root_deadline":{"type":"string","format":"date-time"}},"required":["currency","spend_micro_units","concurrency","model_steps","child_count","delegation_depth","attempt_seconds","root_deadline"]},"Money":{"type":"object","additionalProperties":false,"properties":{"currency":{"type":"string","pattern":"^[A-Z]{3}$"},"micro_units":{"type":"integer","minimum":0,"maximum":9223372036854775807}},"required":["currency","micro_units"]},"Ref":{"type":"object","additionalProperties":false,"properties":{"id":{"type":"string","format":"uuid"},"version":{"type":"integer","minimum":1,"maximum":9223372036854775807}},"required":["id","version"]},"Reservation":{"type":"object","additionalProperties":false,"properties":{"id":{"type":"string","format":"uuid"},"version":{"type":"integer","minimum":1,"maximum":9223372036854775807},"scope":{"$ref":"#/$defs/Scope"},"root_task_id":{"type":"string","format":"uuid"},"operation_id":{"type":"string","format":"uuid"},"amount":{"$ref":"#/$defs/Money"},"state":{"type":"string","enum":["reserved","settled","unknown","released"]}},"required":["id","version","scope","operation_id","amount","state"]},"Scope":{"type":"object","additionalProperties":false,"properties":{"installation_id":{"type":"string","format":"uuid"},"organization_id":{"type":"string","format":"uuid"},"project_id":{"type":"string","format":"uuid"},"worker_id":{"type":"string","format":"uuid"},"task_id":{"type":"string","format":"uuid"}},"required":["installation_id"]},"Usage":{"type":"object","additionalProperties":false,"properties":{"currency":{"type":"string","pattern":"^[A-Z]{3}$"},"spent":{"type":"integer","minimum":0,"maximum":9223372036854775807},"reserved":{"type":"integer","minimum":0,"maximum":9223372036854775807},"estimated":{"type":"integer","minimum":0,"maximum":9223372036854775807},"unknown":{"type":"integer","minimum":0,"maximum":9223372036854775807},"advisory":{"type":"boolean"}},"required":["currency","spent","reserved","estimated","unknown","advisory"]},"VoiceSession":{"type":"object","additionalProperties":false,"properties":{"id":{"type":"string","format":"uuid"},"conversation_id":{"type":"string","format":"uuid"},"state":{"type":"string","enum":["active","ended","expired"]},"settings":{"$ref":"#/$defs/VoiceSettings"},"reserved_micro_units":{"type":"integer","minimum":0,"maximum":9223372036854775807},"calls":{"type":"integer","minimum":0,"maximum":9223372036854775807},"expires_at":{"type":"string","format":"date-time"}},"required":["id","conversation_id","state","settings","reserved_micro_units","calls","expires_at"]},"VoiceSettings":{"type":"object","additionalProperties":false,"properties":{"input_connection":{"$ref":"#/$defs/Ref"},"output_connection":{"$ref":"#/$defs/Ref"},"transcription_model":{"type":"string","enum":["openai/whisper-large-v3-turbo"]},"speech_model":{"type":"string","enum":["hexgrad/kokoro-82m","deepgram/flux-tts:free"]},"voice":{"type":"string","minLength":1,"maxLength":128},"language":{"type":"string","maxLength":8},"style":{"type":"string","enum":["conversational","agent-update","coach","verbatim"]},"budget_micro_units":{"type":"integer","minimum":1,"maximum":10000000},"call_allowance_micro_units":{"type":"integer","minimum":1,"maximum":100000},"advisory_cost_acknowledged":{"const":true,"type":"boolean"}},"required":["input_connection","output_connection","transcription_model","speech_model","voice","language","style","budget_micro_units","call_allowance_micro_units","advisory_cost_acknowledged"]}}}
+```
+
+## Named acceptance cases
+
+Tests are implementation deliverables, not claims of already executed qualification. Retain expected/observed results, exact source/config/tool versions and failure evidence.
+
+Credential separation, actor and scope isolation, disclosure intervals, malformed WAV and bounds, accounting admission, same-key no second Perform, generation and late-result fences, cancellation and unknown billing.
+
+## Delivery
+
+Implement production behavior and meaningful local tests within scope. Report files changed, commands actually run, observed results, unresolved dependency qualifications and contract defects. A missing dependency may use an exact local fake for development; production must return a named prerequisite/unsupported error instead of fake success. Integration owns shared dependency changes, real assembly, cross-package proving and landing. Do not advertise release or client/platform support from compilation alone.

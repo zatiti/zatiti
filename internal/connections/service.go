@@ -30,6 +30,7 @@ type opMeta struct {
 // declared by the implementation assignment.
 var opMetas = []opMeta{
 	{id: "_connections.tool.resolve", visibility: "internal", mode: "query", effect: "local", callers: []string{"execution", "configuration"}},
+	{id: "_connections.voice.resolve", visibility: "internal", mode: "query", effect: "local", callers: []string{"voice"}},
 	// Internal operations.
 	{id: "_connections.activate", visibility: "internal", mode: "mutation", effect: "local",
 		callers: []string{"configuration", "application"}},
@@ -202,6 +203,7 @@ var handlers = map[string]handlerFunc{
 	"_connections.validation.record": handleValidationRecord,
 	"_connections.discovery.record":  handleDiscoveryRecord,
 	"_connections.tool.resolve":      handleMCPToolResolve,
+	"_connections.voice.resolve":     handleVoiceResolve,
 
 	"connection.archive":        handleArchive,
 	"connection.create":         handleCreate,

@@ -308,6 +308,7 @@ class _WorkspaceSettingsState extends State<WorkspaceSettings> {
                               title: Text(connection.provider),
                               subtitle: Text(
                                 '${connection.accountIdentity} · '
+                                '${connection.allowedScopes.contains('voice') ? 'voice-only · ' : ''}'
                                 '${connection.validationState.name}',
                               ),
                               trailing: TextButton(

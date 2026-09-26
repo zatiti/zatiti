@@ -37,6 +37,7 @@ var opMetas = []opMeta{
 		callers: []string{"execution", "controller"}},
 	{id: "_messaging.processed", visibility: "internal", mode: "mutation", effect: "local",
 		callers: []string{"execution"}},
+	{id: "_messaging.voice.read", visibility: "internal", mode: "query", effect: "local", callers: []string{"voice"}},
 
 	// conversation.*
 	{id: "conversation.create", visibility: "public", mode: "mutation", effect: "local", submission: true,
@@ -166,6 +167,7 @@ var handlers = map[string]handlerFunc{
 	"_messaging.history":        handleMessagingHistory,
 	"_messaging.ready":          handleMessagingReady,
 	"_messaging.processed":      handleMessagingProcessed,
+	"_messaging.voice.read":     handleVoiceRead,
 	"conversation.create":       handleConversationCreate,
 	"conversation.get":          handleConversationGet,
 	"conversation.list":         handleConversationList,

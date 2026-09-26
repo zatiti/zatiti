@@ -3,7 +3,7 @@ from copy import deepcopy
 
 # Specification revision. Bump with every coordinated contract revision; the renderer
 # refuses to render unless contracts.md names the same revision in its title.
-REVISION=18
+REVISION=19
 
 S={'type':'string','maxLength':8192}
 ID={'type':'string','format':'uuid'}
@@ -639,6 +639,22 @@ for o in OPS:
 # calling principal (always controller/application, an already-trusted
 # internal peer), so it is deliberately never counted as scope_required the
 # way an ordinary caller-facing operation's "scope" is.
+# Revision 19: human conversational voice. Explicit per-session consent and
+# separate credentials; bounded interactive I/O, never a worker execution mode.
+D['VoiceSettings']=obj(input_connection=ref('Ref'),output_connection=ref('Ref'),transcription_model=enum('openai/whisper-large-v3-turbo'),speech_model=enum('hexgrad/kokoro-82m','deepgram/flux-tts:free'),voice={'type':'string','minLength':1,'maxLength':128},language={'type':'string','maxLength':8},style=enum('conversational','agent-update','coach','verbatim'),budget_micro_units={'type':'integer','minimum':1,'maximum':10000000},call_allowance_micro_units={'type':'integer','minimum':1,'maximum':100000},advisory_cost_acknowledged={'const':True,'type':'boolean'})
+D['VoiceSession']=obj(id=ID,conversation_id=ID,state=enum('active','ended','expired'),settings=ref('VoiceSettings'),reserved_micro_units=INT,calls=INT,expires_at=TIME)
+add('voice.session.begin','voice',obj(scope=ref('Scope'),conversation_id=ID,settings=ref('VoiceSettings')),one('VoiceSession'),'Start a human-only voice session bound to this actor, conversation and controller generation, with separate voice-only connections, explicit disclosure consent and advisory budget. No model work occurs in this transaction.')
+for verb in ['get','end']:
+ add('voice.session.'+verb,'voice',obj(scope=ref('Scope'),session_id=ID),one('VoiceSession'),'Read or end the actor-owned scoped voice session. End fences late audio and does not cancel accepted worker tasks.',mode='query' if verb=='get' else 'mutation')
+voice_out=obj(session_id=ID,call_id=ID,text=S,audio={'type':'string','maxLength':12000000},media_type=S,billing=enum('estimated','unknown','no_charge'),reserved_micro_units=INT)
+add('voice.transcribe','voice',obj(scope=ref('Scope'),session_id=ID,audio={'type':'string','minLength':60,'maxLength':700000}),voice_out,'Human-only bounded WAV transcription, separate voice credential, durable intent and conservative accounting reservation. Exactly one network call outside Unit; no retries or fallback. Transcript is not sent until ordinary conversation.message.send.',effect='disclosure')
+add('voice.speak','voice',obj(scope=ref('Scope'),session_id=ID,message_id=ID),voice_out,'Read an actually disclosed worker reply from the bound conversation. Narrate supplies canonical craft; optional bounded craft rewrite and speech calls use voice credentials only. No tools or approvals. Durable intent, no retries, late results fenced by session/generation.',effect='disclosure')
+internal('voice.resolve','connections',obj(scope=ref('Scope'),connection=ref('Ref'),destination=enum('https://openrouter.ai/api/v1/audio/transcriptions','https://openrouter.ai/api/v1/audio/speech','https://openrouter.ai/api/v1/chat/completions')),obj(credential_ref=S),'Resolve current voice-only OpenRouter connection, exact version, scope, revocation and destination. This explicit interactive advisory mode permits a captured unverified credential; no successful probe is invented. Voice-only destinations exclude reasoning endpoints.',['voice'],mode='query')
+internal('voice.read','messaging',obj(scope=ref('Scope'),conversation_id=ID,**{'message_id?':ID}),obj(text=S),'Verify current actor is a participant and requested reply was actually disclosed to that actor; reject own messages and inaccessible history. With no message, validate conversation only.',['voice'],mode='query')
+for operation in OPS:
+ if operation['id'] in ['_accounting.reserve','_accounting.settle']:
+  operation['callers'].append('voice')
+
 _SCOPE_REQUIRED_EXEMPT={'_configuration.export.prepare'}
 for _o in OPS:
     # Later coordinated revisions may add async operations after the initial

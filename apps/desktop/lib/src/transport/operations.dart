@@ -60,6 +60,17 @@ abstract final class Operations {
   static const conversationMessageList = OperationDescriptor.query(
     'conversation.message.list',
   );
+  static const voiceSessionBegin = OperationDescriptor.mutation(
+    'voice.session.begin',
+  );
+  static const voiceSessionGet = OperationDescriptor.query('voice.session.get');
+  static const voiceSessionEnd = OperationDescriptor.mutation(
+    'voice.session.end',
+  );
+  static const voiceTranscribe = OperationDescriptor.mutation(
+    'voice.transcribe',
+  );
+  static const voiceSpeak = OperationDescriptor.mutation('voice.speak');
   static const conversationMessageSend = OperationDescriptor.mutation(
     'conversation.message.send',
   );
@@ -176,6 +187,11 @@ abstract final class Operations {
     conversationList,
     conversationMessageList,
     conversationMessageSend,
+    voiceSessionBegin,
+    voiceSessionGet,
+    voiceSessionEnd,
+    voiceTranscribe,
+    voiceSpeak,
     conversationCreate,
     conversationUpdate,
     reviewList,

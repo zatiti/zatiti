@@ -25,6 +25,8 @@ type Catalog interface {
 // handler call. Every other operation, including every other operation of
 // the same owners, takes the ordinary path.
 var localIOOperations = map[string]bool{
+	"voice.transcribe":          true,
+	"voice.speak":               true,
 	"artifact.upload.chunk":     true,
 	"artifact.upload.finish":    true,
 	"artifact.upload.cancel":    true,

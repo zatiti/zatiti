@@ -1,8 +1,8 @@
 # Package implementation specification
 
-Revision 18. **Implementation exists; this is the frozen contributor specification, not release qualification.**
+Revision 19. **Implementation exists; this is the frozen contributor specification, not release qualification.**
 
-37 implementation roots; 205 public operations; 100 internal owner methods; 153 source blocks with explicit ownership; 147 named acceptance cases covering Z01–Z21 and release journeys. The repository contains implementation code; passing package tests do not establish external service or release qualification.
+38 implementation roots; 210 public operations; 102 internal owner methods; 153 source blocks with explicit ownership; 147 named acceptance cases covering Z01–Z21 and release journeys. The repository contains implementation code; passing package tests do not establish external service or release qualification.
 
 Each root already contains a complete committed AGENTS.md: local mission, allowed imports, owned requirements, exact Go interfaces, incoming/outgoing operation schemas, persistence/recovery rules and named acceptance criteria. An agent can implement from that file without the RFC. Scope prompts intentionally repeat necessary contracts; do not edit generated copies independently.
 
@@ -53,6 +53,7 @@ Root dependency work and the lock report belong only to integration's serialized
 | [`tests/qualification`](../../tests/qualification/AGENTS.md) | verification | 4 | Own executable external adapter, real Flutter desktop/platform/client qualification and release evidence. |
 | [`packaging`](../../packaging/AGENTS.md) | infrastructure | 4 | Own release manifests, service launchers, secure helper and Serenity distribution lifecycle. |
 | [`.github/workflows`](../../.github/workflows/AGENTS.md) | support | 4 | Own CI workflow validation and release qualification orchestration. |
+| [`internal/voice`](../../internal/voice/AGENTS.md) | domain | 2 | Own human conversational voice sessions, admission and speech evidence. |
 
 ## Sources and validation
 

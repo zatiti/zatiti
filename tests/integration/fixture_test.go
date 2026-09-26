@@ -35,6 +35,7 @@ import (
 	"github.com/zatiti/zatiti/internal/skills"
 	"github.com/zatiti/zatiti/internal/storage"
 	"github.com/zatiti/zatiti/internal/tasks"
+	"github.com/zatiti/zatiti/internal/voice"
 )
 
 // fixtureEpoch is the deterministic start of every fixture clock.
@@ -150,7 +151,7 @@ func TestRecordingSecretsLookupUsesRealOpaqueReference(t *testing.T) {
 var moduleOrder = []string{
 	"identity", "configuration", "skills", "connections", "policy", "reviews",
 	"accounting", "tasks", "scheduling", "messaging", "execution", "effects",
-	"memory", "artifacts", "evidence", "installation",
+	"memory", "artifacts", "evidence", "voice", "installation",
 }
 
 // ownerKey is the secret-store key the fixture asks bootstrap to custody the
@@ -158,7 +159,7 @@ var moduleOrder = []string{
 const ownerKey = "integration/owner"
 
 // fixture is one really assembled installation: platform custody and lock,
-// SQLite storage, all sixteen landed domain modules with real dependencies,
+// SQLite storage, all seventeen landed domain modules with real dependencies,
 // an operation catalog and the application dispatcher, on temp directories.
 type fixture struct {
 	t        testing.TB
@@ -238,6 +239,7 @@ func buildModules(router *application.PortRouter, clock contract.Clock, secrets 
 		"installation": func(d contract.Dependencies) (contract.Module, error) {
 			return installation.New(d, installation.WithDatabaseBackup(backup))
 		},
+		"voice": func(d contract.Dependencies) (contract.Module, error) { return voice.New(d) },
 	}
 	modules := []contract.Module{idn}
 	for _, name := range moduleOrder[1:] {

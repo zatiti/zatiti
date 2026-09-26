@@ -73,8 +73,8 @@ func TestDescriptors(t *testing.T) {
 	}{
 		opActivate:      {visibility: "internal", mode: "mutation", callers: 2, cli: false, mcp: false, submission: false},
 		opInspect:       {visibility: "internal", mode: "query", callers: 6, cli: false, mcp: false, submission: false},
-		opReserve:       {visibility: "internal", mode: "mutation", callers: 4, cli: false, mcp: false, submission: false},
-		opSettle:        {visibility: "internal", mode: "mutation", callers: 3, cli: false, mcp: false, submission: false},
+		opReserve:       {visibility: "internal", mode: "mutation", callers: 5, cli: false, mcp: false, submission: false},
+		opSettle:        {visibility: "internal", mode: "mutation", callers: 4, cli: false, mcp: false, submission: false},
 		opValidate:      {visibility: "internal", mode: "query", callers: 2, cli: false, mcp: false, submission: false},
 		opBudgetGet:     {visibility: "public", mode: "query", callers: 0, cli: true, mcp: true, submission: false},
 		opBudgetPropose: {visibility: "public", mode: "mutation", callers: 0, cli: true, mcp: true, submission: true},

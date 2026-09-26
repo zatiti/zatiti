@@ -1547,6 +1547,8 @@ class Connection {
     required this.provider,
     required this.accountIdentity,
     required this.validationState,
+    this.destinations = const [],
+    this.allowedScopes = const [],
   });
 
   factory Connection.fromJson(Object? json) {
@@ -1566,12 +1568,20 @@ class Connection {
     );
     o.object('scope');
     o.string('credential_ref');
-    o.list('destinations');
-    o.list('allowed_scopes');
+    final destinations = o.stringList('destinations');
+    final allowedScopes = o.stringList('allowed_scopes');
     o.optionalDateTime('validated_at');
     o.optionalDateTime('valid_until');
     o.finish();
-    return c;
+    return Connection(
+      id: c.id,
+      version: c.version,
+      provider: c.provider,
+      accountIdentity: c.accountIdentity,
+      validationState: c.validationState,
+      destinations: destinations,
+      allowedScopes: allowedScopes,
+    );
   }
 
   final String id;
@@ -1579,6 +1589,8 @@ class Connection {
   final String provider;
   final String accountIdentity;
   final ConnectionValidationState validationState;
+  final List<String> destinations;
+  final List<String> allowedScopes;
 }
 
 /// A bounded async unit of work: `memory.retract`, `memory.recall`,
