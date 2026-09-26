@@ -139,6 +139,7 @@ type fakePorts struct {
 	memoryBindings  map[contract.ID]wireMemoryBinding
 	connections     map[contract.ID]wireConnection
 	tools           map[contract.ID]wireTool
+	mcpOwners       map[contract.ID]contract.ID
 	fail            map[string]*contract.Fault
 	rawFail         map[string]error
 	transitions     []recordedTransition
@@ -161,6 +162,7 @@ func newFakePorts() *fakePorts {
 		memoryBindings: map[contract.ID]wireMemoryBinding{},
 		connections:    map[contract.ID]wireConnection{},
 		tools:          map[contract.ID]wireTool{},
+		mcpOwners:      map[contract.ID]contract.ID{},
 		fail:           map[string]*contract.Fault{},
 		rawFail:        map[string]error{},
 	}
@@ -470,6 +472,21 @@ func (p *fakePorts) Call(ctx context.Context, unit contract.Unit, inv contract.I
 			bindings = append(bindings, b)
 		}
 		body = map[string]any{"bindings": bindings}
+	case peerConnectionsToolResolve:
+		var in struct {
+			Scope  contract.Scope `json:"scope"`
+			ToolID contract.ID    `json:"tool_id"`
+		}
+		if err := contract.DecodeStrict(inv.Input, &in); err != nil {
+			p.mu.Unlock()
+			return contract.Payload{}, err
+		}
+		owner, ok := p.mcpOwners[in.ToolID]
+		if !ok {
+			p.mu.Unlock()
+			return contract.Payload{}, notFound("MCP catalog tool is unknown")
+		}
+		body = map[string]any{"connection": p.connections[owner], "tool": p.tools[in.ToolID]}
 	case peerConnectionsResolve:
 		var in struct {
 			Scope       contract.Scope `json:"scope"`

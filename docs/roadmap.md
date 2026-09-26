@@ -3077,6 +3077,56 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   have an IDSource to mint a durable ArtifactRef for request bytes they
   build synchronously. A tools/specgen contract change, not a plain Go
   edit.
+- 2026-09-23 -- first cards after P50 (all 51 original cards landed
+  2026-09-23 ~06:45 PT, PR #65): the marketer's AI-agent org
+  (designs/2026-09-23-marketer-org-on-zatiti.md, dec-1255/dec-1256),
+  dispatched by chief-developer per dec-1065, using this repo's own
+  worktree-lane convention -- no kazi goal.toml, this repo opted out of
+  kazi by design (docs/implementation/README.md). Z-M5 (assignments/Z-M5.md,
+  internal/skills + cmd/zatiti, no new root, no coordinated revision):
+  accept/strip argument-hint, disable-model-invocation, metadata from
+  SKILL.md frontmatter (32 of 128 skills under ~/.agents/skills fail
+  import today for exactly these three keys, confirmed by count
+  2026-09-23) and add a cmd/zatiti bulk `import-dir` helper. Dispatched
+  now. Z-M2 (generic MCP connection adapter) was BLOCKED on this repo's
+  rule that no new ownership root or exported seam ships without a
+  coordinated revision; chief-architect landed that revision 2026-09-24
+  (assignments/Z-M2.md; new root internal/adapters/mcpclient, adapter name
+  `mcp`, frozen profile/action/evidence schemas, connection.discover /
+  connection.tools / _connections.discovery.record on internal/connections,
+  contracts.md section "MCP client connection adapter"). Z-M2 is now
+  UNBLOCKED and dispatchable by chief-developer; it does not depend on
+  Z-M1.1 or Z-M1.2 (the Postiz end-to-end run, Z-M3, does).
+
+- 2026-09-24 -- Z-M2 update: chief-architect's coordinated revision landed
+  as zatiti#67 (root `internal/adapters/mcpclient`, wire name `mcp`,
+  assignments/Z-M2.md, dec-1256/dec-1258); chief-developer_z-m2's
+  implementation lane is running stacked on that branch, not merging
+  ahead of #67. One real contract defect found and fixed in #67 itself
+  (commit b6fe041) before implementation needed a workaround: go-sdk
+  v1.7.0's `Client.Connect` makes three physical HTTP requests for
+  open_session (a SEP-2575 `server/discover` probe first, then legacy
+  `initialize`+`notifications/initialized` against a 2025-11-25-only
+  server), not two -- MCPHandshakeExchange/MCPClientEvidence.handshake now
+  allow maxItems 3, MCPClientProfile.protocol_version is an enum of
+  `2025-11-25 | 2026-07-28`, and Z06.mcp_one_request_per_call reads "at
+  most three requests, every one recorded, the discover probe never
+  omitted from evidence."
+- 2026-09-24 -- Z-M3 (Postiz binding, blocked on Z-M2 landing) fact for
+  whoever mints its task card: Postiz's MCP endpoint through our own nginx
+  is `https://post.sire.blog/api/mcp` (NOT `/mcp`, which hits the frontend
+  and 307s to /auth) using `Authorization: Bearer`, verified live by
+  chief-architect (a placeholder Bearer header returns 401 "Invalid API
+  Key or OAuth token"). Postiz ALSO exposes a `/api/mcp/<key>`
+  credential-in-path form -- do NOT use it as the fixture/default: it is
+  exactly the shape the frozen mcpclient contract refuses as
+  `capability_unsupported` (credential in URL, not in the connection's
+  held credential). post.sire.blog was down 19 days, back as of
+  2026-09-24 06:23Z (chief-operator, via Cloudflare). No public API key
+  exists yet -- David mints it at the 08:00 sync; Z-M2's own tonight
+  acceptance runs a placeholder Bearer token against `/api/mcp` and
+  records the resulting 401 as a typed refusal, never success. Real-key
+  streaming is Z-M3's.
 
 ## Blocked
 

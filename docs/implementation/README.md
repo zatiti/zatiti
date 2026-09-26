@@ -1,8 +1,8 @@
 # Package implementation specification
 
-Revision 17. **Implementation exists; this is the frozen contributor specification, not release qualification.**
+Revision 18. **Implementation exists; this is the frozen contributor specification, not release qualification.**
 
-36 implementation roots; 203 public operations; 97 internal owner methods; 153 source blocks with explicit ownership; 147 named acceptance cases covering Z01–Z21 and release journeys. The repository contains implementation code; passing package tests do not establish external service or release qualification.
+37 implementation roots; 205 public operations; 100 internal owner methods; 153 source blocks with explicit ownership; 147 named acceptance cases covering Z01–Z21 and release journeys. The repository contains implementation code; passing package tests do not establish external service or release qualification.
 
 Each root already contains a complete committed AGENTS.md: local mission, allowed imports, owned requirements, exact Go interfaces, incoming/outgoing operation schemas, persistence/recovery rules and named acceptance criteria. An agent can implement from that file without the RFC. Scope prompts intentionally repeat necessary contracts; do not edit generated copies independently.
 
@@ -43,6 +43,7 @@ Root dependency work and the lock report belong only to integration's serialized
 | [`internal/cli`](../../internal/cli/AGENTS.md) | infrastructure | 2 | Own Cobra command generation, structured input, deterministic JSON output and process exit mapping. |
 | [`internal/mcp`](../../internal/mcp/AGENTS.md) | infrastructure | 2 | Own stdio MCP adapter over the common authenticated controller client. |
 | [`apps/desktop`](../../apps/desktop/AGENTS.md) | client | 3 | Own the Flutter chat-first human workspace: a direct wire client of the controller with acknowledged controller-derived views. |
+| [`internal/adapters/mcpclient`](../../internal/adapters/mcpclient/AGENTS.md) | adapter | 2 | Qualified generic MCP client connection adapter (adapter name mcp; Postiz first). |
 | [`internal/adapters/responses`](../../internal/adapters/responses/AGENTS.md) | adapter | 2 | Qualified hosted Responses model adapter. |
 | [`internal/adapters/github`](../../internal/adapters/github/AGENTS.md) | adapter | 2 | Qualified GitHub repository artifact/publication adapter. |
 | [`internal/adapters/httpread`](../../internal/adapters/httpread/AGENTS.md) | adapter | 2 | Qualified bounded public HTTP reads for research. |

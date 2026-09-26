@@ -187,8 +187,9 @@ type fixture struct {
 
 // fixtureOptions reuses an existing state directory (restart cases).
 type fixtureOptions struct {
-	stateDir string
-	keyRef   string
+	mcpProfile json.RawMessage
+	stateDir   string
+	keyRef     string
 }
 
 // buildModules constructs every landed domain module with real
@@ -203,7 +204,7 @@ func (b databaseBackup) Backup(ctx context.Context, w io.Writer) error { return 
 
 var _ contract.DatabaseBackup = databaseBackup{}
 
-func buildModules(router *application.PortRouter, clock contract.Clock, secrets contract.SecretStore, blobs contract.BlobStore, backup contract.DatabaseBackup) ([]contract.Module, contract.Authenticator, error) {
+func buildModules(router *application.PortRouter, clock contract.Clock, secrets contract.SecretStore, blobs contract.BlobStore, backup contract.DatabaseBackup, mcpProfiles ...json.RawMessage) ([]contract.Module, contract.Authenticator, error) {
 	deps := func(owner string) contract.Dependencies {
 		return contract.Dependencies{
 			Clock: clock, IDs: uuidSource{}, Ports: router.For(owner),
@@ -217,18 +218,23 @@ func buildModules(router *application.PortRouter, clock contract.Clock, secrets 
 	constructors := map[string]func(contract.Dependencies) (contract.Module, error){
 		"configuration": func(d contract.Dependencies) (contract.Module, error) { return configuration.New(d) },
 		"skills":        func(d contract.Dependencies) (contract.Module, error) { return skills.New(d) },
-		"connections":   func(d contract.Dependencies) (contract.Module, error) { return connections.New(d) },
-		"policy":        func(d contract.Dependencies) (contract.Module, error) { return policy.New(d) },
-		"reviews":       func(d contract.Dependencies) (contract.Module, error) { return reviews.New(d) },
-		"accounting":    func(d contract.Dependencies) (contract.Module, error) { return accounting.New(d) },
-		"tasks":         func(d contract.Dependencies) (contract.Module, error) { return tasks.New(d) },
-		"scheduling":    func(d contract.Dependencies) (contract.Module, error) { return scheduling.New(d) },
-		"messaging":     func(d contract.Dependencies) (contract.Module, error) { return messaging.New(d) },
-		"execution":     func(d contract.Dependencies) (contract.Module, error) { return execution.New(d) },
-		"effects":       func(d contract.Dependencies) (contract.Module, error) { return effects.New(d) },
-		"memory":        func(d contract.Dependencies) (contract.Module, error) { return memory.New(d) },
-		"artifacts":     func(d contract.Dependencies) (contract.Module, error) { return artifacts.New(d) },
-		"evidence":      func(d contract.Dependencies) (contract.Module, error) { return evidence.New(d) },
+		"connections": func(d contract.Dependencies) (contract.Module, error) {
+			if len(mcpProfiles) > 0 && len(mcpProfiles[0]) > 0 {
+				return connections.NewWithMCPProfile(d, mcpProfiles[0])
+			}
+			return connections.New(d)
+		},
+		"policy":     func(d contract.Dependencies) (contract.Module, error) { return policy.New(d) },
+		"reviews":    func(d contract.Dependencies) (contract.Module, error) { return reviews.New(d) },
+		"accounting": func(d contract.Dependencies) (contract.Module, error) { return accounting.New(d) },
+		"tasks":      func(d contract.Dependencies) (contract.Module, error) { return tasks.New(d) },
+		"scheduling": func(d contract.Dependencies) (contract.Module, error) { return scheduling.New(d) },
+		"messaging":  func(d contract.Dependencies) (contract.Module, error) { return messaging.New(d) },
+		"execution":  func(d contract.Dependencies) (contract.Module, error) { return execution.New(d) },
+		"effects":    func(d contract.Dependencies) (contract.Module, error) { return effects.New(d) },
+		"memory":     func(d contract.Dependencies) (contract.Module, error) { return memory.New(d) },
+		"artifacts":  func(d contract.Dependencies) (contract.Module, error) { return artifacts.New(d) },
+		"evidence":   func(d contract.Dependencies) (contract.Module, error) { return evidence.New(d) },
 		"installation": func(d contract.Dependencies) (contract.Module, error) {
 			return installation.New(d, installation.WithDatabaseBackup(backup))
 		},
@@ -295,7 +301,7 @@ func assemble(t testing.TB, opts fixtureOptions) (*fixture, error) {
 	}
 
 	router := application.NewPorts()
-	modules, auth, err := buildModules(router, f.clock, f.secrets, plat.Blobs(), databaseBackup{db: f.db})
+	modules, auth, err := buildModules(router, f.clock, f.secrets, plat.Blobs(), databaseBackup{db: f.db}, opts.mcpProfile)
 	if err != nil {
 		return nil, err
 	}

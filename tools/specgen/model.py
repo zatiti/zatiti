@@ -3,7 +3,7 @@ from copy import deepcopy
 
 # Specification revision. Bump with every coordinated contract revision; the renderer
 # refuses to render unless contracts.md names the same revision in its title.
-REVISION=17
+REVISION=18
 
 S={'type':'string','maxLength':8192}
 ID={'type':'string','format':'uuid'}
@@ -155,6 +155,9 @@ add('tool.schema','connections',fields(KEY),obj(input_schema=JSON,output_schema=
 for v in ('bind','unbind'):
     add('tool.'+v,'connections',fields({**SC,'binding':ref('Binding'),'draft_id?':ID}),one('Draft'),'Stage explicit tool binding change through compiler; reject unknown adapter or unqualified executable binding.')
 resource('connection','connections','Connection')
+D['MCPDiscoveredTool']=obj(name=S,input_schema=JSON,input_schema_digest=DIG,id=ID,version=VER,discovered_at=TIME,discovery_operation_id=ID,**{'title?':S,'description?':S,'output_schema?':JSON,'annotations?':obj(**{'title?':S,'read_only_hint?':BOOL,'destructive_hint?':BOOL,'idempotent_hint?':BOOL,'open_world_hint?':BOOL})})
+add('connection.discover','connections',fields(EDIT),one('Job'),'Admit one bounded, separately authorized MCP tools/list catalog read for the selected connection. It installs no authority; each discovered tool needs an explicit binding and profile allowlist entry.',effect='external_read')
+add('connection.tools','connections',fields({**PAGE,'connection_id':ID}),page('MCPDiscoveredTool'),'List the locally recorded discovered tool catalog under current authorization; this operation makes no live provider call.',mode='query')
 add('connection.validate','connections',fields(EDIT),one('Job'),'Admit a bounded separately authorized provider probe. Record observed account/scopes, timestamp and freshness. Mismatch cannot silently substitute accounts.',effect='external_read')
 for v in ('begin','status','complete','cancel'):
     inp=fields({**SC,'connection_id':ID,'expected_version':VER,'method':enum('browser','store_reference')}) if v=='begin' else fields({**SC,'challenge_id':ID,**({'expected_version':VER} if v!='status' else {}),**({'helper_ref':S} if v=='complete' else {})})
@@ -271,7 +274,10 @@ internal('reserve','accounting',obj(scope=ref('Scope'),root_task_id=ID,operation
 internal('settle','accounting',obj(reservation_id=ID,expected_version=VER,usage=ref('Usage'),authoritative_nonexecution=BOOL),one('Reservation'),'Settle observed cost or retain unknown reservation; release only proven unused portion and conclusive no-effect/no-cost evidence. Check currency and overflow.',['effects','execution','installation'])
 internal('inspect','accounting',fields(SC),obj(limits=ref('Limits'),usage=ref('Usage')),'Return current intersected limits and honest usage to admission/doctor.',['policy','tasks','execution','effects','scheduling','installation'],mode='query')
 internal('resolve','connections',obj(scope=ref('Scope'),connection=ref('Ref'),tool=ref('Ref'),destination=S),obj(connection=ref('Connection'),tool=ref('Tool')),'Resolve exact validated account/tool/destination/binding and current revocation/freshness; return opaque credential reference only to trusted dispatcher.',['effects','execution','memory','skills','configuration'],mode='query')
+internal('tool.resolve','connections',obj(scope=ref('Scope'),tool_id=ID),obj(connection=ref('Connection'),tool=ref('Tool')),'Resolve an exact, current MCP catalog identity to its owning connection and fully composed tool contract. This is lookup only; dispatch still requires current explicit bindings and authorization.',['execution','configuration'],mode='query')
 internal('validation.record','connections',obj(connection_id=ID,expected_version=VER,observation=ref('Observation')),one('Connection'),'Record authorized probe identity/scopes/freshness and invalidation without accepting account substitution.',['effects','controller'])
+internal('discovery.record','connections',obj(connection_id=ID,expected_version=VER,observation=ref('Observation')),one('Connection'),'Record the observed MCP tool catalog from the exact physical observation; pin schemas and digests as inert data, advance catalog versions, and mark absent entries stale only for a complete catalog page.',['effects','controller'])
+internal('callback.evidence','effects',obj(operation_id=ID,attempt_id=ID),obj(action=ref('Action'),observation=ref('Observation'),generation=VER),'Return the immutable action and recorded physical observation for the exact effect attempt; callbacks cannot supply provider facts in place of recorded evidence.',['connections'],mode='query')
 internal('create','tasks',obj(task=ref('Task'),source_id=ID,occurrence_key=S),one('Task'),'Create/deduplicate admitted task from wake/responsibility/conversation by source+occurrence identity; differing content conflicts. Enforce current bounds and bindings.',['scheduling','messaging','execution'])
 internal('snapshot','tasks',fields(KEY),one('Task'),'Return current pinned contract and task scope, parent/root/dependency state; caller still obeys authority.',['execution','effects','scheduling','memory','reviews','policy'],mode='query')
 internal('transition','tasks',obj(task_id=ID,expected_version=VER,state=D['Task']['properties']['state'],evidence_ids=arr(ID),**{'waiting_reason?':S,'manual?':BOOL} ),one('Task'),'Validate legal transition and pinned independent acceptance. succeeded requires verifier-established observations or eligible explicitly manual acceptance; failed verification never releases success dependents.',['execution','scheduling','installation'])
@@ -365,10 +371,22 @@ for o in OPS:
         o['input_schema']['properties']['filter']=obj(**{'state?':S,'key?':S,'parent_id?':ID,'worker_id?':ID,'task_id?':ID,'organization_id?':ID,'descendants?':BOOL,'needs_you?':BOOL})
         o['behavior']+=' Filters are structured exact-match fields (AND semantics); unsupported fields for this resource refuse invalid_input. Never interpolate filter strings as SQL.'
 
+# Revision 18 adds governed MCP client discovery and dispatch to the existing catalog.
+for _operation in OPS:
+    if _operation['id']=='_connections.resolve':
+        _operation['input_schema']['properties'].update(operation_id=ID,action=ref('Action'))
+        _operation['output_schema']['properties']['validation_intent']=BOOL
+        _operation['behavior'] += ' MCP admission and claim re-resolve the exact immutable Action, connection/catalog/profile versions, current authority and pending validation intent; identity alone never bypasses freshness.'
+    if _operation['id'] in ('_connections.validation.record','_connections.discovery.record'):
+        _operation['input_schema']['properties'].update(operation_id=ID,attempt_id=ID)
+        _operation['behavior'] += ' MCP callbacks require exact operation and attempt identity and consume only the corresponding effects callback evidence; duplicate exact delivery is idempotent.'
+    if _operation['id']=='_artifacts.metadata' and 'connections' not in _operation['callers']:
+        _operation['callers'].append('connections')
+
 # Async completion schemas are distinct from the immediate accepted Job envelope.
 _COMPLETIONS={
  'skill.evaluate':obj(evaluation_id=ID,passed=BOOL,evidence=arr(ref('ArtifactRef'))),
- 'connection.validate':one('Connection'),'connection.rotate':one('Connection'),
+ 'connection.validate':one('Connection'),'connection.discover':one('Connection'),'connection.rotate':one('Connection'),
  'execution_profile.qualify':one('QualifiedExecutionProfile'),
  'operation.reconcile':one('Operation'),
  'memory.recall':obj(context_artifact=ref('ArtifactRef'),claims=arr(ref('Claim')),brain_versions=arr(ref('Ref')),freshness=TIME,requirements=arr(ref('Requirement'))),

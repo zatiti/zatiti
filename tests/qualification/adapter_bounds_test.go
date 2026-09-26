@@ -124,6 +124,16 @@ func (b *memoryBlobs) Open(_ context.Context, digest contract.Digest, offset, le
 
 func (b *memoryBlobs) RemoveStaged(context.Context, string) error { return nil }
 
+func (b *memoryBlobs) all() [][]byte {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	out := make([][]byte, 0, len(b.objects))
+	for _, v := range b.objects {
+		out = append(out, append([]byte(nil), v...))
+	}
+	return out
+}
+
 func (b *memoryBlobs) artifact(data string) map[string]any {
 	return map[string]any{"id": string(contract.NewID()), "digest": string(b.put([]byte(data)))}
 }

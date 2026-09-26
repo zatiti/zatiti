@@ -1,6 +1,7 @@
 package execution
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -750,6 +751,12 @@ func (s *Service) interpretExternalTool(ctx context.Context, unit contract.Unit,
 			fmt.Sprintf("tool/connection no longer resolves: %v", err))
 	}
 
+	if comp.Adapter == "mcp" || tool.Adapter == "mcp" {
+		if err := validateMCPProposal(comp, conn, tool, mp.Input, turn.Limits.Currency); err != nil {
+			return s.recordRefused(ctx, unit, base, refusalUnauthorizedTool, "MCP tool authority changed or proposal is not pinned")
+		}
+	}
+
 	expiresAt := turn.LeaseExpiresAt
 	if expiresAt.IsZero() {
 		expiresAt = now.Add(leaseDuration)
@@ -768,10 +775,11 @@ func (s *Service) interpretExternalTool(ctx context.Context, unit contract.Unit,
 		"parameters":             json.RawMessage(mp.Input),
 		"cost_bound":             map[string]any{"currency": turn.Limits.Currency, "micro_units": 0},
 	}
-	sourceID := turn.AttemptID
-	if sourceID == "" {
-		sourceID = turn.ID
+	if comp.Adapter == "mcp" {
+		action["cost_bound"] = tool.CostBound
 	}
+	sourceID := turn.ID
+
 	data, err := s.callPeer(ctx, unit, peerEffectsPrepare, map[string]any{
 		"scope":     turn.Scope,
 		"action":    action,
@@ -874,4 +882,37 @@ func nextTurnState(turn *turnRow, d stepDisposition, now time.Time) (state, wait
 		nextWake = time.Time{}
 	}
 	return state, waitingReason, nextWake
+}
+
+// validateMCPProposal checks authoritative pins again after model deliberation.
+// The full envelope is constrained by the connection owner's composed schema;
+// only arguments are free model input, never adapter metadata or classification.
+func validateMCPProposal(comp *contextComponent, conn wireConnection, tool wireTool, input json.RawMessage, currency string) error {
+	if comp.Adapter != "mcp" || tool.Adapter != "mcp" || conn.Provider != "mcp" || conn.ID != comp.ConnectionID || conn.Version != comp.ConnectionVersion || tool.ID != comp.ToolID || tool.Version != comp.ToolVersion || conn.AccountIdentity != comp.AccountIdentity || len(tool.Destinations) != 1 || len(comp.Destinations) != 1 || tool.Destinations[0] != comp.Destinations[0] || tool.CostBound.Currency != currency || tool.CostBound.MicroUnits < 0 {
+		return fmt.Errorf("MCP authority mismatch")
+	}
+	pinned, err := contract.Canonicalize(comp.InputSchema)
+	if err != nil {
+		return err
+	}
+	current, err := contract.Canonicalize(tool.InputSchema)
+	if err != nil {
+		return err
+	}
+	if !bytes.Equal(pinned, current) {
+		return fmt.Errorf("MCP schema changed")
+	}
+	if err := contract.ValidateSchema(tool.InputSchema, input); err != nil {
+		return err
+	}
+	var envelope struct {
+		Classification string `json:"classification"`
+	}
+	if err := json.Unmarshal(input, &envelope); err != nil {
+		return err
+	}
+	if envelope.Classification != "restricted" {
+		return fmt.Errorf("MCP classification is not restricted")
+	}
+	return nil
 }

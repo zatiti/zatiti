@@ -1,6 +1,6 @@
 # Zatiti repository guidance
 
-This repository contains a product specification and a frozen package implementation scaffold. It does not yet contain a working product. Keep implementation and qualification claims honest.
+This repository contains the Zatiti product specification, its frozen package implementation scaffold, and the implementation built from them. The product is implemented and pre-release: it builds and runs from source, but no release has been tagged and release qualification has not been run. Keep implementation and qualification claims honest.
 
 For an assigned implementation package, use the AGENTS.md in that directory. It embeds the necessary product requirements and shared interfaces; no RFC copy is required. Write only in that assignment's root. Do not independently edit generated prompts, shared contracts, sibling packages, root dependency files or acceptance criteria. Report required contract changes to the integration owner with the affected callers and proposed revision.
 

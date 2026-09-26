@@ -245,3 +245,22 @@ const (
 	obsUnknown   = "unknown"
 	obsNotSent   = "not_sent"
 )
+
+// wireMCPDiscoveredTool mirrors $defs/MCPDiscoveredTool as returned by
+// connection.tools: the recorded catalog entry with owner-local discovery
+// provenance (discovered_at, discovery_operation_id) required by the frozen
+// operations catalog. Annotations stay inert JSON tips; they never change
+// effect classification.
+type wireMCPDiscoveredTool struct {
+	ID                   contract.ID     `json:"id"`
+	Version              int64           `json:"version"`
+	Name                 string          `json:"name"`
+	InputSchema          json.RawMessage `json:"input_schema"`
+	InputSchemaDigest    string          `json:"input_schema_digest"`
+	DiscoveredAt         time.Time       `json:"discovered_at"`
+	DiscoveryOperationID contract.ID     `json:"discovery_operation_id"`
+	Title                string          `json:"title,omitempty"`
+	Description          string          `json:"description,omitempty"`
+	OutputSchema         json.RawMessage `json:"output_schema,omitempty"`
+	Annotations          json.RawMessage `json:"annotations,omitempty"`
+}

@@ -1,6 +1,6 @@
 # Implementation assignment: `internal/configuration`
 
-Generated specification revision 17; source digest `f77034332a96396a9f88395f71ff528f051f96f35b398629236dd00bc731c08f`. This file is committed implementation context. Do not independently edit it. Everything required from the product specification and adjacent interfaces is embedded below; no RFC copy is required.
+Generated specification revision 18; source digest `b69aafc1a7069d7f85acd918d019e4e8745a08fb7648343c9fadd56da1b51ed9`. This file is committed implementation context. Do not independently edit it. Everything required from the product specification and adjacent interfaces is embedded below; no RFC copy is required.
 
 ## Mission and scope
 
@@ -20,7 +20,7 @@ Local proving focus: Atomic child/chief creation, ordinary worker no child org, 
 
 Incoming callers: accounting, application, configuration, connections, controller, effects, execution, installation, memory, messaging, policy, reviews, scheduling, skills, tasks, application (authenticated public operations).
 
-Outgoing owner calls: `_identity.validate`, `_identity.activate`, `_skills.validate`, `_skills.activate`, `_connections.validate`, `_connections.activate`, `_policy.validate`, `_policy.activate`, `_accounting.validate`, `_accounting.activate`, `_scheduling.validate`, `_scheduling.activate`, `_memory.validate`, `_memory.activate`, `_identity.authority`, `_policy.check`, `_policy.invalidate`, `_reviews.ensure`, `_reviews.check`, `_connections.resolve`, `_effects.prepare`, `_memory.select`, `_execution.job.create`. Each exact input/output schema appears below. Calls retain current Unit/authority; owner allowlists are mandatory.
+Outgoing owner calls: `_identity.validate`, `_identity.activate`, `_skills.validate`, `_skills.activate`, `_connections.validate`, `_connections.activate`, `_policy.validate`, `_policy.activate`, `_accounting.validate`, `_accounting.activate`, `_scheduling.validate`, `_scheduling.activate`, `_memory.validate`, `_memory.activate`, `_identity.authority`, `_policy.check`, `_policy.invalidate`, `_reviews.ensure`, `_reviews.check`, `_connections.resolve`, `_connections.tool.resolve`, `_effects.prepare`, `_memory.select`, `_execution.job.create`. Each exact input/output schema appears below. Calls retain current Unit/authority; owner allowlists are mandatory.
 
 Expose `New(contract.Dependencies) (*Service,error)`; `*Service` implements `contract.Module` with Name `configuration`, owner-prefixed migrations, all owned descriptors, and strict dispatch. No calls/goroutines during construction. Implement optional authentication/LocalIO interfaces where specified in the common contract. Tables are private under `configuration_`; external callers rely only on methods and schemas.
 
@@ -30,7 +30,7 @@ These briefs are embedded so you need not read a sibling prompt to discover its 
 
 ## Shared foundation contract
 
-# Frozen implementation contract, revision 17
+# Frozen implementation contract, revision 18
 
 These decisions complete the product specification and bind every scope. Report contradictions with an affected-dependency list and proposed coordinated revision; do not change another owner's interface locally.
 
@@ -479,6 +479,23 @@ Normalized provider usage may include requested and served model IDs, serving pr
 
 Revision 17 adds the internal query `_messaging.history` (caller: execution) for reconstructing a worker turn's complete chat transcript. Its worker identity is taken from the persisted turn, and Messaging verifies current conversation membership before reading sender and admitted-recipient rows. It returns up to 200 authorized rows chronologically and an explicit `complete` flag; older undisclosed or over-limit history is never silently dropped, and execution refuses provider dispatch when `complete` is false. The existing public `conversation.message.list` remains principal-scoped and unchanged. This closes the context-history gap without granting the controller or a client a history bypass.
 
+## Revision 18: governed MCP integration
+
+This serialized amendment resolves Z-M2's independent review counterexamples. It does not authorize live Postiz publishing, deployment or release. Affected owners: connections, effects, execution, controller, mcpclient, cmd/zatiti and integration/qualification.
+
+- Startup supplies the same secret-free local MCP profile to connections through `NewWithMCPProfile(Dependencies,json.RawMessage)`. Its digest excludes capability_evidence, exactly as the adapter's existing self-binding digest. No installed profile means MCP admission is unavailable. Every composed MCP action pins profile_digest; the adapter refuses drift before credentials/network. Generic MCP validates transport and the exact opaque credential binding (`credential:<ref>`, or `none`), not an upstream account identity or provider authorization scopes. No provider identity is invented from server metadata.
+- Connections creates an exact bounded open_session/list_tools Action using the current configuration revision, reviewed account/endpoint, installed profile cost and reply bounds. `_effects.prepare`, the operation-linked execution job, and an immutable connections-owned intent commit in one transaction. A second outstanding probe refuses. Initial validation requires the matching pending operation/action-digest/connection-version intent at both admission and claim; ordinary calls/discovery retain freshness checks. The adapter does no list_tools automatically after opening a session.
+- Callback delivery routes by the persisted job operation. Connections obtains the recorded observation from effects for the exact operation/attempt; it never trusts caller-supplied provider JSON. Only matching intent/account/profile/endpoint/kind can mutate validation/catalog or complete the linked job. Duplicate exact deliveries are idempotent. Successful validation stores the opaque session under the resulting connection version, profile digest and controller generation. Profile change, connection change or restart requires explicit fresh validation/discovery.
+- Catalog tools expose their ID/version. Every rediscovery advances catalog version; stale entries cannot resolve. `_connections.tool.resolve` is a context-only exact catalog lookup, not a wildcard dispatch. Execution requires explicitly selected tool and connection bindings and intersecting endpoints. The composed Tool schema is the full MCP envelope: const tool, session, schema/digest, profile digest, restricted classification, and control limit, with arguments validated by the discovered schema. Local JSON pointers are relocated under arguments; unsupported resource IDs/anchors refuse. Model parameters cannot select another schema, session, classification or profile. Admission and claim re-resolve exact catalog/connection versions and validate the whole action; account, endpoint, current policy/configuration, artifacts and full cost bounds remain enforced.
+- Effects retains the full governed Action in durable Dispatch. Controller extracts only its validated parameters for the mcp adapter; operation/attempt identity, credential reference and deadline remain unchanged. No additional provider request is created by translation.
+- MCP actions carry optional control_reply_limit (absent means zero), capped at sixteen and by installed profile max_control_replies (absent means zero). Nonzero allowance requires same-currency control_reply_cost; overflow refuses. Replies are only JSON-RPC method-not-found refusals, with no sampling, elicitation, roots, ping work or tool calls. They are explicitly bounded sub-exchanges of the admitted effect, not retries or independent authority. Reserve base tool_call_cost plus maximum reply allowance before dispatch; evidence accounts the replies actually dispatched separately and includes their liability even on lost response. Unused slots do not count as dispatched. Exhaustion aborts the local session without an automatic DELETE; incomplete primary outcomes remain unknown. This replaces the incompatible blanket 'exactly one total HTTP request while answering every callback' requirement: one primary tools/list or tools/call, or up to three distinct handshake requests, plus only the explicitly admitted refusal allowance.
+- Every captured HTTP exchange has an ordinal, kind (main/handshake/control_reply), HTTP method, optional RPC method, request context, request-sent knowledge and optional actual status. At most nineteen exchanges and twenty staged outputs (including one tool result). Every staged request context is published, not only the first. A base-transport error without response records request_sent unknown, never invented status or certain nonexecution. Handshake evidence retains all exchanges even without responses.
+- MCP physical request_context is omitted only when request_sent=no and context_unavailable records staging_failed, request_rejected or cancelled_before_send. An empty/fabricated artifact locator is forbidden. This MCP-specific evidence variant does not relax other adapters' evidence contracts. Pre-send refusal carries no provider effect; partial/sent attempts retain their actual exchange evidence and unknown liability.
+
+Executable regression coverage must include unverified bootstrap through effects and callback, forged/replayed/stale intent rejection, catalog mutation between admit/claim, full-envelope tampering, lost handshake response, staged-context failure, callback bounds zero/one/sixteen and overflow with server-counted requests. Controlled fixtures are not live-provider or release qualification.
+
+Revision 4 integration details: a connections callback uses the recorded effects observation for outcome and provenance. If the observation contains staged outputs, the owner verifies the controller's publication mapping against artifact metadata (scope, digest, size, media type, classification and availability), reconstructs only the permitted locator substitutions, and persists that normalized recorded evidence. Callback-supplied outcome, usage or tool facts never replace recorded truth. The controller defers an explicit connection callback operation before admission if its linked job is absent from the current bounded scan; absence is not permission to discard the callback. Generic MCP cannot attest same-account credential rotation: `connection.rotate` returns `capability_unsupported` for MCP and leaves any existing intent untouched; a separately reviewed connection is required.
+
 ## Owned product requirements
 
 ### R1-002 (source section 1; primary owner configuration)
@@ -896,11 +913,26 @@ Output data schema:
 
 Allowed internal callers: effects, execution, memory, skills, configuration. Submission key: not required at this internal/query/bootstrap boundary.
 
-Resolve exact validated account/tool/destination/binding and current revocation/freshness; return opaque credential reference only to trusted dispatcher.
+Resolve exact validated account/tool/destination/binding and current revocation/freshness; return opaque credential reference only to trusted dispatcher. MCP admission and claim re-resolve the exact immutable Action, connection/catalog/profile versions, current authority and pending validation intent; identity alone never bypasses freshness.
 
 Input schema:
 ```json
-{"type":"object","additionalProperties":false,"properties":{"scope":{"$ref":"#/$defs/Scope"},"connection":{"$ref":"#/$defs/Ref"},"tool":{"$ref":"#/$defs/Ref"},"destination":{"type":"string","maxLength":8192}},"required":["scope","connection","tool","destination"]}
+{"type":"object","additionalProperties":false,"properties":{"scope":{"$ref":"#/$defs/Scope"},"connection":{"$ref":"#/$defs/Ref"},"tool":{"$ref":"#/$defs/Ref"},"destination":{"type":"string","maxLength":8192},"operation_id":{"type":"string","format":"uuid"},"action":{"$ref":"#/$defs/Action"}},"required":["scope","connection","tool","destination"]}
+```
+Output data schema:
+```json
+{"type":"object","additionalProperties":false,"properties":{"connection":{"$ref":"#/$defs/Connection"},"tool":{"$ref":"#/$defs/Tool"},"validation_intent":{"type":"boolean"}},"required":["connection","tool"]}
+```
+
+### `_connections.tool.resolve` v1 — connections / internal / query / local
+
+Allowed internal callers: execution, configuration. Submission key: not required at this internal/query/bootstrap boundary.
+
+Resolve an exact, current MCP catalog identity to its owning connection and fully composed tool contract. This is lookup only; dispatch still requires current explicit bindings and authorization.
+
+Input schema:
+```json
+{"type":"object","additionalProperties":false,"properties":{"scope":{"$ref":"#/$defs/Scope"},"tool_id":{"type":"string","format":"uuid"}},"required":["scope","tool_id"]}
 ```
 Output data schema:
 ```json

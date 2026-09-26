@@ -75,6 +75,7 @@ type opMeta struct {
 // operations. Caller allowlists and transport bindings follow the
 // implementation assignment exactly.
 var opMetas = []opMeta{
+	{id: "_effects.callback.evidence", visibility: "internal", mode: "query", callers: []string{"connections"}},
 	{id: opAdmit, visibility: "internal", mode: "mutation", expected: true,
 		callers: []string{"controller", "execution", "memory", "skills", "connections"}},
 	{id: opClaim, visibility: "internal", mode: "mutation",
@@ -230,6 +231,8 @@ func scopeRequirement(input json.RawMessage) []string {
 // through the local bind.
 func (s *Service) bindHandler(d contract.Descriptor) (contract.Handler, error) {
 	switch d.ID {
+	case "_effects.callback.evidence":
+		return bind(d, s.handleCallbackEvidence)
 	case opAdmit:
 		return bind(d, s.handleAdmit)
 	case opClaim:

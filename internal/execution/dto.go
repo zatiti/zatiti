@@ -237,6 +237,7 @@ type wireMemoryBinding struct {
 // need; extra frozen fields decode and are ignored by Go's default
 // (non-strict) json.Unmarshal used for peer responses.
 type wireTool struct {
+	CostBound    wireMoney        `json:"cost_bound"`
 	ID           contract.ID      `json:"id"`
 	Version      contract.Version `json:"version"`
 	Name         string           `json:"name"`

@@ -29,6 +29,7 @@ type opMeta struct {
 // the public catalog in schema order. Caller allowlists are the exact sets
 // declared by the implementation assignment.
 var opMetas = []opMeta{
+	{id: "_connections.tool.resolve", visibility: "internal", mode: "query", effect: "local", callers: []string{"execution", "configuration"}},
 	// Internal operations.
 	{id: "_connections.activate", visibility: "internal", mode: "mutation", effect: "local",
 		callers: []string{"configuration", "application"}},
@@ -38,6 +39,8 @@ var opMetas = []opMeta{
 		callers: []string{"configuration", "application"}},
 	{id: "_connections.validation.record", visibility: "internal", mode: "mutation", effect: "local",
 		expectedVersion: true, callers: []string{"effects", "controller"}},
+	{id: "_connections.discovery.record", visibility: "internal", mode: "mutation", effect: "local",
+		expectedVersion: true, callers: []string{"effects", "controller"}},
 
 	// connection.*
 	{id: "model.provider.list", visibility: "public", mode: "query", effect: "local",
@@ -46,6 +49,8 @@ var opMetas = []opMeta{
 		submission: true, expectedVersion: true, cli: "connection archive"},
 	{id: "connection.create", visibility: "public", mode: "mutation", effect: "local",
 		submission: true, cli: "connection create"},
+	{id: "connection.discover", visibility: "public", mode: "mutation", effect: "external_read",
+		submission: true, expectedVersion: true, completion: true, cli: "connection discover"},
 	{id: "connection.get", visibility: "public", mode: "query", effect: "local",
 		cli: "connection get"},
 	{id: "connection.list", visibility: "public", mode: "query", effect: "local",
@@ -62,6 +67,8 @@ var opMetas = []opMeta{
 		submission: true, expectedVersion: true, completion: true, cli: "connection setup complete"},
 	{id: "connection.setup.status", visibility: "public", mode: "query", effect: "local",
 		cli: "connection setup status"},
+	{id: "connection.tools", visibility: "public", mode: "query", effect: "local",
+		cli: "connection tools"},
 	{id: "connection.update", visibility: "public", mode: "mutation", effect: "local",
 		submission: true, expectedVersion: true, cli: "connection update"},
 	{id: "connection.validate", visibility: "public", mode: "mutation", effect: "external_read",
@@ -84,6 +91,7 @@ var opMetas = []opMeta{
 // connection definitions, validation freshness and credential setup
 // challenges.
 type Service struct {
+	mcpProfile  *MCPProfile
 	clock       contract.Clock
 	ids         contract.IDSource
 	ports       contract.Ports
@@ -192,9 +200,12 @@ var handlers = map[string]handlerFunc{
 	"_connections.resolve":           handleResolve,
 	"_connections.validate":          handleValidate,
 	"_connections.validation.record": handleValidationRecord,
+	"_connections.discovery.record":  handleDiscoveryRecord,
+	"_connections.tool.resolve":      handleMCPToolResolve,
 
 	"connection.archive":        handleArchive,
 	"connection.create":         handleCreate,
+	"connection.discover":       handleDiscoverPublic,
 	"connection.get":            handleGet,
 	"connection.list":           handleList,
 	"connection.revoke":         handleRevoke,
@@ -203,6 +214,7 @@ var handlers = map[string]handlerFunc{
 	"connection.setup.cancel":   handleLocalIORouted,
 	"connection.setup.complete": handleLocalIORouted,
 	"connection.setup.status":   handleSetupStatus,
+	"connection.tools":          handleToolsList,
 	"connection.update":         handleUpdate,
 	"connection.validate":       handleValidatePublic,
 	"model.provider.list":       handleModelProviderList,

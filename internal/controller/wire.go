@@ -143,6 +143,8 @@ type memoryRecordInput struct {
 }
 
 type validationRecordInput struct {
+	OperationID     contract.ID          `json:"operation_id,omitempty"`
+	AttemptID       contract.ID          `json:"attempt_id,omitempty"`
 	ConnectionID    contract.ID          `json:"connection_id"`
 	ExpectedVersion int64                `json:"expected_version"`
 	Observation     contract.Observation `json:"observation"`

@@ -1,5 +1,5 @@
 {
-  "revision": 17,
+  "revision": 18,
   "requirements": [
     {
       "requirement": "R1-002",
@@ -1487,7 +1487,8 @@
         "internal/adapters/github",
         "internal/adapters/httpread",
         "internal/adapters/responses",
-        "internal/adapters/serenity"
+        "internal/adapters/serenity",
+        "internal/adapters/mcpclient"
       ],
       "verification": [
         "tests/integration",
@@ -1506,7 +1507,8 @@
         "internal/adapters/github",
         "internal/adapters/httpread",
         "internal/adapters/responses",
-        "internal/adapters/serenity"
+        "internal/adapters/serenity",
+        "internal/adapters/mcpclient"
       ],
       "verification": [
         "tests/integration",
@@ -1525,7 +1527,8 @@
         "internal/adapters/github",
         "internal/adapters/httpread",
         "internal/adapters/responses",
-        "internal/adapters/serenity"
+        "internal/adapters/serenity",
+        "internal/adapters/mcpclient"
       ],
       "verification": [
         "tests/integration",
@@ -1544,7 +1547,8 @@
         "internal/adapters/github",
         "internal/adapters/httpread",
         "internal/adapters/responses",
-        "internal/adapters/serenity"
+        "internal/adapters/serenity",
+        "internal/adapters/mcpclient"
       ],
       "verification": [
         "tests/integration",
@@ -1563,7 +1567,8 @@
         "internal/adapters/github",
         "internal/adapters/httpread",
         "internal/adapters/responses",
-        "internal/adapters/serenity"
+        "internal/adapters/serenity",
+        "internal/adapters/mcpclient"
       ],
       "verification": [
         "tests/integration",
@@ -1582,7 +1587,8 @@
         "internal/adapters/github",
         "internal/adapters/httpread",
         "internal/adapters/responses",
-        "internal/adapters/serenity"
+        "internal/adapters/serenity",
+        "internal/adapters/mcpclient"
       ],
       "verification": [
         "tests/integration",
@@ -1601,7 +1607,8 @@
         "internal/adapters/github",
         "internal/adapters/httpread",
         "internal/adapters/responses",
-        "internal/adapters/serenity"
+        "internal/adapters/serenity",
+        "internal/adapters/mcpclient"
       ],
       "verification": [
         "tests/integration",
