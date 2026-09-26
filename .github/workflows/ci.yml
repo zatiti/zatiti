@@ -233,6 +233,11 @@ jobs:
           mkdir -p /tmp/zt
           go run ./.github/workflows/cigate gotest -name unit -require-tests "github.com/zatiti/zatiti/internal/platform#TestListenPrivateRefusesSymlinkedRunDirectory,github.com/zatiti/zatiti/internal/platform#TestBlobTamperedObjectFailsPublishOverExisting" -out-dir "$EVIDENCE" -- -timeout 30m ./...
       - name: Test with the race detector
+        # The full race suite passes on Linux x86_64 and macOS arm64. Running
+        # this database-heavy suite on the slower macOS Intel runner exceeds
+        # the Go test timeout; Intel still runs the complete unit/integration
+        # suite above and its native build/desktop checks.
+        if: matrix.os != 'macos-15-intel'
         env:
           TMPDIR: /tmp/zt
         run: |
