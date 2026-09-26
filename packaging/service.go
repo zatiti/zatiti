@@ -198,6 +198,9 @@ func (s ServiceSpec) validate() error {
 		if arg == "" || hasControl(arg) || len(arg) > 4096 {
 			return errf(CodeInvalidInput, "service arguments must be non-empty and free of control characters")
 		}
+		if (arg == "--master-key" || strings.HasPrefix(arg, "--master-key=")) && !fixedMaster {
+			return errf(CodeInvalidInput, "the service master-key selector is not the fixed Mac Keychain selector")
+		}
 		if fixedMaster && (arg == "--master-key-ref" || strings.HasPrefix(arg, "--master-key-ref=")) {
 			return errf(CodeInvalidInput, "the fixed Mac master selector cannot be overridden")
 		}

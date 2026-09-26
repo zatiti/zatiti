@@ -119,12 +119,12 @@ func TestFixedMacMasterSelector(t *testing.T) {
 		t.Fatalf("fixed selector rejected: %v", err)
 	}
 	for _, args := range [][]string{
-		{"serve", "--credential-backend", "keychain", "--master-key", "secret:other"},
-		{"serve", "--credential-backend", "keychain", "--master-key=secret:master"},
-		{"serve", "--master-key", "secret:master"},
-		{"serve", "--credential-backend", "keychain", "--master-key", "secret:master", "--master-key", "secret:master"},
-		{"serve", "--credential-backend", "keychain", "--master-key", "secret:master", "--master-key-ref=secret:other"},
-		{"serve", "--credential-backend", "file", "--master-key", "secret:master"},
+		{"serve", "--socket", "/tmp/zatiti-hosted-test.sock", "--credential-backend", "keychain", "--master-key", "secret:other"},
+		{"serve", "--socket", "/tmp/zatiti-hosted-test.sock", "--credential-backend", "keychain", "--master-key=secret:master"},
+		{"serve", "--socket", "/tmp/zatiti-hosted-test.sock", "--master-key", "secret:master"},
+		{"serve", "--socket", "/tmp/zatiti-hosted-test.sock", "--credential-backend", "keychain", "--master-key", "secret:master", "--master-key", "secret:master"},
+		{"serve", "--socket", "/tmp/zatiti-hosted-test.sock", "--credential-backend", "keychain", "--master-key", "secret:master", "--master-key-ref=secret:other"},
+		{"serve", "--socket", "/tmp/zatiti-hosted-test.sock", "--credential-backend", "file", "--master-key", "secret:master"},
 	} {
 		s.Arguments = args
 		wantCode(t, s.validate(), CodeInvalidInput)
