@@ -163,6 +163,7 @@ func TestPolicyRejectsMutations(t *testing.T) {
 		{"gate bypasses inputs", rel, "    name: specification drift\n    needs: inputs\n", "    name: specification drift\n", false, "release-inputs"},
 		{"release grants write", rel, "  contents: read", "  contents: write", false, "permissions"},
 		{"release skips a missing suite", rel, "      - name: Run integration_test on macOS\n        if: runner.os == 'macOS'\n", "      - name: Run integration_test on macOS\n        if: runner.os == 'macOS' && steps.layout.outputs.integration_test == 'true'\n", false, "step-condition"},
+		{"release skips Intel race coverage", rel, "      - name: Check the generated specification first\n", "      - name: Check the generated specification first\n        if: matrix.os != 'macos-15-intel'\n", false, "step-condition"},
 		{"release tolerates flutter skips", rel, "fluttertest -strict -name flutter-test", "fluttertest -name flutter-test", false, "strict-tests"},
 		{"flutter gate dropped", rel, "      - test\n      - flutter\n      - qualification\n", "      - test\n      - qualification\n", false, "release-gates"},
 		{"candidate matrix gate dropped", rel, "      - candidate_matrix\n      - qualification_matrix\n", "      - qualification_matrix\n", false, "release-gates"},

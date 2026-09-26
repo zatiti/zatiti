@@ -122,6 +122,7 @@ var (
 	ciOnlyStepConditions = map[string]bool{
 		"runner.os == 'Linux' && steps.layout.outputs.integration_test == 'true'": true,
 		"runner.os == 'macOS' && steps.layout.outputs.integration_test == 'true'": true,
+		"matrix.os != 'macos-15-intel'":                                           true,
 	}
 	allowedTopKeys  = set("name", "on", "permissions", "concurrency", "defaults", "env", "jobs")
 	allowedJobKeys  = set("name", "needs", "if", "runs-on", "timeout-minutes", "strategy", "steps", "outputs", "env", "permissions")
