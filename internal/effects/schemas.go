@@ -18,13 +18,15 @@ const wireDefs = `{"$defs":{"Acceptance":{"type":"object","additionalProperties"
 // equal to the frozen catalog entries; internal bodies mirror the exact
 // schemas in the implementation assignment.
 const (
+	schemaCallbackEvidenceIn       = `{"type":"object","additionalProperties":false,"properties":{"operation_id":{"type":"string","format":"uuid"},"attempt_id":{"type":"string","format":"uuid"}},"required":["operation_id","attempt_id"]}`
+	schemaCallbackEvidenceOut      = `{"type":"object","additionalProperties":false,"properties":{"action":{"$ref":"#/$defs/Action"},"observation":{"$ref":"#/$defs/Observation"},"generation":{"type":"integer","minimum":1,"maximum":9223372036854775807}},"required":["action","observation","generation"]}`
 	schemaAdmitIn                  = `{"type":"object","additionalProperties":false,"properties":{"operation_id":{"type":"string","format":"uuid"},"expected_version":{"type":"integer","minimum":1,"maximum":9223372036854775807}},"required":["operation_id","expected_version"]}`
 	schemaAdmitOut                 = `{"type":"object","additionalProperties":false,"properties":{"resource":{"$ref":"#/$defs/Operation"}},"required":["resource"]}`
 	schemaClaimIn                  = `{"type":"object","additionalProperties":false,"properties":{"operation_id":{"type":"string","format":"uuid"},"attempt_id":{"type":"string","format":"uuid"},"generation":{"type":"integer","minimum":1,"maximum":9223372036854775807}},"required":["operation_id","attempt_id","generation"]}`
 	schemaClaimOut                 = `{"type":"object","additionalProperties":false,"properties":{"resource":{"$ref":"#/$defs/Dispatch"}},"required":["resource"]}`
 	schemaPendingIn                = `{"type":"object","additionalProperties":false,"properties":{"limit":{"type":"integer","minimum":1,"maximum":100}},"required":["limit"]}`
 	schemaPendingOut               = `{"type":"object","additionalProperties":false,"properties":{"operations":{"type":"array","items":{"$ref":"#/$defs/Operation"},"maxItems":100}},"required":["operations"]}`
-	schemaPrepareIn = `{"type":"object","additionalProperties":false,"properties":{"scope":{"$ref":"#/$defs/Scope"},"action":{"$ref":"#/$defs/Action"},"source_id":{"type":"string","format":"uuid"},"callback_route":{"$ref":"#/$defs/CallbackRoute"},"qualification_id":{"type":"string","format":"uuid"}},"required":["scope","action","source_id"]}`
+	schemaPrepareIn                = `{"type":"object","additionalProperties":false,"properties":{"scope":{"$ref":"#/$defs/Scope"},"action":{"$ref":"#/$defs/Action"},"source_id":{"type":"string","format":"uuid"},"callback_route":{"$ref":"#/$defs/CallbackRoute"},"qualification_id":{"type":"string","format":"uuid"}},"required":["scope","action","source_id"]}`
 	schemaPrepareOut               = `{"type":"object","additionalProperties":false,"properties":{"resource":{"$ref":"#/$defs/Operation"}},"required":["resource"]}`
 	schemaRecordIn                 = `{"type":"object","additionalProperties":false,"properties":{"operation_id":{"type":"string","format":"uuid"},"attempt_id":{"type":"string","format":"uuid"},"generation":{"type":"integer","minimum":1,"maximum":9223372036854775807},"observation":{"$ref":"#/$defs/Observation"},"current_generation":{"type":"integer","minimum":1,"maximum":9223372036854775807}},"required":["operation_id","attempt_id","generation","observation"]}`
 	schemaRecordOut                = `{"type":"object","additionalProperties":false,"properties":{"resource":{"$ref":"#/$defs/Operation"}},"required":["resource"]}`
@@ -58,6 +60,7 @@ type wireSchema struct {
 // wireSchemas merges every owned operation body with the shared $defs
 // document.
 var wireSchemas = map[string]wireSchema{
+	"_effects.callback.evidence":      {schemaCallbackEvidenceIn, schemaCallbackEvidenceOut},
 	"_effects.admit":                  {schemaAdmitIn, schemaAdmitOut},
 	"_effects.claim":                  {schemaClaimIn, schemaClaimOut},
 	"_effects.pending":                {schemaPendingIn, schemaPendingOut},

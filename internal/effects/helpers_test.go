@@ -68,21 +68,22 @@ type fakePorts struct {
 	calls []contract.Invocation
 	fail  map[string]*contract.Fault
 
-	principalRevoked   bool
-	restrictions       []string
-	configRevision     int64
-	policyDecision     string
-	policyReasons      []string
-	policyRequirements []wireDecisionRequirement
-	reviewEligible     bool
-	reviewDecision     *wireDecision
-	connState          string
-	connValidUntil     *time.Time
-	taskRootID         *contract.ID
-	artifactStates     map[contract.ID]string
-	artifactDigests    map[contract.ID]contract.Digest
-	artifactsOmit      map[contract.ID]bool
-	reservationOp      *contract.ID
+	principalRevoked     bool
+	restrictions         []string
+	configRevision       int64
+	policyDecision       string
+	policyReasons        []string
+	policyRequirements   []wireDecisionRequirement
+	reviewEligible       bool
+	reviewDecision       *wireDecision
+	connState            string
+	connValidUntil       *time.Time
+	connValidationIntent bool
+	taskRootID           *contract.ID
+	artifactStates       map[contract.ID]string
+	artifactDigests      map[contract.ID]contract.Digest
+	artifactsOmit        map[contract.ID]bool
+	reservationOp        *contract.ID
 }
 
 func newFakePorts(ids *seqIDs) *fakePorts {
@@ -108,6 +109,7 @@ func (p *fakePorts) Call(ctx context.Context, unit contract.Unit, inv contract.I
 	requirements := append([]wireDecisionRequirement{}, p.policyRequirements...)
 	eligible, approved := p.reviewEligible, p.reviewDecision
 	connState, connValidUntil := p.connState, p.connValidUntil
+	connValidationIntent := p.connValidationIntent
 	taskRoot := p.taskRootID
 	artifactStates := make(map[contract.ID]string, len(p.artifactStates))
 	for id, st := range p.artifactStates {
@@ -203,6 +205,7 @@ func (p *fakePorts) Call(ctx context.Context, unit contract.Unit, inv contract.I
 			return contract.Payload{}, err
 		}
 		body = resolveBody{
+			ValidationIntent: connValidationIntent,
 			Connection: wireConnection{
 				ID: in.Connection.ID, Version: in.Connection.Version,
 				CredentialRef: "conn-ref-test", ValidationState: connState,

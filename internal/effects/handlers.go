@@ -769,7 +769,7 @@ func (s *Service) handleAdmit(ctx context.Context, unit contract.Unit, in admitI
 	if err != nil {
 		return contract.Outcome[operationResourceBody]{}, err
 	}
-	tool, conn, err := s.resolveDispatch(ctx, unit, action.Scope, action)
+	tool, conn, err := s.resolveDispatch(ctx, unit, o.ID, actionRow, action)
 	if err != nil {
 		return contract.Outcome[operationResourceBody]{}, err
 	}
@@ -808,9 +808,11 @@ func (s *Service) handleAdmit(ctx context.Context, unit contract.Unit, in admitI
 
 // resolveDispatch resolves the validated connection and tool contract for one
 // action, refusing unvalidated or expired connections.
-func (s *Service) resolveDispatch(ctx context.Context, unit contract.Unit, scope wireScope, action wireAction) (wireTool, wireConnection, error) {
+func (s *Service) resolveDispatch(ctx context.Context, unit contract.Unit, operationID contract.ID, storedAction *actionRow, action wireAction) (wireTool, wireConnection, error) {
 	out, err := s.connectionsResolve(ctx, unit, connectionsResolveInput{
-		Scope:       scope,
+		OperationID: operationID,
+		Action:      json.RawMessage(storedAction.ActionJSON),
+		Scope:       action.Scope,
 		Connection:  action.Connection,
 		Tool:        action.Tool,
 		Destination: action.Destination,
@@ -818,12 +820,12 @@ func (s *Service) resolveDispatch(ctx context.Context, unit contract.Unit, scope
 	if err != nil {
 		return wireTool{}, wireConnection{}, err
 	}
-	if out.Connection.ValidationState != connStateValid {
+	if out.Connection.ValidationState != connStateValid && !out.ValidationIntent {
 		return wireTool{}, wireConnection{}, prerequisiteMissing(
 			"connection %s is %s, not validated for dispatch",
 			out.Connection.ID, out.Connection.ValidationState)
 	}
-	if out.Connection.ValidUntil != nil && s.now().After(*out.Connection.ValidUntil) {
+	if !out.ValidationIntent && out.Connection.ValidUntil != nil && s.now().After(*out.Connection.ValidUntil) {
 		return wireTool{}, wireConnection{}, prerequisiteMissing(
 			"connection %s validation expired at %s", out.Connection.ID, formatStamp(*out.Connection.ValidUntil))
 	}
@@ -952,14 +954,14 @@ func (s *Service) handleClaim(ctx context.Context, unit contract.Unit, in claimI
 	// Resolve the exact connection again immediately before consuming the
 	// one-use claim. This is the final current-authority/version fence before
 	// the controller can send bytes to a provider.
-	_, action, err := loadStoredAction(ctx, unit, o)
+	storedAction, action, err := loadStoredAction(ctx, unit, o)
 	if err != nil {
 		return contract.Outcome[dispatchResourceBody]{}, err
 	}
 	if action.ExpiresAt.Before(now) {
 		return contract.Outcome[dispatchResourceBody]{}, conflict("action of operation %s expired before dispatch", o.ID)
 	}
-	_, currentConnection, err := s.resolveDispatch(ctx, unit, action.Scope, action)
+	_, currentConnection, err := s.resolveDispatch(ctx, unit, o.ID, storedAction, action)
 	if err != nil {
 		return contract.Outcome[dispatchResourceBody]{}, err
 	}
