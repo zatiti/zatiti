@@ -586,15 +586,6 @@ func findSelectedBinding(bindings []wireBinding, selected []contract.ID, targetI
 	return nil
 }
 
-func findBinding(bindings []wireBinding, targetID contract.ID, kind string) *wireBinding {
-	for i := range bindings {
-		if bindings[i].Kind == kind && bindings[i].TargetID == targetID {
-			return &bindings[i]
-		}
-	}
-	return nil
-}
-
 // localDecisionTools are the sealed, always-available non-provider decision
 // tools (contract.LocalDecisionTool*), never routed through a
 // connections.Tool/adapter and never given a provider operation mapping.
