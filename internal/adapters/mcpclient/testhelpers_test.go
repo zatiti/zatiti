@@ -58,6 +58,15 @@ func (s *fakeSecrets) Put(_ context.Context, ref string, secret []byte) (string,
 	return ref, nil
 }
 
+func (s *fakeSecrets) Lookup(_ context.Context, key string) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.values[key]; !ok {
+		return "", &contract.Fault{Code: contract.CodeNotFound, Message: "credential not found"}
+	}
+	return key, nil
+}
+
 func (s *fakeSecrets) Get(_ context.Context, ref string) ([]byte, error) {
 	if s.getErr != nil {
 		return nil, s.getErr
