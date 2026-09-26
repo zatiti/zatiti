@@ -1,7 +1,8 @@
 # Zatiti desktop client
 
-The chat-first desktop client for a Zatiti controller, built with Flutter for
-macOS, Linux and Windows. It implements
+The chat-first client for a Zatiti controller, built with Flutter. The current
+desktop app targets macOS, Linux and Windows; iOS, Android and web are planned
+near-term targets after the Mac install-to-first-chat path. It implements
 [ADR 002](../../docs/adr/002-flutter-desktop-client.md) and the design of record
 in [`internal/desktop/design/`](../../internal/desktop/design/README.md).
 
@@ -13,6 +14,30 @@ There is no Go code, no sidecar and no WebView.
 
 This increment is unqualified. Nothing here is release evidence for
 accessibility, platform packaging or controller behavior.
+
+## Hosted Serenity setup direction
+
+The first Mac release is planned to connect the personal chief to the user's
+existing hosted Serenity brain. Setup will hand off to the system browser for
+Serenity OAuth and project consent; a signed native helper will own the
+callback and token custody. The app will display the verified brain and
+connection status, then keep chat unavailable until provider, memory, and
+controller prerequisites are satisfied. This flow is not implemented in the
+current desktop increment. The Mac hosted mode does not bundle or launch a
+local Serenity process. See the [frozen implementation contract](../../docs/implementation/contracts.md)
+for the full release gates.
+
+## Preview the interface
+
+With Flutter and macOS desktop support installed, run the synthetic demo:
+
+```sh
+git clone https://github.com/zatiti/zatiti.git && cd zatiti/apps/desktop && flutter pub get && flutter run -d macos --dart-define=ZATITI_DEMO=true
+```
+
+The demo is an interface preview with fictional records. It does not connect
+to a live controller, hosted Serenity, or a model provider. The signed Mac
+install-to-first-chat command will be published after release qualification.
 
 ## Run it
 

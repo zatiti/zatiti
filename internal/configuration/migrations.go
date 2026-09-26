@@ -225,6 +225,25 @@ INSERT INTO configuration_execution_profile_versions
  FROM configuration_execution_profiles;
 `
 
+const migrationV4 = `
+CREATE TABLE configuration_profile_qualifications (
+	qualification_id TEXT PRIMARY KEY,
+	installation_id TEXT NOT NULL,
+	scope_json TEXT NOT NULL,
+	candidate_json TEXT NOT NULL,
+	profile_digest TEXT NOT NULL,
+	state TEXT NOT NULL CHECK (state IN ('pending', 'succeeded', 'failed', 'outcome_unknown')),
+	effect_operation_id TEXT NOT NULL DEFAULT '',
+	job_id TEXT NOT NULL DEFAULT '',
+	job_version INTEGER NOT NULL DEFAULT 0,
+	result_json TEXT,
+	created_at TEXT NOT NULL,
+	updated_at TEXT NOT NULL
+);
+CREATE UNIQUE INDEX configuration_profile_qualifications_job_idx
+	ON configuration_profile_qualifications (job_id) WHERE job_id <> '';
+`
+
 // Migrations returns the owned migration set. Bodies are pinned by digest so
 // storage refuses any later byte change.
 func configurationMigrations() []contract.Migration {
@@ -243,6 +262,11 @@ func configurationMigrations() []contract.Migration {
 		Version: 3,
 		SQL:     migrationV3,
 		SHA256:  contract.Digest(hashHex(migrationV3)),
+	}, {
+		Owner:   "configuration",
+		Version: 4,
+		SQL:     migrationV4,
+		SHA256:  contract.Digest(hashHex(migrationV4)),
 	}}
 }
 

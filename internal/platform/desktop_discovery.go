@@ -206,7 +206,9 @@ func validDesktopUUID(id contract.ID) bool {
 			}
 			continue
 		}
-		if !((s[i] >= '0' && s[i] <= '9') || (s[i] >= 'a' && s[i] <= 'f')) {
+		switch c := s[i]; {
+		case '0' <= c && c <= '9', 'a' <= c && c <= 'f':
+		default:
 			return false
 		}
 	}

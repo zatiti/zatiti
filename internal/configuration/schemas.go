@@ -25,7 +25,7 @@ const (
 	schemaArchiveIn = `{"type":"object","additionalProperties":false,"properties":{"scope":{"$ref":"#/$defs/Scope"},"id":{"type":"string","format":"uuid"},"expected_version":{"type":"integer","minimum":1,"maximum":9223372036854775807},"draft_id":{"type":"string","format":"uuid"}},"required":["scope","id","expected_version"]}`
 
 	schemaBindingDef   = `{"type":"object","additionalProperties":false,"properties":{"scope":{"$ref":"#/$defs/Scope"},"kind":{"type":"string","enum":["tool","skill","connection","worker","repository","reporting","memory"]},"target_id":{"type":"string","format":"uuid"},"permissions":{"type":"array","items":{"type":"string","maxLength":8192},"maxItems":4096},"source_scope":{"$ref":"#/$defs/Scope"},"destinations":{"type":"array","items":{"type":"string","maxLength":8192},"maxItems":4096}},"required":["scope","kind","target_id","permissions"]}`
-	schemaProfileDef   = `{"type":"object","additionalProperties":false,"properties":{"executor":{"type":"string","enum":["hosted","cooperative"]},"model":{"type":"string","maxLength":8192},"connection_id":{"type":"string","format":"uuid"},"provider_destination":{"type":"string","maxLength":8192},"capabilities":{"type":"array","items":{"type":"string","maxLength":8192},"maxItems":4096},"cost_bound":{"$ref":"#/$defs/Money"},"classification":{"type":"string","enum":["internal","public","restricted"]},"context_capture":{"type":"string","enum":["complete","partial","advisory"]},"adapter_profile":{"type":"object"},"connection_version":{"type":"integer","minimum":1,"maximum":9223372036854775807}},"required":["executor","model","connection_id","provider_destination","capabilities","cost_bound","classification","context_capture","adapter_profile","connection_version"]}`
+	schemaProfileDef   = `{"type":"object","additionalProperties":false,"properties":{"executor":{"type":"string","enum":["hosted","cooperative"]},"model":{"type":"string","maxLength":8192},"connection_id":{"type":"string","format":"uuid"},"provider_destination":{"type":"string","maxLength":8192},"capabilities":{"type":"array","items":{"type":"string","maxLength":8192},"maxItems":4096},"cost_bound":{"$ref":"#/$defs/Money"},"classification":{"type":"string","enum":["internal","public","restricted"]},"context_capture":{"type":"string","enum":["complete","partial","advisory"]},"adapter_profile":{"$ref":"#/$defs/ResponsesProfile"},"connection_version":{"type":"integer","minimum":1,"maximum":9223372036854775807}},"required":["executor","model","connection_id","provider_destination","capabilities","cost_bound","classification","context_capture"]}`
 	schemaOrgDefCreate = `{"type":"object","additionalProperties":false,"properties":{"key":{"type":"string","maxLength":8192},"name":{"type":"string","maxLength":8192},"parent_id":{"type":"string","format":"uuid"},"limits":{"$ref":"#/$defs/Limits"},"extensions":{"type":"object","description":"Inert JSON data bounded by the enclosing size limit; never executable authority."}},"required":["key","name"]}`
 	schemaOrgDefUpdate = `{"type":"object","additionalProperties":false,"properties":{"key":{"type":"string","maxLength":8192},"name":{"type":"string","maxLength":8192},"chief_id":{"type":"string","format":"uuid"},"parent_id":{"type":"string","format":"uuid"},"limits":{"$ref":"#/$defs/Limits"},"extensions":{"type":"object","description":"Inert JSON data bounded by the enclosing size limit; never executable authority."}},"required":["key","name","chief_id"]}`
 	schemaChiefDef     = `{"type":"object","additionalProperties":false,"properties":{"key":{"type":"string","maxLength":8192},"name":{"type":"string","maxLength":8192},"purpose":{"type":"string","maxLength":8192},"instructions":{"type":"string","maxLength":8192},"skill_versions":{"type":"array","items":{"$ref":"#/$defs/Ref"},"maxItems":4096},"bindings":{"type":"array","items":{"type":"string","format":"uuid"},"maxItems":4096},"profile":{"anyOf":[{"$ref":"#/$defs/ExecutionProfile"},{"type":"null"}]},"limits":{"anyOf":[{"$ref":"#/$defs/Limits"},{"type":"null"}]},"extensions":{"type":"object","description":"Inert JSON data bounded by the enclosing size limit; never executable authority."}},"required":["key","name","purpose","instructions","skill_versions","bindings","profile","limits"]}`
@@ -94,15 +94,18 @@ type opSchemas struct {
 // assignment embeds it. Internal operations precede public ones.
 var operationSchemaBodies = map[string]opSchemas{
 	// Internal operations.
-	"_accounting.validate":                     {schemaCandidateIn, schemaValidateOut},
-	"_configuration.activate":                  {schemaCandidateIn, schemaActivateOut},
-	"_configuration.bootstrap":                 {schemaBootstrapIn, schemaBootstrapOut},
-	"_configuration.export.prepare":            {schemaExportPrepareIn, schemaGetOut("Job")},
-	"_configuration.execution_profile.resolve": {`{"type":"object","additionalProperties":false,"properties":{"scope":{"$ref":"#/$defs/Scope"},"profile":{"$ref":"#/$defs/Ref"}},"required":["scope","profile"]}`, `{"type":"object","additionalProperties":false,"properties":{"resource":{"$ref":"#/$defs/ExecutionProfile"}},"required":["resource"]}`},
-	"_configuration.export.record":             {schemaExportRecordIn, schemaGetOut("Job")},
-	"_configuration.snapshot":                  {schemaSnapshotIn, schemaSnapshotOut},
-	"_configuration.stage":                     {schemaStageIn, schemaGetOut("Draft")},
-	"_configuration.validate":                  {schemaCandidateIn, schemaValidateOut},
+	"_accounting.validate":                                   {schemaCandidateIn, schemaValidateOut},
+	"_configuration.activate":                                {schemaCandidateIn, schemaActivateOut},
+	"_configuration.bootstrap":                               {schemaBootstrapIn, schemaBootstrapOut},
+	"_configuration.export.prepare":                          {schemaExportPrepareIn, schemaGetOut("Job")},
+	"_configuration.execution_profile.resolve":               {`{"type":"object","additionalProperties":false,"properties":{"scope":{"$ref":"#/$defs/Scope"},"profile":{"$ref":"#/$defs/Ref"}},"required":["scope","profile"]}`, `{"type":"object","additionalProperties":false,"properties":{"resource":{"$ref":"#/$defs/ExecutionProfile"}},"required":["resource"]}`},
+	"_configuration.execution_profile.qualification.resolve": {`{"type":"object","additionalProperties":false,"properties":{"qualification_id":{"type":"string","format":"uuid"}},"required":["qualification_id"]}`, `{"type":"object","additionalProperties":false,"properties":{"candidate":{"$ref":"#/$defs/ExecutionProfileCandidate"},"profile_digest":{"type":"string","pattern":"^[0-9a-f]{64}$"}},"required":["candidate","profile_digest"]}`},
+	"_configuration.execution_profile.qualify.record":        {`{"type":"object","additionalProperties":false,"properties":{"job_id":{"type":"string","format":"uuid"},"expected_version":{"type":"integer","minimum":1,"maximum":9223372036854775807},"generation":{"type":"integer","minimum":1,"maximum":9223372036854775807},"operation_id":{"type":"string","format":"uuid"},"profile_digest":{"type":"string","pattern":"^[0-9a-f]{64}$"},"artifact":{"$ref":"#/$defs/ArtifactRef"},"qualified_at":{"type":"string","format":"date-time"},"adapter_version":{"type":"string","maxLength":8192},"source_revision":{"type":"string","maxLength":8192},"protocol_revision":{"type":"string","maxLength":8192},"capabilities":{"type":"array","items":{"type":"string","maxLength":8192},"maxItems":128},"limitations":{"type":"array","items":{"type":"string","maxLength":8192},"maxItems":128}},"required":["job_id","expected_version","generation","operation_id","profile_digest","artifact","qualified_at","adapter_version","source_revision","protocol_revision","capabilities","limitations"]}`, `{"type":"object","additionalProperties":false,"properties":{"resource":{"$ref":"#/$defs/QualifiedExecutionProfile"}},"required":["resource"]}`},
+	"_configuration.execution_profile.qualify.finish":        {`{"type":"object","additionalProperties":false,"properties":{"job_id":{"type":"string","format":"uuid"},"expected_version":{"type":"integer","minimum":1,"maximum":9223372036854775807},"generation":{"type":"integer","minimum":1,"maximum":9223372036854775807},"operation_id":{"type":"string","format":"uuid"},"profile_digest":{"type":"string","pattern":"^[0-9a-f]{64}$"},"state":{"type":"string","enum":["failed","outcome_unknown"]}},"required":["job_id","expected_version","generation","operation_id","profile_digest","state"]}`, `{"type":"object","additionalProperties":false,"properties":{},"required":[]}`},
+	"_configuration.export.record":                           {schemaExportRecordIn, schemaGetOut("Job")},
+	"_configuration.snapshot":                                {schemaSnapshotIn, schemaSnapshotOut},
+	"_configuration.stage":                                   {schemaStageIn, schemaGetOut("Draft")},
+	"_configuration.validate":                                {schemaCandidateIn, schemaValidateOut},
 
 	"binding.archive": {schemaArchiveIn, schemaCreateOut("Binding")},
 	"binding.create":  {schemaCreateIn(schemaBindingDef), schemaCreateOut("Binding")},
@@ -125,6 +128,7 @@ var operationSchemaBodies = map[string]opSchemas{
 
 	"execution_profile.archive": {schemaArchiveIn, schemaCreateOut("ExecutionProfile")},
 	"execution_profile.create":  {schemaCreateIn(schemaProfileDef), schemaCreateOut("ExecutionProfile")},
+	"execution_profile.qualify": {`{"type":"object","additionalProperties":false,"properties":{"scope":{"$ref":"#/$defs/Scope"},"definition":{"$ref":"#/$defs/ExecutionProfileCandidate"},"qualification_cost_bound":{"$ref":"#/$defs/Money"}},"required":["scope","definition","qualification_cost_bound"]}`, schemaJobOut},
 	"execution_profile.get":     {schemaGetIn, schemaGetOut("ExecutionProfile")},
 	"execution_profile.list":    {schemaListIn, schemaListOut("ExecutionProfile")},
 	"execution_profile.update":  {`{"type":"object","additionalProperties":false,"properties":{"scope":{"$ref":"#/$defs/Scope"},"id":{"type":"string","format":"uuid"},"expected_version":{"type":"integer","minimum":1,"maximum":9223372036854775807},"definition":` + schemaProfileDef + `,"draft_id":{"type":"string","format":"uuid"}},"required":["scope","id","expected_version","definition"]}`, schemaCreateOut("ExecutionProfile")},
@@ -166,6 +170,7 @@ var operationSchemaBodies = map[string]opSchemas{
 // completionExportResult is the eventual job result schema declared by every
 // export operation (asynchronous job result artifact).
 const completionExportResult = `{"type":"object","additionalProperties":false,"properties":{"resource":{"$ref":"#/$defs/Artifact"}},"required":["resource"]}`
+const completionQualifiedExecutionProfile = `{"type":"object","additionalProperties":false,"properties":{"resource":{"$ref":"#/$defs/QualifiedExecutionProfile"}},"required":["resource"]}`
 
 // composedSchemas lazily composes every operation schema document with the
 // shared $defs catalog. Composition happens once; documents are immutable.
@@ -189,7 +194,6 @@ func composeSchemas() {
 		if !ok {
 			panic("configuration: embedded $defs catalog has no $defs object")
 		}
-		defs = configurationProfileSchemaDefs(defs)
 		composedIn = make(map[string]json.RawMessage, len(operationSchemaBodies))
 		composedOut = make(map[string]json.RawMessage, len(operationSchemaBodies))
 		for id, bodies := range operationSchemaBodies {
@@ -198,7 +202,11 @@ func composeSchemas() {
 		}
 		composedCompletion = make(map[string]json.RawMessage, len(completionOps))
 		for _, id := range completionOps {
-			composedCompletion[id] = withDefs(completionExportResult, defs)
+			body := completionExportResult
+			if id == "execution_profile.qualify" {
+				body = completionQualifiedExecutionProfile
+			}
+			composedCompletion[id] = withDefs(body, defs)
 		}
 	})
 }
@@ -209,6 +217,7 @@ var completionOps = []string{
 	"organization.export",
 	"project.export",
 	"team.export",
+	"execution_profile.qualify",
 }
 
 // withDefs returns body with the $defs catalog injected at the document
@@ -248,39 +257,4 @@ func outputSchema(op string) json.RawMessage {
 func completionSchema(op string) json.RawMessage {
 	composeSchemas()
 	return composedCompletion[op]
-}
-
-// configurationProfileSchemaDefs overlays the revision-12 profile fields on
-// the package's older generated operation definition. The raw adapter profile
-// is validated semantically before staging and when resolving immutable rows.
-func configurationProfileSchemaDefs(raw json.RawMessage) json.RawMessage {
-	var defs map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &defs); err != nil {
-		panic("configuration: invalid $defs object: " + err.Error())
-	}
-	var profile map[string]json.RawMessage
-	if err := json.Unmarshal(defs["ExecutionProfile"], &profile); err != nil {
-		panic("configuration: invalid ExecutionProfile schema: " + err.Error())
-	}
-	var props map[string]json.RawMessage
-	if err := json.Unmarshal(profile["properties"], &props); err != nil {
-		panic("configuration: invalid ExecutionProfile properties: " + err.Error())
-	}
-	props["adapter_profile"] = json.RawMessage(`{"type":"object"}`)
-	props["connection_version"] = json.RawMessage(`{"type":"integer","minimum":1,"maximum":9223372036854775807}`)
-	pb, err := json.Marshal(props)
-	if err != nil {
-		panic(err)
-	}
-	profile["properties"] = pb
-	profileBytes, err := json.Marshal(profile)
-	if err != nil {
-		panic(err)
-	}
-	defs["ExecutionProfile"] = profileBytes
-	b, err := json.Marshal(defs)
-	if err != nil {
-		panic(err)
-	}
-	return b
 }

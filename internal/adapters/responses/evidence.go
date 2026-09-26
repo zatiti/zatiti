@@ -306,7 +306,7 @@ func buildModelStepEvidence(sessionHandle string, physical wirePhysicalCallEvide
 	return builtEvidence{doc: doc, usage: usageDoc}, nil
 }
 
-func buildModelStepEvidenceV2(sessionMode, sessionID, sessionHandle string, physical wirePhysicalCallEvidence, output wireModelOutput, staged []wireStagedOutput) (builtEvidence, error) {
+func buildModelStepEvidenceV2(sessionMode, sessionID, sessionHandle, kind string, physical wirePhysicalCallEvidence, output wireModelOutput, staged []wireStagedOutput, qualification *wireQualificationMetadataV2) (builtEvidence, error) {
 	usageDoc, err := json.Marshal(output.Usage.Accounting)
 	if err != nil {
 		return builtEvidence{}, internalError("encoding responses usage failed: %v", err)
@@ -320,7 +320,7 @@ func buildModelStepEvidenceV2(sessionMode, sessionID, sessionHandle string, phys
 	if staged == nil {
 		staged = []wireStagedOutput{}
 	}
-	ev := wireResponsesEvidenceV2{Schema: "zatiti.responses.evidence/v2", PhysicalCall: physical, SessionHandle: sessionHandle, ResponseID: output.ResponseID, Output: &output, StagedOutputs: staged, OutputArtifacts: []wireArtifactRef{}, SessionMode: sessionMode, SessionID: sessionID}
+	ev := wireResponsesEvidenceV2{Schema: "zatiti.responses.evidence/v2", Kind: kind, Qualification: qualification, PhysicalCall: physical, SessionHandle: sessionHandle, ResponseID: output.ResponseID, Output: &output, StagedOutputs: staged, OutputArtifacts: []wireArtifactRef{}, SessionMode: sessionMode, SessionID: sessionID}
 	doc, err := json.Marshal(ev)
 	if err != nil {
 		return builtEvidence{}, internalError("encoding responses v2 evidence failed: %v", err)

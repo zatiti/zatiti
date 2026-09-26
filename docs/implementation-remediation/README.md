@@ -1,34 +1,28 @@
 # Zatiti implementation completion plan
 
-**The control plane exists; autonomous useful work does not.** The audit found 27 confirmed gaps or explicitly labeled integration risks. The central missing piece is a durable worker loop that consumes intent, builds context, interprets model proposals, executes authorized actions and submits outputs for independent verification. Wiring the model adapter alone will not fix it.
+**The P00–P50 implementation dispatch has landed in `main`; the product is not launch-ready.** The 2026-09-19 audit below is historical. The current ledger records 46 implemented cards, three blocked on hosted Serenity capabilities, and two whose release tooling exists but still needs real qualification. No card is considered release evidence merely because its code or tests landed.
 
-Baseline: `34d291f4c44b1a2a4950e8155498daad2a56c251`, audited 2026-09-19. This directory is a plan, not implemented behavior or release evidence. It supplements the existing frozen specification and supersedes package-count completion as a product-readiness measure. Historical roadmap/sitreps remain intact.
+The remaining ordered gates are in [launch readiness](../launch-readiness.md). In particular, the current execution context fails closed when configured memory recall has not completed; Serenity OAuth and hosted recall are not qualified; and signed/notarized Mac Intel and Apple Silicon installs have not been proven on clean hosts. The historical roadmap and work logs remain intact as historical records.
 
-## Read and dispatch
+## Historical audit and dispatch record
 
-1. Read [audit.md](audit.md) for source-backed findings and what is already implemented.
-2. Land P00–P02 serially: [contract proposals](contract-proposals.md) → exact authored revision/generated prompts → shared code/dependency baseline. No dependent model should invent shared interfaces.
-3. Dispatch the individual [assignment cards](assignments/) below in isolated worktrees. Each card names allowed writes, predecessors, ordered implementation steps, required tests and its handoff. Use current root/package AGENTS.md together with the card.
-4. One writer per root; same-root cards are explicitly dependency-ordered. One integration owner lands changes. Never run root/spec regeneration concurrently with child-package writes. Ready disjoint cards may code concurrently; builds still obey the machine lease.
-5. Integration reviews actual caller behavior and runs real-owner tests before advancing a dependency. Model assertions, compilation, mocks implementing missing behavior, and skipped suites cannot close a card.
+The following materials describe the original remediation plan and are retained to explain its scope. They are no longer a dispatch queue. Any new implementation work must be added to a new dated plan after the open gates are resolved.
 
-[plan.json](plan.json) is the machine-readable task/dependency/ownership source. [findings.json](findings.json) provides evidence pointers. [inventory.json](inventory.json) covers every one of the 36 roots and 264 baseline operations. [coverage.json](coverage.json) assigns all 127 requirements and retains the expected observations for all 116 original acceptance cases. [new-acceptance.json](new-acceptance.json) adds 15 explicit missing-runtime regressions for P00 to incorporate. [baseline.json](baseline.json) records this audit’s actual local checks.
+[plan.json](plan.json) is the current card disposition ledger; [findings.json](findings.json) provides historical evidence pointers. [inventory.json](inventory.json) covers the original 36 roots and 264 baseline operations. [coverage.json](coverage.json) assigns the original requirements and acceptance cases. [baseline.json](baseline.json) records checks from the audit date.
 
-## Delivery milestones
+## Original delivery milestones
 
-- **M0 — contracts are dispatchable:** P00–P02 landed; no unresolved schema/caller/migration choice in a downstream card.
-- **M1 — a chief can do useful work:** P03–P18, P22–P25 and required transport/catalog support are integrated. A message creates a durable turn/task, an allowed tool runs, newly generated output is independently verified, and one reply survives restart. Use the controlled external provider first; a real model requires configured qualified profile/credentials.
-- **M2 — work is governable and ongoing:** skill evaluation, cooperative execution, reviews, repeated responsibility cycles, root budgets and unknown-effect reconciliation work across CLI/MCP and disconnects.
-- **M3 — the specified daily product works:** controlled repository verification, real qualified memory, complete backup/restore and populated desktop journeys. Memory upstream limitations remain an explicit dependency, never a fake success or silently dropped release requirement.
-- **M4 — a release is supportable:** installable artifacts, real platform/client/provider tests and all required evidence gates. Build/merge authorization is not publication authorization.
+- **M0–M2:** implementation cards landed; current source includes controller, execution, transport and recovery paths.
+- **M3:** partial. Backup/restore code and qualifications exist, but hosted memory recall does not reach model context and the Serenity service path is not qualified.
+- **M4:** partial. Packaging and release evidence gates exist; no signed clean-host Mac install-to-first-chat evidence is recorded.
 
-The work graph is intentionally conservative: a card closes only with its complete prerequisites. The integration owner should build the P46 vertical fixture early after M0 and run the M1 subset after core runtime landing; full P46 sign-off waits for its declared restore/memory/engineering dependencies. This early test work does not permit overlapping writers in tests/integration or weakening the completion gate.
+The P00–P50 cards below preserve the original dependency graph and acceptance intent. Their first-line status is synchronized with plan.json; they are retained for traceability, not dispatch.
 
 ## Ownership and execution rules
 
 The execution root is the unavoidable serialized critical path (P14 → P15 → P16 → P18 → P20 → P21). The controller and desktop roots have their own serialized chains. Do not dispatch those cards simultaneously merely because the desired end product is parallel. Parallelism comes from independent identity/configuration/connections/policy/accounting/artifacts/tasks/messaging/effects/adapters/storage/platform/transport roots. A later contract-approved split could change ownership, but this plan does not invent one.
 
-Use one isolated worktree per active root and a single landing owner. Assign small commits within each card in its listed order; a partial commit does not satisfy its dependency. At a handoff include exact source revision, migrations, schema fixture compatibility, named tests/results and remaining environmental blockers. Shared contract corrections go back through P00 and the renderer, never local generated edits.
+The original work used isolated worktrees and a single landing owner. Any future contract revision must use the current spec generator and coordinated ownership map; do not treat these closed cards as authorization to reopen work.
 
 Before any heavy multi-package build/test, check uptime and hold if the one-minute load exceeds 10. Acquire R-build-lease using the canonical claim primitive required by root AGENTS.md, retain the winning SHA, and release immediately after the command; do not infer a won lease from exit code alone. At most two heavy lanes per project, with only one actual shared heavy-build holder. Observe any applicable stricter installed hook/runner rules.
 

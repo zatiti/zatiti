@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"runtime/debug"
 	"slices"
 	"strings"
 	"time"
@@ -200,6 +201,18 @@ func (a *Adapter) admitStep(ctx context.Context, dispatch contract.Dispatch, rec
 	} else if act.Schema != "zatiti.responses.action/v1" {
 		return nil, invalidInput("a v1 Responses profile requires a v1 action")
 	}
+	if a.profile.QualificationOnly {
+		if act.Kind != kindQualificationProbe || act.Model != a.profile.Model ||
+			act.ProbeText != "Reply with exactly: ZATITI_MODEL_QUALIFIED" ||
+			!validProfileDigest(act.ProfileDigest) ||
+			act.QualificationCostBound.Currency != a.profile.Currency || act.QualificationCostBound.MicroUnits < 1 ||
+			act.SessionMode != a.profile.SessionMode || act.MaxOutputTokens < 1 ||
+			act.MaxOutputTokens > 64 || act.MaxOutputTokens > a.profile.MaxOutputTokens {
+			return nil, invalidInput("an evidence-free profile draft may perform only its exact bounded qualification probe")
+		}
+	} else if act.Kind == kindQualificationProbe {
+		return nil, permissionDenied("a qualification probe cannot use an already-qualified model profile")
+	}
 
 	if act.Kind == kindPrepareSession {
 		// The wire boundary: everything above is defined by the frozen
@@ -227,6 +240,49 @@ func (a *Adapter) admitStep(ctx context.Context, dispatch contract.Dispatch, rec
 		// PROTOCOL.md's accounting section): there is no worst-case
 		// charge to admit or refuse.
 		s.bounds = admittedBounds{}
+		if s.secret, err = a.resolveCredential(ctx, dispatch.CredentialRef); err != nil {
+			return nil, err
+		}
+		return s, nil
+	}
+	if act.Kind == kindQualificationProbe {
+		if a.protocol == nil {
+			return nil, capabilityUnsupported("the qualification probe has no pinned provider wire protocol; no call was made")
+		}
+		// The probe has no user conversation or previous state. Its one fixed
+		// user message is embedded in the immutable action and the adapter
+		// stages the exact translated request before sending it.
+		text := &wireContextText{Kind: partText, Text: act.ProbeText}
+		doc := &contextDocument{
+			Classification: "internal",
+			Messages: []contextMessage{{
+				wireContextMessage: wireContextMessage{Role: "user"},
+				DecodedParts:       []contextPart{{Kind: partText, Text: text}},
+			}},
+		}
+		s.doc = doc
+		s.classification = "internal"
+		s.request = protocolRequest{
+			Profile: a.profile.protocolProfile(), OperationID: string(dispatch.OperationID),
+			AttemptID: string(dispatch.AttemptID), MaxOutputTokens: act.MaxOutputTokens, Context: doc,
+		}
+		// Until qualification has measured the selected provider/model, reserve
+		// the complete configured input ceiling. This keeps the one probe under
+		// the candidate's declared worst-case cost rather than assuming a
+		// tokenizer bound that this very probe is intended to establish.
+		bound := a.profile.MaxInputTokens
+		s.bound = &bound
+		limits := a.protocol.limits()
+		if act.MaxOutputTokens < limits.MinOutputTokens {
+			return nil, capabilityUnsupported("qualification probe output ceiling %d is below the provider protocol minimum %d", act.MaxOutputTokens, limits.MinOutputTokens)
+		}
+		s.bounds, err = a.profile.admit(act.MaxOutputTokens, limits, s.bound)
+		if err != nil {
+			return nil, err
+		}
+		if s.bounds.WorstCase > act.QualificationCostBound.MicroUnits {
+			return nil, budgetUnavailable("qualification probe worst-case charge %d %s exceeds its explicitly approved ceiling %d %s", s.bounds.WorstCase, a.profile.Currency, act.QualificationCostBound.MicroUnits, act.QualificationCostBound.Currency)
+		}
 		if s.secret, err = a.resolveCredential(ctx, dispatch.CredentialRef); err != nil {
 			return nil, err
 		}
@@ -391,11 +447,33 @@ func (a *Adapter) invokeModelStep(ctx, callCtx context.Context, dispatch contrac
 		}
 	} else {
 		result, decodeErr := a.protocol.decode(po.status, po.header, po.body)
+		probeMatches := true
+		if s.act.Kind == kindQualificationProbe {
+			probeMatches = decodeErr == nil && result.State == "completed" && result.Refusal == "" &&
+				len(result.Texts) == 1 && result.Texts[0] == qualificationExpectedOutput && len(result.ToolCalls) == 0
+		}
 		staged = in.interpret(ctx, a, po.status, result, decodeErr, &physical, &output, staged)
+		if s.act.Kind == kindQualificationProbe && !probeMatches && in.disposition == contract.DispositionSucceeded {
+			// A valid provider HTTP response is not proof that this model obeyed
+			// the qualification contract. Preserve the physical evidence but do
+			// not let configuration turn it into a qualified profile.
+			in.disposition = contract.DispositionFailed
+		}
 	}
 	var built builtEvidence
 	if a.profile.Version == "zatiti.responses/v2" {
-		built, err = buildModelStepEvidenceV2(a.profile.SessionMode, s.act.SessionID, s.act.SessionHandle, physical, output, staged)
+		kind := ""
+		var qualification *wireQualificationMetadataV2
+		if s.act.Kind == kindQualificationProbe {
+			kind = kindQualificationProbe
+			qualification = &wireQualificationMetadataV2{
+				AdapterVersion: "responses-adapter/v2", SourceRevision: responsesSourceRevision(),
+				ProtocolRevision: a.profile.CapabilityEvidence.ProtocolRevision,
+				Capabilities:     []string{"responses.text_generation", "responses.single_request"},
+				Limitations:      []string{"Only the fixed qualification prompt was exercised; provider context-window and other model capabilities remain unqualified."},
+			}
+		}
+		built, err = buildModelStepEvidenceV2(a.profile.SessionMode, s.act.SessionID, s.act.SessionHandle, kind, physical, output, staged, qualification)
 	} else {
 		built, err = buildModelStepEvidence(s.act.SessionHandle, physical, output, staged)
 	}
@@ -407,6 +485,17 @@ func (a *Adapter) invokeModelStep(ctx, callCtx context.Context, dispatch contrac
 		reference = output.ResponseID
 	}
 	return finishObservation(in.disposition, reference, built, physical.FinishedAt), nil
+}
+
+func responsesSourceRevision() string {
+	if info, ok := debug.ReadBuildInfo(); ok {
+		for _, setting := range info.Settings {
+			if setting.Key == "vcs.revision" && setting.Value != "" {
+				return setting.Value
+			}
+		}
+	}
+	return "development"
 }
 
 // encodeStep translates the admitted step through the wire protocol,
@@ -613,11 +702,22 @@ func (a *Adapter) basePhysicalEvidence(dispatch contract.Dispatch, po *physicalO
 		RequestedDestination: po.destination,
 		ResolvedDestination:  po.destination,
 		ProfileDigest:        a.profile.Digest,
-		CapabilityEvidence:   a.profile.CapabilityEvidence.Artifact,
 		StartedAt:            po.started,
 		FinishedAt:           po.finished,
 		RequestContext:       po.requestContext,
 		RequestSent:          "yes",
+	}
+	if a.profile.CapabilityEvidence.Artifact.ID != "" && a.profile.CapabilityEvidence.Artifact.Digest != "" {
+		artifact := a.profile.CapabilityEvidence.Artifact
+		physical.CapabilityEvidence = &artifact
+	}
+	if a.profile.QualificationOnly {
+		var probe struct {
+			ProfileDigest contract.Digest `json:"profile_digest"`
+		}
+		if json.Unmarshal(dispatch.Action, &probe) == nil && validProfileDigest(probe.ProfileDigest) {
+			physical.ProfileDigest = probe.ProfileDigest
+		}
 	}
 	if po.doErr == nil {
 		physical.HTTPStatus = int64(po.status)

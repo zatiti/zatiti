@@ -1,6 +1,6 @@
 # Implementation assignment: `internal/messaging`
 
-Generated specification revision 13; source digest `6b086d744761eeee6bd2c58666f74a84397375da262081b073a06565ad42ea3d`. This file is committed implementation context. Do not independently edit it. Everything required from the product specification and adjacent interfaces is embedded below; no RFC copy is required.
+Generated specification revision 17; source digest `f77034332a96396a9f88395f71ff528f051f96f35b398629236dd00bc731c08f`. This file is committed implementation context. Do not independently edit it. Everything required from the product specification and adjacent interfaces is embedded below; no RFC copy is required.
 
 ## Mission and scope
 
@@ -12,7 +12,7 @@ Allowed production imports from this repository: `github.com/zatiti/zatiti/inter
 
 ## Implementation decisions and acceptance focus
 
-Own messaging_conversations/messages/recipients/receipts/read_markers. Group membership is conversation state, not organization membership, grant or memory binding. Authorize body/attachment disclosure for all recipients before delivery; do not retroactively disclose restricted history on joining. Messages have stable ID, authenticated sender, recipients/scope/task refs. Ack after durable target inbox admission, retry deduplicates ID with content hash; different content under same ID conflicts. Workers ingest at safe step boundary; idle resume uses scheduling/execution ownership, not separate task graph. User requests/chief assignments call versioned task operations with shared task identity. Content is untrusted and cannot change grants or verifier. Persist user messages and actual delivered agent input for reconstructable owned model context. Distinguish meaningful human-facing event from routine reasoning/coordination: quiet internal work does not reorder chats, mark unread or notify. Projection action cards derive committed controller operation/task/review state; text claims are not state. Bootstrap pinned personal-chief conversation. Server scopes all conversation list/hierarchy filters, not only UI. Revision 3: _messaging.ready bounded-scans admitted messages awaiting a durable worker turn, fair and scoped without acknowledgment; _messaging.processed records delivery disposition sharing the same transaction as the execution owner's turn admission/context commit, so a durable link exists even before any reply is produced. conversation.get/.list additionally return the calling principal's own caller_unread_count/caller_last_read_marker; conversation.message.list reads authorized history for one conversation within disclosed membership intervals.
+Own messaging_conversations/messages/recipients/receipts/read_markers. Group membership is conversation state, not organization membership, grant or memory binding. Authorize body/attachment disclosure for all recipients before delivery; do not retroactively disclose restricted history on joining. Messages have stable ID, authenticated sender, recipients/scope/task refs. Ack after durable target inbox admission, retry deduplicates ID with content hash; different content under same ID conflicts. Workers ingest at safe step boundary; idle resume uses scheduling/execution ownership, not separate task graph. User requests/chief assignments call versioned task operations with shared task identity. Content is untrusted and cannot change grants or verifier. Persist user messages and actual delivered agent input for reconstructable owned model context. Distinguish meaningful human-facing event from routine reasoning/coordination: quiet internal work does not reorder chats, mark unread or notify. Projection action cards derive committed controller operation/task/review state; text claims are not state. Bootstrap pinned personal-chief conversation. Server scopes all conversation list/hierarchy filters, not only UI. Revision 3: _messaging.ready bounded-scans admitted messages awaiting a durable worker turn, fair and scoped without acknowledgment; _messaging.processed records delivery disposition sharing the same transaction as the execution owner's turn admission/context commit, so a durable link exists even before any reply is produced. conversation.get/.list additionally return the calling principal's own caller_unread_count/caller_last_read_marker; conversation.message.list reads authorized history for one conversation within disclosed membership intervals. Revision 17: _messaging.history is an execution-only bounded query. The worker ID must come from the persisted WorkerTurn and must still be a current conversation participant; query sent plus admitted inbox messages exactly as public history does, preserving membership intervals. Return chronological rows and an explicit complete flag; never disclose pre-join group history or let a client select a worker principal.
 
 Local proving focus: Mailbox redelivery/crash-after-admit, forged sender, cross-scope attachment, safe-boundary injection, group no extra authority, concurrent assignments, quiet routine messages and committed card state.
 
@@ -30,11 +30,17 @@ These briefs are embedded so you need not read a sibling prompt to discover its 
 
 ## Shared foundation contract
 
-# Frozen implementation contract, revision 13
+# Frozen implementation contract, revision 17
 
 These decisions complete the product specification and bind every scope. Report contradictions with an affected-dependency list and proposed coordinated revision; do not change another owner's interface locally.
 
 Revision 13 permits a Responses v2 provider-conversation evidence record to omit `session_handle` when its physical call was not authoritatively successful. A confirmed prepare-session still requires a nonempty handle; stateless evidence still forbids it. This preserves honest unknown/failure outcomes without inventing a provider session identifier. Execution persists the model-step index alongside each effects operation reference and accepts a callback only when that exact reference, route step, current turn step and `model_pending` state agree. Chat observations use the existing controller-only `_execution.turn.observation` operation and never fabricate a task or Attempt.
+
+Revision 14 carries the transaction-pinned, secret-free context recipe in the internal-only ContextPlan so the trusted ContextPerformer can rebuild the exact context outside a Unit without opening owner tables or inventing artifact identities. The controller stages and publishes the bytes through BlobStore and `_artifacts.publish`; execution alone commits the returned owner-minted artifact after rechecking plan generation, authority and pinned references. The recipe is never a public client field or model-callable input.
+
+Revision 15 adds `execution_profile.qualify` as the only path from a client-authored provider-profile draft to executable capability evidence. The strict `ExecutionProfileCandidate`/`ResponsesProfileDraft` schemas contain all selected provider, model, route, price and resource bounds but have no `capability_evidence` field. The operation creates one durable job and one separately admitted, explicitly cost-bounded qualification effect bound to the exact active connection version, candidate profile digest, destination, route and requested capability set. The qualification probe uses fixed non-sensitive input, one physical provider request, the normal credential resolver, current principal/scope/classification/disclosure checks, current cost reservation and the exact provider adapter. No fallback, retry, redirect, SDK retry or hidden auxiliary call is permitted. Before dispatch, persist the exact bounded request context through the ordinary artifact path. On authoritative response, the controller records the physical-call evidence and publishes a qualification artifact; only the trusted completion writer can construct a `QualifiedExecutionProfile` and its evidence bound to the canonical candidate digest. Provider refusal is a failed job. Lost acknowledgement after request bytes may have been sent is `outcome_unknown`, remains visible on the same job and cannot be silently resent or turned into a qualified profile. A caller can start a fresh qualification only after authoritative non-execution of the prior probe. Completion does not create or activate an execution profile: Desktop consumes the trusted result through the existing `execution_profile.create` → plan → explicit apply path. The existing context preparation/publication/commit generation and authority fences remain unchanged.
+
+Revision 16 makes the qualification candidate resolution private and effect-bound. `_configuration.execution_profile.qualification.resolve` returns only the exact pending candidate and canonical digest to Effects. `_effects.prepare` may name that qualification ID only from the configuration owner; Effects verifies its connection, endpoint, model, price and requested bounds against the immutable action, then persists the candidate profile on the effect. Ordinary public effects still require an exact already-qualified execution profile, and cannot set the qualification ID or inject `Dispatch.adapter_profile`. The durable job links to the one effect operation so the controller can complete that same job from the exact physical observation.
 
 Revision 11 selects **hosted Serenity as the primary Mac memory service**. The user's existing hosted personal brain is the default personal-chief brain, including when another client already uses it. Zatiti does not create or import a duplicate personal brain during setup. Serenity remains the canonical memory writer; Zatiti retains local execution, authorization, accounting, conversation and recovery state. Separate restricted worker or project brains, when required by the existing isolation contract, are separate projects within the same hosted Serenity account and require explicit grants. The free tier may be offered, but no paid entitlement, quota, extra brain, or successful memory call is assumed from sign-in alone. The local Serenity distribution path is optional future/self-hosted packaging; the Mac release descriptor, controller manifest, bootstrap, installer and LaunchAgent do not require or start a bundled Serenity binary or local read facade for the hosted mode. Preserve the rev10 installer and trust chain for Zatiti's controller, desktop and credential helper.
 
@@ -471,6 +477,8 @@ The controller assembly dependency struct gains a required `Context contract.Con
 
 Normalized provider usage may include requested and served model IDs, serving provider, provider request ID, and exact source decimal cost evidence. Convert decimal USD to integer micro-units with checked integer/rational arithmetic and upward rounding, preserving the original decimal. No floating point is permitted. Missing, invalid or overflowing cost, disputed route, or unpriced BYOK upstream cost stays unknown/advisory; a gateway platform cost of zero is not evidence of zero upstream charge.
 
+Revision 17 adds the internal query `_messaging.history` (caller: execution) for reconstructing a worker turn's complete chat transcript. Its worker identity is taken from the persisted turn, and Messaging verifies current conversation membership before reading sender and admitted-recipient rows. It returns up to 200 authorized rows chronologically and an explicit `complete` flag; older undisclosed or over-limit history is never silently dropped, and execution refuses provider dispatch when `complete` is false. The existing public `conversation.message.list` remains principal-scoped and unchanged. This closes the context-history gap without granting the controller or a client a history bypass.
+
 ## Owned product requirements
 
 ### R9-002 (source section 9; primary owner tasks)
@@ -644,6 +652,21 @@ Input schema:
 Output data schema:
 ```json
 {"type":"object","additionalProperties":false,"properties":{"resource":{"$ref":"#/$defs/Conversation"}},"required":["resource"]}
+```
+
+### `_messaging.history` v1 — messaging / internal / query / local
+
+Allowed internal callers: execution. Submission key: not required at this internal/query/bootstrap boundary.
+
+Read at most 200 messages for the persisted worker turn from a conversation where that worker is a current participant. Preserve recipient-admission membership intervals, return messages chronologically, and set complete=false when older authorized history exists; execution must refuse dispatch rather than silently omit history. This internal operation is callable only by execution and never lets a public caller choose another principal.
+
+Input schema:
+```json
+{"type":"object","additionalProperties":false,"properties":{"scope":{"$ref":"#/$defs/Scope"},"conversation_id":{"type":"string","format":"uuid"},"worker_id":{"type":"string","format":"uuid"},"limit":{"type":"integer","minimum":1,"maximum":200}},"required":["scope","conversation_id","worker_id","limit"]}
+```
+Output data schema:
+```json
+{"type":"object","additionalProperties":false,"properties":{"items":{"type":"array","items":{"$ref":"#/$defs/Message"},"maxItems":200},"complete":{"type":"boolean"}},"required":["items","complete"]}
 ```
 
 ### `_messaging.pending` v1 — messaging / internal / query / local
@@ -948,6 +971,18 @@ Expected:
 - Every row validates against its updated schema with the new fields simply absent.
 - No read fails, migrates destructively or fabricates a value for an absent optional field.
 - Writing any of the rows again populates the new fields going forward without altering the unrelated persisted history.
+
+### P15.complete_authorized_chat_history — Z21
+
+Setup: A worker is a current participant in a conversation with more than one previously admitted message, including a group conversation with historical membership changes.
+
+Action: Send another chat turn and inspect the persisted context artifact and provider dispatch boundary.
+
+Expected:
+
+- The context contains the worker-visible sent and admitted messages in chronological order, deduplicated with the triggering inbox message.
+- Messages outside the worker current membership interval are not disclosed.
+- If authorized history exceeds the bound or cannot be fully read, no provider effect is dispatched and context is not labeled complete.
 
 ## Delivery
 

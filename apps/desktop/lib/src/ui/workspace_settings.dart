@@ -12,6 +12,7 @@ import 'theme.dart';
 import 'widgets.dart';
 import 'provider_model_editor.dart';
 import 'provider_connection_editor.dart';
+import 'provider_profile_setup.dart';
 
 /// Appearance follows the operating system unless the person chooses.
 class AppSettings extends ChangeNotifier {
@@ -327,6 +328,30 @@ class _WorkspaceSettingsState extends State<WorkspaceSettings> {
                     Text(_providerKeyStatus!, style: text.bodySmall),
                   const SizedBox(height: Space.xl),
                   const SectionLabel('Provider and model profiles'),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: OutlinedButton.icon(
+                      key: const ValueKey('set-up-model-profile'),
+                      onPressed: () async {
+                        final source = widget.controller.source;
+                        final applied = await showProviderProfileSetup(
+                          context,
+                          controller: widget.controller,
+                          credentials: widget.credentials,
+                        );
+                        if (applied == true &&
+                            mounted &&
+                            source is LiveWorkspaceSource) {
+                          setState(
+                            () => _profiles = source.api.executionProfiles(),
+                          );
+                        }
+                      },
+                      icon: const Icon(Icons.auto_awesome),
+                      label: const Text('Set up a model'),
+                    ),
+                  ),
+                  const SizedBox(height: Space.sm),
                   FutureBuilder<List<wire.ProviderDescriptor>>(
                     future: _providers,
                     builder: (context, snapshot) {
@@ -398,6 +423,7 @@ class _WorkspaceSettingsState extends State<WorkspaceSettings> {
                                   context,
                                   controller: widget.controller,
                                   workerId: workerId,
+                                  credentials: widget.credentials,
                                 ),
                                 icon: const Icon(Icons.tune),
                                 label: const Text(

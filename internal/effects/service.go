@@ -45,6 +45,7 @@ const (
 	opIdentityAuthority             = "_identity.authority"
 	opConfigSnapshot                = "_configuration.snapshot"
 	opConfigExecutionProfileResolve = "_configuration.execution_profile.resolve"
+	opConfigQualificationResolve    = "_configuration.execution_profile.qualification.resolve"
 	opPolicyCheck                   = "_policy.check"
 	opReviewsEnsure                 = "_reviews.ensure"
 	opReviewsCheck                  = "_reviews.check"
@@ -81,7 +82,7 @@ var opMetas = []opMeta{
 	{id: opPending, visibility: "internal", mode: "query",
 		callers: []string{"controller", "installation"}},
 	{id: opPrepare, visibility: "internal", mode: "mutation",
-		callers: []string{"execution", "memory", "connections", "skills", "installation"}},
+		callers: []string{"execution", "memory", "connections", "skills", "installation", "configuration"}},
 	{id: opRecord, visibility: "internal", mode: "mutation",
 		callers: []string{"controller"}},
 	{id: opReconciliationPrepare, visibility: "internal", mode: "mutation", expected: true,

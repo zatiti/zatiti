@@ -337,28 +337,30 @@ class LiveWorkspaceSource implements WorkspaceSource {
     required int expectedVersion,
   }) => _LiveResourceSubmission(
     api.preparePlan(draftId: draftId, expectedVersion: expectedVersion),
-    (data) {
-      final o = StrictObject(data, 'configuration.plan');
-      final plan = wire.Plan.fromJson(o.object('resource'));
-      o.finish();
-      return PlanOutcome(
-        planId: plan.id,
-        baseRevision: plan.baseRevision,
-        candidateDigest: plan.candidateDigest,
-        diagnostics: [
-          for (final d in plan.diagnostics) '${d.severity}: ${d.message}',
-        ],
-        pendingRequirements: [
-          for (final r in plan.authorityRequirements)
-            'Authority needed: ${r.message}',
-          for (final d in plan.decisions)
-            'A decision is needed on action ${d.actionDigest.substring(0, 8)}…',
-          for (final r in plan.requirements) r.message,
-        ],
-      );
-    },
+    _decodePlanOutcome,
     'plan draft $draftId',
   );
+
+  PlanOutcome _decodePlanOutcome(Map<String, Object?> data) {
+    final o = StrictObject(data, 'configuration.plan');
+    final plan = wire.Plan.fromJson(o.object('resource'));
+    o.finish();
+    return PlanOutcome(
+      planId: plan.id,
+      baseRevision: plan.baseRevision,
+      candidateDigest: plan.candidateDigest,
+      diagnostics: [
+        for (final d in plan.diagnostics) '${d.severity}: ${d.message}',
+      ],
+      pendingRequirements: [
+        for (final r in plan.authorityRequirements)
+          'Authority needed: ${r.message}',
+        for (final d in plan.decisions)
+          'A decision is needed on action ${d.actionDigest.substring(0, 8)}…',
+        for (final r in plan.requirements) r.message,
+      ],
+    );
+  }
 
   @override
   ResourceSubmission<PlanOutcome> prepareApplyPlan(PlanOutcome plan) =>
@@ -630,22 +632,29 @@ class LiveWorkspaceSource implements WorkspaceSource {
     required wire.ExecutionProfile profile,
   }) => _guard(() async {
     final worker = await api.workerGet(workerId);
-    return _LiveResourceSubmission(
-      api.prepareWorkerProfileUpdate(worker: worker, profile: profile),
-      (data) {
-        final o = StrictObject(data, 'worker.update');
-        final draft = wire.Draft.fromJson(o.object('draft'));
-        final updated = wire.Worker.fromJson(o.object('resource'));
-        o.finish();
-        return DraftedResource(
-          draftId: draft.id,
-          draftVersion: draft.version,
-          resourceId: updated.id,
-        );
-      },
-      'update worker model profile $workerId',
-    );
+    return prepareWorkerProfileUpdateFor(worker: worker, profile: profile);
   });
+
+  /// Stages from a fresh controller-returned worker without an additional
+  /// read. The same decoder is shared with lost-ack recovery.
+  ResourceSubmission<DraftedResource> prepareWorkerProfileUpdateFor({
+    required wire.Worker worker,
+    required wire.ExecutionProfile profile,
+  }) => _LiveResourceSubmission(
+    api.prepareWorkerProfileUpdate(worker: worker, profile: profile),
+    (data) {
+      final o = StrictObject(data, 'worker.update');
+      final draft = wire.Draft.fromJson(o.object('draft'));
+      final updated = wire.Worker.fromJson(o.object('resource'));
+      o.finish();
+      return DraftedResource(
+        draftId: draft.id,
+        draftVersion: draft.version,
+        resourceId: updated.id,
+      );
+    },
+    'update worker model profile ${worker.id}',
+  );
 
   /// Stages a provider connection with the preset's fixed destination. The
   /// returned identity can be passed to the existing secure key helper only
@@ -670,6 +679,156 @@ class LiveWorkspaceSource implements WorkspaceSource {
       );
     },
     'create ${provider.id} provider connection',
+  );
+
+  ResourceSubmission<wire.Job> prepareExecutionProfileQualification({
+    required Map<String, Object?> definition,
+    required wire.Money qualificationCostBound,
+  }) => _LiveResourceSubmission(
+    api.prepareExecutionProfileQualification(
+      definition: definition,
+      qualificationCostBound: qualificationCostBound,
+    ),
+    (data) {
+      final o = StrictObject(data, 'execution_profile.qualify');
+      final job = wire.Job.fromJson(o.object('job'));
+      o.finish();
+      return job;
+    },
+    'qualify execution profile',
+  );
+
+  /// Retains the exact identity and request bytes for a provider-profile
+  /// setup mutation. This is deliberately limited to the four local setup
+  /// operations; callers must persist the result before sending the request.
+  Map<String, Object?> providerSetupRecoveryRecord(PendingSubmission pending) {
+    late final Submission submission;
+    if (pending is _LiveResourceSubmission) {
+      submission = pending.submission;
+    } else if (pending is _LiveSubmission) {
+      submission = pending.submission;
+    } else {
+      throw ArgumentError('provider setup requires a live submission');
+    }
+    const allowed = {
+      'execution_profile.qualify',
+      'execution_profile.create',
+      'worker.update',
+      'configuration.plan',
+      'configuration.apply',
+    };
+    if (!allowed.contains(submission.operation)) {
+      throw ArgumentError('unsupported provider setup mutation');
+    }
+    return {
+      'operation': submission.operation,
+      'version': submission.operationVersion,
+      'key': submission.key,
+      'body': base64Encode(submission.body),
+    };
+  }
+
+  /// Rebuilds the typed result decoder for a saved provider setup command.
+  /// Submission.restore marks it unknown, so it can only be resolved using
+  /// command.get; it cannot resend after a process restart.
+  PendingSubmission restoreProviderSetupSubmission(
+    String step,
+    Map<String, Object?> saved,
+  ) {
+    final operation = saved['operation'];
+    final version = saved['version'];
+    final key = saved['key'];
+    final body = saved['body'];
+    final expectedOperation = switch (step) {
+      'qualify' => Operations.executionProfileQualify.id,
+      'profile_stage' => Operations.executionProfileCreate.id,
+      'profile_plan' => Operations.configurationPlan.id,
+      'profile_apply' => Operations.configurationApply.id,
+      'worker_profile_stage' => Operations.workerUpdate.id,
+      'worker_profile_plan' => Operations.configurationPlan.id,
+      'worker_profile_apply' => Operations.configurationApply.id,
+      _ => throw const FormatException('saved provider setup step is unknown'),
+    };
+    final expectedVersion = switch (step) {
+      'qualify' => Operations.executionProfileQualify.version,
+      'profile_stage' => Operations.executionProfileCreate.version,
+      'profile_plan' => Operations.configurationPlan.version,
+      'profile_apply' => Operations.configurationApply.version,
+      'worker_profile_stage' => Operations.workerUpdate.version,
+      'worker_profile_plan' => Operations.configurationPlan.version,
+      'worker_profile_apply' => Operations.configurationApply.version,
+      _ => throw const FormatException('saved provider setup step is unknown'),
+    };
+    if (operation != expectedOperation ||
+        version != expectedVersion ||
+        key is! String ||
+        body is! String) {
+      throw const FormatException('saved provider setup command is malformed');
+    }
+    final submission = Submission.restore(
+      operation: operation as String,
+      operationVersion: version as int,
+      key: key,
+      body: base64Decode(body),
+    );
+    switch (step) {
+      case 'qualify':
+        return _LiveResourceSubmission<wire.Job>(submission, (data) {
+          final o = StrictObject(data, 'execution_profile.qualify');
+          final job = wire.Job.fromJson(o.object('job'));
+          o.finish();
+          return job;
+        }, 'qualify execution profile');
+      case 'profile_stage':
+        return _LiveResourceSubmission<DraftedResource>(
+          submission,
+          (data) => _draftedResource(
+            data,
+            'execution_profile.create',
+            (r) => (wire.ExecutionProfile.fromJson(r).id, null),
+          ),
+          'create qualified execution profile',
+        );
+      case 'profile_plan':
+        return _LiveResourceSubmission<PlanOutcome>(
+          submission,
+          _decodePlanOutcome,
+          'plan provider profile',
+        );
+      case 'profile_apply':
+        return _LiveSubmission(submission);
+      case 'worker_profile_stage':
+        return _LiveResourceSubmission<DraftedResource>(
+          submission,
+          (data) => _draftedResource(
+            data,
+            'worker.update',
+            (r) => (wire.Worker.fromJson(r).id, null),
+          ),
+          'update worker model profile',
+        );
+      case 'worker_profile_plan':
+        return _LiveResourceSubmission<PlanOutcome>(
+          submission,
+          _decodePlanOutcome,
+          'plan worker model profile',
+        );
+      case 'worker_profile_apply':
+        return _LiveSubmission(submission);
+    }
+    throw const FormatException('saved provider setup step is unknown');
+  }
+
+  ResourceSubmission<DraftedResource> prepareExecutionProfileCreate(
+    Map<String, Object?> definition,
+  ) => _LiveResourceSubmission(
+    api.prepareExecutionProfileCreate(definition),
+    (data) => _draftedResource(
+      data,
+      'execution_profile.create',
+      (r) => (wire.ExecutionProfile.fromJson(r).id, null),
+    ),
+    'create qualified execution profile',
   );
 
   /// Whether a message is shown as the person's own. A direct conversation

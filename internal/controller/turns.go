@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -318,7 +319,8 @@ func (c *Controller) stageContextArtifact(ctx context.Context, sess *session, e 
 	}
 	plan := contract.ContextPlan{
 		ID: e.Plan.ID, TurnID: e.Plan.TurnID, ExpectedVersion: contract.Version(e.Plan.ExpectedVersion),
-		Generation: contract.Version(e.Plan.Generation), Refs: refs,
+		Generation: contract.Version(e.Plan.Generation), Scope: e.Plan.Scope,
+		AttemptID: e.Plan.AttemptID, Refs: refs, Recipe: append(json.RawMessage(nil), e.Plan.Recipe...),
 		ConfigurationRevision: contract.Version(e.Plan.ConfigurationRevision),
 		ByteBound:             e.Plan.ByteBound, TokenBound: e.Plan.TokenBound,
 	}
@@ -329,15 +331,52 @@ func (c *Controller) stageContextArtifact(ctx context.Context, sess *session, e 
 		c.oblige(obligationPublication, e.TurnID, f)
 		return wireArtifact{}, false
 	}
-	var locator wireArtifactLocator
-	if err := contract.DecodeStrict(raw, &locator); err != nil || locator.Kind != "artifact" || locator.Artifact == nil {
-		f := capabilityUnsupported("execution context performer returned an invalid or unpublished artifact locator for turn %s", e.TurnID)
+	if len(raw) == 0 || int64(len(raw)) > plan.ByteBound || int64(len(raw)) > plan.TokenBound {
+		f := capabilityUnsupported("execution context performer returned an empty or over-bound context for turn %s", e.TurnID)
+		c.note(f)
+		c.oblige(obligationPublication, e.TurnID, f)
+		return wireArtifact{}, false
+	}
+	c.mu.Lock()
+	blobs := c.deps.Blobs
+	c.mu.Unlock()
+	if blobs == nil {
+		f := prerequisiteMissing("controller has no blob store for turn %s context publication", e.TurnID)
+		c.note(f)
+		c.oblige(obligationPublication, e.TurnID, f)
+		return wireArtifact{}, false
+	}
+	stagingRef, digest, size, err := blobs.Stage(ctx, bytes.NewReader(raw), int64(len(raw)))
+	if err == nil && size != int64(len(raw)) {
+		err = internalFault("blob store staged %d bytes for a %d-byte turn context", size, len(raw))
+	}
+	if err == nil {
+		err = blobs.Publish(ctx, stagingRef, digest)
+	}
+	if err != nil {
+		f := unavailable("turn %s context artifact staging failed: %v", e.TurnID, err)
+		c.note(f)
+		c.oblige(obligationPublication, e.TurnID, f)
+		return wireArtifact{}, false
+	}
+	var artifact artifactOutput
+	err = c.write(func() error {
+		return c.call(ctx, sess, "_artifacts.publish", artifactsPublishInput{
+			Scope: plan.Scope, Digest: digest, Size: size, MediaType: "application/json",
+			Classification: "restricted", Encrypted: true,
+		}, &artifact)
+	})
+	if err == nil && (artifact.Resource.ID == "" || artifact.Resource.Digest != digest) {
+		err = internalFault("artifacts owner published context metadata that does not match staged bytes")
+	}
+	if err != nil {
+		f := faultOf(err)
 		c.note(f)
 		c.oblige(obligationPublication, e.TurnID, f)
 		return wireArtifact{}, false
 	}
 	c.resolve(obligationPublication, e.TurnID)
-	return *locator.Artifact, true
+	return wireArtifact{ID: artifact.Resource.ID, Digest: artifact.Resource.Digest}, true
 }
 
 // commitStagedContext commits an already-published context artifact.
@@ -694,11 +733,4 @@ func (c *Controller) publishVerification(ctx context.Context, sess *session, att
 	}
 	c.resolve(obligationVerification, attemptID)
 	return normalized, true
-}
-
-func nonNilArtifacts(in []wireArtifact) []wireArtifact {
-	if in == nil {
-		return []wireArtifact{}
-	}
-	return in
 }

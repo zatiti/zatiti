@@ -792,11 +792,29 @@ func TestProfilePlanNamesMissingConnectionPrerequisite(t *testing.T) {
 	env := newEnv(t)
 	profileID := env.ids.New()
 	conn := env.ids.New() // well-formed but unresolved connection reference
+	adapterProfile, err := json.Marshal(map[string]any{
+		"schema": "zatiti.responses/v1", "endpoint": "https://api.openai.com/v1/responses",
+		"model": "test-model", "connection_id": conn,
+		"max_input_tokens": 1, "max_output_tokens": 1, "max_response_bytes": 1024,
+		"timeout_seconds": 30, "currency": "USD",
+		"input_rate":  map[string]any{"numerator_micro_units": 50, "denominator_units": 1, "unit": "input_token"},
+		"output_rate": map[string]any{"numerator_micro_units": 50, "denominator_units": 1, "unit": "output_token"},
+		"enforcement": map[string]any{"cost": "enforced", "disclosure": "enforced", "maximum_cost": map[string]any{"currency": "USD", "micro_units": 100}, "provider_destinations": []string{}},
+		"capability_evidence": map[string]any{
+			"artifact":        map[string]any{"id": env.ids.New(), "digest": strings.Repeat("a", 64)},
+			"adapter_version": "test", "source_revision": "test", "protocol_revision": "test",
+			"profile_digest": strings.Repeat("b", 64), "qualified_at": "2026-09-24T00:00:00Z",
+			"capabilities": []string{}, "limitations": []string{},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	profile := wireExecutionProfile{
 		ID: profileID, Version: 1, Executor: "hosted", Model: "test-model",
-		ConnectionID: conn, ProviderDestination: "https://provider.example",
+		ConnectionID: conn, ConnectionVersion: 1, ProviderDestination: "https://api.openai.com/v1/responses",
 		Capabilities: []string{"completion"}, CostBound: wireMoney{Currency: "USD", MicroUnits: 100},
-		Classification: "internal", ContextCapture: "advisory",
+		Classification: "internal", ContextCapture: "complete", AdapterProfile: adapterProfile,
 	}
 	draft := env.stage(createChange(kindExecutionProfile, profileID, profile))
 	plan := env.planDraft(draft)

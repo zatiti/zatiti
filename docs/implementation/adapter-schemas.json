@@ -494,7 +494,6 @@
         "requested_destination",
         "resolved_destination",
         "profile_digest",
-        "capability_evidence",
         "started_at",
         "finished_at",
         "request_context",
@@ -4296,6 +4295,9 @@
         },
         {
           "$ref": "#/$defs/ResponsesModelStepParametersV2"
+        },
+        {
+          "$ref": "#/$defs/ResponsesQualificationProbeParametersV2"
         }
       ]
     },
@@ -4350,6 +4352,13 @@
           "type": "string",
           "minLength": 1,
           "maxLength": 128
+        },
+        "kind": {
+          "type": "string",
+          "const": "qualification_probe"
+        },
+        "qualification": {
+          "$ref": "#/$defs/ResponsesQualificationMetadataV2"
         }
       },
       "required": [
@@ -4380,7 +4389,12 @@
             "required": [
               "session_mode",
               "physical_call"
-            ]
+            ],
+            "not": {
+              "required": [
+                "kind"
+              ]
+            }
           },
           "then": {
             "required": [
@@ -4405,6 +4419,42 @@
                 "session_handle"
               ]
             }
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "const": "qualification_probe"
+              }
+            }
+          },
+          "then": {
+            "not": {
+              "required": [
+                "session_handle"
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "const": "qualification_probe"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "qualification"
+            ]
           }
         }
       ]
@@ -4518,6 +4568,112 @@
             }
           }
         }
+      ]
+    },
+    "ResponsesQualificationProbeParametersV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema": {
+          "const": "zatiti.responses.action/v2",
+          "type": "string"
+        },
+        "kind": {
+          "const": "qualification_probe",
+          "type": "string"
+        },
+        "session_mode": {
+          "type": "string",
+          "enum": [
+            "provider_conversation",
+            "stateless"
+          ]
+        },
+        "model": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "probe_text": {
+          "const": "Reply with exactly: ZATITI_MODEL_QUALIFIED",
+          "type": "string"
+        },
+        "max_output_tokens": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 64
+        },
+        "profile_digest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "qualification_cost_bound": {
+          "$ref": "#/$defs/Money"
+        },
+        "provider": {
+          "type": "string",
+          "enum": [
+            "openai",
+            "openrouter",
+            "experiential"
+          ]
+        }
+      },
+      "required": [
+        "schema",
+        "kind",
+        "session_mode",
+        "model",
+        "probe_text",
+        "max_output_tokens",
+        "profile_digest",
+        "qualification_cost_bound",
+        "provider"
+      ]
+    },
+    "ResponsesQualificationMetadataV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "adapter_version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "source_revision": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "protocol_revision": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "capabilities": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "maxItems": 32
+        },
+        "limitations": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048
+          },
+          "maxItems": 32
+        }
+      },
+      "required": [
+        "adapter_version",
+        "source_revision",
+        "protocol_revision",
+        "capabilities",
+        "limitations"
       ]
     }
   },

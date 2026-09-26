@@ -2357,5 +2357,96 @@
     "expected": [
       "Checked decimal arithmetic rounds upward; invalid/overflow/unpriced costs remain unknown/advisory and source decimal evidence is retained."
     ]
+  },
+  {
+    "id": "P15.profile_qualification_requires_evidence_free_candidate",
+    "gate": "Z18",
+    "owners": [
+      "configuration",
+      "connections",
+      "effects",
+      "controller",
+      "integration"
+    ],
+    "setup": "An authenticated human has an active provider connection and submits a candidate model profile for qualification.",
+    "action": "Attempt to include capability_evidence in the qualification candidate, then submit the strict evidence-free candidate bound to the exact connection version.",
+    "expected": [
+      "Client-authored capability evidence is rejected by schema validation.",
+      "The accepted candidate is pinned to the exact connection, model, endpoint, route and profile digest; no credential is returned or accepted in the public operation."
+    ]
+  },
+  {
+    "id": "P15.profile_qualification_cost_and_authority",
+    "gate": "Z18",
+    "owners": [
+      "identity",
+      "configuration",
+      "policy",
+      "effects",
+      "accounting",
+      "responses",
+      "controller",
+      "integration"
+    ],
+    "setup": "A profile candidate has explicit token/rate bounds and the caller has scope-limited provider disclosure authority.",
+    "action": "Qualify the exact profile with a maximum probe cost, and vary the current grant, destination, classification, profile digest and available budget before claim.",
+    "expected": [
+      "The one probe is admitted only under current authority, exact bound destination and classification, and sufficient reserved budget.",
+      "Observed charge is settled against that probe; a profile mismatch or a charge beyond the configured bound never yields qualified evidence."
+    ]
+  },
+  {
+    "id": "P15.profile_qualification_unknown_never_replays",
+    "gate": "Z18",
+    "owners": [
+      "configuration",
+      "effects",
+      "responses",
+      "controller",
+      "integration"
+    ],
+    "setup": "A qualification request may lose its provider response or controller acknowledgement after request bytes are sent.",
+    "action": "Crash or drop the response at each provider boundary, restart the controller and inspect/retry the same qualification job.",
+    "expected": [
+      "Possible-send outcomes remain outcome_unknown on the same job and are not automatically resent.",
+      "Unknown, failed, stale-connection and stale-profile outcomes never produce a QualifiedExecutionProfile; a new probe requires authoritative proof the previous request was not sent."
+    ]
+  },
+  {
+    "id": "P15.desktop_model_profile_setup_and_first_chat",
+    "gate": "Z21",
+    "owners": [
+      "configuration",
+      "connections",
+      "effects",
+      "execution",
+      "controller",
+      "desktop",
+      "qualification"
+    ],
+    "setup": "A live controller and Desktop have a usable secure credential helper, an active provider connection and sufficient explicit cost budget.",
+    "action": "In Desktop, configure a model/rates/resource bounds, approve one qualification spend bound, wait for the trusted result, review and apply the profile, then send a first chat.",
+    "expected": [
+      "Desktop submits no capability evidence and reconciles a lost acknowledgement through the same job/submission identity.",
+      "The user reviews and applies the qualified profile through the ordinary compiler path; the first chat uses that exact qualified profile and complete persisted context.",
+      "The reply is read back from authoritative controller conversation state, and provider request/response cost and unknown outcome behavior remain visible and bounded."
+    ]
+  },
+  {
+    "id": "P15.complete_authorized_chat_history",
+    "gate": "Z21",
+    "owners": [
+      "messaging",
+      "execution",
+      "controller",
+      "qualification"
+    ],
+    "setup": "A worker is a current participant in a conversation with more than one previously admitted message, including a group conversation with historical membership changes.",
+    "action": "Send another chat turn and inspect the persisted context artifact and provider dispatch boundary.",
+    "expected": [
+      "The context contains the worker-visible sent and admitted messages in chronological order, deduplicated with the triggering inbox message.",
+      "Messages outside the worker current membership interval are not disclosed.",
+      "If authorized history exceeds the bound or cannot be fully read, no provider effect is dispatched and context is not labeled complete."
+    ]
   }
 ]

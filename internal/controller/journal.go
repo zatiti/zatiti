@@ -126,13 +126,16 @@ const (
 
 // route names the owner callback an effect outcome is delivered to.
 type route struct {
-	// Owner is "", "execution", "execution_proposal", "memory" or
-	// "connections".
+	// Owner is "", "execution", "execution_proposal", "memory",
+	// "connections" or "configuration_qualification".
 	Owner string `json:"owner,omitempty"`
 	// AttemptID is the execution attempt a model effect belongs to.
 	AttemptID contract.ID `json:"attempt_id,omitempty"`
 	// JobID is the network job waiting on the operation.
-	JobID contract.ID `json:"job_id,omitempty"`
+	JobID         contract.ID `json:"job_id,omitempty"`
+	JobVersion    int64       `json:"job_version,omitempty"`
+	ProfileDigest string      `json:"profile_digest,omitempty"`
+	Provider      string      `json:"provider,omitempty"`
 	// Connection is the connection a probe validated.
 	Connection wireRef `json:"connection,omitempty"`
 	// ProposalID names the WorkerTurn proposal (owner execution_proposal)

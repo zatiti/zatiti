@@ -550,8 +550,8 @@ func TestRegistryResolvesEveryLandedOperation(t *testing.T) {
 	if internal == 0 || mutations == 0 {
 		t.Fatalf("landed modules declare %d internal operations, %d of them mutations; the seam is not exercised", internal, mutations)
 	}
-	if got := len(a.reg.Public()); got != 201 {
-		t.Fatalf("Public() holds %d operations, want the 201 frozen ones", got)
+	if got := len(a.reg.Public()); got != 203 {
+		t.Fatalf("Public() holds %d operations, want the 203 frozen ones", got)
 	}
 }
 

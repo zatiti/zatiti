@@ -66,7 +66,7 @@ var (
 
 const (
 	schemaModelProviderListIn  = `{"type":"object","additionalProperties":false,"properties":{"scope":{"$ref":"#/$defs/Scope"}},"required":["scope"]}`
-	schemaModelProviderListOut = `{"type":"object","additionalProperties":false,"properties":{"items":{"type":"array","maxItems":3,"items":{"type":"object","additionalProperties":false,"properties":{"id":{"type":"string","enum":["openai","openrouter","experiential"]},"display_name":{"type":"string","minLength":1,"maxLength":128},"default_endpoint":{"type":"string","format":"uri","pattern":"^https://","maxLength":4096},"session_mode":{"type":"string","enum":["provider_conversation","stateless"]},"credential_setup":{"type":"string","const":"api_key"}},"required":["id","display_name","default_endpoint","session_mode","credential_setup"],"allOf":[{"if":{"properties":{"id":{"const":"openai"}},"required":["id"]},"then":{"properties":{"default_endpoint":{"const":"https://api.openai.com/v1/responses"},"session_mode":{"const":"provider_conversation"}}}},{"if":{"properties":{"id":{"const":"openrouter"}},"required":["id"]},"then":{"properties":{"default_endpoint":{"const":"https://openrouter.ai/api/v1/responses"},"session_mode":{"const":"stateless"}}}},{"if":{"properties":{"id":{"const":"experiential"}},"required":["id"]},"then":{"properties":{"default_endpoint":{"const":"https://api.experientiallabs.ai/v1/responses"},"session_mode":{"const":"stateless"}}}]}}},"required":["items"]}`
+	schemaModelProviderListOut = `{"type":"object","additionalProperties":false,"properties":{"items":{"type":"array","items":{"$ref":"#/$defs/ProviderDescriptor"},"maxItems":3}},"required":["items"]}`
 )
 
 // opSchema is one operation's declared input/output bodies.

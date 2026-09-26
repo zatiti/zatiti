@@ -179,6 +179,16 @@ class ControllerApi {
     return Job.fromJson(_resource(r.data, 'memory.job.get'));
   }
 
+  /// Reads the durable job record. Polling this read never repeats the
+  /// mutation which created the job.
+  Future<Job> jobGet(String id) async {
+    final r = await client.query(Operations.jobGet, {
+      'scope': client.scope(),
+      'id': id,
+    });
+    return Job.fromJson(_resource(r.data, 'job.get'));
+  }
+
   // ---- responsibility-to-schedule links -----------------------------------
 
   Future<List<Schedule>> schedules() =>
@@ -291,6 +301,28 @@ class ControllerApi {
 
   Future<List<ExecutionProfile>> executionProfiles() =>
       listAll(Operations.executionProfileList, ExecutionProfile.fromJson);
+
+  /// Prepares one explicit, bounded provider-profile qualification probe.
+  /// The caller supplies a secret-free candidate without capability evidence;
+  /// only the controller can return a qualified profile after observing the
+  /// physical provider response.
+  Submission prepareExecutionProfileQualification({
+    required Map<String, Object?> definition,
+    required Money qualificationCostBound,
+  }) => client.prepare(Operations.executionProfileQualify, {
+    'scope': client.scope(),
+    'definition': definition,
+    'qualification_cost_bound': {
+      'currency': qualificationCostBound.currency,
+      'micro_units': qualificationCostBound.microUnits,
+    },
+  });
+
+  Submission prepareExecutionProfileCreate(Map<String, Object?> definition) =>
+      client.prepare(Operations.executionProfileCreate, {
+        'scope': client.scope(),
+        'definition': definition,
+      });
 
   Submission prepareProviderConnection({
     required ProviderDescriptor provider,

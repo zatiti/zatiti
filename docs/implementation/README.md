@@ -1,18 +1,14 @@
 # Package implementation specification
 
-Revision 13. **Specification scaffold; no product implementation or executed release qualification is claimed.**
+Revision 17. **Implementation exists; this is the frozen contributor specification, not release qualification.**
 
-36 disjoint implementation roots; 202 public operations; 93 internal owner methods; 153 source blocks with explicit ownership; 142 named acceptance cases covering Z01–Z21 and release journeys.
+36 implementation roots; 203 public operations; 97 internal owner methods; 153 source blocks with explicit ownership; 147 named acceptance cases covering Z01–Z21 and release journeys. The repository contains implementation code; passing package tests do not establish external service or release qualification.
 
 Each root already contains a complete committed AGENTS.md: local mission, allowed imports, owned requirements, exact Go interfaces, incoming/outgoing operation schemas, persistence/recovery rules and named acceptance criteria. An agent can implement from that file without the RFC. Scope prompts intentionally repeat necessary contracts; do not edit generated copies independently.
 
-## Start and dispatch
+## Status and future work
 
-1. Assign the integration owner its **serialized foundation assignment**: create root go.mod/go.sum for module github.com/zatiti/zatiti, Go 1.26.0/toolchain 1.26.2, resolve exact dependency releases/commits/licenses/checksums, and qualify required upstream seams. Record docs/implementation/dependencies.lock.json. This is a specified implementation deliverable, not a preexisting lock or compatibility claim.
-2. Implement wave 0 contract/platform/storage against frozen interfaces. A dependency library required by a scope must be pinned before that scope starts. Land the shared contract baseline before dispatching dependent agents; no guessing or independently rewriting shared types.
-3. Wave 1 establishes identity/compiler and transport/application foundations. Wave 2 domain services, adapters and presentation transports can generate code concurrently against the baseline, using exact local fakes. The wave numbers are integration order, not a claim that all runtime collaborators already exist.
-4. Wave 3 assembles real controller and entrypoints and builds the Flutter desktop client; replace development fakes with actual modules. Wave 4 proves cross-package transactions, all operations/parity/journeys and real platform/client/provider qualification.
-5. Use one isolated worktree per concurrent root and one landing owner. Dispatch only disjoint roots; no ancestor/root assignment concurrently with descendants. A package may add private files in its root but no new ownership roots or exported seams without a coordinated revision.
+The original implementation dispatch is complete. See [implementation remediation status](../implementation-remediation/README.md) and [launch readiness](../launch-readiness.md) for completed work and remaining external/native gates. The ownership map below remains useful for future coordinated changes; the original wave plan is closed.
 
 Root dependency work and the lock report belong only to integration's serialized exception. cmd entrypoints own wiring, apps/desktop owns the Flutter desktop client (a non-Go root outside the Go module that consumes the operation catalog and wire envelope), tests/integration owns product-wide fixtures, tests/qualification owns external/GUI qualification, packaging owns distribution, and .github/workflows owns CI. The root AGENTS.md is stable repository guidance, not a concurrently implementable root task. There is no Kazi/apply dependency and no assumption about coding harness.
 

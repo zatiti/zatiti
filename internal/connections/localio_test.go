@@ -383,7 +383,7 @@ func TestCompleteRefusesMissingOrWrongNamedReceiptKey(t *testing.T) {
 				ChallengeID: ch.ID, CredentialRef: conn.CredentialRef,
 				AccountIdentity: conn.AccountIdentity, ExpiresAt: ch.ExpiresAt,
 			})
-			env.expectIOFault("connection.setup.complete", completeInput{
+			_ = env.expectIOFault("connection.setup.complete", completeInput{
 				Scope: env.scope, ChallengeID: ch.ID,
 				ExpectedVersion: ch.Version, HelperRef: receipt,
 			}, tc.wantCode)

@@ -49,6 +49,15 @@ class CredentialKeys {
 
   /// One JSON object of conversation id to unsent draft text.
   String get drafts => 'zatiti.$profile.drafts';
+
+  /// One bounded provider-profile setup recovery record. It contains no
+  /// credential bytes; the exact mutation request is retained only in secure storage.
+  String get modelSetup => 'zatiti.$profile.model_setup';
+
+  /// One bounded personal-chief profile assignment recovery record. It is
+  /// separate from profile qualification so the two setup flows cannot
+  /// overwrite each other's uncertain command identity.
+  String get workerProfileSetup => 'zatiti.$profile.worker_profile_setup';
 }
 
 /// Keychain on macOS, libsecret on Linux, Credential Manager on Windows.

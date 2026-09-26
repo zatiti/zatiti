@@ -74,6 +74,14 @@ func (s *Service) executionProfileResolve(ctx context.Context, unit contract.Uni
 	return out.Resource, nil
 }
 
+func (s *Service) qualificationResolve(ctx context.Context, unit contract.Unit, in qualificationResolveInput) (wireQualificationCandidate, error) {
+	var out wireQualificationCandidate
+	if err := callPeer(ctx, s, unit, opConfigQualificationResolve, in, &out); err != nil {
+		return wireQualificationCandidate{}, err
+	}
+	return out, nil
+}
+
 // policyCheck evaluates current authorization for one capability and action.
 func (s *Service) policyCheck(ctx context.Context, unit contract.Unit, in policyCheckInput) (policyResultBody, error) {
 	var out policyResultBody

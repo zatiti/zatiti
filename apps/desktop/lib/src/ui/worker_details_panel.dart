@@ -4,6 +4,7 @@
 
 import 'package:flutter/material.dart';
 
+import '../app/credential_store.dart';
 import '../state/snapshot.dart';
 import '../state/view_state.dart';
 import '../state/workspace_controller.dart';
@@ -20,10 +21,12 @@ class WorkerDetailsPanel extends StatelessWidget {
     super.key,
     required this.controller,
     required this.worker,
+    required this.credentials,
   });
 
   final WorkspaceController controller;
   final WorkerEntry worker;
+  final CredentialStore? credentials;
 
   @override
   Widget build(BuildContext context) {
@@ -65,6 +68,7 @@ class WorkerDetailsPanel extends StatelessWidget {
                         context,
                         controller: controller,
                         workerId: worker.id.value,
+                        credentials: credentials,
                       ),
                       icon: const Icon(Icons.tune),
                     ),

@@ -17,6 +17,7 @@ type opMeta struct {
 	id              string
 	visibility      string
 	mode            string
+	effect          string
 	submission      bool
 	expectedVersion bool
 	callers         []string
@@ -48,6 +49,12 @@ var opMetas = []opMeta{
 		callers: []string{"controller"}},
 	{id: "_configuration.execution_profile.resolve", visibility: "internal", mode: "query", submission: false,
 		callers: []string{"execution", "effects"}},
+	{id: "_configuration.execution_profile.qualification.resolve", visibility: "internal", mode: "query", submission: false,
+		callers: []string{"effects"}},
+	{id: "_configuration.execution_profile.qualify.record", visibility: "internal", mode: "mutation", submission: false, expectedVersion: true,
+		callers: []string{"controller"}},
+	{id: "_configuration.execution_profile.qualify.finish", visibility: "internal", mode: "mutation", submission: false, expectedVersion: true,
+		callers: []string{"controller"}},
 	{id: "_configuration.snapshot", visibility: "internal", mode: "query", submission: false,
 		callers: internalCallersSnapshot},
 	{id: "_configuration.stage", visibility: "internal", mode: "mutation", submission: false,
@@ -79,6 +86,7 @@ var opMetas = []opMeta{
 	// execution_profile.*
 	{id: "execution_profile.archive", visibility: "public", mode: "mutation", submission: true, expectedVersion: true, cli: "execution_profile archive"},
 	{id: "execution_profile.create", visibility: "public", mode: "mutation", submission: true, cli: "execution_profile create"},
+	{id: "execution_profile.qualify", visibility: "public", mode: "mutation", effect: "external_read", submission: true, completion: true, cli: "execution_profile qualify"},
 	{id: "execution_profile.get", visibility: "public", mode: "query", cli: "execution_profile get"},
 	{id: "execution_profile.list", visibility: "public", mode: "query", cli: "execution_profile list"},
 	{id: "execution_profile.update", visibility: "public", mode: "mutation", submission: true, expectedVersion: true, cli: "execution_profile update"},
@@ -181,13 +189,17 @@ func (s *Service) Descriptors() []contract.Descriptor { return s.descriptors }
 func buildDescriptors(catalog map[string]contract.Descriptor) []contract.Descriptor {
 	out := make([]contract.Descriptor, 0, len(opMetas))
 	for _, m := range opMetas {
+		effect := m.effect
+		if effect == "" {
+			effect = "local"
+		}
 		d := contract.Descriptor{
 			ID:               m.id,
 			Version:          1,
 			Owner:            ownerName,
 			Visibility:       m.visibility,
 			Mode:             m.mode,
-			Effect:           "local",
+			Effect:           effect,
 			InputSchema:      inputSchema(m.id),
 			OutputSchema:     outputSchema(m.id),
 			CompletionSchema: nil,
@@ -242,14 +254,17 @@ type handlerFunc func(ctx context.Context, s *Service, unit contract.Unit, inv c
 
 // handlers is the strict dispatch table; every registered operation has one.
 var handlers = map[string]handlerFunc{
-	"_configuration.activate":                  handleActivate,
-	"_configuration.bootstrap":                 handleBootstrap,
-	"_configuration.export.prepare":            handleExportPrepare,
-	"_configuration.export.record":             handleExportRecord,
-	"_configuration.execution_profile.resolve": handleResolveExecutionProfile,
-	"_configuration.snapshot":                  handleSnapshot,
-	"_configuration.stage":                     handleStage,
-	"_configuration.validate":                  handleValidate,
+	"_configuration.activate":                                handleActivate,
+	"_configuration.bootstrap":                               handleBootstrap,
+	"_configuration.export.prepare":                          handleExportPrepare,
+	"_configuration.export.record":                           handleExportRecord,
+	"_configuration.execution_profile.resolve":               handleResolveExecutionProfile,
+	"_configuration.execution_profile.qualification.resolve": handleResolveExecutionProfileQualification,
+	"_configuration.execution_profile.qualify.record":        handleRecordQualifiedExecutionProfile,
+	"_configuration.execution_profile.qualify.finish":        handleFinishQualifiedExecutionProfile,
+	"_configuration.snapshot":                                handleSnapshot,
+	"_configuration.stage":                                   handleStage,
+	"_configuration.validate":                                handleValidate,
 
 	"binding.archive": handleArchive("binding"),
 	"binding.create":  handleCreateResource("binding"),
@@ -272,6 +287,7 @@ var handlers = map[string]handlerFunc{
 
 	"execution_profile.archive": handleArchive("execution_profile"),
 	"execution_profile.create":  handleCreateResource("execution_profile"),
+	"execution_profile.qualify": handleQualifyExecutionProfile,
 	"execution_profile.get":     handleGetResource("execution_profile"),
 	"execution_profile.list":    handleListResource("execution_profile"),
 	"execution_profile.update":  handleUpdateResource("execution_profile"),

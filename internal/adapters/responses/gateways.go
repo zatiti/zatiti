@@ -156,10 +156,10 @@ func (g gatewayProtocol) encode(in protocolRequest, _ string) (protocolCall, err
 	case "experiential":
 		var r experientialRoute
 		if err := json.Unmarshal(in.Profile.Routing, &r); err != nil {
-			return protocolCall{}, fmt.Errorf("Experiential routing decode failed")
+			return protocolCall{}, fmt.Errorf("experiential routing decode failed")
 		}
 		if r.Gateway.Retry.MaxPerRoute != 1 || r.Gateway.Retry.MaxTotal != 1 || r.Gateway.Backoff.Type != "none" || r.Gateway.Routing.AllowFallbacks {
-			return protocolCall{}, fmt.Errorf("Experiential routing must constrain execution to one attempt with no fallback")
+			return protocolCall{}, fmt.Errorf("experiential routing must constrain execution to one attempt with no fallback")
 		}
 		routing := map[string]any{"allow_fallbacks": false}
 		if r.RouteID != "" {
@@ -193,14 +193,14 @@ func (g gatewayProtocol) encode(in protocolRequest, _ string) (protocolCall, err
 func (g gatewayProtocol) decode(status int, h http.Header, body []byte) (protocolResult, error) {
 	if g.provider == "experiential" {
 		if h.Get("x-gateway-replay-repair") != "" {
-			return protocolResult{}, fmt.Errorf("Experiential disclosed an internal replay repair despite the single-attempt route profile")
+			return protocolResult{}, fmt.Errorf("experiential disclosed an internal replay repair despite the single-attempt route profile")
 		}
 		for _, v := range h.Values("x-experiential-ignored-parameters") {
 			for _, field := range strings.Split(v, ",") {
 				f := strings.Trim(strings.TrimSpace(field), "\"[] ")
 				switch f {
 				case "model", "input", "tools", "tool_choice", "max_output_tokens", "store", "gateway", "session_id", "provider", "background", "stream":
-					return protocolResult{}, fmt.Errorf("Experiential disclosed ignored safety parameter %q", f)
+					return protocolResult{}, fmt.Errorf("experiential disclosed ignored safety parameter %q", f)
 				}
 			}
 		}

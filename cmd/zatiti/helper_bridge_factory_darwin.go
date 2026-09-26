@@ -1,4 +1,4 @@
-//go:build darwin
+//go:build darwin && cgo && zatiti_carchive
 
 package main
 

@@ -105,6 +105,7 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
                         child: WorkerDetailsPanel(
                           controller: controller,
                           worker: worker,
+                          credentials: widget.credentials,
                         ),
                       ),
                     ],
@@ -131,6 +132,7 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
                     child: WorkerDetailsPanel(
                       controller: controller,
                       worker: worker,
+                      credentials: widget.credentials,
                     ),
                   ),
                 ],

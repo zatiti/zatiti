@@ -480,7 +480,7 @@ func TestAdapterBoundsSerenity(t *testing.T) {
 	evidence := capabilityEvidence("zatiti-serenity-adapter/1", "b4febdf7bbc0d3c33f9939c79099dc64cce89e84", "memory_verbs/1+mcp/2025-11-25", []string{}, []string{"no operation is dispatchable at this pin; see PROTOCOL.md"})
 	enforcement := capabilityEvidence("zatiti-serenity-adapter/1", "b4febdf7bbc0d3c33f9939c79099dc64cce89e84", "memory_verbs/1+mcp/2025-11-25", []string{}, []string{"unsupported"})
 	profile := bindProfile(t, map[string]any{
-		"schema":  "zatiti.serenity/v1",
+		"schema":  "zatiti.serenity/v2",
 		"version": "v0.1.10-hosted-candidate",
 		"commit":  "b4febdf7bbc0d3c33f9939c79099dc64cce89e84",
 		"brain_mappings": []map[string]any{{

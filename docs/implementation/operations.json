@@ -1,5 +1,5 @@
 {
-  "revision": 13,
+  "revision": 17,
   "$defs": {
     "Scope": {
       "type": "object",
@@ -4617,7 +4617,6 @@
         "requested_destination",
         "resolved_destination",
         "profile_digest",
-        "capability_evidence",
         "started_at",
         "finished_at",
         "request_context",
@@ -8419,6 +8418,9 @@
         },
         {
           "$ref": "#/$defs/Adapter_ResponsesModelStepParametersV2"
+        },
+        {
+          "$ref": "#/$defs/Adapter_ResponsesQualificationProbeParametersV2"
         }
       ]
     },
@@ -8473,6 +8475,13 @@
           "type": "string",
           "minLength": 1,
           "maxLength": 128
+        },
+        "kind": {
+          "type": "string",
+          "const": "qualification_probe"
+        },
+        "qualification": {
+          "$ref": "#/$defs/Adapter_ResponsesQualificationMetadataV2"
         }
       },
       "required": [
@@ -8503,7 +8512,12 @@
             "required": [
               "session_mode",
               "physical_call"
-            ]
+            ],
+            "not": {
+              "required": [
+                "kind"
+              ]
+            }
           },
           "then": {
             "required": [
@@ -8528,6 +8542,42 @@
                 "session_handle"
               ]
             }
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "const": "qualification_probe"
+              }
+            }
+          },
+          "then": {
+            "not": {
+              "required": [
+                "session_handle"
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "const": "qualification_probe"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "qualification"
+            ]
           }
         }
       ]
@@ -8641,6 +8691,112 @@
             }
           }
         }
+      ]
+    },
+    "Adapter_ResponsesQualificationProbeParametersV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema": {
+          "const": "zatiti.responses.action/v2",
+          "type": "string"
+        },
+        "kind": {
+          "const": "qualification_probe",
+          "type": "string"
+        },
+        "session_mode": {
+          "type": "string",
+          "enum": [
+            "provider_conversation",
+            "stateless"
+          ]
+        },
+        "model": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "probe_text": {
+          "const": "Reply with exactly: ZATITI_MODEL_QUALIFIED",
+          "type": "string"
+        },
+        "max_output_tokens": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 64
+        },
+        "profile_digest": {
+          "$ref": "#/$defs/Adapter_Digest"
+        },
+        "qualification_cost_bound": {
+          "$ref": "#/$defs/Adapter_Money"
+        },
+        "provider": {
+          "type": "string",
+          "enum": [
+            "openai",
+            "openrouter",
+            "experiential"
+          ]
+        }
+      },
+      "required": [
+        "schema",
+        "kind",
+        "session_mode",
+        "model",
+        "probe_text",
+        "max_output_tokens",
+        "profile_digest",
+        "qualification_cost_bound",
+        "provider"
+      ]
+    },
+    "Adapter_ResponsesQualificationMetadataV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "adapter_version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "source_revision": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "protocol_revision": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "capabilities": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "maxItems": 32
+        },
+        "limitations": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048
+          },
+          "maxItems": 32
+        }
+      },
+      "required": [
+        "adapter_version",
+        "source_revision",
+        "protocol_revision",
+        "capabilities",
+        "limitations"
       ]
     },
     "Fault": {
@@ -9083,6 +9239,13 @@
           "minimum": 1,
           "maximum": 9223372036854775807
         },
+        "scope": {
+          "$ref": "#/$defs/Scope"
+        },
+        "attempt_id": {
+          "type": "string",
+          "format": "uuid"
+        },
         "refs": {
           "type": "array",
           "items": {
@@ -9104,6 +9267,10 @@
           "type": "integer",
           "minimum": 0,
           "maximum": 9223372036854775807
+        },
+        "recipe": {
+          "type": "object",
+          "description": "Inert JSON data bounded by the enclosing size limit; never executable authority."
         }
       },
       "required": [
@@ -9111,10 +9278,12 @@
         "turn_id",
         "expected_version",
         "generation",
+        "scope",
         "refs",
         "configuration_revision",
         "byte_bound",
-        "token_bound"
+        "token_bound",
+        "recipe"
       ]
     },
     "VerifierDescriptor": {
@@ -9931,6 +10100,418 @@
         {
           "$ref": "#/$defs/ResponsesProfileV2"
         }
+      ]
+    },
+    "ResponsesProfileDraftV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema": {
+          "const": "zatiti.responses/v1",
+          "type": "string"
+        },
+        "endpoint": {
+          "type": "string",
+          "format": "uri",
+          "pattern": "^https://",
+          "maxLength": 2048
+        },
+        "model": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "connection_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "max_input_tokens": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10000000
+        },
+        "max_output_tokens": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000000
+        },
+        "max_response_bytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 268435456
+        },
+        "timeout_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1800
+        },
+        "currency": {
+          "type": "string",
+          "pattern": "^[A-Z]{3}$"
+        },
+        "input_rate": {
+          "$ref": "#/$defs/ResponsesRate"
+        },
+        "output_rate": {
+          "$ref": "#/$defs/ResponsesRate"
+        },
+        "enforcement": {
+          "$ref": "#/$defs/ResponsesEnforcement"
+        }
+      },
+      "required": [
+        "schema",
+        "endpoint",
+        "model",
+        "connection_id",
+        "max_input_tokens",
+        "max_output_tokens",
+        "max_response_bytes",
+        "timeout_seconds",
+        "currency",
+        "input_rate",
+        "output_rate",
+        "enforcement"
+      ]
+    },
+    "ResponsesProfileDraftV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema": {
+          "const": "zatiti.responses/v2",
+          "type": "string"
+        },
+        "endpoint": {
+          "type": "string",
+          "format": "uri",
+          "pattern": "^https://",
+          "maxLength": 2048
+        },
+        "model": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "connection_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "max_input_tokens": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10000000
+        },
+        "max_output_tokens": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000000
+        },
+        "max_response_bytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 268435456
+        },
+        "timeout_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1800
+        },
+        "currency": {
+          "type": "string",
+          "pattern": "^[A-Z]{3}$"
+        },
+        "input_rate": {
+          "$ref": "#/$defs/ResponsesRate"
+        },
+        "output_rate": {
+          "$ref": "#/$defs/ResponsesRate"
+        },
+        "enforcement": {
+          "$ref": "#/$defs/ResponsesEnforcement"
+        },
+        "provider": {
+          "type": "string",
+          "enum": [
+            "openai",
+            "openrouter",
+            "experiential"
+          ]
+        },
+        "session_mode": {
+          "type": "string",
+          "enum": [
+            "provider_conversation",
+            "stateless"
+          ]
+        },
+        "routing": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {},
+              "required": []
+            },
+            {
+              "$ref": "#/$defs/ResponsesRoutingOpenRouter"
+            },
+            {
+              "$ref": "#/$defs/ResponsesRoutingExperiential"
+            }
+          ]
+        }
+      },
+      "required": [
+        "schema",
+        "endpoint",
+        "model",
+        "connection_id",
+        "max_input_tokens",
+        "max_output_tokens",
+        "max_response_bytes",
+        "timeout_seconds",
+        "currency",
+        "input_rate",
+        "output_rate",
+        "enforcement",
+        "provider",
+        "session_mode",
+        "routing"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "provider": {
+                "const": "openai"
+              }
+            },
+            "required": [
+              "provider"
+            ]
+          },
+          "then": {
+            "properties": {
+              "session_mode": {
+                "const": "provider_conversation"
+              },
+              "endpoint": {
+                "const": "https://api.openai.com/v1/responses"
+              },
+              "routing": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {},
+                "required": []
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "provider": {
+                "const": "openrouter"
+              }
+            },
+            "required": [
+              "provider"
+            ]
+          },
+          "then": {
+            "properties": {
+              "session_mode": {
+                "const": "stateless"
+              },
+              "endpoint": {
+                "const": "https://openrouter.ai/api/v1/responses"
+              },
+              "routing": {
+                "$ref": "#/$defs/ResponsesRoutingOpenRouter"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "provider": {
+                "const": "experiential"
+              }
+            },
+            "required": [
+              "provider"
+            ]
+          },
+          "then": {
+            "properties": {
+              "session_mode": {
+                "const": "stateless"
+              },
+              "endpoint": {
+                "const": "https://api.experientiallabs.ai/v1/responses"
+              },
+              "routing": {
+                "$ref": "#/$defs/ResponsesRoutingExperiential"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "ResponsesProfileDraft": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/ResponsesProfileDraftV1"
+        },
+        {
+          "$ref": "#/$defs/ResponsesProfileDraftV2"
+        }
+      ]
+    },
+    "ExecutionProfileCandidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "executor": {
+          "type": "string",
+          "enum": [
+            "hosted",
+            "cooperative"
+          ]
+        },
+        "model": {
+          "type": "string",
+          "maxLength": 8192
+        },
+        "connection_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "provider_destination": {
+          "type": "string",
+          "maxLength": 8192
+        },
+        "capabilities": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 8192
+          },
+          "maxItems": 4096
+        },
+        "cost_bound": {
+          "$ref": "#/$defs/Money"
+        },
+        "classification": {
+          "type": "string",
+          "enum": [
+            "internal",
+            "public",
+            "restricted"
+          ]
+        },
+        "context_capture": {
+          "type": "string",
+          "enum": [
+            "complete",
+            "partial",
+            "advisory"
+          ]
+        },
+        "adapter_profile": {
+          "$ref": "#/$defs/ResponsesProfileDraft"
+        },
+        "connection_version": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9223372036854775807
+        }
+      },
+      "required": [
+        "executor",
+        "model",
+        "connection_id",
+        "provider_destination",
+        "capabilities",
+        "cost_bound",
+        "classification",
+        "context_capture",
+        "adapter_profile",
+        "connection_version"
+      ]
+    },
+    "QualifiedExecutionProfile": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "executor": {
+          "type": "string",
+          "enum": [
+            "hosted",
+            "cooperative"
+          ]
+        },
+        "model": {
+          "type": "string",
+          "maxLength": 8192
+        },
+        "connection_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "provider_destination": {
+          "type": "string",
+          "maxLength": 8192
+        },
+        "capabilities": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 8192
+          },
+          "maxItems": 4096
+        },
+        "cost_bound": {
+          "$ref": "#/$defs/Money"
+        },
+        "classification": {
+          "type": "string",
+          "enum": [
+            "internal",
+            "public",
+            "restricted"
+          ]
+        },
+        "context_capture": {
+          "type": "string",
+          "enum": [
+            "complete",
+            "partial",
+            "advisory"
+          ]
+        },
+        "adapter_profile": {
+          "$ref": "#/$defs/ResponsesProfile"
+        },
+        "connection_version": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9223372036854775807
+        }
+      },
+      "required": [
+        "executor",
+        "model",
+        "connection_id",
+        "provider_destination",
+        "capabilities",
+        "cost_bound",
+        "classification",
+        "context_capture",
+        "adapter_profile",
+        "connection_version"
       ]
     }
   },
@@ -26602,8 +27183,9 @@
           "callback_route": {
             "$ref": "#/$defs/CallbackRoute"
           },
-          "execution_profile": {
-            "$ref": "#/$defs/Ref"
+          "qualification_id": {
+            "type": "string",
+            "format": "uuid"
           }
         },
         "required": [
@@ -26624,7 +27206,7 @@
           "resource"
         ]
       },
-      "behavior": "Persist immutable action and logical effect for hosted steps/memory/probes/evaluation; required decisions produce awaiting_review. No physical call here. callback_route is an explicit controller-owned routing reference (worker turn/step or job id), persisted alongside the action and returned at claim; adapters never receive it. The controller resolves callback routing from this persisted route, never by inserting an undeclared attempt_id into strict adapter parameters. Hosted model actions pin an exact execution_profile VersionRef. Resolve and persist its strict secret-free adapter_profile during preparation; claims and reconciliation return the same historical profile. Recheck current connection version, credential and authority before send. Public inputs cannot inject Dispatch.adapter_profile.",
+      "behavior": "Persist immutable action and logical effect for hosted steps/memory/probes/evaluation; required decisions produce awaiting_review. No physical call here. callback_route is an explicit controller-owned routing reference (worker turn/step or job id), persisted alongside the action and returned at claim; adapters never receive it. The controller resolves callback routing from this persisted route, never by inserting an undeclared attempt_id into strict adapter parameters. Qualification-only preparation may name a pending configuration-owned qualification_id. Effects resolves that exact candidate through _configuration.execution_profile.qualification.resolve, validates that it agrees with the immutable action and active connection version, and persists the draft adapter profile on the effect. Only configuration may call this seam; ordinary operations still require an exact qualified execution_profile. Public inputs cannot inject Dispatch.adapter_profile.",
       "cli": [],
       "mcp": null,
       "submission_key": false,
@@ -26634,7 +27216,8 @@
         "memory",
         "connections",
         "skills",
-        "installation"
+        "installation",
+        "configuration"
       ],
       "scope_required": [
         "installation_id"
@@ -28972,6 +29555,73 @@
       "scope_required": []
     },
     {
+      "id": "_messaging.history",
+      "version": 1,
+      "owner": "messaging",
+      "visibility": "internal",
+      "mode": "query",
+      "effect": "local",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "scope": {
+            "$ref": "#/$defs/Scope"
+          },
+          "conversation_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "worker_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200
+          }
+        },
+        "required": [
+          "scope",
+          "conversation_id",
+          "worker_id",
+          "limit"
+        ]
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/Message"
+            },
+            "maxItems": 200
+          },
+          "complete": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "items",
+          "complete"
+        ]
+      },
+      "behavior": "Read at most 200 messages for the persisted worker turn from a conversation where that worker is a current participant. Preserve recipient-admission membership intervals, return messages chronologically, and set complete=false when older authorized history exists; execution must refuse dispatch rather than silently omit history. This internal operation is callable only by execution and never lets a public caller choose another principal.",
+      "cli": [],
+      "mcp": null,
+      "submission_key": false,
+      "expected_version": false,
+      "callers": [
+        "execution"
+      ],
+      "scope_required": [
+        "installation_id"
+      ]
+    },
+    {
       "id": "conversation.message.list",
       "version": 1,
       "owner": "messaging",
@@ -29778,6 +30428,70 @@
       ]
     },
     {
+      "id": "execution_profile.qualify",
+      "version": 1,
+      "owner": "configuration",
+      "visibility": "public",
+      "mode": "mutation",
+      "effect": "external_read",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "scope": {
+            "$ref": "#/$defs/Scope"
+          },
+          "definition": {
+            "$ref": "#/$defs/ExecutionProfileCandidate"
+          },
+          "qualification_cost_bound": {
+            "$ref": "#/$defs/Money"
+          }
+        },
+        "required": [
+          "scope",
+          "definition",
+          "qualification_cost_bound"
+        ]
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "job": {
+            "$ref": "#/$defs/Job"
+          }
+        },
+        "required": [
+          "job"
+        ]
+      },
+      "behavior": "Run one explicit, bounded provider qualification probe for this exact connection version, model, endpoint, route and pricing profile. The probe is separately authorized and accounted, accepts no capability-evidence input, and produces a trusted qualified profile only from the recorded physical-call observation. A lost acknowledgement remains outcome_unknown and is never silently resent; the caller retrieves the same job and may only start a new probe after authoritative non-execution.",
+      "cli": [
+        "execution_profile",
+        "qualify"
+      ],
+      "mcp": "zatiti_execution_profile_qualify",
+      "submission_key": true,
+      "expected_version": false,
+      "callers": [],
+      "completion_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "resource": {
+            "$ref": "#/$defs/QualifiedExecutionProfile"
+          }
+        },
+        "required": [
+          "resource"
+        ]
+      },
+      "scope_required": [
+        "installation_id"
+      ]
+    },
+    {
       "id": "_configuration.execution_profile.resolve",
       "version": 1,
       "owner": "configuration",
@@ -29824,6 +30538,53 @@
       "scope_required": [
         "installation_id"
       ]
+    },
+    {
+      "id": "_configuration.execution_profile.qualification.resolve",
+      "version": 1,
+      "owner": "configuration",
+      "visibility": "internal",
+      "mode": "query",
+      "effect": "local",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "qualification_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "qualification_id"
+        ]
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "candidate": {
+            "$ref": "#/$defs/ExecutionProfileCandidate"
+          },
+          "profile_digest": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        },
+        "required": [
+          "candidate",
+          "profile_digest"
+        ]
+      },
+      "behavior": "Resolve one pending, exact, secret-free provider-profile qualification candidate for Effects. This private seam is available only to Effects while preparing the corresponding qualification operation; it never resolves a public draft or an already-unknown job.",
+      "cli": [],
+      "mcp": null,
+      "submission_key": false,
+      "expected_version": false,
+      "callers": [
+        "effects"
+      ],
+      "scope_required": []
     },
     {
       "id": "_execution.turn.observation",
@@ -29878,6 +30639,178 @@
       "mcp": null,
       "submission_key": false,
       "expected_version": false,
+      "callers": [
+        "controller"
+      ],
+      "scope_required": []
+    },
+    {
+      "id": "_configuration.execution_profile.qualify.record",
+      "version": 1,
+      "owner": "configuration",
+      "visibility": "internal",
+      "mode": "mutation",
+      "effect": "local",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "job_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9223372036854775807
+          },
+          "generation": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9223372036854775807
+          },
+          "operation_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "profile_digest": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "artifact": {
+            "$ref": "#/$defs/ArtifactRef"
+          },
+          "qualified_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "adapter_version": {
+            "type": "string",
+            "maxLength": 8192
+          },
+          "source_revision": {
+            "type": "string",
+            "maxLength": 8192
+          },
+          "protocol_revision": {
+            "type": "string",
+            "maxLength": 8192
+          },
+          "capabilities": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 8192
+            },
+            "maxItems": 128
+          },
+          "limitations": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 8192
+            },
+            "maxItems": 128
+          }
+        },
+        "required": [
+          "job_id",
+          "expected_version",
+          "generation",
+          "operation_id",
+          "profile_digest",
+          "artifact",
+          "qualified_at",
+          "adapter_version",
+          "source_revision",
+          "protocol_revision",
+          "capabilities",
+          "limitations"
+        ]
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "resource": {
+            "$ref": "#/$defs/QualifiedExecutionProfile"
+          }
+        },
+        "required": [
+          "resource"
+        ]
+      },
+      "behavior": "Accept only the controller-recorded terminal success for the exact pending qualification job/effect and candidate profile digest. Verify current exact connection version and published evidence artifact, compute evidence binding from trusted runtime metadata, persist the qualified candidate idempotently, and return it for the durable job result. Refuse stale, failed, unknown, replay-conflicting or mismatched observations; never infer success from provider acceptance.",
+      "cli": [],
+      "mcp": null,
+      "submission_key": false,
+      "expected_version": true,
+      "callers": [
+        "controller"
+      ],
+      "scope_required": []
+    },
+    {
+      "id": "_configuration.execution_profile.qualify.finish",
+      "version": 1,
+      "owner": "configuration",
+      "visibility": "internal",
+      "mode": "mutation",
+      "effect": "local",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "job_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9223372036854775807
+          },
+          "generation": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9223372036854775807
+          },
+          "operation_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "profile_digest": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "failed",
+              "outcome_unknown"
+            ]
+          }
+        },
+        "required": [
+          "job_id",
+          "expected_version",
+          "generation",
+          "operation_id",
+          "profile_digest",
+          "state"
+        ]
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": []
+      },
+      "behavior": "Persist a trusted terminal failed or unknown qualification outcome against the exact pending job/effect/candidate, so the private candidate can never resolve for another dispatch. Success is recorded only through qualify.record.",
+      "cli": [],
+      "mcp": null,
+      "submission_key": false,
+      "expected_version": true,
       "callers": [
         "controller"
       ],

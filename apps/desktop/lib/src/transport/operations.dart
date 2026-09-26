@@ -128,6 +128,12 @@ abstract final class Operations {
   static const executionProfileList = OperationDescriptor.query(
     'execution_profile.list',
   );
+  static const executionProfileCreate = OperationDescriptor.mutation(
+    'execution_profile.create',
+  );
+  static const executionProfileQualify = OperationDescriptor.mutation(
+    'execution_profile.qualify',
+  );
   static const installationVerifierList = OperationDescriptor.query(
     'installation.verifier.list',
   );
@@ -140,6 +146,7 @@ abstract final class Operations {
   static const memoryList = OperationDescriptor.query('memory.list');
   static const memoryRetract = OperationDescriptor.mutation('memory.retract');
   static const memoryJobGet = OperationDescriptor.query('memory.job.get');
+  static const jobGet = OperationDescriptor.query('job.get');
 
   // ---- responsibility-to-schedule links -----------------------------------
 
@@ -196,11 +203,14 @@ abstract final class Operations {
     connectionCreate,
     modelProviderList,
     executionProfileList,
+    executionProfileCreate,
+    executionProfileQualify,
     installationVerifierList,
     memoryBindingList,
     memoryList,
     memoryRetract,
     memoryJobGet,
+    jobGet,
     scheduleList,
     autonomyQualificationList,
     runList,

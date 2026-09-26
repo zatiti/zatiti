@@ -16,6 +16,7 @@ var opSchemas = map[string][2]string{
 	"_messaging.admit":          {schemaInMessagingAdmit, schemaOutMessage},
 	"_messaging.bootstrap":      {schemaInMessagingBootstrap, schemaOutConversation},
 	"_messaging.pending":        {schemaInMessagingPending, schemaOutMessages},
+	"_messaging.history":        {schemaInMessagingHistory, schemaOutMessagingHistory},
 	"_messaging.ready":          {schemaInMessagingReady, schemaOutMessages},
 	"_messaging.processed":      {schemaInMessagingProcessed, schemaOutMessage},
 	"conversation.create":       {schemaInConversationCreate, schemaOutConversation},
@@ -33,6 +34,8 @@ const schemaOutMessage = `{"type":"object","additionalProperties":false,"propert
 
 const schemaOutMessages = `{"type":"object","additionalProperties":false,"properties":{"items":{"type":"array","items":{"$ref":"#/$defs/Message"},"maxItems":500}},"required":["items"]}`
 
+const schemaOutMessagingHistory = `{"type":"object","additionalProperties":false,"properties":{"items":{"type":"array","items":{"$ref":"#/$defs/Message"},"maxItems":200},"complete":{"type":"boolean"}},"required":["items","complete"]}`
+
 const schemaOutConversation = `{"type":"object","additionalProperties":false,"properties":{"resource":{"$ref":"#/$defs/Conversation"}},"required":["resource"]}`
 
 const schemaOutConversations = `{"type":"object","additionalProperties":false,"properties":{"items":{"type":"array","items":{"$ref":"#/$defs/Conversation"},"maxItems":500}},"required":["items"]}`
@@ -42,6 +45,8 @@ const schemaInMessagingAdmit = `{"type":"object","additionalProperties":false,"p
 const schemaInMessagingBootstrap = `{"type":"object","additionalProperties":false,"properties":{"scope":{"$ref":"#/$defs/Scope"},"owner_id":{"type":"string","format":"uuid"},"chief_id":{"type":"string","format":"uuid"}},"required":["scope","owner_id","chief_id"]}`
 
 const schemaInMessagingPending = `{"type":"object","additionalProperties":false,"properties":{"worker_id":{"type":"string","format":"uuid"},"limit":{"type":"integer","minimum":1,"maximum":100}},"required":["worker_id","limit"]}`
+
+const schemaInMessagingHistory = `{"type":"object","additionalProperties":false,"properties":{"scope":{"$ref":"#/$defs/Scope"},"conversation_id":{"type":"string","format":"uuid"},"worker_id":{"type":"string","format":"uuid"},"limit":{"type":"integer","minimum":1,"maximum":200}},"required":["scope","conversation_id","worker_id","limit"]}`
 
 const schemaInMessagingReady = `{"type":"object","additionalProperties":false,"properties":{"limit":{"type":"integer","minimum":1,"maximum":100}},"required":["limit"]}`
 

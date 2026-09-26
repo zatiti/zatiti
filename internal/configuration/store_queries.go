@@ -95,7 +95,7 @@ func fetchBindingByID(ctx context.Context, unit contract.Unit, install, id contr
 // fetchProfileByID loads one execution-profile row.
 func fetchProfileByID(ctx context.Context, unit contract.Unit, install, id contract.ID) (*profileRow, error) {
 	return scanProfile(unit.QueryRowContext(ctx,
-		"SELECT id, version, installation_id, executor, model, connection_id, provider_destination, capabilities_json, cost_bound_json, classification, context_capture, state, created_at, updated_at "+
+		"SELECT id, version, installation_id, executor, model, connection_id, provider_destination, capabilities_json, cost_bound_json, classification, context_capture, adapter_profile_json, connection_version, state, created_at, updated_at "+
 			"FROM configuration_execution_profiles WHERE installation_id = ? AND id = ?", install, id))
 }
 

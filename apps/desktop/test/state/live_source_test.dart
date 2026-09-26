@@ -5,6 +5,7 @@ import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zatiti_desktop/src/app/local_store.dart';
+import 'package:zatiti_desktop/src/api/models.dart' as wire;
 import 'package:zatiti_desktop/src/state/live_source.dart';
 import 'package:zatiti_desktop/src/state/snapshot.dart';
 import 'package:zatiti_desktop/src/state/view_state.dart';
@@ -696,6 +697,136 @@ void main() {
   });
 
   tearDown(() => fake.stop());
+
+  test(
+    'provider setup recovery preserves exact command identity for every phase',
+    () async {
+      final source = c.source as LiveWorkspaceSource;
+      final plan = PlanOutcome(
+        planId: _id(810),
+        baseRevision: 4,
+        candidateDigest: 'd' * 64,
+        diagnostics: const [],
+        pendingRequirements: const [],
+      );
+      final profile = wire.ExecutionProfile(
+        id: _id(812),
+        version: 3,
+        executor: 'responses',
+        model: 'z-ai/glm-flash-latest',
+        connectionId: _id(813),
+        providerDestination: 'https://openrouter.ai/api/v1',
+        costBound: const wire.Money(currency: 'USD', microUnits: 20000),
+        contextCapture: 'complete',
+        provider: 'openrouter',
+        adapterProfile: const <String, Object?>{
+          'schema': 'zatiti.responses/v2',
+          'provider': 'openrouter',
+          'model': 'z-ai/glm-flash-latest',
+        },
+        connectionVersion: 1,
+        costEnforcement: 'enforced',
+        raw: <String, Object?>{
+          'id': _id(812),
+          'version': 3,
+          'executor': 'responses',
+          'model': 'z-ai/glm-flash-latest',
+          'connection_id': _id(813),
+          'connection_version': 1,
+          'provider_destination': 'https://openrouter.ai/api/v1',
+          'cost_bound': <String, Object?>{
+            'currency': 'USD',
+            'micro_units': 20000,
+          },
+          'context_capture': 'complete',
+          'capabilities': <Object?>[],
+          'classification': 'provider-generated',
+          'adapter_profile': <String, Object?>{
+            'schema': 'zatiti.responses/v2',
+            'provider': 'openrouter',
+            'model': 'z-ai/glm-flash-latest',
+          },
+        },
+      );
+      final worker = wire.Worker.fromJson(
+        _worker(_chief, _rootOrg, 'personal-chief', 'Wren'),
+      );
+      final requests = <(String, PendingSubmission)>[
+        (
+          'qualify',
+          source.prepareExecutionProfileQualification(
+            definition: const <String, Object?>{'model': 'fixture'},
+            qualificationCostBound: const wire.Money(
+              currency: 'USD',
+              microUnits: 20000,
+            ),
+          ),
+        ),
+        (
+          'profile_stage',
+          source.prepareExecutionProfileCreate(const <String, Object?>{
+            'model': 'fixture',
+          }),
+        ),
+        (
+          'profile_plan',
+          source.preparePlan(draftId: _id(811), expectedVersion: 2),
+        ),
+        ('profile_apply', source.prepareApplyPlan(plan)),
+        (
+          'worker_profile_stage',
+          source.prepareWorkerProfileUpdateFor(
+            worker: worker,
+            profile: profile,
+          ),
+        ),
+        (
+          'worker_profile_plan',
+          source.preparePlan(draftId: _id(814), expectedVersion: 5),
+        ),
+        ('worker_profile_apply', source.prepareApplyPlan(plan)),
+      ];
+
+      for (final (step, original) in requests) {
+        final record = source.providerSetupRecoveryRecord(original);
+        final restored = source.restoreProviderSetupSubmission(step, record);
+        expect(
+          source.providerSetupRecoveryRecord(restored),
+          record,
+          reason: step,
+        );
+        final requestCount = fake.requests.length;
+        await expectLater(source.submit(restored), throwsStateError);
+        expect(
+          fake.requests.length,
+          requestCount,
+          reason: '$step must only be reconciled, never replayed after restore',
+        );
+      }
+
+      // A restart-restored command becomes sendable only after command.get
+      // authoritatively proves it was not committed. The retry must preserve
+      // the original key and exact serialized bytes.
+      final original = source.preparePlan(
+        draftId: _id(815),
+        expectedVersion: 6,
+      );
+      final originalRecord = source.providerSetupRecoveryRecord(original);
+      final restored = source.restoreProviderSetupSubmission(
+        'profile_plan',
+        originalRecord,
+      );
+      expect(await source.resolve(restored), isA<ResolvedNotReceived>());
+      final beforeRetry = fake.requests.length;
+      await expectLater(source.submit(restored), throwsA(anything));
+      expect(fake.requests.length, beforeRetry + 1);
+      expect(fake.requests.last.submissionKey, originalRecord['key']);
+      expect(
+        fake.requests.last.body,
+        utf8.decode(base64Decode(originalRecord['body']! as String)),
+      );
+    },
+  );
 
   Future<void> approve() {
     final r = c.decision(ReviewId(_reviewId))!.review;

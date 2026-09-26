@@ -1,19 +1,18 @@
 # Packaging
 
 This root owns the Zatiti distribution lifecycle: release manifests, service
-launchers, the installation-time secure helper, and the record of the pinned
-Serenity distribution. It imports the Go standard library only.
+launchers, the installation-time secure helper, and hosted or optional
+self-hosted Serenity metadata. It imports the Go standard library only.
 
 ## Status
 
-No release exists. The controller binary (`cmd/zatiti`) is landed but no
-release build of it has been packaged; the Flutter desktop client
-(`apps/desktop`) has not been built for release; the Serenity pin and the
-Flutter, Dart, and plugin pins are unresolved in
-`docs/implementation/dependencies.lock.json`. The `zatiti-pack` executable
-below is a real packaging/install driver, not an installation command for a
-release: it needs a staged tree, and none exists until the gaps above close.
-Nothing here claims that an artifact is signed, notarized, or published.
+No release exists. The controller and Flutter client have not been assembled
+into a qualified, signed release. The source Serenity pin and Flutter, Dart,
+and plugin pins are recorded in `docs/implementation/dependencies.lock.json`,
+but the hosted Serenity interface is not qualified for Zatiti's full memory
+requirements. The `zatiti-pack` executable below is a packaging/install
+driver, not an installation command for a release. Nothing here claims that
+an artifact is signed, notarized, or published.
 
 Everything in this root is proven against synthetic trees in temporary
 directories, including `zatiti-pack`'s own tests, which run the real
@@ -112,8 +111,9 @@ A manifest describes one distribution of one release for one target
 separately, so a headless host installs the controller alone:
 
 - `controller`: the `zatiti` binary (`serve`, `init`, the generated CLI, and
-  `mcp serve`), the pinned Serenity runtime and read facade, and the secure
-  helper record.
+  `mcp serve`) and the secure helper record. The Mac hosted mode uses remote
+  Serenity over OAuth and MCP and does not bundle a Serenity runtime or read
+  facade. An optional self-hosted mode may declare its own qualified runtime.
 - `desktop`: the Flutter application bundle from `flutter build macos` or
   `flutter build linux` (release mode), as one `tar.gz` artifact because a
   macOS `.app` holds symlinks that a flat tree refuses, plus the Flutter and
@@ -133,9 +133,11 @@ Every manifest carries:
   evidence in the tree;
 - attestations, each pointing at an evidence file in the tree.
 
-The controller distribution adds the Serenity pin (source, version, revision,
-license, interface version, runtime, read facade, and qualification evidence)
-and the secure helper for the target. The desktop distribution adds the
+For hosted Mac mode, the controller distribution records the hosted endpoint,
+OAuth profile contract, and only qualified capability evidence; it does not
+install or launch Serenity. A self-hosted mode must record its source,
+version, revision, license, interface, runtime, read facade, and qualification
+evidence. The desktop distribution adds the
 desktop section and carries no controller binary, Serenity pin, secure
 helper, controller state, database driver, or credential: file names that
 look like state or key material are refused, and a named list of SQLite
@@ -152,8 +154,9 @@ Validation enforces these rules:
 - A profile, a Serenity pin, or a code signature, notarization, or
   qualification attestation without an evidence file in the tree is
   rejected. A claim cannot be made without its evidence.
-- An absent Serenity pin returns `prerequisite_missing`. The package invents
-  no Serenity version, interface, or launch command.
+- A hosted Mac manifest may omit a local Serenity pin. Any claimed hosted or
+  self-hosted capability still requires evidence; the package invents no
+  Serenity version, interface, or launch command.
 - No file is group writable or world writable, and no file carries `setuid`,
   `setgid`, or sticky bits.
 
@@ -208,8 +211,8 @@ notices.
 
 The controller launcher runs `<controller> serve`. Any further argument comes
 from the caller, because the entrypoint's flags are not part of the frozen
-contract. A Serenity launcher takes its executable and arguments from the
-qualified pin.
+contract. A local Serenity launcher takes its executable and arguments from
+the qualified self-hosted pin. Hosted Mac mode has no Serenity launcher.
 
 The controller listens on `<state dir>/zatiti.sock` unless `--socket` or
 `ZATITI_SOCKET` says otherwise, and `cmd/zatiti` refuses a socket path of 104

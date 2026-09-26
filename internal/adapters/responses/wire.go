@@ -110,15 +110,20 @@ type wireResponsesProfileV2 struct {
 // zero value. MarshalJSON re-splits it back into the exact shape its Kind
 // names, for the one caller (tests) that constructs an action as a Go value.
 type wireResponsesParameters struct {
-	Schema                string           `json:"schema"`
-	Kind                  string           `json:"kind"`
-	SessionHandle         string           `json:"session_handle"`
-	ContextArtifact       wireArtifactRef  `json:"context_artifact"`
-	MaxOutputTokens       int64            `json:"max_output_tokens"`
-	ToolContractVersions  []wireVersionRef `json:"tool_contract_versions"`
-	ContinuationReference string           `json:"continuation_reference,omitempty"`
-	SessionMode           string           `json:"session_mode,omitempty"`
-	SessionID             string           `json:"session_id,omitempty"`
+	Schema                 string           `json:"schema"`
+	Kind                   string           `json:"kind"`
+	SessionHandle          string           `json:"session_handle"`
+	ContextArtifact        wireArtifactRef  `json:"context_artifact"`
+	MaxOutputTokens        int64            `json:"max_output_tokens"`
+	ToolContractVersions   []wireVersionRef `json:"tool_contract_versions"`
+	ContinuationReference  string           `json:"continuation_reference,omitempty"`
+	SessionMode            string           `json:"session_mode,omitempty"`
+	SessionID              string           `json:"session_id,omitempty"`
+	Model                  string           `json:"model,omitempty"`
+	ProbeText              string           `json:"probe_text,omitempty"`
+	ProfileDigest          contract.Digest  `json:"profile_digest,omitempty"`
+	QualificationCostBound wireMoney        `json:"qualification_cost_bound,omitempty"`
+	Provider               string           `json:"provider,omitempty"`
 }
 
 // MarshalJSON encodes w as exactly ResponsesPrepareSessionParameters (only
@@ -135,6 +140,19 @@ func (w wireResponsesParameters) MarshalJSON() ([]byte, error) {
 				SessionMode string `json:"session_mode"`
 				SessionID   string `json:"session_id,omitempty"`
 			}{w.Schema, w.Kind, w.SessionMode, w.SessionID})
+		}
+		if w.Kind == kindQualificationProbe {
+			return json.Marshal(struct {
+				Schema          string          `json:"schema"`
+				Kind            string          `json:"kind"`
+				SessionMode     string          `json:"session_mode"`
+				Model           string          `json:"model"`
+				ProbeText       string          `json:"probe_text"`
+				MaxOutputTokens int64           `json:"max_output_tokens"`
+				ProfileDigest   contract.Digest `json:"profile_digest"`
+				CostBound       wireMoney       `json:"qualification_cost_bound"`
+				Provider        string          `json:"provider"`
+			}{w.Schema, w.Kind, w.SessionMode, w.Model, w.ProbeText, w.MaxOutputTokens, w.ProfileDigest, w.QualificationCostBound, w.Provider})
 		}
 		return json.Marshal(struct {
 			Schema                string           `json:"schema"`
@@ -275,7 +293,7 @@ type wirePhysicalCallEvidence struct {
 	RequestedDestination string            `json:"requested_destination"`
 	ResolvedDestination  string            `json:"resolved_destination"`
 	ProfileDigest        contract.Digest   `json:"profile_digest"`
-	CapabilityEvidence   wireArtifactRef   `json:"capability_evidence"`
+	CapabilityEvidence   *wireArtifactRef  `json:"capability_evidence,omitempty"`
 	StartedAt            time.Time         `json:"started_at"`
 	FinishedAt           time.Time         `json:"finished_at"`
 	RequestContext       wireStagedLocator `json:"request_context"`
@@ -360,6 +378,8 @@ type wireResponsesEvidence struct {
 
 type wireResponsesEvidenceV2 struct {
 	Schema          string                   `json:"schema"`
+	Kind            string                   `json:"kind,omitempty"`
+	Qualification   *wireQualificationMetadataV2 `json:"qualification,omitempty"`
 	PhysicalCall    wirePhysicalCallEvidence `json:"physical_call"`
 	SessionHandle   string                   `json:"session_handle,omitempty"`
 	ResponseID      string                   `json:"response_id,omitempty"`
@@ -368,4 +388,12 @@ type wireResponsesEvidenceV2 struct {
 	OutputArtifacts []wireArtifactRef        `json:"output_artifacts,omitempty"`
 	SessionMode     string                   `json:"session_mode"`
 	SessionID       string                   `json:"session_id,omitempty"`
+}
+
+type wireQualificationMetadataV2 struct {
+	AdapterVersion   string   `json:"adapter_version"`
+	SourceRevision   string   `json:"source_revision"`
+	ProtocolRevision string   `json:"protocol_revision"`
+	Capabilities     []string `json:"capabilities"`
+	Limitations      []string `json:"limitations"`
 }

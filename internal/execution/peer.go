@@ -155,6 +155,23 @@ func (s *Service) callMessagingPending(ctx context.Context, unit contract.Unit, 
 	return body.Items, nil
 }
 
+func (s *Service) callMessagingHistory(ctx context.Context, unit contract.Unit, scope contract.Scope, conversationID, workerID contract.ID, limit int64) ([]wireMessage, bool, error) {
+	data, err := s.callPeer(ctx, unit, peerMessagingHistory, map[string]any{
+		"scope": scope, "conversation_id": conversationID, "worker_id": workerID, "limit": limit,
+	})
+	if err != nil {
+		return nil, false, err
+	}
+	var body struct {
+		Items    []wireMessage `json:"items"`
+		Complete bool          `json:"complete"`
+	}
+	if err := contract.DecodeStrict(data, &body); err != nil {
+		return nil, false, fmt.Errorf("execution: decode messaging history response: %w", err)
+	}
+	return body.Items, body.Complete, nil
+}
+
 // callMemorySelect filters the current authorized bindings before any
 // retrieval: a binding outside the caller's permission or freshness bound
 // refuses here, before any context bytes are built or staged.

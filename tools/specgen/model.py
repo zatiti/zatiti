@@ -3,7 +3,7 @@ from copy import deepcopy
 
 # Specification revision. Bump with every coordinated contract revision; the renderer
 # refuses to render unless contracts.md names the same revision in its title.
-REVISION=13
+REVISION=17
 
 S={'type':'string','maxLength':8192}
 ID={'type':'string','format':'uuid'}
@@ -282,7 +282,7 @@ internal('admit','effects',obj(operation_id=ID,expected_version=VER),one('Operat
 internal('claim','effects',obj(operation_id=ID,attempt_id=ID,generation=VER),one('Dispatch'),'Consume one-use attempt claim after current generation, revocation, expiry, restriction and action checks. Dispatch never returned to cooperative workers.',['controller'])
 internal('record','effects',obj(operation_id=ID,attempt_id=ID,generation=VER,observation=ref('Observation')),one('Operation'),'Store actual provider observation plus cost settlement/uncertainty atomically. Lost record is recoverable without blind resend. Contradictory late evidence records correction/dispute.',['controller'])
 internal('pending','effects',obj(limit={'type':'integer','minimum':1,'maximum':100}),obj(operations=arr(ref('Operation'),100)),'List pending intents/confirmation/reconciliation obligations; claimed attempts after restart become unknown, not ready for resend.',['controller','installation'],mode='query')
-internal('prepare','effects',obj(scope=ref('Scope'),action=ref('Action'),source_id=ID),one('Operation'),'Persist immutable action and logical effect for hosted steps/memory/probes/evaluation; required decisions produce awaiting_review. No physical call here.',['execution','memory','connections','skills','installation'])
+internal('prepare','effects',obj(scope=ref('Scope'),action=ref('Action'),source_id=ID),one('Operation'),'Persist immutable action and logical effect for hosted steps/memory/probes/evaluation; required decisions produce awaiting_review. No physical call here.',['execution','memory','connections','skills','installation','configuration'])
 internal('tick','execution',obj(now=TIME,limit={'type':'integer','minimum':1,'maximum':100}),obj(attempt_ids=arr(ID)),'Admit bounded owned work/expire leases; persist request context artifact before preparing model effect. Any blob staging happens via IO boundary before this method. No network inside transaction.',['controller'])
 internal('context','execution',obj(attempt_id=ID,context=ref('Context')),one('Attempt'),'Pin persisted model-visible messages/instructions/tools/results/memory/compaction lineage and safe-boundary mailbox injection before dispatch.',['controller'])
 internal('observation','execution',obj(attempt_id=ID,operation_id=ID,observation=ref('Observation')),one('Attempt'),'Continue bounded model loop from recorded effect; dispatch declared tools via effects owner, persist output context, verify submitted task independently.',['controller'])
@@ -369,6 +369,7 @@ for o in OPS:
 _COMPLETIONS={
  'skill.evaluate':obj(evaluation_id=ID,passed=BOOL,evidence=arr(ref('ArtifactRef'))),
  'connection.validate':one('Connection'),'connection.rotate':one('Connection'),
+ 'execution_profile.qualify':one('QualifiedExecutionProfile'),
  'operation.reconcile':one('Operation'),
  'memory.recall':obj(context_artifact=ref('ArtifactRef'),claims=arr(ref('Claim')),brain_versions=arr(ref('Ref')),freshness=TIME,requirements=arr(ref('Requirement'))),
  'memory.remember':obj(claims=arr(ref('Claim')),obligations=arr(ref('Requirement'))),
@@ -426,7 +427,7 @@ D['ProposalRecord']=obj(
 D['CallbackRoute']=obj(kind=enum('worker_turn','job','memory','skill','connection'),**{'turn_id?':ID,'step_index?':INT,'job_id?':ID})
 D['OperationAttempt']=obj(attempt_id=ID,generation=VER)
 D['WorkItem']=obj(id=ID,kind=enum('claim','context','proposal','resume'),scope=ref('Scope'),turn=ref('WorkerTurn'),**{'run_id?':ID})
-D['ContextPlan']=obj(id=ID,turn_id=ID,expected_version=VER,generation=VER,refs=arr(ref('ArtifactRef')),configuration_revision=VER,byte_bound=INT,token_bound=INT)
+D['ContextPlan']=obj(id=ID,turn_id=ID,expected_version=VER,generation=VER,scope=ref('Scope'),**{'attempt_id?':ID},refs=arr(ref('ArtifactRef')),configuration_revision=VER,byte_bound=INT,token_bound=INT,recipe=JSON)
 
 # Unique source identity (installation_id, source_kind, source_id, source_version,
 # recipient_worker_id) makes _execution.turn.admit idempotent re-admission. A pending
@@ -451,6 +452,7 @@ internal('evidence.record','tasks',obj(task_id=ID,attempt_id=ID,expected_version
 internal('dependencies.wake','tasks',obj(completed_task_id=ID,limit={'type':'integer','minimum':1,'maximum':100},**{'cursor?':S}),obj(dependents=arr(ref('Task'),100),**{'next_cursor?':S}),'Bounded scan of dependents blocked on a just-completed task; revalidate current eligibility per dependent and never report success for a dependent whose required child failed.',['execution','controller'])
 internal('ready','messaging',obj(limit={'type':'integer','minimum':1,'maximum':100}),page('Message'),'Bounded fair scan of admitted messages awaiting a durable worker turn, scoped and ordered without acknowledgment.',['execution','controller'],mode='query')
 internal('processed','messaging',obj(message_id=ID,recipient_id=ID,turn_id=ID,**{'context_artifact?':ref('ArtifactRef')}),one('Message'),'Record durable delivery disposition sharing the same transaction as turn admission/context commit; replay of the same message/turn pair is idempotent.',['execution'])
+internal('history','messaging',obj(scope=ref('Scope'),conversation_id=ID,worker_id=ID,limit={'type':'integer','minimum':1,'maximum':200}),obj(items=arr(ref('Message'),200),complete=BOOL),'Read at most 200 messages for the persisted worker turn from a conversation where that worker is a current participant. Preserve recipient-admission membership intervals, return messages chronologically, and set complete=false when older authorized history exists; execution must refuse dispatch rather than silently omit history. This internal operation is callable only by execution and never lets a public caller choose another principal.',['execution'],mode='query')
 add('conversation.message.list','messaging',fields({**SC,'conversation_id':ID,'cursor?':S,'limit?':{'type':'integer','minimum':1,'maximum':200}}),page('Message'),'Read authorized sent/received message history for a conversation, limited to disclosed membership intervals; joining a group discloses no retroactive restricted history.',mode='query')
 D['Conversation']['properties'].update(caller_unread_count=deepcopy(INT),caller_last_read_marker=deepcopy(TIME))
 # conversation.get/list now also return the calling principal's unread count and read
@@ -564,8 +566,20 @@ D['ResponsesProfileV2']=obj(schema={'const':'zatiti.responses/v2','type':'string
 D['ResponsesProfileV2']['allOf']=[{'if':{'properties':{'provider':{'const':'openai'}},'required':['provider']},'then':{'properties':{'session_mode':{'const':'provider_conversation'},'endpoint':{'const':'https://api.openai.com/v1/responses'},'routing':obj()}}},{'if':{'properties':{'provider':{'const':'openrouter'}},'required':['provider']},'then':{'properties':{'session_mode':{'const':'stateless'},'endpoint':{'const':'https://openrouter.ai/api/v1/responses'},'routing':ref('ResponsesRoutingOpenRouter')}}},{'if':{'properties':{'provider':{'const':'experiential'}},'required':['provider']},'then':{'properties':{'session_mode':{'const':'stateless'},'endpoint':{'const':'https://api.experientiallabs.ai/v1/responses'},'routing':ref('ResponsesRoutingExperiential')}}}]
 D['ResponsesProfile']= {'oneOf':[ref('ResponsesProfileV1'),ref('ResponsesProfileV2')]}
 
+# A qualification request has the same bounded, secret-free provider settings
+# as an executable profile, but deliberately carries no client-authored
+# capability evidence. Only a trusted qualification completion can produce a
+# complete ResponsesProfile.
+_D_RESPONSES_DRAFT_COMMON={k:deepcopy(v) for k,v in _D_RESPONSES_COMMON.items() if k!='capability_evidence'}
+D['ResponsesProfileDraftV1']=obj(schema={'const':'zatiti.responses/v1','type':'string'},**_D_RESPONSES_DRAFT_COMMON)
+D['ResponsesProfileDraftV2']=obj(schema={'const':'zatiti.responses/v2','type':'string'},**_D_RESPONSES_DRAFT_COMMON,provider=enum('openai','openrouter','experiential'),session_mode=enum('provider_conversation','stateless'),routing={'oneOf':[obj(),ref('ResponsesRoutingOpenRouter'),ref('ResponsesRoutingExperiential')]})
+D['ResponsesProfileDraftV2']['allOf']=deepcopy(D['ResponsesProfileV2']['allOf'])
+D['ResponsesProfileDraft']={'oneOf':[ref('ResponsesProfileDraftV1'),ref('ResponsesProfileDraftV2')]}
+D['ExecutionProfileCandidate']=obj(executor=enum('hosted','cooperative'),model=S,connection_id=ID,provider_destination=S,capabilities=arr(S),cost_bound=ref('Money'),classification=enum('internal','public','restricted'),context_capture=enum('complete','partial','advisory'),adapter_profile=ref('ResponsesProfileDraft'),connection_version=VER)
+D['QualifiedExecutionProfile']=obj(executor=enum('hosted','cooperative'),model=S,connection_id=ID,provider_destination=S,capabilities=arr(S),cost_bound=ref('Money'),classification=enum('internal','public','restricted'),context_capture=enum('complete','partial','advisory'),adapter_profile=ref('ResponsesProfile'),connection_version=VER)
+
 # --- Revision 12: versioned provider profiles and stateless turn dispatch ---
-D['ContextPlan']=obj(id=ID,turn_id=ID,expected_version=VER,generation=VER,refs=arr(ref('ArtifactRef')),configuration_revision=VER,byte_bound=INT,token_bound=INT)
+D['ContextPlan']=obj(id=ID,turn_id=ID,expected_version=VER,generation=VER,scope=ref('Scope'),**{'attempt_id?':ID},refs=arr(ref('ArtifactRef')),configuration_revision=VER,byte_bound=INT,token_bound=INT,recipe=JSON)
 D['ProviderDescriptor']=obj(id=enum('openai','openrouter','experiential'),display_name=S,default_endpoint=S,session_mode=enum('provider_conversation','stateless'),credential_setup=enum('api_key'))
 D['ProviderDescriptor']['allOf']=[
  {'if':{'properties':{'id':{'const':'openai'}},'required':['id']},'then':{'properties':{'default_endpoint':{'const':'https://api.openai.com/v1/responses'},'session_mode':{'const':'provider_conversation'}}}},
@@ -573,12 +587,19 @@ D['ProviderDescriptor']['allOf']=[
  {'if':{'properties':{'id':{'const':'experiential'}},'required':['id']},'then':{'properties':{'default_endpoint':{'const':'https://api.experientiallabs.ai/v1/responses'},'session_mode':{'const':'stateless'}}}}
 ]
 add('model.provider.list','connections',fields(SC),obj(items=arr(ref('ProviderDescriptor'),3)),'Return the fixed supported provider presets and endpoints; no network/catalog request, credentials, or account identity. Provider validation is a separate bounded connection.validate job.',mode='query')
+add('execution_profile.qualify','configuration',obj(scope=ref('Scope'),definition=ref('ExecutionProfileCandidate'),qualification_cost_bound=ref('Money')),
+    obj(job=ref('Job')),
+    'Run one explicit, bounded provider qualification probe for this exact connection version, model, endpoint, route and pricing profile. The probe is separately authorized and accounted, accepts no capability-evidence input, and produces a trusted qualified profile only from the recorded physical-call observation. A lost acknowledgement remains outcome_unknown and is never silently resent; the caller retrieves the same job and may only start a new probe after authoritative non-execution.',
+    effect='external_read')
 internal('execution_profile.resolve','configuration',obj(scope=ref('Scope'),profile=ref('Ref')),one('ExecutionProfile'),'Resolve the exact immutable hosted execution-profile version under current scoped authority, including its validated secret-free adapter_profile and connection version. Never substitute the latest worker setting.',['execution','effects'],mode='query')
+internal('execution_profile.qualification.resolve','configuration',obj(qualification_id=ID),obj(candidate=ref('ExecutionProfileCandidate'),profile_digest=DIG),'Resolve one pending, exact, secret-free provider-profile qualification candidate for Effects. This private seam is available only to Effects while preparing the corresponding qualification operation; it never resolves a public draft or an already-unknown job.',['effects'],mode='query')
 internal('turn.observation','execution',obj(turn_id=ID,step_index=INT,operation_id=ID,observation=JSON),one('WorkerTurn'),'Authenticate the persisted effects callback route, fence turn generation and step, and idempotently record the model observation by operation ID. Chat has no task or fabricated Attempt; task compatibility delegates while task success still requires verification.',['controller'])
+internal('execution_profile.qualify.record','configuration',obj(job_id=ID,expected_version=VER,generation=VER,operation_id=ID,profile_digest=DIG,artifact=ref('ArtifactRef'),qualified_at=TIME,adapter_version=S,source_revision=S,protocol_revision=S,capabilities=arr(S,128),limitations=arr(S,128)),one('QualifiedExecutionProfile'),'Accept only the controller-recorded terminal success for the exact pending qualification job/effect and candidate profile digest. Verify current exact connection version and published evidence artifact, compute evidence binding from trusted runtime metadata, persist the qualified candidate idempotently, and return it for the durable job result. Refuse stale, failed, unknown, replay-conflicting or mismatched observations; never infer success from provider acceptance.',['controller'])
+internal('execution_profile.qualify.finish','configuration',obj(job_id=ID,expected_version=VER,generation=VER,operation_id=ID,profile_digest=DIG,state=enum('failed','outcome_unknown')),obj(),'Persist a trusted terminal failed or unknown qualification outcome against the exact pending job/effect/candidate, so the private candidate can never resolve for another dispatch. Success is recorded only through qualify.record.',['controller'])
 for o in OPS:
     if o['id']=='_effects.prepare':
-        o['input_schema']['properties']['execution_profile']=ref('Ref')
-        o['behavior']+=' Hosted model actions pin an exact execution_profile VersionRef. Resolve and persist its strict secret-free adapter_profile during preparation; claims and reconciliation return the same historical profile. Recheck current connection version, credential and authority before send. Public inputs cannot inject Dispatch.adapter_profile.'
+        o['input_schema']['properties']['qualification_id']=ID
+        o['behavior']+=' Qualification-only preparation may name a pending configuration-owned qualification_id. Effects resolves that exact candidate through _configuration.execution_profile.qualification.resolve, validates that it agrees with the immutable action and active connection version, and persists the draft adapter profile on the effect. Only configuration may call this seam; ordinary operations still require an exact qualified execution_profile. Public inputs cannot inject Dispatch.adapter_profile.'
     if o['id']=='_execution.context.prepare':
         o['behavior']+=' The matching trusted ContextPerformer receives the resulting ContextPlan outside a write Unit; _execution.context.commit alone publishes after generation, authority and referenced-version checks.'
 
@@ -602,6 +623,11 @@ for o in OPS:
 # way an ordinary caller-facing operation's "scope" is.
 _SCOPE_REQUIRED_EXEMPT={'_configuration.export.prepare'}
 for _o in OPS:
+    # Later coordinated revisions may add async operations after the initial
+    # catalog pass above; bind their completion contract only after the final
+    # operation surface is known.
+    if _o['id'] in _COMPLETIONS:
+        _o['completion_schema']=_COMPLETIONS[_o['id']]
     if _o['id'] in _SCOPE_REQUIRED_EXEMPT:
         _o['scope_required']=[]
     else:

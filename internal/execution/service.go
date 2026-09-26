@@ -86,6 +86,7 @@ const (
 	// memory's authorized bindings and connections' validated tool/
 	// connection resolution.
 	peerMessagingPending   = "_messaging.pending"
+	peerMessagingHistory   = "_messaging.history"
 	peerMemorySelect       = "_memory.select"
 	peerConnectionsResolve = "_connections.resolve"
 
@@ -198,6 +199,7 @@ type Service struct {
 
 // Compile-time proof that *Service implements the shared Module contract.
 var _ contract.Module = (*Service)(nil)
+var _ contract.ContextPerformer = (*Service)(nil)
 
 // New constructs the execution owner. It never queries peers, touches
 // storage or starts goroutines; all runtime coupling arrives through deps.

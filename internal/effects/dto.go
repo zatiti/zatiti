@@ -365,10 +365,33 @@ type taskBody struct {
 // Operation inputs.
 
 type prepareInput struct {
-	Scope         wireScope          `json:"scope"`
-	Action        wireAction         `json:"action"`
-	SourceID      contract.ID        `json:"source_id"`
-	CallbackRoute *wireCallbackRoute `json:"callback_route,omitempty"`
+	Scope           wireScope          `json:"scope"`
+	Action          wireAction         `json:"action"`
+	SourceID        contract.ID        `json:"source_id"`
+	CallbackRoute   *wireCallbackRoute `json:"callback_route,omitempty"`
+	QualificationID contract.ID        `json:"qualification_id,omitempty"`
+}
+
+type qualificationResolveInput struct {
+	QualificationID contract.ID `json:"qualification_id"`
+}
+
+type wireQualificationCandidate struct {
+	Candidate     json.RawMessage `json:"candidate"`
+	ProfileDigest string          `json:"profile_digest"`
+}
+
+type qualificationCandidateDef struct {
+	Executor            string          `json:"executor"`
+	Model               string          `json:"model"`
+	ConnectionID        contract.ID     `json:"connection_id"`
+	ProviderDestination string          `json:"provider_destination"`
+	Capabilities        []string        `json:"capabilities"`
+	CostBound           wireMoney       `json:"cost_bound"`
+	Classification      string          `json:"classification"`
+	ContextCapture      string          `json:"context_capture"`
+	AdapterProfile      json.RawMessage `json:"adapter_profile"`
+	ConnectionVersion   int64           `json:"connection_version"`
 }
 
 // admitInput is also the wire input of _effects.reconciliation.prepare: the

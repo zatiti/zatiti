@@ -2,9 +2,13 @@
 // configuration draft → plan → apply path. The editor cannot author profile
 // evidence or dispatch JSON.
 
+import 'dart:async';
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 
 import '../api/models.dart' as wire;
+import '../app/credential_store.dart';
 import '../state/live_source.dart';
 import '../state/workspace_controller.dart';
 import '../state/workspace_source.dart';
@@ -14,21 +18,27 @@ Future<void> showProviderModelEditor(
   BuildContext context, {
   required WorkspaceController controller,
   required String workerId,
+  required CredentialStore? credentials,
 }) => showDialog<void>(
   context: context,
   barrierLabel: 'Close model selection',
-  builder: (_) =>
-      _ProviderModelEditor(controller: controller, workerId: workerId),
+  builder: (_) => _ProviderModelEditor(
+    controller: controller,
+    workerId: workerId,
+    credentials: credentials,
+  ),
 );
 
 class _ProviderModelEditor extends StatefulWidget {
   const _ProviderModelEditor({
     required this.controller,
     required this.workerId,
+    required this.credentials,
   });
 
   final WorkspaceController controller;
   final String workerId;
+  final CredentialStore? credentials;
 
   @override
   State<_ProviderModelEditor> createState() => _ProviderModelEditorState();
@@ -42,6 +52,8 @@ class _ProviderModelEditorState extends State<_ProviderModelEditor> {
   String? _status;
   bool _busy = false;
   bool _unknown = false;
+  bool _recoveryLoading = true;
+  bool _recoveryUnavailable = false;
   PendingSubmission? _pending;
   String? _pendingStep;
   ResourceSubmission<DraftedResource>? _stage;
@@ -50,6 +62,7 @@ class _ProviderModelEditorState extends State<_ProviderModelEditor> {
   @override
   void initState() {
     super.initState();
+    unawaited(_restoreRecovery());
     final source = widget.controller.source;
     if (source is LiveWorkspaceSource) {
       _profiles = source.api.executionProfiles();
@@ -85,6 +98,130 @@ class _ProviderModelEditorState extends State<_ProviderModelEditor> {
     }
   }
 
+  Future<void> _restoreRecovery() async {
+    final source = widget.controller.source;
+    final store = widget.credentials;
+    if (source is! LiveWorkspaceSource || store == null) {
+      _recoveryUnavailable = true;
+      _recoveryLoading = false;
+      if (mounted) {
+        setState(
+          () => _status =
+              'Secure recovery storage is unavailable. No profile assignment can be sent safely.',
+        );
+      }
+      return;
+    }
+    try {
+      final raw = await store.readNamed(store.keys.workerProfileSetup);
+      if (raw == null) return;
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map<String, Object?>) {
+        _recoveryUnavailable = true;
+        if (mounted) {
+          setState(
+            () => _status =
+                'The saved profile-assignment command is malformed. No new command was sent.',
+          );
+        }
+        return;
+      }
+      if (decoded['installation_id'] is String &&
+          decoded['installation_id'] != source.installationId) {
+        await store.deleteNamed(store.keys.workerProfileSetup);
+        return;
+      }
+      if (decoded['installation_id'] != source.installationId ||
+          decoded['phase'] != 'mutation' ||
+          decoded['step'] is! String ||
+          decoded['submission'] is! Map<String, Object?>) {
+        _recoveryUnavailable = true;
+        if (mounted) {
+          setState(
+            () => _status =
+                'The saved profile-assignment command is malformed or belongs to another installation. No new command was sent.',
+          );
+        }
+        return;
+      }
+      final step = decoded['step'] as String;
+      if (!const {
+        'worker_profile_stage',
+        'worker_profile_plan',
+        'worker_profile_apply',
+      }.contains(step)) {
+        _recoveryUnavailable = true;
+        if (mounted) {
+          setState(
+            () => _status =
+                'The saved profile-assignment phase is unknown. No new command was sent.',
+          );
+        }
+        return;
+      }
+      final restored = source.restoreProviderSetupSubmission(
+        step,
+        decoded['submission'] as Map<String, Object?>,
+      );
+      switch (step) {
+        case 'worker_profile_stage':
+          _stage = restored as ResourceSubmission<DraftedResource>;
+        case 'worker_profile_plan':
+          _plan = restored as ResourceSubmission<PlanOutcome>;
+      }
+      _pending = restored;
+      _pendingStep = step;
+      _unknown = true;
+      if (mounted) {
+        setState(
+          () => _status =
+              'Recovering the original profile-assignment command from secure storage.',
+        );
+      }
+      await _checkStatus(source);
+    } on Object {
+      _recoveryUnavailable = true;
+      if (mounted) {
+        setState(
+          () => _status =
+              'The saved profile-assignment command could not be recovered. No replacement command was sent.',
+        );
+      }
+    } finally {
+      _recoveryLoading = false;
+      if (mounted) setState(() {});
+    }
+  }
+
+  Future<void> _saveRecovery(
+    String step,
+    PendingSubmission submission,
+    LiveWorkspaceSource source,
+  ) async {
+    final store = widget.credentials;
+    if (store == null) {
+      throw StateError(
+        'Secure storage is unavailable; the assignment command was not sent.',
+      );
+    }
+    await store.writeNamed(
+      store.keys.workerProfileSetup,
+      jsonEncode({
+        'installation_id': source.installationId,
+        'phase': 'mutation',
+        'step': step,
+        'submission': source.providerSetupRecoveryRecord(submission),
+      }),
+    );
+  }
+
+  Future<void> _clearRecovery() async {
+    final store = widget.credentials;
+    if (store != null) {
+      await store.deleteNamed(store.keys.workerProfileSetup);
+    }
+  }
+
   String _identity(wire.ExecutionProfile profile) =>
       '${profile.id}@${profile.version}';
 
@@ -104,7 +241,7 @@ class _ProviderModelEditorState extends State<_ProviderModelEditor> {
         workerId: widget.workerId,
         profile: profile,
       );
-      if (!await _send(_stage!, 'stage', source)) return;
+      if (!await _send(_stage!, 'worker_profile_stage', source)) return;
       await _planDraft(source);
     } on Exception catch (e) {
       _failed(e);
@@ -120,7 +257,7 @@ class _ProviderModelEditorState extends State<_ProviderModelEditor> {
         expectedVersion: draft.draftVersion,
       );
       setState(() => _status = 'Validating the proposed profile assignment…');
-      if (!await _send(_plan!, 'plan', source)) return;
+      if (!await _send(_plan!, 'worker_profile_plan', source)) return;
       final result = _plan!.result!;
       setState(() {
         _busy = false;
@@ -139,7 +276,9 @@ class _ProviderModelEditorState extends State<_ProviderModelEditor> {
     LiveWorkspaceSource source,
   ) async {
     try {
+      await _saveRecovery(step, submission, source);
       await source.submit(submission);
+      await _clearRecovery();
       _pending = null;
       _pendingStep = null;
       return true;
@@ -152,6 +291,12 @@ class _ProviderModelEditorState extends State<_ProviderModelEditor> {
         _status =
             'The controller acknowledgment is unknown. Check its status before retrying.';
       });
+      return false;
+    } on SourceRefusal catch (e) {
+      await _clearRecovery();
+      _pending = null;
+      _pendingStep = null;
+      _failed(e);
       return false;
     } on Exception catch (e) {
       _failed(e);
@@ -170,12 +315,13 @@ class _ProviderModelEditorState extends State<_ProviderModelEditor> {
     try {
       switch (await source.resolve(pending)) {
         case ResolvedAcknowledged():
+          await _clearRecovery();
           _pending = null;
           _pendingStep = null;
           _unknown = false;
-          if (step == 'stage') {
+          if (step == 'stage' || step == 'worker_profile_stage') {
             await _planDraft(source);
-          } else if (step == 'plan') {
+          } else if (step == 'plan' || step == 'worker_profile_plan') {
             final plan = _plan?.result;
             setState(() {
               _busy = false;
@@ -189,6 +335,7 @@ class _ProviderModelEditorState extends State<_ProviderModelEditor> {
           }
           break;
         case ResolvedRefused(:final refusal):
+          await _clearRecovery();
           _pending = null;
           _pendingStep = null;
           _failed(refusal);
@@ -217,9 +364,9 @@ class _ProviderModelEditorState extends State<_ProviderModelEditor> {
       _status = 'Retrying the same command…';
     });
     if (!await _send(pending, step, source)) return;
-    if (step == 'stage') {
+    if (step == 'stage' || step == 'worker_profile_stage') {
       await _planDraft(source);
-    } else if (step == 'plan') {
+    } else if (step == 'plan' || step == 'worker_profile_plan') {
       final plan = _plan?.result;
       setState(() {
         _busy = false;
@@ -242,7 +389,7 @@ class _ProviderModelEditorState extends State<_ProviderModelEditor> {
     });
     try {
       final submission = source.prepareApplyPlan(plan);
-      if (!await _send(submission, 'apply', source)) return;
+      if (!await _send(submission, 'worker_profile_apply', source)) return;
       await widget.controller.reconnect();
       if (mounted) Navigator.of(context).pop();
     } on Exception catch (e) {
@@ -317,7 +464,7 @@ class _ProviderModelEditorState extends State<_ProviderModelEditor> {
                   value: selected == null ? null : _selected,
                   decoration: const InputDecoration(labelText: 'Saved profile'),
                   items: items,
-                  onChanged: _busy
+                  onChanged: _busy || _recoveryUnavailable || _recoveryLoading
                       ? null
                       : (value) => setState(() => _selected = value),
                 ),
@@ -332,6 +479,7 @@ class _ProviderModelEditorState extends State<_ProviderModelEditor> {
                   const SizedBox(height: Space.md),
                   Text(_status!, style: text.bodySmall),
                 ],
+                if (_recoveryLoading) const LinearProgressIndicator(),
                 if (_plan?.result != null) ...[
                   for (final message in _plan!.result!.diagnostics)
                     Text(message, style: text.bodySmall),
@@ -361,13 +509,17 @@ class _ProviderModelEditorState extends State<_ProviderModelEditor> {
         ),
         if (_plan?.result?.isClean == true)
           FilledButton(
-            onPressed: _busy ? null : () => _apply(source),
+            onPressed: _busy || _recoveryUnavailable || _recoveryLoading
+                ? null
+                : () => _apply(source),
             child: Text(_busy ? 'Saving…' : 'Apply for next turn'),
           )
         else
           FilledButton(
             onPressed:
                 _busy ||
+                    _recoveryLoading ||
+                    _recoveryUnavailable ||
                     _selected == null ||
                     _selected == _active ||
                     _plan?.result != null

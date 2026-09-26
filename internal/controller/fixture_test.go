@@ -428,7 +428,7 @@ func (f *fx) controller(own contract.Ownership) *Controller {
 		f.t.Fatalf("New: %v", err)
 	}
 	if err := c.Attach(Collaborators{
-		Identity: f.actor, Blobs: f.blobs, Jobs: f.jobs, Verifier: f.verifier, Operator: f.operator,
+		Identity: f.actor, Blobs: f.blobs, Context: fxContextPerformer{}, Jobs: f.jobs, Verifier: f.verifier, Operator: f.operator,
 		RestoreLifecycle: f.restoreLifecycle,
 	}); err != nil {
 		f.t.Fatalf("Attach: %v", err)
@@ -543,6 +543,15 @@ func (f *fx) crash() {
 }
 
 type ownerFunc func(ctx context.Context, u contract.Unit, input json.RawMessage) (any, error)
+
+type fxContextPerformer struct{}
+
+func (fxContextPerformer) PerformContext(ctx context.Context, plan contract.ContextPlan) (json.RawMessage, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return json.Marshal(map[string]any{"fixture_context": true, "turn_id": plan.TurnID})
+}
 
 // handler wraps one fake owner method with schema checks and injection.
 func (f *fx) handler(op string, checkOutput bool, fn ownerFunc) contract.Handler {

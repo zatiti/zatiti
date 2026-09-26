@@ -581,7 +581,11 @@ func (s *Service) handleContextCommit(ctx context.Context, unit contract.Unit, i
 func (s *Service) dispatchModelEffect(ctx context.Context, unit contract.Unit, t *turnRow, plan *contextPlanRow, contextArtifact wireArtifactRef, now time.Time) error {
 	modelTool := resolveModelToolComponent(plan)
 	if modelTool == nil {
-		return prerequisiteMissing("worker turn %s has no currently resolved hosted model tool/connection", t.ID)
+		// A context plan may be committed for work that has no hosted-model
+		// dispatch component (for example, a local or external-tool-only
+		// turn). Admission has already pinned the execution mode; absence of
+		// this optional dispatch route must not roll back the context commit.
+		return nil
 	}
 	var (
 		kind            string

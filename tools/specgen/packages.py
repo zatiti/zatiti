@@ -203,3 +203,41 @@ for package in P:
         package['design'] += ' Revision 11: build no local Serenity runtime for hosted Mac mode. Qualify a real hosted OAuth grant and pre-existing brain on each native host, linked to the same signed release and real first chat; record version/capability and revocation/reconnect evidence without tokens.'
     elif package['name'] == 'qualification':
         package['design'] += ' Revision 11: Mac release is blocked until a real browser sign-in selects and verifies the pre-existing hosted personal brain and the full Serenity semantic/backup gates pass with the genuine provider reply on both native architectures. An HTTP 200, OAuth login, empty recall or synthetic fixture is not first-chat proof.'
+
+# Revision 15 adds trusted provider-profile qualification. The public client
+# supplies a profile draft with no evidence; one bounded governed probe is the
+# only source of executable model capability evidence.
+for package in P:
+    if package['name'] == 'configuration':
+        package['design'] += ' Revision 15: execution_profile.qualify accepts a strict ExecutionProfileCandidate whose ResponsesProfileDraft has no capability_evidence field. Pin exact connection version, profile bytes/digest, destination, prices, route and explicit probe cost bound; create one durable qualification job and one effects operation atomically. Do not call a provider from a Unit. Only the controller callback that records the matching physical-call observation may publish CapabilityEvidence and return QualifiedExecutionProfile. Qualification never creates or activates the execution profile; the caller uses ordinary execution_profile.create → plan → explicit apply. Unknown physical outcomes remain unknown and cannot qualify or be retried.'
+        package['tests'] += ' Rev15: candidate rejects client evidence, mismatched connection/profile/route, evidence digest is server-derived, max qualification charge is enforced, failed/unknown probes never produce a qualified profile, replay returns the same job/result.'
+    elif package['name'] == 'effects':
+        package['design'] += ' Revision 15: profile qualification is a separately admitted external_read model effect with its own exact candidate digest and explicit maximum probe cost. It receives the normal destination/classification/current-authority checks and token/cost reservation. Its specialized dispatch is allowed to omit prior capability_evidence only when bound to the persisted qualification job and allowlisted probe action; never broaden this exception to ordinary model_step. One claim yields one physical call; lost acknowledgement after possible send remains outcome_unknown with no retry.'
+        package['tests'] += ' Rev15: qualification-specific admission, cost reservation/settlement, exact candidate-digest binding, single physical call and unknown-outcome recovery without resend.'
+    elif package['name'] == 'responses':
+        package['design'] += ' Revision 15: support the fixed qualification_probe action only for an effects operation carrying the controller-persisted qualification-job route and a strict evidence-free ResponsesProfileDraft. The probe has a fixed non-sensitive prompt, bounded input/output/response bytes and one physical request; it cannot invoke tools, continue, follow redirects or retry. Emit only observed protocol/model/usage evidence; do not assert capabilities not exercised or documented. Ordinary prepare_session/model_step still require a complete evidence-bound profile.'
+        package['tests'] += ' Rev15: qualification probe per provider preset, malformed draft, no tools/retries/redirects, strict byte/token limits, billing evidence, timeout-after-send unknown and no profile authority from the adapter.'
+    elif package['name'] == 'controller':
+        package['design'] += ' Revision 15: drive qualification jobs through the normal effects claim/dispatch/record path, stage/publish the exact provider request/response evidence through artifacts, and finish only the originating job after matching operation, connection version, profile digest and candidate. Preserve unknown without resend and never let a stale callback qualify changed settings.'
+        package['tests'] += ' Rev15: controller crash at claim/send/response/publish/job-record boundaries, exact-job callback binding, stale profile/connection callback refusal and no duplicate provider probe.'
+    elif package['name'] == 'desktop':
+        package['design'] += ' Revision 15: provide a model-profile setup wizard that selects a saved provider connection, accepts model, explicit pricing/resource limits and classification, asks for the qualification spend bound, and submits only ResponsesProfileDraft. Poll the same job by identity through unknown/lost acknowledgements; never replace its submission key or replay a possibly sent probe. On trusted completion, show observed route/model/cost limitations, then create the execution profile and use the existing draft → plan → user-reviewed apply path. Never accept, edit or synthesize capability_evidence.'
+        package['tests'] += ' Rev15: keyboard-accessible provider/model setup, profile draft without evidence, explicit probe-cost review, job reconciliation after lost acknowledgement, failed/unknown qualification cannot be selected, qualified result requires reviewed apply.'
+    elif package['name'] == 'qualification':
+        package['tests'] += ' Rev15: controlled live provider run proves one qualification probe becomes exact profile evidence and a subsequent real first chat uses that same profile/connection/model/route under enforced cost limits; timeout/unknown and mismatched-profile cases remain unqualified.'
+
+# Revision 16 makes the candidate handoff private to Configuration and Effects.
+for package in P:
+    if package['name'] == 'configuration':
+        package['design'] += ' Revision 16: persist the pending candidate and its digest before preparing its external effect; expose the candidate only through _configuration.execution_profile.qualification.resolve to Effects. Link one execution job to the resulting effect operation in the same Unit. The controller completion must be idempotent and terminal job state must preserve failed/unknown outcomes.'
+    elif package['name'] == 'effects':
+        package['design'] += ' Revision 16: _effects.prepare accepts qualification_id only from Configuration. Resolve the candidate through the private configuration seam, check it against action connection/destination/cost and the model-responses tool, and persist that exact evidence-free adapter profile before admission. No public operation may inject this field or use it for model_step.'
+    elif package['name'] == 'controller':
+        package['design'] += ' Revision 16: route a linked configuration/execution_profile.qualify job by its exact effects operation_id; publish staged evidence, then in one write Unit record the configuration qualification result and the originating execution job result. Replay of a committed callback returns the same result; stale or unknown outcomes never qualify.'
+
+# Revision 17 completes the current conversation transcript boundary.
+for package in P:
+    if package['name'] == 'messaging':
+        package['design'] += ' Revision 17: _messaging.history is an execution-only bounded query. The worker ID must come from the persisted WorkerTurn and must still be a current conversation participant; query sent plus admitted inbox messages exactly as public history does, preserving membership intervals. Return chronological rows and an explicit complete flag; never disclose pre-join group history or let a client select a worker principal.'
+    elif package['name'] == 'execution':
+        package['design'] += ' Revision 17: for a chat turn, resolve its persisted conversation history through _messaging.history using the turn-bound worker ID; merge the currently pending triggering message by stable message ID, deduplicate and order by creation time. If the bounded history reports incomplete, refuse before provider dispatch; ContextArtifact.capture=complete is legal only when all required chat history is present.'

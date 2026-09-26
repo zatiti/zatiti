@@ -1,5 +1,5 @@
 {
-  "revision": 13,
+  "revision": 17,
   "requirements": [
     {
       "requirement": "R1-002",
@@ -4025,6 +4025,65 @@
         "internal/accounting",
         "internal/controller",
         "tests/integration"
+      ]
+    },
+    {
+      "id": "P15.profile_qualification_requires_evidence_free_candidate",
+      "gate": "Z18",
+      "scopes": [
+        "internal/configuration",
+        "internal/connections",
+        "internal/effects",
+        "internal/controller",
+        "tests/integration"
+      ]
+    },
+    {
+      "id": "P15.profile_qualification_cost_and_authority",
+      "gate": "Z18",
+      "scopes": [
+        "internal/identity",
+        "internal/configuration",
+        "internal/policy",
+        "internal/effects",
+        "internal/accounting",
+        "internal/adapters/responses",
+        "internal/controller",
+        "tests/integration"
+      ]
+    },
+    {
+      "id": "P15.profile_qualification_unknown_never_replays",
+      "gate": "Z18",
+      "scopes": [
+        "internal/configuration",
+        "internal/effects",
+        "internal/adapters/responses",
+        "internal/controller",
+        "tests/integration"
+      ]
+    },
+    {
+      "id": "P15.desktop_model_profile_setup_and_first_chat",
+      "gate": "Z21",
+      "scopes": [
+        "internal/configuration",
+        "internal/connections",
+        "internal/effects",
+        "internal/execution",
+        "internal/controller",
+        "apps/desktop",
+        "tests/qualification"
+      ]
+    },
+    {
+      "id": "P15.complete_authorized_chat_history",
+      "gate": "Z21",
+      "scopes": [
+        "internal/messaging",
+        "internal/execution",
+        "internal/controller",
+        "tests/qualification"
       ]
     }
   ]

@@ -375,7 +375,7 @@ func requirementFromPolicy(reqs []wireDecisionRequirement, digest string, now ti
 // unchanged; a different action behind the same key is a submission_conflict.
 // route is the already-validated callback route, present only for _effects.
 // prepare; propose and the linked proposes always pass nil.
-func (s *Service) stageOperation(ctx context.Context, unit contract.Unit, scope wireScope, action wireAction, sourceKey string, linked contract.ID, relationship string, route *wireCallbackRoute) (*operationRow, error) {
+func (s *Service) stageOperation(ctx context.Context, unit contract.Unit, scope wireScope, action wireAction, sourceKey string, linked contract.ID, relationship string, route *wireCallbackRoute, qualificationID contract.ID) (*operationRow, error) {
 	if err := s.checkInstallation(unit, scope.InstallationID); err != nil {
 		return nil, err
 	}
@@ -390,7 +390,7 @@ func (s *Service) stageOperation(ctx context.Context, unit contract.Unit, scope 
 	if err := validatePreconditions(action); err != nil {
 		return nil, err
 	}
-	adapterProfileJSON, profileConnectionVersion, err := s.resolvePinnedAdapterProfile(ctx, unit, action)
+	adapterProfileJSON, profileConnectionVersion, err := s.resolvePinnedAdapterProfile(ctx, unit, action, qualificationID)
 	if err != nil {
 		return nil, err
 	}
@@ -480,7 +480,10 @@ func (s *Service) stageOperation(ctx context.Context, unit contract.Unit, scope 
 // resolvePinnedAdapterProfile resolves only the exact action reference and
 // checks the duplicated legacy fields before preserving the immutable,
 // secret-free adapter document on the operation.
-func (s *Service) resolvePinnedAdapterProfile(ctx context.Context, unit contract.Unit, action wireAction) (string, int64, error) {
+func (s *Service) resolvePinnedAdapterProfile(ctx context.Context, unit contract.Unit, action wireAction, qualificationID contract.ID) (string, int64, error) {
+	if qualificationID != "" {
+		return s.resolveQualificationProfile(ctx, unit, action, qualificationID)
+	}
 	if action.ExecutionProfile == nil {
 		return "", 0, nil
 	}
@@ -503,7 +506,7 @@ func (s *Service) resolvePinnedAdapterProfile(ctx context.Context, unit contract
 		p.CostBound != action.CostBound {
 		return "", 0, invalidInput("action connection, destination or cost bound disagrees with its pinned execution profile")
 	}
-	if p.AdapterProfile == nil || len(p.AdapterProfile) == 0 || p.ConnectionVersion == nil || *p.ConnectionVersion < 1 {
+	if len(p.AdapterProfile) == 0 || p.ConnectionVersion == nil || *p.ConnectionVersion < 1 {
 		return "", 0, prerequisiteMissing("execution profile %s@%d lacks a validated adapter profile or connection version; import/resolve the legacy profile first",
 			p.ID, p.Version)
 	}
@@ -518,6 +521,80 @@ func (s *Service) resolvePinnedAdapterProfile(ctx context.Context, unit contract
 	return string(canonical), *p.ConnectionVersion, nil
 }
 
+func (s *Service) resolveQualificationProfile(ctx context.Context, unit contract.Unit, action wireAction, qualificationID contract.ID) (string, int64, error) {
+	if action.ExecutionProfile != nil {
+		return "", 0, invalidInput("a qualification effect cannot also name an executable profile")
+	}
+	var params struct {
+		Kind                   string    `json:"kind"`
+		ProfileDigest          string    `json:"profile_digest"`
+		QualificationCostBound wireMoney `json:"qualification_cost_bound"`
+		Provider               string    `json:"provider"`
+	}
+	if err := json.Unmarshal(action.Parameters, &params); err != nil || params.Kind != "qualification_probe" {
+		return "", 0, invalidInput("qualification_id is valid only for a qualification_probe action")
+	}
+	resolved, err := s.qualificationResolve(ctx, unit, qualificationResolveInput{QualificationID: qualificationID})
+	if err != nil {
+		return "", 0, err
+	}
+	canonicalCandidate, err := contract.Canonicalize(resolved.Candidate)
+	if err != nil {
+		return "", 0, invalidInput("configuration returned an invalid qualification candidate")
+	}
+	if string(contract.Hash(canonicalCandidate)) != resolved.ProfileDigest {
+		return "", 0, prerequisiteMissing("configuration qualification candidate digest does not match its pinned bytes")
+	}
+	if params.ProfileDigest != resolved.ProfileDigest {
+		return "", 0, invalidInput("qualification action profile_digest does not match the exact pending candidate")
+	}
+	if params.QualificationCostBound != action.CostBound || params.QualificationCostBound.MicroUnits < 1 {
+		return "", 0, invalidInput("qualification action cost ceiling must equal the explicitly admitted effect cost bound")
+	}
+	var candidate qualificationCandidateDef
+	if err := contract.DecodeStrict(canonicalCandidate, &candidate); err != nil {
+		return "", 0, invalidInput("configuration returned a malformed qualification candidate")
+	}
+	if candidate.Executor != "hosted" || candidate.ConnectionID != action.Connection.ID ||
+		candidate.ConnectionVersion != action.Connection.Version ||
+		candidate.ProviderDestination != action.Destination ||
+		candidate.Model != actionModel(action) || candidate.ConnectionID == "" ||
+		candidate.ConnectionVersion < 1 || candidate.CostBound.Currency != action.CostBound.Currency ||
+		action.CostBound.MicroUnits > candidate.CostBound.MicroUnits {
+		return "", 0, invalidInput("qualification action does not match the exact candidate connection, model, destination or cost ceiling")
+	}
+	var adapterProfile map[string]json.RawMessage
+	if err := contract.DecodeStrict(candidate.AdapterProfile, &adapterProfile); err != nil || adapterProfile == nil {
+		return "", 0, invalidInput("qualification candidate has a malformed adapter profile")
+	}
+	var adapterIdentity struct {
+		Model      string      `json:"model"`
+		Endpoint   string      `json:"endpoint"`
+		Connection contract.ID `json:"connection_id"`
+		Provider   string      `json:"provider"`
+	}
+	if err := json.Unmarshal(candidate.AdapterProfile, &adapterIdentity); err != nil ||
+		adapterIdentity.Model != candidate.Model || adapterIdentity.Endpoint != candidate.ProviderDestination ||
+		adapterIdentity.Connection != candidate.ConnectionID || adapterIdentity.Provider != params.Provider {
+		return "", 0, invalidInput("qualification adapter profile disagrees with the candidate model, endpoint or connection")
+	}
+	canonicalProfile, err := contract.Canonicalize(candidate.AdapterProfile)
+	if err != nil {
+		return "", 0, invalidInput("qualification adapter profile is not canonicalizable")
+	}
+	return string(canonicalProfile), candidate.ConnectionVersion, nil
+}
+
+func actionModel(action wireAction) string {
+	var model struct {
+		Model string `json:"model"`
+	}
+	if json.Unmarshal(action.Parameters, &model) != nil {
+		return ""
+	}
+	return model.Model
+}
+
 // _effects.prepare persists the immutable action and logical effect for
 // hosted steps, memory writes, probes and evaluation. No physical call
 // happens here; admission and dispatch follow through admit and claim. An
@@ -528,7 +605,7 @@ func (s *Service) handlePrepare(ctx context.Context, unit contract.Unit, in prep
 	if err := validateCallbackRoute(in.CallbackRoute, in.SourceID); err != nil {
 		return contract.Outcome[operationResourceBody]{}, err
 	}
-	o, err := s.stageOperation(ctx, unit, in.Scope, in.Action, string(in.SourceID), "", "", in.CallbackRoute)
+	o, err := s.stageOperation(ctx, unit, in.Scope, in.Action, string(in.SourceID), "", "", in.CallbackRoute, in.QualificationID)
 	if err != nil {
 		return contract.Outcome[operationResourceBody]{}, err
 	}
@@ -539,7 +616,7 @@ func (s *Service) handlePrepare(ctx context.Context, unit contract.Unit, in prep
 // current prerequisites and policy and creates the logical operation. No
 // provider call happens in the handler.
 func (s *Service) handlePropose(ctx context.Context, unit contract.Unit, in proposeInput) (contract.Outcome[operationResourceBody], error) {
-	o, err := s.stageOperation(ctx, unit, in.Scope, in.Action, "", "", "", nil)
+	o, err := s.stageOperation(ctx, unit, in.Scope, in.Action, "", "", "", nil, "")
 	if err != nil {
 		return contract.Outcome[operationResourceBody]{}, err
 	}
@@ -573,7 +650,7 @@ func (s *Service) linkedPropose(ctx context.Context, unit contract.Unit, in link
 		return contract.Outcome[operationResourceBody]{}, conflict(
 			"operation %s is %s; %s requires a concluded original", o.ID, o.State, relationship)
 	}
-	n, err := s.stageOperation(ctx, unit, in.Scope, in.Action, "", o.ID, relationship, nil)
+	n, err := s.stageOperation(ctx, unit, in.Scope, in.Action, "", o.ID, relationship, nil, "")
 	if err != nil {
 		return contract.Outcome[operationResourceBody]{}, err
 	}

@@ -1597,6 +1597,7 @@ class Job {
     required this.state,
     required this.owner,
     required this.operation,
+    this.result,
   });
 
   factory Job.fromJson(Object? json) {
@@ -1617,11 +1618,11 @@ class Job {
       },
       owner: o.string('owner'),
       operation: o.string('operation'),
+      result: o.optional('result'),
     );
     o.list('requirements');
     o.optional('result_artifact');
     o.optionalString('operation_id');
-    o.optional('result');
     o.finish();
     return j;
   }
@@ -1632,6 +1633,7 @@ class Job {
   final JobState state;
   final String owner;
   final String operation;
+  final Object? result;
 
   String get label => switch (state) {
     JobState.pending => 'Queued',

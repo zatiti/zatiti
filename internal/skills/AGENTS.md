@@ -1,6 +1,6 @@
 # Implementation assignment: `internal/skills`
 
-Generated specification revision 13; source digest `6b086d744761eeee6bd2c58666f74a84397375da262081b073a06565ad42ea3d`. This file is committed implementation context. Do not independently edit it. Everything required from the product specification and adjacent interfaces is embedded below; no RFC copy is required.
+Generated specification revision 17; source digest `f77034332a96396a9f88395f71ff528f051f96f35b398629236dd00bc731c08f`. This file is committed implementation context. Do not independently edit it. Everything required from the product specification and adjacent interfaces is embedded below; no RFC copy is required.
 
 ## Mission and scope
 
@@ -30,11 +30,17 @@ These briefs are embedded so you need not read a sibling prompt to discover its 
 
 ## Shared foundation contract
 
-# Frozen implementation contract, revision 13
+# Frozen implementation contract, revision 17
 
 These decisions complete the product specification and bind every scope. Report contradictions with an affected-dependency list and proposed coordinated revision; do not change another owner's interface locally.
 
 Revision 13 permits a Responses v2 provider-conversation evidence record to omit `session_handle` when its physical call was not authoritatively successful. A confirmed prepare-session still requires a nonempty handle; stateless evidence still forbids it. This preserves honest unknown/failure outcomes without inventing a provider session identifier. Execution persists the model-step index alongside each effects operation reference and accepts a callback only when that exact reference, route step, current turn step and `model_pending` state agree. Chat observations use the existing controller-only `_execution.turn.observation` operation and never fabricate a task or Attempt.
+
+Revision 14 carries the transaction-pinned, secret-free context recipe in the internal-only ContextPlan so the trusted ContextPerformer can rebuild the exact context outside a Unit without opening owner tables or inventing artifact identities. The controller stages and publishes the bytes through BlobStore and `_artifacts.publish`; execution alone commits the returned owner-minted artifact after rechecking plan generation, authority and pinned references. The recipe is never a public client field or model-callable input.
+
+Revision 15 adds `execution_profile.qualify` as the only path from a client-authored provider-profile draft to executable capability evidence. The strict `ExecutionProfileCandidate`/`ResponsesProfileDraft` schemas contain all selected provider, model, route, price and resource bounds but have no `capability_evidence` field. The operation creates one durable job and one separately admitted, explicitly cost-bounded qualification effect bound to the exact active connection version, candidate profile digest, destination, route and requested capability set. The qualification probe uses fixed non-sensitive input, one physical provider request, the normal credential resolver, current principal/scope/classification/disclosure checks, current cost reservation and the exact provider adapter. No fallback, retry, redirect, SDK retry or hidden auxiliary call is permitted. Before dispatch, persist the exact bounded request context through the ordinary artifact path. On authoritative response, the controller records the physical-call evidence and publishes a qualification artifact; only the trusted completion writer can construct a `QualifiedExecutionProfile` and its evidence bound to the canonical candidate digest. Provider refusal is a failed job. Lost acknowledgement after request bytes may have been sent is `outcome_unknown`, remains visible on the same job and cannot be silently resent or turned into a qualified profile. A caller can start a fresh qualification only after authoritative non-execution of the prior probe. Completion does not create or activate an execution profile: Desktop consumes the trusted result through the existing `execution_profile.create` → plan → explicit apply path. The existing context preparation/publication/commit generation and authority fences remain unchanged.
+
+Revision 16 makes the qualification candidate resolution private and effect-bound. `_configuration.execution_profile.qualification.resolve` returns only the exact pending candidate and canonical digest to Effects. `_effects.prepare` may name that qualification ID only from the configuration owner; Effects verifies its connection, endpoint, model, price and requested bounds against the immutable action, then persists the candidate profile on the effect. Ordinary public effects still require an exact already-qualified execution profile, and cannot set the qualification ID or inject `Dispatch.adapter_profile`. The durable job links to the one effect operation so the controller can complete that same job from the exact physical observation.
 
 Revision 11 selects **hosted Serenity as the primary Mac memory service**. The user's existing hosted personal brain is the default personal-chief brain, including when another client already uses it. Zatiti does not create or import a duplicate personal brain during setup. Serenity remains the canonical memory writer; Zatiti retains local execution, authorization, accounting, conversation and recovery state. Separate restricted worker or project brains, when required by the existing isolation contract, are separate projects within the same hosted Serenity account and require explicit grants. The free tier may be offered, but no paid entitlement, quota, extra brain, or successful memory call is assumed from sign-in alone. The local Serenity distribution path is optional future/self-hosted packaging; the Mac release descriptor, controller manifest, bootstrap, installer and LaunchAgent do not require or start a bundled Serenity binary or local read facade for the hosted mode. Preserve the rev10 installer and trust chain for Zatiti's controller, desktop and credential helper.
 
@@ -471,6 +477,8 @@ The controller assembly dependency struct gains a required `Context contract.Con
 
 Normalized provider usage may include requested and served model IDs, serving provider, provider request ID, and exact source decimal cost evidence. Convert decimal USD to integer micro-units with checked integer/rational arithmetic and upward rounding, preserving the original decimal. No floating point is permitted. Missing, invalid or overflowing cost, disputed route, or unpriced BYOK upstream cost stays unknown/advisory; a gateway platform cost of zero is not evidence of zero upstream charge.
 
+Revision 17 adds the internal query `_messaging.history` (caller: execution) for reconstructing a worker turn's complete chat transcript. Its worker identity is taken from the persisted turn, and Messaging verifies current conversation membership before reading sender and admitted-recipient rows. It returns up to 200 authorized rows chronologically and an explicit `complete` flag; older undisclosed or over-limit history is never silently dropped, and execution refuses provider dispatch when `complete` is false. The existing public `conversation.message.list` remains principal-scoped and unchanged. This closes the context-history gap without granting the controller or a client a history bypass.
+
 ## Owned product requirements
 
 ### R7.1-002 (source section 7.1; primary owner skills)
@@ -567,13 +575,13 @@ Output data schema:
 
 ### `_effects.prepare` v1 — effects / internal / mutation / local
 
-Allowed internal callers: execution, memory, connections, skills, installation. Submission key: not required at this internal/query/bootstrap boundary.
+Allowed internal callers: execution, memory, connections, skills, installation, configuration. Submission key: not required at this internal/query/bootstrap boundary.
 
-Persist immutable action and logical effect for hosted steps/memory/probes/evaluation; required decisions produce awaiting_review. No physical call here. callback_route is an explicit controller-owned routing reference (worker turn/step or job id), persisted alongside the action and returned at claim; adapters never receive it. The controller resolves callback routing from this persisted route, never by inserting an undeclared attempt_id into strict adapter parameters. Hosted model actions pin an exact execution_profile VersionRef. Resolve and persist its strict secret-free adapter_profile during preparation; claims and reconciliation return the same historical profile. Recheck current connection version, credential and authority before send. Public inputs cannot inject Dispatch.adapter_profile.
+Persist immutable action and logical effect for hosted steps/memory/probes/evaluation; required decisions produce awaiting_review. No physical call here. callback_route is an explicit controller-owned routing reference (worker turn/step or job id), persisted alongside the action and returned at claim; adapters never receive it. The controller resolves callback routing from this persisted route, never by inserting an undeclared attempt_id into strict adapter parameters. Qualification-only preparation may name a pending configuration-owned qualification_id. Effects resolves that exact candidate through _configuration.execution_profile.qualification.resolve, validates that it agrees with the immutable action and active connection version, and persists the draft adapter profile on the effect. Only configuration may call this seam; ordinary operations still require an exact qualified execution_profile. Public inputs cannot inject Dispatch.adapter_profile.
 
 Input schema:
 ```json
-{"type":"object","additionalProperties":false,"properties":{"scope":{"$ref":"#/$defs/Scope"},"action":{"$ref":"#/$defs/Action"},"source_id":{"type":"string","format":"uuid"},"callback_route":{"$ref":"#/$defs/CallbackRoute"},"execution_profile":{"$ref":"#/$defs/Ref"}},"required":["scope","action","source_id"]}
+{"type":"object","additionalProperties":false,"properties":{"scope":{"$ref":"#/$defs/Scope"},"action":{"$ref":"#/$defs/Action"},"source_id":{"type":"string","format":"uuid"},"callback_route":{"$ref":"#/$defs/CallbackRoute"},"qualification_id":{"type":"string","format":"uuid"}},"required":["scope","action","source_id"]}
 ```
 Output data schema:
 ```json

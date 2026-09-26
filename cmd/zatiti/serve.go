@@ -276,6 +276,10 @@ func superviseController(ctx context.Context, h *installationHandle, adapters ma
 	if err != nil {
 		return fmt.Errorf("constructing the trusted verifier: %w", err)
 	}
+	contextPerformer, ok := h.owners["execution"].(contract.ContextPerformer)
+	if !ok {
+		return errors.New("execution module does not implement the trusted context performer")
+	}
 	jobs := buildJobRunners(h.jobRunners)
 
 	// restoreLifecycle is the production value (restore.go) unless a test
@@ -304,6 +308,7 @@ func superviseController(ctx context.Context, h *installationHandle, adapters ma
 		// construction step exists.
 		Operator:         h.app,
 		Verifier:         verifier,
+		Context:          contextPerformer,
 		RestoreLifecycle: restoreLifecycleValue,
 		// The model profile is resolved from the durable, version-pinned
 		// dispatch, not from process-global adapter configuration. Keeping

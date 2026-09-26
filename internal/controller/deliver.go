@@ -20,6 +20,7 @@ const (
 	// turn/proposal record -- not an attempt -- is what advances.
 	ownerExecutionProposal = "execution_proposal"
 	ownerExecutionTurn     = "execution_turn"
+	ownerQualification     = "configuration_qualification"
 )
 
 // stagedOutput mirrors the adapter StagedOutput handoff: bytes an adapter
@@ -50,6 +51,14 @@ func (c *Controller) routeFor(operation contract.ID, op wireOperation, action wi
 			return &route{Owner: ownerMemory, JobID: job.ID}
 		case ownerConnections:
 			return &route{Owner: ownerConnections, JobID: job.ID, Connection: action.Connection}
+		case configurationOwner:
+			if job.Operation == "execution_profile.qualify" && job.State == jobStatePending {
+				var params qualificationProbeParameters
+				if json.Unmarshal(action.Parameters, &params) == nil &&
+					params.ProfileDigest != "" && params.Provider != "" {
+					return &route{Owner: ownerQualification, JobID: job.ID, JobVersion: job.Version, ProfileDigest: params.ProfileDigest, Provider: params.Provider}
+				}
+			}
 		}
 	}
 	if len(op.CallbackRoute) > 0 {
@@ -163,6 +172,8 @@ func (c *Controller) deliver(ctx context.Context, sess *session, e *entry) {
 				Observation:     normalized,
 			}, nil)
 		})
+	case ownerQualification:
+		err = c.deliverQualification(ctx, sess, e, normalized)
 	default:
 		err = internalFault("journal entry names unknown callback owner %q", e.Route.Owner)
 	}
