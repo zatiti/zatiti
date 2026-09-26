@@ -198,7 +198,7 @@ func (s ServiceSpec) validate() error {
 		if arg == "" || hasControl(arg) || len(arg) > 4096 {
 			return errf(CodeInvalidInput, "service arguments must be non-empty and free of control characters")
 		}
-		if (arg == "--master-key" || strings.HasPrefix(arg, "--master-key=")) && !fixedMaster {
+		if (arg == "--master-key" || strings.HasPrefix(arg, "--master-key=")) && isDefaultMacStateDir(s.Owns) && !fixedMaster {
 			return errf(CodeInvalidInput, "the service master-key selector is not the fixed Mac Keychain selector")
 		}
 		if fixedMaster && (arg == "--master-key-ref" || strings.HasPrefix(arg, "--master-key-ref=")) {
@@ -238,6 +238,10 @@ func hasFixedMacMasterSelector(args []string) bool {
 		}
 	}
 	return count == 1
+}
+
+func isDefaultMacStateDir(path string) bool {
+	return strings.HasSuffix(path, string(filepath.Separator)+filepath.Join("Library", "Application Support", "zatiti"))
 }
 
 func hasFixedMacCredentialBackend(args []string) bool {

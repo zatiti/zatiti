@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -101,6 +102,9 @@ func TestMacPkgNativeProductMetadataRejectsAlternateDomainsChoicesAndScripts(t *
 }
 
 func TestBuildUnsignedMacPkgCandidateHasExactInertPayload(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("Mac package production requires macOS")
+	}
 	_, release, plan, _, inbox := macPkgBindingFixture(t)
 	output := filepath.Join(t.TempDir(), plan.Installer.Filename)
 	size, digest, err := BuildUnsignedMacPkgCandidate(context.Background(), release, plan, filepath.Join(inbox, "controller.tar.gz"), filepath.Join(inbox, "desktop.tar.gz"), output)

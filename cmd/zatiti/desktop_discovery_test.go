@@ -179,7 +179,7 @@ func TestInitializedRestartKeepsLocatorWhenKeychainRecoveryFails(t *testing.T) {
 	if runtime.GOOS != "darwin" {
 		t.Skip("macOS discovery layout")
 	}
-	root, err := os.MkdirTemp("/private/tmp", "zt")
+	root, err := ownerDiscoveryTestRoot(t)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -193,6 +193,7 @@ func TestInitializedRestartKeepsLocatorWhenKeychainRecoveryFails(t *testing.T) {
 	if err := cfg.finalize(); err != nil {
 		t.Fatal(err)
 	}
+	cfg.SocketPath = filepath.Join(cfg.StateDir, socketFileName)
 	h := openTestInstallation(t, cfg)
 	id := bootstrapInstallation(t, h)
 	h.close() // committed before either discovery or profile publication
@@ -222,7 +223,7 @@ func TestInitializedRestartKeepsLocatorWhenKeychainRecoveryFails(t *testing.T) {
 }
 
 func TestOwnerDiscoveryFileContainsOnlyPersistedIdentityAndLocator(t *testing.T) {
-	root, err := os.MkdirTemp("/private/tmp", "zt")
+	root, err := ownerDiscoveryTestRoot(t)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -231,6 +232,7 @@ func TestOwnerDiscoveryFileContainsOnlyPersistedIdentityAndLocator(t *testing.T)
 	if err := cfg.finalize(); err != nil {
 		t.Fatal(err)
 	}
+	cfg.SocketPath = filepath.Join(cfg.StateDir, socketFileName)
 	h := openTestInstallation(t, cfg)
 	defer h.close()
 	id := bootstrapInstallation(t, h)
@@ -268,4 +270,22 @@ func TestOwnerDiscoveryFileContainsOnlyPersistedIdentityAndLocator(t *testing.T)
 	if _, err := ownerDesktopDiscovery(context.Background(), locator, cfg.SocketPath, contract.NewID(), owner); faultCode(err) != contract.CodePrerequisiteMissing {
 		t.Fatalf("mismatched installation identity: %v", err)
 	}
+}
+
+func ownerDiscoveryTestRoot(t *testing.T) (string, error) {
+	t.Helper()
+	base := os.TempDir()
+	if info, err := os.Stat("/tmp"); err == nil && info.IsDir() {
+		base = "/tmp"
+	}
+	root, err := os.MkdirTemp(base, "zt")
+	if err != nil {
+		return "", err
+	}
+	resolved, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		_ = os.RemoveAll(root)
+		return "", err
+	}
+	return resolved, nil
 }
