@@ -85,10 +85,11 @@ const (
 	// P15: real context assembly reaches messaging's authorized inbox,
 	// memory's authorized bindings and connections' validated tool/
 	// connection resolution.
-	peerMessagingPending   = "_messaging.pending"
-	peerMessagingHistory   = "_messaging.history"
-	peerMemorySelect       = "_memory.select"
-	peerConnectionsResolve = "_connections.resolve"
+	peerMessagingPending       = "_messaging.pending"
+	peerMessagingHistory       = "_messaging.history"
+	peerMemorySelect           = "_memory.select"
+	peerConnectionsResolve     = "_connections.resolve"
+	peerConnectionsToolResolve = "_connections.tool.resolve"
 
 	// P16: interpreting a cycle_decision proposal for a responsibility-
 	// triggered turn records the reasoning cycle's bounded outcome through
