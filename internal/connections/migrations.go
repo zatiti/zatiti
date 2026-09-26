@@ -235,7 +235,9 @@ func connectionsMigrations() []contract.Migration {
 		Version: 2,
 		SQL:     migrationV2,
 		SHA256:  contract.Digest(hashHex(migrationV2)),
-	}, {Owner: "connections", Version: 3, SQL: migrationV3, SHA256: contract.Digest(hashHex(migrationV3))}}
+	}, {Owner: "connections", Version: 3, SQL: migrationV3, SHA256: contract.Digest(hashHex(migrationV3))}, {
+		Owner: "connections", Version: 4, SQL: migrationV4, SHA256: contract.Digest(hashHex(migrationV4)),
+	}}
 }
 
 const migrationV3 = `
@@ -250,6 +252,10 @@ CREATE TABLE connections_mcp_intents (
 );
 CREATE TABLE connections_mcp_sessions (connection_id TEXT PRIMARY KEY, connection_version INTEGER NOT NULL, profile_digest TEXT NOT NULL, generation INTEGER NOT NULL, session_handle TEXT NOT NULL);
 ALTER TABLE connections_mcp_tools ADD COLUMN catalog_version INTEGER NOT NULL DEFAULT 1;
+`
+
+const migrationV4 = `
+ALTER TABLE connections_connections ADD COLUMN hosted_memory_grant_json TEXT;
 `
 
 // hashHex returns the lowercase SHA-256 hex digest of s.

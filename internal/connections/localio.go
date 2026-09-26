@@ -37,14 +37,21 @@ const helperReceiptPrefix = "zatiti-helper/v1."
 // with the trusted local helper. SecretStore.Lookup resolves its opaque ref.
 const helperReceiptKeyName = "connections/helper/receipt-key"
 
+const (
+	serenityIssuer   = "https://serenity.sire.run"
+	serenityResource = serenityIssuer + "/mcp"
+)
+
 // ioPrivate is the namespaced owner-local metadata channel inside Prepared
 // and IOResult.Data. No other package reads it.
 type ioPrivate struct {
-	CredentialRef   string         `json:"credential_ref,omitempty"`
-	AccountIdentity string         `json:"account_identity,omitempty"`
-	ExpiresAt       *time.Time     `json:"expires_at,omitempty"`
-	ConsentURL      string         `json:"consent_url,omitempty"`
-	Receipt         *helperPayload `json:"receipt,omitempty"`
+	CredentialRef   string                 `json:"credential_ref,omitempty"`
+	AccountIdentity string                 `json:"account_identity,omitempty"`
+	Provider        string                 `json:"provider,omitempty"`
+	ExpiresAt       *time.Time             `json:"expires_at,omitempty"`
+	ConsentURL      string                 `json:"consent_url,omitempty"`
+	Receipt         *helperPayload         `json:"receipt,omitempty"`
+	HostedGrant     *wireHostedMemoryGrant `json:"hosted_memory_grant,omitempty"`
 }
 
 // helperPayload is the owner-decoded receipt body. It binds the receipt to
@@ -52,10 +59,15 @@ type ioPrivate struct {
 // the real credential reference the helper wrote the verified material
 // under.
 type helperPayload struct {
-	ChallengeID     contract.ID `json:"challenge_id"`
-	CredentialRef   string      `json:"credential_ref"`
-	AccountIdentity string      `json:"account_identity"`
-	ExpiresAt       time.Time   `json:"expires_at"`
+	ChallengeID     contract.ID            `json:"challenge_id"`
+	CredentialRef   string                 `json:"credential_ref"`
+	AccountIdentity string                 `json:"account_identity"`
+	ExpiresAt       time.Time              `json:"expires_at"`
+	HostedGrant     *wireHostedMemoryGrant `json:"hosted_memory_grant,omitempty"`
+	HostedGrantID   string                 `json:"hosted_grant_id,omitempty"`
+	AccountState    string                 `json:"account_state,omitempty"`
+	ProjectState    string                 `json:"project_state,omitempty"`
+	RevocationEpoch int64                  `json:"revocation_epoch,omitempty"`
 }
 
 // credentialMeta is the owner-decoded subset of stored credential metadata
@@ -211,6 +223,7 @@ func (s *Service) prepareBegin(ctx context.Context, unit contract.Unit, inv cont
 		Resource: challenge.wireAddr(),
 		XConnections: &ioPrivate{
 			CredentialRef: row.CredentialRef,
+			Provider:      row.Provider,
 		},
 	})
 	if err != nil {
@@ -355,6 +368,7 @@ func (s *Service) transitionPlan(ctx context.Context, unit contract.Unit, inv co
 	if found {
 		private.CredentialRef = conn.CredentialRef
 		private.AccountIdentity = row.AccountIdentity
+		private.Provider = conn.Provider
 		expires := row.ExpiresAt
 		private.ExpiresAt = &expires
 	}
@@ -433,6 +447,16 @@ func (s *Service) performBegin(ctx context.Context, plan contract.IOPlan) (contr
 		return contract.IOResult{Data: nil}, nil
 	}
 	private := decodePrivate(plan.Prepared)
+	if private.Provider == "serenity" {
+		// Hosted Serenity OAuth is owned by the signed native helper. The
+		// helper performs fixed-origin discovery/registration and opens the
+		// browser; no consent URL or user-supplied OAuth metadata is accepted.
+		data, err := marshalData(ioEnvelope{XConnections: &ioPrivate{Provider: private.Provider}})
+		if err != nil {
+			return contract.IOResult{}, err
+		}
+		return contract.IOResult{Data: data}, nil
+	}
 	if private.CredentialRef == "" {
 		return contract.IOResult{Fault: internalError("begin plan carries no credential reference")}, nil
 	}
@@ -466,7 +490,7 @@ func (s *Service) performBegin(ctx context.Context, plan contract.IOPlan) (contr
 	q.Set("redirect_uri", meta.RedirectURI)
 	q.Set("state", string(plan.ID))
 	parsed.RawQuery = q.Encode()
-	data, err := marshalData(ioEnvelope{XConnections: &ioPrivate{ConsentURL: parsed.String()}})
+	data, err := marshalData(ioEnvelope{XConnections: &ioPrivate{ConsentURL: parsed.String(), Provider: private.Provider}})
 	if err != nil {
 		return contract.IOResult{}, err
 	}
@@ -511,10 +535,29 @@ func (s *Service) performComplete(ctx context.Context, plan contract.IOPlan) (co
 		return contract.IOResult{Fault: verificationFailed(
 			"helper receipt is bound to challenge %s, not %s", payload.ChallengeID, plan.ID)}, nil
 	}
-	if payload.AccountIdentity != private.AccountIdentity {
-		return contract.IOResult{Fault: verificationFailed(
-			"helper receipt reports account %q but the challenge is bound to %q; substitution is refused",
-			payload.AccountIdentity, private.AccountIdentity)}, nil
+	if private.Provider == "serenity" {
+		if !validHostedGrant(payload, s.clock.Now()) {
+			return contract.IOResult{Fault: verificationFailed(
+				"helper receipt does not contain a current verified Serenity account/project binding")}, nil
+		}
+		if private.AccountIdentity != "" && private.AccountIdentity != payload.HostedGrant.AccountID {
+			return contract.IOResult{Fault: verificationFailed(
+				"helper receipt account differs from the expected account; substitution is refused")}, nil
+		}
+		if payload.AccountIdentity != payload.HostedGrant.AccountID {
+			return contract.IOResult{Fault: verificationFailed(
+				"helper receipt account does not match its hosted binding; substitution is refused")}, nil
+		}
+	} else {
+		if payload.HostedGrant != nil || payload.HostedGrantID != "" || payload.AccountState != "" || payload.ProjectState != "" {
+			return contract.IOResult{Fault: verificationFailed(
+				"non-Serenity helper receipt carries hosted grant metadata")}, nil
+		}
+		if payload.AccountIdentity != private.AccountIdentity {
+			return contract.IOResult{Fault: verificationFailed(
+				"helper receipt reports account %q but the challenge is bound to %q; substitution is refused",
+				payload.AccountIdentity, private.AccountIdentity)}, nil
+		}
 	}
 	if private.ExpiresAt == nil {
 		return contract.IOResult{Fault: internalError("complete plan carries no bound challenge expiry")}, nil
@@ -528,11 +571,33 @@ func (s *Service) performComplete(ctx context.Context, plan contract.IOPlan) (co
 		return contract.IOResult{Fault: verificationFailed(
 			"helper receipt names credential reference %s which the store does not hold", payload.CredentialRef)}, nil
 	}
-	data, err := marshalData(ioEnvelope{XConnections: &ioPrivate{Receipt: payload}})
+	data, err := marshalData(ioEnvelope{XConnections: &ioPrivate{Receipt: payload, HostedGrant: payload.HostedGrant}})
 	if err != nil {
 		return contract.IOResult{}, err
 	}
 	return contract.IOResult{Data: data}, nil
+}
+
+func validHostedGrant(payload *helperPayload, now time.Time) bool {
+	if payload == nil || payload.HostedGrant == nil || payload.HostedGrantID == "" ||
+		payload.AccountState != "active" || payload.ProjectState != "ready" || payload.RevocationEpoch < 0 {
+		return false
+	}
+	grant := payload.HostedGrant
+	if grant.Issuer != serenityIssuer || grant.Resource != serenityResource ||
+		grant.AccountID == "" || grant.ProjectID == "" || grant.VerifiedAt.IsZero() ||
+		grant.VerifiedAt.Before(payload.ExpiresAt.Add(-challengeExpiry)) ||
+		grant.VerifiedAt.After(now.Add(2*time.Minute)) || now.Sub(grant.VerifiedAt) > challengeExpiry {
+		return false
+	}
+	seen := make(map[string]bool, len(grant.Scopes))
+	for _, scope := range grant.Scopes {
+		if (scope != "memory:read" && scope != "memory:write") || seen[scope] {
+			return false
+		}
+		seen[scope] = true
+	}
+	return seen["memory:read"] && len(seen) == len(grant.Scopes) && len(seen) >= 1 && len(seen) <= 2
 }
 
 // verifyReceipt checks the receipt envelope and its HMAC. The decoded
@@ -653,7 +718,7 @@ func revalidatePins(plan contract.IOPlan, row challengeRow) *contract.Fault {
 func (s *Service) finishBegin(ctx context.Context, unit contract.Unit, row challengeRow, data json.RawMessage) (contract.Payload, error) {
 	private := decodePrivate(data)
 	consent := private.ConsentURL
-	if row.Method == methodBrowser && consent == "" {
+	if row.Method == methodBrowser && consent == "" && private.Provider != "serenity" {
 		return contract.Payload{}, internalError("browser challenge completion carries no consent URL")
 	}
 	if err := s.updateChallenge(ctx, unit, row, challengeExternalActionRequired, consent, ""); err != nil {
@@ -703,7 +768,11 @@ func (s *Service) finishComplete(ctx context.Context, unit contract.Unit, row ch
 			"connection %s changed from version %d to %d since setup began; cancel and begin setup again against the current connection",
 			row.ConnectionID, pinned, live.Version)
 	}
-	if err := s.applyVerifiedCredential(ctx, unit, live, private.Receipt.CredentialRef); err != nil {
+	accountIdentity := private.Receipt.AccountIdentity
+	if private.Receipt.HostedGrant != nil {
+		accountIdentity = private.Receipt.HostedGrant.AccountID
+	}
+	if err := s.applyVerifiedCredential(ctx, unit, live, private.Receipt.CredentialRef, accountIdentity, private.Receipt.HostedGrant); err != nil {
 		return contract.Payload{}, err
 	}
 	if err := s.updateChallenge(ctx, unit, row, challengeCompleted, row.ConsentURL, in.HelperRef); err != nil {
@@ -727,15 +796,17 @@ func (s *Service) finishComplete(ctx context.Context, unit contract.Unit, row ch
 // holds is a no-op: only a materially different custody bumps the version
 // and re-enters unverified, matching the same rule connection.update's
 // candidate validation already states for a credential_ref change.
-func (s *Service) applyVerifiedCredential(ctx context.Context, unit contract.Unit, live connectionRow, credentialRef string) error {
-	if credentialRef == live.CredentialRef {
+func (s *Service) applyVerifiedCredential(ctx context.Context, unit contract.Unit, live connectionRow, credentialRef, accountIdentity string, grant *wireHostedMemoryGrant) error {
+	if credentialRef == live.CredentialRef && accountIdentity == live.AccountIdentity && equalHostedMemoryGrant(grant, live.HostedMemoryGrant) {
 		return nil
 	}
 	res, err := unit.ExecContext(ctx, `
 		UPDATE connections_connections
-		SET version = ?, credential_ref = ?, validation_state = ?, validated_at = NULL, valid_until = NULL, updated_at = ?
+		SET version = ?, credential_ref = ?, account_identity = ?, hosted_memory_grant_json = ?,
+		    validation_state = ?, validated_at = NULL, valid_until = NULL, updated_at = ?
 		WHERE id = ? AND version = ?`,
-		live.Version+1, credentialRef, connStateUnverified, formatStamp(s.clock.Now()),
+		live.Version+1, credentialRef, accountIdentity, hostedMemoryGrantJSON(grant),
+		connStateUnverified, formatStamp(s.clock.Now()),
 		string(live.ID), live.Version)
 	if err != nil {
 		return fmt.Errorf("connections: apply verified credential: %w", err)
@@ -746,4 +817,20 @@ func (s *Service) applyVerifiedCredential(ctx context.Context, unit contract.Uni
 	return s.emit(ctx, unit, "connections.connection.credential_applied", live.ID, live.Version+1, map[string]any{
 		"id": live.ID, "version": live.Version + 1,
 	})
+}
+
+func equalHostedMemoryGrant(a, b *wireHostedMemoryGrant) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	if a.Issuer != b.Issuer || a.Resource != b.Resource || a.AccountID != b.AccountID ||
+		a.ProjectID != b.ProjectID || !a.VerifiedAt.Equal(b.VerifiedAt) || len(a.Scopes) != len(b.Scopes) {
+		return false
+	}
+	for i := range a.Scopes {
+		if a.Scopes[i] != b.Scopes[i] {
+			return false
+		}
+	}
+	return true
 }

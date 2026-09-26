@@ -161,27 +161,29 @@ func (s *Service) listContracts(ctx context.Context, unit contract.Unit, limit i
 // connectionRow is one applied connection definition plus its private
 // lifecycle state.
 type connectionRow struct {
-	ID              contract.ID
-	Version         int64
-	Scope           contract.Scope
-	Provider        string
-	AccountIdentity string
-	CredentialRef   string
-	Destinations    []string
-	AllowedScopes   []string
-	ValidationState string
-	LifecycleState  string
-	ValidatedAt     *time.Time
-	ValidUntil      *time.Time
+	ID                contract.ID
+	Version           int64
+	Scope             contract.Scope
+	Provider          string
+	AccountIdentity   string
+	CredentialRef     string
+	Destinations      []string
+	AllowedScopes     []string
+	ValidationState   string
+	LifecycleState    string
+	ValidatedAt       *time.Time
+	ValidUntil        *time.Time
+	HostedMemoryGrant *wireHostedMemoryGrant
 }
 
 func scanConnection(scan func(dest ...any) error) (connectionRow, error) {
 	var r connectionRow
 	var scopeJSON, destinations, allowedScopes string
+	var hostedMemoryGrantJSON *string
 	var validatedAt, validUntil *string
 	if err := scan(&r.ID, &r.Version, &scopeJSON, &r.Provider, &r.AccountIdentity,
 		&r.CredentialRef, &destinations, &allowedScopes, &r.ValidationState,
-		&r.LifecycleState, &validatedAt, &validUntil); err != nil {
+		&r.LifecycleState, &validatedAt, &validUntil, &hostedMemoryGrantJSON); err != nil {
 		return connectionRow{}, err
 	}
 	var err error
@@ -210,11 +212,30 @@ func scanConnection(scan func(dest ...any) error) (connectionRow, error) {
 	if r.ValidUntil, err = parse(validUntil); err != nil {
 		return connectionRow{}, err
 	}
+	if hostedMemoryGrantJSON != nil {
+		var grant wireHostedMemoryGrant
+		if err = json.Unmarshal([]byte(*hostedMemoryGrantJSON), &grant); err != nil {
+			return connectionRow{}, fmt.Errorf("connections: decode hosted memory grant: %w", err)
+		}
+		r.HostedMemoryGrant = &grant
+	}
 	return r, nil
 }
 
 const connectionColumns = `id, version, scope_json, provider, account_identity, credential_ref,
-	destinations_json, allowed_scopes_json, validation_state, lifecycle_state, validated_at, valid_until`
+	destinations_json, allowed_scopes_json, validation_state, lifecycle_state, validated_at, valid_until,
+	hosted_memory_grant_json`
+
+func hostedMemoryGrantJSON(grant *wireHostedMemoryGrant) any {
+	if grant == nil {
+		return nil
+	}
+	raw, err := json.Marshal(grant)
+	if err != nil {
+		panic("connections: hosted memory grant encoding failed: " + err.Error())
+	}
+	return string(raw)
+}
 
 func (s *Service) loadConnection(ctx context.Context, unit contract.Unit, id contract.ID) (connectionRow, bool, error) {
 	row := unit.QueryRowContext(ctx,

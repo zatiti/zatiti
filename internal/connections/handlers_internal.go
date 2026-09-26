@@ -93,6 +93,9 @@ func (s *Service) applyChange(ctx context.Context, unit contract.Unit, ch wireCh
 		return wireRef{}, invalidInput("connection change definition does not match the Connection schema: %v", err)
 	}
 	w := def.wireConnection
+	if w.HostedMemoryGrant != nil && ch.Action != actionArchive {
+		return wireRef{}, invalidInput("hosted_memory_grant is server-observed setup metadata and cannot appear in a connection definition")
+	}
 	if f := checkInstallation(unit, w.Scope); f != nil {
 		return wireRef{}, f
 	}
@@ -108,13 +111,13 @@ func (s *Service) applyChange(ctx context.Context, unit contract.Unit, ch wireCh
 			INSERT INTO connections_connections
 				(id, version, installation_id, scope_json, provider, account_identity,
 				 credential_ref, destinations_json, allowed_scopes_json, validation_state,
-				 lifecycle_state, validated_at, valid_until, created_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				 lifecycle_state, validated_at, valid_until, hosted_memory_grant_json, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			string(w.ID), w.Version, string(w.Scope.InstallationID), mustScopeJSON(w.Scope),
 			w.Provider, w.AccountIdentity, w.CredentialRef,
 			marshalStrings(w.Destinations), marshalStrings(w.AllowedScopes),
 			w.ValidationState, connLifecycleActive, stampOrNull(w.ValidatedAt),
-			stampOrNull(w.ValidUntil), now, now); err != nil {
+			stampOrNull(w.ValidUntil), nil, now, now); err != nil {
 			return wireRef{}, fmt.Errorf("connections: insert connection: %w", err)
 		}
 		if err := s.emit(ctx, unit, "connections.connection.created", w.ID, w.Version, map[string]any{
@@ -140,6 +143,9 @@ func (s *Service) applyChange(ctx context.Context, unit contract.Unit, ch wireCh
 		if w.Version != row.Version+1 {
 			return wireRef{}, invalidInput("connection %s staged version %d does not project from current version %d",
 				ch.ID, w.Version, row.Version)
+		}
+		if w.Provider == row.Provider && w.AccountIdentity == row.AccountIdentity && w.CredentialRef == row.CredentialRef {
+			w.HostedMemoryGrant = row.HostedMemoryGrant
 		}
 		if err := s.upsertConnection(ctx, unit, row, w, row.LifecycleState); err != nil {
 			return wireRef{}, err
@@ -194,11 +200,11 @@ func (s *Service) upsertConnection(ctx context.Context, unit contract.Unit, row 
 		UPDATE connections_connections
 		SET version = ?, scope_json = ?, provider = ?, account_identity = ?, credential_ref = ?,
 		    destinations_json = ?, allowed_scopes_json = ?, validation_state = ?,
-		    lifecycle_state = ?, updated_at = ?
+		    lifecycle_state = ?, hosted_memory_grant_json = ?, updated_at = ?
 		WHERE id = ? AND version = ?`,
 		w.Version, mustScopeJSON(w.Scope), w.Provider, w.AccountIdentity, w.CredentialRef,
 		marshalStrings(w.Destinations), marshalStrings(w.AllowedScopes), w.ValidationState,
-		lifecycle, formatStamp(s.clock.Now()),
+		lifecycle, hostedMemoryGrantJSON(w.HostedMemoryGrant), formatStamp(s.clock.Now()),
 		string(row.ID), row.Version)
 	if err != nil {
 		return fmt.Errorf("connections: update connection: %w", err)

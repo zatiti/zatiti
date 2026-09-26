@@ -71,17 +71,29 @@ type wireMoney struct {
 // wireConnection mirrors $defs/Connection. ValidatedAt and ValidUntil are
 // optional scalars and therefore pointers on the wire.
 type wireConnection struct {
-	ID              contract.ID `json:"id"`
-	Version         int64       `json:"version"`
-	Scope           wireScope   `json:"scope"`
-	Provider        string      `json:"provider"`
-	AccountIdentity string      `json:"account_identity"`
-	CredentialRef   string      `json:"credential_ref"`
-	Destinations    []string    `json:"destinations"`
-	AllowedScopes   []string    `json:"allowed_scopes"`
-	ValidationState string      `json:"validation_state"`
-	ValidatedAt     *time.Time  `json:"validated_at,omitempty"`
-	ValidUntil      *time.Time  `json:"valid_until,omitempty"`
+	ID                contract.ID            `json:"id"`
+	Version           int64                  `json:"version"`
+	Scope             wireScope              `json:"scope"`
+	Provider          string                 `json:"provider"`
+	AccountIdentity   string                 `json:"account_identity"`
+	CredentialRef     string                 `json:"credential_ref"`
+	Destinations      []string               `json:"destinations"`
+	AllowedScopes     []string               `json:"allowed_scopes"`
+	ValidationState   string                 `json:"validation_state"`
+	ValidatedAt       *time.Time             `json:"validated_at,omitempty"`
+	ValidUntil        *time.Time             `json:"valid_until,omitempty"`
+	HostedMemoryGrant *wireHostedMemoryGrant `json:"hosted_memory_grant,omitempty"`
+}
+
+// wireHostedMemoryGrant is server-observed metadata from the trusted OAuth
+// helper. It is never accepted from a user-authored connection definition.
+type wireHostedMemoryGrant struct {
+	Issuer     string    `json:"issuer"`
+	Resource   string    `json:"resource"`
+	AccountID  string    `json:"account_id"`
+	ProjectID  string    `json:"project_id"`
+	Scopes     []string  `json:"scopes"`
+	VerifiedAt time.Time `json:"verified_at"`
 }
 
 // wireTool mirrors $defs/Tool. Schemas stay inert JSON.
