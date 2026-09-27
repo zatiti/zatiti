@@ -510,6 +510,32 @@ func TestRealRegistryDrivesApplication(t *testing.T) {
 		t.Fatalf("capabilities.list: %v", err)
 	}
 
+	// Phrase speech is local IO: the registry routes it to the voice
+	// module's own phases, and application.Invoke reaches Prepare (which
+	// refuses the unknown session) rather than the single-handler path that
+	// fails with "voice call requires phased IO".
+	var voiceModule contract.Module
+	for _, m := range a.modules {
+		if m.Name() == "voice" {
+			voiceModule = m
+		}
+	}
+	if phrase, ok := a.reg.LocalIOFor("voice.speak.phrase"); !ok {
+		t.Fatal("registry exposes no local IO route for voice.speak.phrase")
+	} else if view, isView := phrase.(localIOView); !isView || view.LocalIO != voiceModule.(contract.LocalIO) {
+		t.Fatal("voice.speak.phrase does not route to the voice module's own LocalIO")
+	}
+	_, err = a.app.Invoke(ctx, owner, "voice.speak.phrase", contract.Request{
+		Schema: contract.SchemaRequest, SubmissionKey: "assembly-phrase-1",
+		Input: mustJSON(t, map[string]any{"scope": scope, "session_id": contract.NewID(), "stream_id": "attempt:item", "phrase_index": 0}),
+	})
+	if err == nil || strings.Contains(err.Error(), "phased IO") || faultCode(err) == contract.CodeInvalidInput {
+		t.Fatalf("voice.speak.phrase for an unknown session: %v, want a refusal from the voice phases", err)
+	}
+	if a.rec.saw("voice.speak.phrase", 1) {
+		t.Fatal("voice.speak.phrase ran through Module.Handle instead of the LocalIO phases")
+	}
+
 	// Public routing never reaches an internal operation.
 	if _, err := a.app.Invoke(ctx, owner, "_identity.bootstrap", contract.Request{
 		Schema: contract.SchemaRequest, Input: json.RawMessage(`{}`),

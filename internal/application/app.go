@@ -27,6 +27,7 @@ type Catalog interface {
 var localIOOperations = map[string]bool{
 	"voice.transcribe":          true,
 	"voice.speak":               true,
+	"voice.speak.phrase":        true,
 	"artifact.upload.chunk":     true,
 	"artifact.upload.finish":    true,
 	"artifact.upload.cancel":    true,
