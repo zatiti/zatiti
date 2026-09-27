@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -207,7 +208,7 @@ func AppleNotarize(ctx context.Context, r AppleToolRunner, c AppleSigningConfig,
 	if timeout <= 0 {
 		timeout = time.Hour
 	}
-	args := []string{"notarytool", "submit", path, "--keychain-profile", c.NotaryProfile, "--wait", "--timeout", timeout.String(), "--output-format", "json"}
+	args := []string{"notarytool", "submit", path, "--keychain-profile", c.NotaryProfile, "--wait", "--timeout", notaryTimeout(timeout), "--output-format", "json"}
 	args = append(args, c.keychainArgs()...)
 	out, err := appleRun(ctx, r, "notarization", "/usr/bin/xcrun", args...)
 	if err != nil {
@@ -221,6 +222,17 @@ func AppleNotarize(ctx context.Context, r AppleToolRunner, c AppleSigningConfig,
 		return res.ID, errf(CodeVerificationFailed, "notarization submission %s was not accepted: %s", res.ID, res.Status)
 	}
 	return res.ID, nil
+}
+
+// notaryTimeout renders d in the single-unit form notarytool accepts
+// ("3600s"). notarytool rejects Go's compound form such as "1h0m0s", which
+// would make every signed notarization fail before submission.
+func notaryTimeout(d time.Duration) string {
+	secs := int64((d + time.Second - 1) / time.Second)
+	if secs < 1 {
+		secs = 1
+	}
+	return strconv.FormatInt(secs, 10) + "s"
 }
 
 // AppleStaple staples the notarization ticket to path and validates it.

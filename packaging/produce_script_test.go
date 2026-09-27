@@ -99,16 +99,31 @@ func TestProducerScriptDryRunProducesVerifiableReleaseSet(t *testing.T) {
 	}
 	keys := t.TempDir()
 	priv, privPath, pubPath := writeKeyPair(t, keys, "release")
-	common := []string{"--input", input, "--sequence", "5", "--base-url", "https://downloads.zatiti.example/releases", "--release-key", privPath, "--trusted", pubPath}
+	common := []string{"--input", input, "--sequence", "5", "--base-url", "https://downloads.zatiti.example/releases"}
+	operatorKeys := []string{"--release-key", privPath, "--trusted", pubPath}
 	unconfigured := []string{EnvAppleAppIdentity + "=", EnvAppleInstallerIdentity + "=", EnvAppleNotaryProfile + "=", EnvAppleKeychain + "="}
 
 	signedOut := filepath.Join(t.TempDir(), "signed")
-	log, err := runProducer(t, unconfigured, append(common, "--out", signedOut)...)
+	log, err := runProducer(t, unconfigured, append(append(common, operatorKeys...), "--out", signedOut)...)
 	if err == nil || !strings.Contains(log, "not configured") {
 		t.Fatalf("a signed run without Apple configuration did not fail closed: %v\n%s", err, log)
 	}
 	if entries, _ := os.ReadDir(filepath.Join(signedOut, "assets")); len(entries) != 0 {
 		t.Fatalf("an unconfigured signed run produced assets: %v", entries)
+	}
+
+	refused := filepath.Join(t.TempDir(), "dry-with-keys")
+	log, err = runProducer(t, unconfigured, append(append(common, operatorKeys...), "--out", refused, "--unsigned-dry-run")...)
+	if err == nil || !strings.Contains(log, "throwaway") {
+		t.Fatalf("a dry run accepted the operator's release key: %v\n%s", err, log)
+	}
+	if _, err := os.Stat(refused); !os.IsNotExist(err) {
+		t.Fatal("a refused dry run created its output directory")
+	}
+	spaced := filepath.Join(t.TempDir(), "has space")
+	log, err = runProducer(t, unconfigured, append(common, "--out", spaced, "--unsigned-dry-run")...)
+	if err == nil || !strings.Contains(log, "whitespace or glob") {
+		t.Fatalf("an output path with a space was accepted: %v\n%s", err, log)
 	}
 
 	out := filepath.Join(t.TempDir(), "dry")
@@ -131,7 +146,15 @@ func TestProducerScriptDryRunProducesVerifiableReleaseSet(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	trusted := []ed25519.PublicKey{priv.Public().(ed25519.PublicKey)}
+	dryPub, err := loadEd25519PublicKey(filepath.Join(out, "UNSIGNED-DRY-RUN.pub.pem"))
+	if err != nil {
+		t.Fatalf("dry run did not emit its throwaway public key: %v", err)
+	}
+	operator := []ed25519.PublicKey{priv.Public().(ed25519.PublicKey)}
+	if _, err := VerifyMacDownloadPlan(deliveryRaw, sig, operator, time.Now().Add(time.Hour), 0, "arm64"); err == nil {
+		t.Fatal("unsigned dry-run output verifies against the operator's trusted release key")
+	}
+	trusted := []ed25519.PublicKey{dryPub}
 	for _, arch := range []string{"amd64", "arm64"} {
 		plan, err := VerifyMacDownloadPlan(deliveryRaw, sig, trusted, time.Now().Add(time.Hour), 0, arch)
 		if err != nil {

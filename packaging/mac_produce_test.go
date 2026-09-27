@@ -111,7 +111,7 @@ func TestAppleNotarizeAcceptsOnlyAcceptedVerdict(t *testing.T) {
 			_ = wantFault(t, err, CodeVerificationFailed)
 		}
 		args := strings.Join(tools.calls[0].args, " ")
-		if !strings.Contains(args, "--keychain-profile zatiti-notary") || !strings.Contains(args, "--wait") {
+		if !strings.Contains(args, "--keychain-profile zatiti-notary") || !strings.Contains(args, "--wait") || !strings.Contains(args, "--timeout 60s") {
 			t.Errorf("notarytool args %q", args)
 		}
 	}
@@ -313,5 +313,15 @@ func TestCLIMacPkgBuildsBoundInstaller(t *testing.T) {
 	}
 	if code := RunCLI([]string{"mac-pkg", "--release", releasePath, "--arch", "ppc", "--sequence", "4", "--controller", controller, "--desktop", desktop, "--out-dir", dir}, &stdout, &stderr); code == 0 {
 		t.Fatal("mac-pkg accepted an unsupported architecture")
+	}
+}
+
+// notarytool accepts only a single-unit duration; Go's "1h0m0s" is refused
+// before submission, so the rendered form must be whole seconds.
+func TestNotaryTimeoutUsesSingleUnitSeconds(t *testing.T) {
+	for d, want := range map[time.Duration]string{time.Hour: "3600s", time.Minute: "60s", 1500 * time.Millisecond: "2s", 0: "1s"} {
+		if got := notaryTimeout(d); got != want {
+			t.Errorf("notaryTimeout(%v) = %q, want %q", d, got, want)
+		}
 	}
 }

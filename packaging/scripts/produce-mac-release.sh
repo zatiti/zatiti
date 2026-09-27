@@ -28,7 +28,7 @@
 set -eu
 
 usage() {
-  echo 'usage: produce-mac-release.sh --input DIR --out DIR --sequence N --base-url https://HOST/PATH --release-key KEY.pem --trusted PUB.pem [--unsigned-dry-run]' >&2
+  echo 'usage: produce-mac-release.sh --input DIR --out DIR --sequence N --base-url https://HOST/PATH (--release-key KEY.pem --trusted PUB.pem | --unsigned-dry-run)' >&2
   exit 2
 }
 
@@ -45,7 +45,27 @@ while [ "$#" -gt 0 ]; do
     *) usage ;;
   esac
 done
-[ -n "$input" ] && [ -n "$out" ] && [ -n "$sequence" ] && [ -n "$base_url" ] && [ -n "$release_key" ] && [ -n "$trusted" ] || usage
+[ -n "$input" ] && [ -n "$out" ] && [ -n "$sequence" ] && [ -n "$base_url" ] || usage
+# A dry run signs release metadata only with a throwaway key it mints itself,
+# so its unsigned output can never verify against a trusted release key and
+# be published by mistake. A signed run requires the operator's keys.
+if [ "$dry_run" = 1 ]; then
+  if [ -n "$release_key" ] || [ -n "$trusted" ]; then
+    echo 'an unsigned dry run uses its own throwaway metadata key; do not pass --release-key or --trusted' >&2
+    exit 2
+  fi
+elif [ -z "$release_key" ] || [ -z "$trusted" ]; then
+  usage
+fi
+# Paths are later expanded unquoted in flag lists; refuse whitespace and glob
+# characters rather than let them split or expand into other arguments.
+for p in "$input" "$out" "$release_key" "$trusted" "$0"; do
+  case "$p" in
+    *[[:space:]]* | *[*?[]*)
+      echo "paths must not contain whitespace or glob characters: $p" >&2
+      exit 2 ;;
+  esac
+done
 if [ "$(uname -s)" != Darwin ]; then
   echo 'Mac release production requires macOS' >&2
   exit 1
@@ -67,7 +87,10 @@ pack="$work/zatiti-pack"
 entitlements="$repo/apps/desktop/macos/Runner/Release.entitlements"
 
 if [ "$dry_run" = 1 ]; then
-  echo 'UNSIGNED DRY RUN: every Apple step is skipped; this output is not a release.' > "$out/UNSIGNED-DRY-RUN"
+  echo 'UNSIGNED DRY RUN: every Apple step is skipped and metadata is signed with a throwaway key; this output is not a release.' > "$out/UNSIGNED-DRY-RUN"
+  release_key="$work/dry-run-release-key.pem"
+  trusted="$out/UNSIGNED-DRY-RUN.pub.pem"
+  "$pack" keygen --private-out "$release_key" --public-out "$trusted" > /dev/null
 else
   # Fail closed before any work when Apple signing is not configured.
   "$pack" apple --step status --require > "$out/apple-status.json"
