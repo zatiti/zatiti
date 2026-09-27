@@ -38,6 +38,10 @@ type Server struct {
 	localServer    *http.Server
 	remoteServer   *http.Server
 
+	// streamsDone is closed when Close begins, ending every open reply
+	// stream so graceful shutdown is not held open by an idle-free SSE
+	// connection.
+	streamsDone chan struct{}
 	shutdownOnce sync.Once
 }
 
@@ -57,12 +61,14 @@ func New(cfg Config, app *application.Application) (*Server, error) {
 		return nil, fmt.Errorf("server: %w", err)
 	}
 
+	streamsDone := make(chan struct{})
 	s := &Server{
+		streamsDone:   streamsDone,
 		cfg:           cfg,
 		app:           app,
 		localListener: localListener,
 		localServer: &http.Server{
-			Handler:           streamMux(&operationHandler{app: app, maxBodyBytes: cfg.MaxBodyBytes, origin: originLocal}, cfg.Streams),
+			Handler:           streamMux(&operationHandler{app: app, maxBodyBytes: cfg.MaxBodyBytes, origin: originLocal}, cfg.Streams, streamsDone),
 			ReadHeaderTimeout: readHeaderTimeout,
 		},
 	}
@@ -76,7 +82,7 @@ func New(cfg Config, app *application.Application) (*Server, error) {
 		}
 		s.remoteListener = remoteListener
 		s.remoteServer = &http.Server{
-			Handler:           streamMux(&operationHandler{app: app, maxBodyBytes: cfg.MaxBodyBytes, origin: originRemote}, cfg.Streams),
+			Handler:           streamMux(&operationHandler{app: app, maxBodyBytes: cfg.MaxBodyBytes, origin: originRemote}, cfg.Streams, streamsDone),
 			ReadHeaderTimeout: readHeaderTimeout,
 		}
 	}
@@ -124,7 +130,9 @@ func (s *Server) Serve(ctx context.Context) error {
 	case serveErr = <-errCh:
 	}
 
-	_ = s.Close(context.Background())
+	closeCtx, cancel := context.WithTimeout(context.Background(), serveCloseGrace)
+	_ = s.Close(closeCtx)
+	cancel()
 	wg.Wait()
 
 	select {
@@ -140,6 +148,9 @@ func (s *Server) Serve(ctx context.Context) error {
 	return ctx.Err()
 }
 
+// serveCloseGrace bounds the shutdown Serve performs on its own way out.
+const serveCloseGrace = 10 * time.Second
+
 // Close gracefully shuts down every listener, waiting for in-flight requests
 // to finish (bounded by ctx) before returning. It is idempotent: a second
 // call, whether from a caller or from Serve's own shutdown on the way out,
@@ -150,6 +161,7 @@ func (s *Server) Serve(ctx context.Context) error {
 func (s *Server) Close(ctx context.Context) error {
 	var err error
 	s.shutdownOnce.Do(func() {
+		close(s.streamsDone)
 		if s.remoteServer != nil {
 			if e := s.remoteServer.Shutdown(ctx); e != nil {
 				err = e

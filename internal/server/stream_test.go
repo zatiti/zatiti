@@ -27,6 +27,7 @@ const messageListInputSchema = `{"type":"object","additionalProperties":false,"p
 type streamEnv struct {
 	*testEnv
 	hub     *controller.ReplyHub
+	srv     *server.Server
 	client  *http.Client
 	allowed atomic.Value // map[contract.ID]bool
 }
@@ -51,6 +52,7 @@ func newStreamEnv(t *testing.T) *streamEnv {
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
 	}
+	env.srv = srv
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() {
@@ -245,5 +247,34 @@ func TestReplyStreamRefusesUnauthorizedAndMalformedRequests(t *testing.T) {
 		if result := decodeFaultEnvelope(t, resp); result.Error == nil || result.Error.Code != c.code {
 			t.Fatalf("%s: result = %+v, want %s", name, result, c.code)
 		}
+	}
+}
+
+// An open reply stream never goes idle, so graceful shutdown must end it
+// rather than wait for it: Close returns promptly and the stream closes.
+func TestOpenReplyStreamDoesNotHoldShutdown(t *testing.T) {
+	env := newStreamEnv(t)
+	human := env.human(t, "tok-shutdown")
+	conversation := contract.NewID()
+	env.allow(human.PrincipalID)
+	resp := env.open(t, context.Background(), "tok-shutdown", conversation, "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("stream status %d", resp.StatusCode)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	start := time.Now()
+	if err := env.srv.Close(ctx); err != nil {
+		t.Fatalf("Close with an open stream: %v after %s", err, time.Since(start))
+	}
+	ended := make(chan error, 1)
+	go func() {
+		_, err := io.Copy(io.Discard, resp.Body)
+		ended <- err
+	}()
+	select {
+	case <-ended:
+	case <-time.After(3 * time.Second):
+		t.Fatal("reply stream stayed open after Close")
 	}
 }

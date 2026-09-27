@@ -11,7 +11,7 @@ import (
 // A read-only HTTP event stream uses the same authentication and Application
 // authorization as ordinary conversation reads. Reconnect obtains a current
 // bounded snapshot; it never resubmits a command or replays speech.
-func streamMux(h *operationHandler, hub contract.ReplyStreams) *http.ServeMux {
+func streamMux(h *operationHandler, hub contract.ReplyStreams, done <-chan struct{}) *http.ServeMux {
 	mux := newMux(h)
 	if hub == nil {
 		return mux
@@ -67,6 +67,8 @@ func streamMux(h *operationHandler, hub contract.ReplyStreams) *http.ServeMux {
 		for {
 			select {
 			case <-r.Context().Done():
+				return
+			case <-done:
 				return
 			case <-heartbeat.C:
 			case <-notify:
