@@ -2,6 +2,7 @@ package execution
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 
 	"github.com/zatiti/zatiti/internal/contract"
@@ -804,9 +805,11 @@ func (s *Service) handleProposalRecord(ctx context.Context, unit contract.Unit, 
 		t.State = "claimed"
 	case "reply":
 		// A conversation reply is left prepared only for its delivery as
-		// the worker's message; once delivered it is the turn's final
-		// answer, exactly as an inline-recorded reply is.
-		t.State = "completed"
+		// the worker's message; once that delivery is recorded it is the
+		// turn's final answer, exactly as an inline-recorded reply is.
+		if stagedReplyDelivery(p.NormalizedProposal) {
+			t.State = "completed"
+		}
 	}
 	t.UpdatedAt = now
 	if t.Limits.ModelSteps > 0 && t.StepsUsed >= t.Limits.ModelSteps {
@@ -818,6 +821,13 @@ func (s *Service) handleProposalRecord(ctx context.Context, unit contract.Unit, 
 		return contract.Outcome[turnBody]{}, err
 	}
 	return completedOutcome(turnBody{Resource: turnOut(t)})
+}
+
+// stagedReplyDelivery reports whether a normalized reply was staged for
+// delivery into a conversation (prepareReplyDelivery).
+func stagedReplyDelivery(raw json.RawMessage) bool {
+	var np normalizedProposal
+	return json.Unmarshal(raw, &np) == nil && np.Kind == "reply" && np.Operation == replyDeliveryOperation && np.MessageID != ""
 }
 
 // artifactRefEqual reports whether two optional artifact refs name the same
