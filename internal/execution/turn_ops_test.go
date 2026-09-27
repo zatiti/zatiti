@@ -732,3 +732,42 @@ func TestVerificationClaimReturnsCurrentAttemptVersionAndFencesRecord(t *testing
 		Result: resultFor(e, job, "passed", passedChecks()),
 	})
 }
+
+// Interpreting a reply inline bumps the turn's version in the same call
+// that records the proposal, so the controller's follow-up prepare lookup
+// necessarily carries the version from before. The lookup of an already
+// interpreted proposal must still answer; the version fence only guards a
+// proposal that does not exist yet.
+func TestProposalPrepareReturnsAnInterpretedProposalDespiteAStaleVersion(t *testing.T) {
+	e := newEnv(t)
+	chief := e.ids.New()
+	e.installWorkerSnapshot(chief, fixtureHostedProfile(chief))
+	payload := e.mustOK(opTurnAdmit, turnAdmitInput{
+		Source:   wireTurnSource{Kind: "message", SourceID: e.ids.New(), SourceVersion: 1},
+		WorkerID: chief, Scope: e.scope, RequesterID: e.ids.New(),
+	})
+	var body turnBody
+	e.decode(payload.Data, &body)
+	e.mustOK(opWorkClaim, workClaimInput{WorkID: body.Resource.ID, ExpectedVersion: body.Resource.Version, Generation: e.generation()})
+	stale := e.readTurn(body.Resource.ID).Version
+	p := e.seedProposal(body.Resource.ID, 0, "call-1")
+	e.inWrite(func(unit contract.Unit) error {
+		turn, err := loadTurn(e.ctx, unit, body.Resource.ID)
+		if err != nil {
+			return err
+		}
+		return updateTurn(e.ctx, unit, turn)
+	})
+	if now := e.readTurn(body.Resource.ID).Version; now == stale {
+		t.Fatalf("turn version did not advance (%d)", now)
+	}
+	got := e.mustOK(opProposalPrepare, proposalPrepareInput{TurnID: body.Resource.ID, StepIndex: 0, ProposalID: p.ProposalID, ExpectedVersion: contract.Version(stale)})
+	var out proposalBody
+	e.decode(got.Data, &out)
+	if out.Resource.ProposalID != p.ProposalID {
+		t.Fatalf("prepare returned proposal %q, want %q", out.Resource.ProposalID, p.ProposalID)
+	}
+	if _, err := e.call(opProposalPrepare, proposalPrepareInput{TurnID: body.Resource.ID, StepIndex: 0, ProposalID: "missing", ExpectedVersion: contract.Version(stale)}); faultCode(err) != contract.CodeStaleVersion {
+		t.Fatalf("stale lookup of a missing proposal = %v, want stale_version", err)
+	}
+}
