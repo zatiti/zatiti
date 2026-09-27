@@ -51,6 +51,14 @@ final class HangReply extends Reply {
   const HangReply();
 }
 
+/// Answer 200 with a server-sent event stream carrying [frames] as `data:`
+/// lines, then end the response, as a controller restart or dropped
+/// connection would.
+final class EventStreamReply extends Reply {
+  const EventStreamReply(this.frames);
+  final List<String> frames;
+}
+
 String completedEnvelope(String dataJson, {String? nextCursor}) =>
     '{"schema":"zatiti.result/v1","command_id":"$testCommandId",'
     '"status":"completed","data":$dataJson,"error":null,'
@@ -131,6 +139,17 @@ class FakeController {
           'json',
         );
         request.response.write(replyBody);
+        await request.response.close();
+      case EventStreamReply(:final frames):
+        request.response.statusCode = 200;
+        request.response.headers.contentType = ContentType(
+          'text',
+          'event-stream',
+        );
+        for (final frame in frames) {
+          request.response.write('data: $frame\n\n');
+          await request.response.flush();
+        }
         await request.response.close();
       case DropReply():
         final socket = await request.response.detachSocket(writeHeaders: false);

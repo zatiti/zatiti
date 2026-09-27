@@ -1,6 +1,6 @@
 package application_test
 
-// Real assembly: the real internal/registry over the sixteen landed domain
+// Real assembly: the real internal/registry over the seventeen landed domain
 // modules, a real application over temp SQLite storage and real platform
 // custody. The in-package tests drive the dispatcher against local owner
 // fakes; this file proves the registry/application seam itself, which no
@@ -38,6 +38,7 @@ import (
 	"github.com/zatiti/zatiti/internal/skills"
 	"github.com/zatiti/zatiti/internal/storage"
 	"github.com/zatiti/zatiti/internal/tasks"
+	"github.com/zatiti/zatiti/internal/voice"
 )
 
 // *registry.Registry is the production Catalog and local IO route.
@@ -217,7 +218,7 @@ func conform(t *testing.T, d contract.Descriptor, f frozen) contract.Descriptor 
 	return d
 }
 
-// realModules constructs the sixteen landed modules with real dependencies
+// realModules constructs the seventeen landed modules with real dependencies
 // and owner-bound ports, in assembly and migration order.
 func realModules(t *testing.T, router *application.PortRouter, clock contract.Clock, secrets contract.SecretStore, blobs contract.BlobStore) ([]contract.Module, contract.Authenticator) {
 	t.Helper()
@@ -248,6 +249,7 @@ func realModules(t *testing.T, router *application.PortRouter, clock contract.Cl
 		{"artifacts", func(d contract.Dependencies) (contract.Module, error) { return artifacts.New(d) }},
 		{"evidence", func(d contract.Dependencies) (contract.Module, error) { return evidence.New(d) }},
 		{"installation", func(d contract.Dependencies) (contract.Module, error) { return installation.New(d) }},
+		{"voice", func(d contract.Dependencies) (contract.Module, error) { return voice.New(d) }},
 	} {
 		m, err := c.make(deps(c.name))
 		if err != nil {
@@ -508,6 +510,32 @@ func TestRealRegistryDrivesApplication(t *testing.T) {
 		t.Fatalf("capabilities.list: %v", err)
 	}
 
+	// Phrase speech is local IO: the registry routes it to the voice
+	// module's own phases, and application.Invoke reaches Prepare (which
+	// refuses the unknown session) rather than the single-handler path that
+	// fails with "voice call requires phased IO".
+	var voiceModule contract.Module
+	for _, m := range a.modules {
+		if m.Name() == "voice" {
+			voiceModule = m
+		}
+	}
+	if phrase, ok := a.reg.LocalIOFor("voice.speak.phrase"); !ok {
+		t.Fatal("registry exposes no local IO route for voice.speak.phrase")
+	} else if view, isView := phrase.(localIOView); !isView || view.LocalIO != voiceModule.(contract.LocalIO) {
+		t.Fatal("voice.speak.phrase does not route to the voice module's own LocalIO")
+	}
+	_, err = a.app.Invoke(ctx, owner, "voice.speak.phrase", contract.Request{
+		Schema: contract.SchemaRequest, SubmissionKey: "assembly-phrase-1",
+		Input: mustJSON(t, map[string]any{"scope": scope, "session_id": contract.NewID(), "stream_id": "attempt:item", "phrase_index": 0}),
+	})
+	if err == nil || strings.Contains(err.Error(), "phased IO") || faultCode(err) == contract.CodeInvalidInput {
+		t.Fatalf("voice.speak.phrase for an unknown session: %v, want a refusal from the voice phases", err)
+	}
+	if a.rec.saw("voice.speak.phrase", 1) {
+		t.Fatal("voice.speak.phrase ran through Module.Handle instead of the LocalIO phases")
+	}
+
 	// Public routing never reaches an internal operation.
 	if _, err := a.app.Invoke(ctx, owner, "_identity.bootstrap", contract.Request{
 		Schema: contract.SchemaRequest, Input: json.RawMessage(`{}`),
@@ -550,8 +578,8 @@ func TestRegistryResolvesEveryLandedOperation(t *testing.T) {
 	if internal == 0 || mutations == 0 {
 		t.Fatalf("landed modules declare %d internal operations, %d of them mutations; the seam is not exercised", internal, mutations)
 	}
-	if got := len(a.reg.Public()); got != 205 {
-		t.Fatalf("Public() holds %d operations, want the 205 frozen ones", got)
+	if got := len(a.reg.Public()); got != 211 {
+		t.Fatalf("Public() holds %d operations, want the 211 frozen ones", got)
 	}
 }
 

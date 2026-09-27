@@ -1,9 +1,10 @@
-// MessageComposer: a per-conversation draft, sent only when the person sends
-// it. There is no voice control and no file upload in this increment, so
-// neither is shown.
+// MessageComposer: a per-conversation draft with optional live voice mode.
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+
+import '../state/live_source.dart';
+import 'voice_mode.dart';
 
 import '../state/snapshot.dart';
 import '../state/workspace_controller.dart';
@@ -70,6 +71,12 @@ class _MessageComposerState extends State<MessageComposer> {
     final text = Theme.of(context).textTheme;
     final offline = !widget.controller.isOnline;
     final canSend = _text.text.trim().isNotEmpty;
+    final source = widget.controller.source;
+    final canVoice =
+        source is LiveWorkspaceSource &&
+        source.installedMac &&
+        widget.controller.isOnline &&
+        widget.controller.canCompose;
     return Container(
       decoration: BoxDecoration(
         color: Theme.of(context).brightness == Brightness.dark
@@ -128,7 +135,19 @@ class _MessageComposerState extends State<MessageComposer> {
                   ),
                 ),
               ),
-              const SizedBox(width: Space.sm),
+              if (canVoice) ...[
+                IconButton(
+                  key: const ValueKey('composer-voice'),
+                  tooltip: 'Start voice conversation',
+                  onPressed: () => showVoiceMode(
+                    context,
+                    controller: widget.controller,
+                    conversation: widget.conversationId,
+                  ),
+                  icon: const Icon(Icons.mic),
+                ),
+                const SizedBox(width: Space.sm),
+              ],
               Semantics(
                 label: offline
                     ? 'Keep message as unsent draft'

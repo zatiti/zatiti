@@ -407,6 +407,10 @@ func handleValidate(ctx context.Context, s *Service, unit contract.Unit, inv con
 					fmt.Sprintf("definition does not match the Connection schema: %v", derr)))
 				continue
 			}
+			if hasVoiceScope(def.wireConnection) && !validDedicatedVoiceConnection(def.wireConnection) {
+				out.Diagnostics = append(out.Diagnostics, errorDiagnostic(path, "voice_connection", "voice credential must be a dedicated OpenRouter connection with only speech endpoints"))
+				continue
+			}
 			if def.Version != 1 {
 				out.Diagnostics = append(out.Diagnostics, errorDiagnostic(path, "version",
 					fmt.Sprintf("created connections start at version 1, staged %d", def.Version)))
@@ -416,6 +420,11 @@ func handleValidate(ctx context.Context, s *Service, unit contract.Unit, inv con
 			} else if found {
 				out.Diagnostics = append(out.Diagnostics, errorDiagnostic(path, "conflict",
 					fmt.Sprintf("connection %s already exists", ch.ID)))
+			}
+			// Voice connections are interactive, disclosure-admitted credentials.
+			// Their speech endpoints do not support the Responses profile probe.
+			if hasVoiceScope(def.wireConnection) && validDedicatedVoiceConnection(def.wireConnection) {
+				continue
 			}
 
 		case actionUpdate:
@@ -440,6 +449,9 @@ func handleValidate(ctx context.Context, s *Service, unit contract.Unit, inv con
 				out.Diagnostics = append(out.Diagnostics, errorDiagnostic(path, "schema",
 					fmt.Sprintf("definition does not match the Connection schema: %v", derr)))
 				continue
+			}
+			if hasVoiceScope(def.wireConnection) != hasVoiceScope(row.wire()) || (hasVoiceScope(def.wireConnection) && !validDedicatedVoiceConnection(def.wireConnection)) {
+				out.Diagnostics = append(out.Diagnostics, errorDiagnostic(path, "voice_role", "credential role is immutable; archive and create a separate voice connection"))
 			}
 			if def.Scope.toContract() != row.Scope {
 				out.Diagnostics = append(out.Diagnostics, errorDiagnostic(path, "scope_move",

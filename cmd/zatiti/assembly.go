@@ -14,6 +14,7 @@ import (
 	"github.com/zatiti/zatiti/internal/configuration"
 	"github.com/zatiti/zatiti/internal/connections"
 	"github.com/zatiti/zatiti/internal/contract"
+	"github.com/zatiti/zatiti/internal/controller"
 	"github.com/zatiti/zatiti/internal/effects"
 	"github.com/zatiti/zatiti/internal/evidence"
 	"github.com/zatiti/zatiti/internal/execution"
@@ -29,6 +30,7 @@ import (
 	"github.com/zatiti/zatiti/internal/skills"
 	"github.com/zatiti/zatiti/internal/storage"
 	"github.com/zatiti/zatiti/internal/tasks"
+	"github.com/zatiti/zatiti/internal/voice"
 )
 
 // systemClock is the production clock.
@@ -70,7 +72,7 @@ func bindInstallationBackup(deps contract.Dependencies, backup contract.Database
 var moduleOrder = []string{
 	"identity", "configuration", "skills", "connections", "policy", "reviews",
 	"accounting", "tasks", "scheduling", "messaging", "execution", "effects",
-	"memory", "artifacts", "evidence", "installation",
+	"memory", "artifacts", "evidence", "voice", "installation",
 }
 
 // modules constructs the sixteen landed domain modules with owner-bound
@@ -87,10 +89,14 @@ var moduleOrder = []string{
 // Collaborators.Jobs requires, keyed by the frozen owner/operation job
 // kinds each of these owners actually implements (landedJobKinds).
 func modules(router *application.PortRouter, clock contract.Clock, ids contract.IDSource, secrets contract.SecretStore, blobs contract.BlobStore, backup contract.DatabaseBackup, mcpProfiles ...json.RawMessage) ([]contract.Module, *identity.Service, map[string]contract.LocalJobRunner, error) {
+	return modulesWithStreams(nil, router, clock, ids, secrets, blobs, backup, mcpProfiles...)
+}
+func modulesWithStreams(streams contract.ReplyStreams, router *application.PortRouter, clock contract.Clock, ids contract.IDSource, secrets contract.SecretStore, blobs contract.BlobStore, backup contract.DatabaseBackup, mcpProfiles ...json.RawMessage) ([]contract.Module, *identity.Service, map[string]contract.LocalJobRunner, error) {
 	deps := func(owner string) contract.Dependencies {
-		return contract.Dependencies{Clock: clock, IDs: ids, Ports: router.For(owner), Secrets: secrets, Blobs: blobs}
+		return contract.Dependencies{Clock: clock, IDs: ids, Ports: router.For(owner), Secrets: secrets, Blobs: blobs, Streams: streams}
 	}
 	constructors := map[string]func(contract.Dependencies) (contract.Module, error){
+		"voice":         func(d contract.Dependencies) (contract.Module, error) { return voice.New(d) },
 		"configuration": func(d contract.Dependencies) (contract.Module, error) { return configuration.New(d) },
 		"skills":        func(d contract.Dependencies) (contract.Module, error) { return skills.New(d) },
 		"connections": func(d contract.Dependencies) (contract.Module, error) {
@@ -180,6 +186,7 @@ func catalog() ([]contract.Descriptor, error) {
 // installationHandle is one opened installation: the startup holder's
 // platform, held ownership, database and assembled application.
 type installationHandle struct {
+	streams      contract.ReplyStreams
 	cfg          config
 	plat         *platform.Platform
 	own          contract.Ownership
@@ -262,7 +269,8 @@ func (h *installationHandle) assemble(ctx context.Context) error {
 		return err
 	}
 	h.mcpProfile = append(json.RawMessage(nil), profile...)
-	mods, idn, jobRunners, err := modules(router, h.clock, randomIDs{}, h.secrets, h.plat.Blobs(), databaseBackup{db: h.db}, h.mcpProfile)
+	h.streams = controller.NewReplyHub()
+	mods, idn, jobRunners, err := modulesWithStreams(h.streams, router, h.clock, randomIDs{}, h.secrets, h.plat.Blobs(), databaseBackup{db: h.db}, h.mcpProfile)
 	if err != nil {
 		return err
 	}

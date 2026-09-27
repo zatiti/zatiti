@@ -19,6 +19,7 @@ var opSchemas = map[string][2]string{
 	"_messaging.history":        {schemaInMessagingHistory, schemaOutMessagingHistory},
 	"_messaging.ready":          {schemaInMessagingReady, schemaOutMessages},
 	"_messaging.processed":      {schemaInMessagingProcessed, schemaOutMessage},
+	"_messaging.voice.read":     {`{"type":"object","additionalProperties":false,"properties":{"scope":{"$ref":"#/$defs/Scope"},"conversation_id":{"type":"string","format":"uuid"},"message_id":{"type":"string","format":"uuid"}},"required":["scope","conversation_id"]}`, `{"type":"object","additionalProperties":false,"properties":{"text":{"type":"string","maxLength":8192}},"required":["text"]}`},
 	"conversation.create":       {schemaInConversationCreate, schemaOutConversation},
 	"conversation.get":          {schemaInConversationGet, schemaOutConversation},
 	"conversation.list":         {schemaInConversationList, schemaOutConversations},

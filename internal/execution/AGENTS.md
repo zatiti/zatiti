@@ -1,6 +1,6 @@
 # Implementation assignment: `internal/execution`
 
-Generated specification revision 18; source digest `b69aafc1a7069d7f85acd918d019e4e8745a08fb7648343c9fadd56da1b51ed9`. This file is committed implementation context. Do not independently edit it. Everything required from the product specification and adjacent interfaces is embedded below; no RFC copy is required.
+Generated specification revision 20; source digest `9713c6797abb90a1d7f2b52bbf71e6d8e46f5b9a5b047f9fa6b9ba1779952edc`. This file is committed implementation context. Do not independently edit it. Everything required from the product specification and adjacent interfaces is embedded below; no RFC copy is required.
 
 ## Mission and scope
 
@@ -12,7 +12,7 @@ Allowed production imports from this repository: `github.com/zatiti/zatiti/inter
 
 ## Implementation decisions and acceptance focus
 
-Own execution_runs/attempts/leases/checkpoints/context_lineage/verification_jobs. Run pins effective configuration and task inputs; attempt owns executor/lease/generation/reservation/output disposition. Concurrent claim must choose one current owner, replay lost ack returns same lease. Default heartbeat interval 15s, lease 60s capped by deadline; no revival after expiry/generation change. Stale lease fences Zatiti mutation but does not prove external process death; replacement blocks on explicit conflicting-resource/effect recovery. Hosted loop uses responses adapter only through effects; normalized ResponsesEvidence and ModelOutput arrive from the controller with request_context as an ArtifactLocator of kind artifact, and a staged locator there is an unpublished obligation, never an accepted model step; store all model-visible user messages/tools/results/memory/instructions/agent messages before dispatch. Compaction persists source lineage and actual compacted context artifact. Parse model tool proposals as untrusted typed requests and authorize through effects. Limits apply each step including continuation/evaluation. Cooperative claims return pinned task/context/bindings/capabilities and advisory usage disclaimer, never dispatch credential or owner secrets. Reports bind exact worker/attempt/lease/generation; independent verifier controls task completion. V1 verifier runner executes only accepted pinned verifier profiles in controlled environment, captures observations/artifact hashes, and cannot be replaced by reported worker checks. Cancellation requests owned-loop interrupt and retains unknown physical effects. Own attempt admission counter and release only safe concurrency resources; uncertain cost reservation stays in accounting. Revision 3: additionally own the durable WorkerTurn/ProposalRecord pipeline (execution_turns/execution_proposals) driving _execution.turn.admit -> _execution.work.pending/.claim -> _execution.context.prepare/.commit -> a controller-dispatched effect naming an explicit CallbackRoute (never an undeclared attempt_id folded into adapter parameters) -> _execution.proposal.prepare/.record -> _execution.report -> _execution.verification.pending/.claim/.record. WorkerTurn admission is idempotent on its unique source identity; a message arriving mid-turn is a safe-boundary injection linked to the active turn, never dropped or double-processed. The worker operation executor (contract.WorkerOperator) is implemented in internal/application and injected here only for trusted composition; it resolves the actor from the persisted turn/worker mapping and re-enters ordinary public-operation authorization under that worker's own scope, never controller privilege. Own the shared execution_jobs ledger's LocalJobRunner dispatch (JobWork/JobOutcome in contract); _execution.job.create's optional operation_id links a network-backed job to its originating effects Operation. Revision 17: for a chat turn, resolve its persisted conversation history through _messaging.history using the turn-bound worker ID; merge the currently pending triggering message by stable message ID, deduplicate and order by creation time. If the bounded history reports incomplete, refuse before provider dispatch; ContextArtifact.capture=complete is legal only when all required chat history is present.
+Own execution_runs/attempts/leases/checkpoints/context_lineage/verification_jobs. Run pins effective configuration and task inputs; attempt owns executor/lease/generation/reservation/output disposition. Concurrent claim must choose one current owner, replay lost ack returns same lease. Default heartbeat interval 15s, lease 60s capped by deadline; no revival after expiry/generation change. Stale lease fences Zatiti mutation but does not prove external process death; replacement blocks on explicit conflicting-resource/effect recovery. Hosted loop uses responses adapter only through effects; normalized ResponsesEvidence and ModelOutput arrive from the controller with request_context as an ArtifactLocator of kind artifact, and a staged locator there is an unpublished obligation, never an accepted model step; store all model-visible user messages/tools/results/memory/instructions/agent messages before dispatch. Compaction persists source lineage and actual compacted context artifact. Parse model tool proposals as untrusted typed requests and authorize through effects. Limits apply each step including continuation/evaluation. Cooperative claims return pinned task/context/bindings/capabilities and advisory usage disclaimer, never dispatch credential or owner secrets. Reports bind exact worker/attempt/lease/generation; independent verifier controls task completion. V1 verifier runner executes only accepted pinned verifier profiles in controlled environment, captures observations/artifact hashes, and cannot be replaced by reported worker checks. Cancellation requests owned-loop interrupt and retains unknown physical effects. Own attempt admission counter and release only safe concurrency resources; uncertain cost reservation stays in accounting. Revision 3: additionally own the durable WorkerTurn/ProposalRecord pipeline (execution_turns/execution_proposals) driving _execution.turn.admit -> _execution.work.pending/.claim -> _execution.context.prepare/.commit -> a controller-dispatched effect naming an explicit CallbackRoute (never an undeclared attempt_id folded into adapter parameters) -> _execution.proposal.prepare/.record -> _execution.report -> _execution.verification.pending/.claim/.record. WorkerTurn admission is idempotent on its unique source identity; a message arriving mid-turn is a safe-boundary injection linked to the active turn, never dropped or double-processed. The worker operation executor (contract.WorkerOperator) is implemented in internal/application and injected here only for trusted composition; it resolves the actor from the persisted turn/worker mapping and re-enters ordinary public-operation authorization under that worker's own scope, never controller privilege. Own the shared execution_jobs ledger's LocalJobRunner dispatch (JobWork/JobOutcome in contract); _execution.job.create's optional operation_id links a network-backed job to its originating effects Operation. Revision 17: for a chat turn, resolve its persisted conversation history through _messaging.history using the turn-bound worker ID; merge the currently pending triggering message by stable message ID, deduplicate and order by creation time. If the bounded history reports incomplete, refuse before provider dispatch; ContextArtifact.capture=complete is legal only when all required chat history is present. Revision 20: authorized reply-tool text previews use a bounded recipient-scoped stream. Provider text streams retain terminal evidence; controller pushes snapshots over authenticated HTTP event streams. Execution pins Narrate craft in voice context; speech synthesizes append-only stable Narrate chunks directly without rewriting. A preview is committed only after execution records a reply proposal with its exact text; preview faults never fail the model step. No preview state claims durable message commitment.
 
 Local proving focus: Concurrent claims/lost ack, heartbeat/lease expiry/generation restart, fenced report, owned context reconstruction/compaction, safe replacement, bounded model steps, independent verification, advisory external worker limits.
 
@@ -20,7 +20,7 @@ Local proving focus: Concurrent claims/lost ack, heartbeat/lease expiry/generati
 
 Incoming callers: application, artifacts, configuration, connections, controller, effects, execution, installation, memory, scheduling, skills, tasks, application (authenticated public operations).
 
-Outgoing owner calls: `_identity.authority`, `_configuration.snapshot`, `_policy.check`, `_policy.invalidate`, `_accounting.reserve`, `_accounting.settle`, `_accounting.inspect`, `_connections.resolve`, `_connections.tool.resolve`, `_tasks.create`, `_tasks.snapshot`, `_tasks.transition`, `_scheduling.cycle.record`, `_effects.admit`, `_effects.prepare`, `_messaging.admit`, `_messaging.pending`, `_memory.select`, `_artifacts.metadata`, `_artifacts.publish`, `_tasks.ready`, `_tasks.evidence.record`, `_tasks.dependencies.wake`, `_messaging.ready`, `_messaging.processed`, `_messaging.history`, `_skills.evaluation.record`, `_configuration.execution_profile.resolve`. Each exact input/output schema appears below. Calls retain current Unit/authority; owner allowlists are mandatory.
+Outgoing owner calls: `_identity.authority`, `_configuration.snapshot`, `_policy.check`, `_policy.invalidate`, `_accounting.reserve`, `_accounting.settle`, `_accounting.inspect`, `_connections.resolve`, `_connections.tool.resolve`, `_tasks.create`, `_tasks.snapshot`, `_tasks.transition`, `_scheduling.cycle.record`, `_effects.admit`, `_effects.prepare`, `_messaging.admit`, `_messaging.pending`, `_memory.select`, `_artifacts.metadata`, `_artifacts.publish`, `_tasks.ready`, `_tasks.evidence.record`, `_tasks.dependencies.wake`, `_messaging.ready`, `_messaging.processed`, `_messaging.history`, `_skills.evaluation.record`, `_configuration.execution_profile.resolve`, `_voice.craft`. Each exact input/output schema appears below. Calls retain current Unit/authority; owner allowlists are mandatory.
 
 Expose `New(contract.Dependencies) (*Service,error)`; `*Service` implements `contract.Module` with Name `execution`, owner-prefixed migrations, all owned descriptors, and strict dispatch. No calls/goroutines during construction. Implement optional authentication/LocalIO interfaces where specified in the common contract. Tables are private under `execution_`; external callers rely only on methods and schemas.
 
@@ -30,7 +30,9 @@ These briefs are embedded so you need not read a sibling prompt to discover its 
 
 ## Shared foundation contract
 
-# Frozen implementation contract, revision 18
+# Frozen implementation contract, revision 20
+
+Revision 19 adds human conversational voice through the `voice` owner. The explicitly registered `voice.transcribe` and `voice.speak` operations use the phased IO boundary for bounded interactive external speech, with durable intent and separate accounting admission before leaving the transaction. They are not worker execution profiles or autonomous tool effects. Every session requires explicit disclosure consent and acknowledgment that OpenRouter speech billing is advisory (transcription routing cannot enforce a provider price cap). Dedicated voice-only connections exclude `/responses`; raw keys remain in SecretStore. The phase's accepted command is never automatically retried after a crash or ambiguous response. Unknown reservations remain visible. Narrate owns craft and provider transport, while Zatiti owns current-authority checks, accounting, conversation identity and session fencing. Desktop only captures and plays audio and uses catalogued operations; no direct model calls or sidecar. Native Mac permission, echo and latency testing remains qualification work.
 
 These decisions complete the product specification and bind every scope. Report contradictions with an affected-dependency list and proposed coordinated revision; do not change another owner's interface locally.
 
@@ -318,7 +320,7 @@ Write only within the assigned root. Do not edit this prompt, siblings, shared c
 
 ## Local IO, authentication, jobs and verification seams
 
-These additional declarations are part of the SAME frozen contract package (using imports already shown). Implementing an interface does not permit calling it inside a Unit except where the signature explicitly takes Unit/Reader.
+These additional declarations are part of the SAME frozen contract package (using imports already shown). Implementing an interface does not permit calling it inside a Unit except where the signature explicitly takes Unit/Reader. For a completed local IO mutation, a nonempty PersistentData is validated and stored as the command/evidence result while Data remains the one-time response to the current caller. This supports bounded ephemeral response material; it must not be used to hide durable side effects or omit replay-safe metadata.
 
 ```go
 type Authenticator interface {
@@ -335,7 +337,11 @@ type IOPlan struct {
     ExpectedVersions map[ID]Version
     Prepared json.RawMessage
 }
-type IOResult struct { Data json.RawMessage; Fault *Fault }
+type IOResult struct {
+    Data json.RawMessage
+    PersistentData json.RawMessage // optional durable/replay projection; empty keeps Data
+    Fault *Fault
+}
 type LocalIO interface {
     Prepare(context.Context, Unit, Invocation) (IOPlan, error)
     Perform(context.Context, IOPlan) (IOResult, error)
@@ -419,7 +425,7 @@ Current state, honestly: production's only `RestoreLifecycle` implementation, `c
 
 Identity Service also implements Authenticator. Application receives this interface explicitly in New; it uses a dedicated read snapshot and never reads identity-owned tables itself. Only the byte-slice credential boundary carries secret authentication material, never Invocation JSON. Zero sensitive buffers after use where practical; no logging. Certificate authentication resolves a preprovisioned credential reference and follows the same current principal/revocation rules.
 
-Artifacts, skills, connections and installation Services also implement LocalIO. The registry detects this interface at assembly and routes ONLY registered local IO operations through Prepare/Perform/Finish: artifact.upload.chunk/finish/cancel/read/export; skill.import; connection.setup.begin/complete/cancel; installation.init/backup/restore. LocalIO handles local bounded files, secure helpers and backup work, never unadmitted provider/model calls. Prepare strictly validates input, versions, identity and authority and records replayable local intent under IOPlan.ID; Perform receives that exact trusted in-memory plan outside transactions, resolves opaque staging/helper references, and returns metadata; Finish rechecks authority/versions/generation and commits result/evidence. IOPlan is never public, accepted from an agent or stored with secrets. Prepared/Data JSON must use the operation's declared schemas plus private owner-local metadata, which no other package reads. No cross-owner business protocol may hide in those private fields. Perform must support safe replay of local staging/publication by plan ID, or preserve an inspectable failed/unknown local obligation. A synchronous read does not return bytes to client until final authorization check. New raw provider writes always use effects, not this interface.
+Artifacts, skills, connections, installation and voice Services also implement LocalIO. The registry detects this interface at assembly and routes ONLY registered local IO operations through Prepare/Perform/Finish: artifact.upload.chunk/finish/cancel/read/export; skill.import; connection.setup.begin/complete/cancel; installation.init/backup/restore; voice.transcribe/speak/speak.phrase. Voice LocalIO is an explicitly consented human interaction exception for bounded speech calls, with durable intent and accounting reservation before network I/O, current-authority checks before returning speech or transcript, and no retries after ambiguity. Synthesized audio is returned once to the live caller; command replay and evidence retain call metadata only, never audio bytes. LocalIO otherwise handles local bounded files, secure helpers and backup work, never unadmitted provider/model calls. Prepare strictly validates input, versions, identity and authority and records replayable local intent under IOPlan.ID; Perform receives that exact trusted in-memory plan outside transactions, resolves opaque staging/helper references, and returns metadata; Finish rechecks authority/versions/generation and commits result/evidence. IOPlan is never public, accepted from an agent or stored with secrets. Prepared/Data JSON must use the operation's declared schemas plus private owner-local metadata, which no other package reads. No cross-owner business protocol may hide in those private fields. Perform must support safe replay of local staging/publication by plan ID, or preserve an inspectable failed/unknown local obligation. A synchronous read does not return bytes to client until final authorization check. New raw provider writes always use effects, not this interface.
 
 For synchronous local IO mutations, persist command identity plus accepted internal pending disposition at Prepare, then replace pending disposition once at Finish. Concurrent same-key calls join/inspect that same in-progress command and never run duplicate Perform. The controller can recover abandoned local intents using the execution job API. Async backup/export uses the same interface with an inspectable job returned immediately. The artifact.upload.chunk endpoint has a 2 MiB encoded request cap (all other ordinary JSON requests 1 MiB), allowing the specified 1 MiB decoded chunk plus envelope.
 
@@ -495,6 +501,15 @@ This serialized amendment resolves Z-M2's independent review counterexamples. It
 Executable regression coverage must include unverified bootstrap through effects and callback, forged/replayed/stale intent rejection, catalog mutation between admit/claim, full-envelope tampering, lost handshake response, staged-context failure, callback bounds zero/one/sixteen and overflow with server-counted requests. Controlled fixtures are not live-provider or release qualification.
 
 Revision 4 integration details: a connections callback uses the recorded effects observation for outcome and provenance. If the observation contains staged outputs, the owner verifies the controller's publication mapping against artifact metadata (scope, digest, size, media type, classification and availability), reconstructs only the permitted locator substitutions, and persists that normalized recorded evidence. Callback-supplied outcome, usage or tool facts never replace recorded truth. The controller defers an explicit connection callback operation before admission if its linked job is absent from the current bounded scan; absence is not permission to discard the callback. Generic MCP cannot attest same-account credential rotation: `connection.rotate` returns `capability_unsupported` for MCP and leaves any existing intent untouched; a separately reviewed connection is required.
+
+
+## Streaming worker replies and direct voice craft
+
+The integration owner adds contract.ReplyStreams, ReplyRoute and ReplyPreview. Dependencies and AdapterDependencies receive the same optional per-controller ReplyStreams instance; entrypoint recreates it on each assembly. Controller owns the bounded ephemeral hub. Execution registers trusted context-digest routes outside Unit after assembling the captured context. Routes bind initiating principal, installation, conversation, worker, turn and optional voice session. Only the sealed reply tool text is eligible; free text, reasoning and other tool arguments are never broadcast. Preview states are streaming, generated, committed and interrupted. Committed means execution recorded a reply proposal with exactly the preview's text; it is not durable conversation history, and a reply preview never claims message admission. A preview fault (an unparseable reply prefix, a rewrite of disclosed text, or a final reply that does not extend the preview) withdraws only that preview as interrupted; it never fails or makes unknown the model step, whose terminal provider response stays authoritative. Terminal failed or incomplete responses reach the ordinary decoder. Stream interruption does not imply rollback or cancel worker tasks.
+
+Server exposes POST /v1/replies/stream using the standard request envelope with scope and conversation_id, no submission key. It authenticates each snapshot and authorizes conversation.message.list through Application before disclosure. SSE data frames contain bounded current ReplyPreview arrays ordered by each preview's sequence, a number assigned at first publication that never changes; a full hub evicts its oldest routes and oldest finished previews rather than refusing new ones; coalescing and reconnect cannot duplicate commands. Previews expire and are lost on restart; durable history remains authoritative. The route is requester-only; other conversation participants receive durable history through existing operations.
+
+Voice owns _voice.craft (execution-only) and voice.speak.phrase. Execution captures Narrate canonical instructions directly in model context; no post-generation rewrite call is made. Phrase text is resolved from an authorized immutable prefix using Narrate Chunker, never arbitrary client text. Phrases are append-only: once published, phrase index i never changes text. Before a reply is generated only text through the last sentence or paragraph boundary (or a word break past the phrase bound) is released; each released span is chunked on its own, never re-chunked with later text. An interrupted preview keeps its released phrases, adds no tail, and cannot be spoken. A second voice.speak.phrase command for the same session, stream and index is refused as a conflict before accounting admission; replay of the same submission key is unaffected. Provider keys, accounting, session/credential rechecks and audio nonretention remain unchanged.
 
 ## Owned product requirements
 
@@ -711,7 +726,7 @@ Output data schema:
 
 ### `_accounting.reserve` v1 — accounting / internal / mutation / local
 
-Allowed internal callers: effects, execution, tasks, scheduling. Submission key: not required at this internal/query/bootstrap boundary.
+Allowed internal callers: effects, execution, tasks, scheduling, voice. Submission key: not required at this internal/query/bootstrap boundary.
 
 Reserve enforceable cost and concurrency in stable installation→ancestor organizations→project→worker→root order, inside caller transaction. All dimensions atomic; reject unknown price/advisory hard-cap claim.
 
@@ -726,7 +741,7 @@ Output data schema:
 
 ### `_accounting.settle` v1 — accounting / internal / mutation / local
 
-Allowed internal callers: effects, execution, installation. Submission key: not required at this internal/query/bootstrap boundary.
+Allowed internal callers: effects, execution, installation, voice. Submission key: not required at this internal/query/bootstrap boundary.
 
 Settle observed cost or retain unknown reservation; release only proven unused portion and conclusive no-effect/no-cost evidence. Check currency and overflow.
 
@@ -1427,6 +1442,21 @@ Input schema:
 Output data schema:
 ```json
 {"type":"object","additionalProperties":false,"properties":{"resource":{"$ref":"#/$defs/Task"}},"required":["resource"]}
+```
+
+### `_voice.craft` v1 — voice / internal / query / local
+
+Allowed internal callers: execution. Submission key: not required at this internal/query/bootstrap boundary.
+
+Resolve the initiating human voice session for execution context; pin Narrate craft in the persisted model context. Never return credentials.
+
+Input schema:
+```json
+{"type":"object","additionalProperties":false,"properties":{"scope":{"$ref":"#/$defs/Scope"},"conversation_id":{"type":"string","format":"uuid"},"recipient_id":{"type":"string","format":"uuid"}},"required":["scope","conversation_id","recipient_id"]}
+```
+Output data schema:
+```json
+{"type":"object","additionalProperties":false,"properties":{"style":{"type":"string","maxLength":8192},"session_id":{"type":"string","maxLength":8192}},"required":["style","session_id"]}
 ```
 
 ### `attempt.cancel` v1 — execution / public / mutation / local

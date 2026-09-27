@@ -15,6 +15,8 @@
 
 import 'dart:async';
 import 'dart:io';
+import 'dart:convert';
+import 'reply_preview.dart';
 
 import 'endpoint.dart';
 import 'envelope.dart';
@@ -86,6 +88,105 @@ class ControllerClient {
     'worker_id': ?workerId,
     'task_id': ?taskId,
   };
+
+  /// Read-only live snapshots. Reconnection never resends a mutation or audio.
+  Stream<List<ReplyPreview>> watchReplies(String conversation) {
+    late StreamController<List<ReplyPreview>> events;
+    HttpClient? active;
+    var stopped = false;
+    Future<void> run() async {
+      while (!stopped) {
+        try {
+          final credential = await _credentials();
+          if (stopped) break;
+          final http = HttpClient(context: _securityContext)
+            ..findProxy = ((_) => 'DIRECT')
+            ..connectionTimeout = timeout
+            ..connectionFactory = (uri, _, _) async => switch (endpoint) {
+              LocalSocketEndpoint e => await Socket.startConnect(
+                InternetAddress(e.socketPath, type: InternetAddressType.unix),
+                0,
+              ),
+              RemoteTlsEndpoint _ => await SecureSocket.startConnect(
+                uri.host,
+                uri.port,
+                context: _securityContext,
+              ),
+            };
+          active = http;
+          final request = await http.postUrl(
+            endpoint.baseUri.resolve('/v1/replies/stream'),
+          );
+          request.followRedirects = false;
+          request.headers.contentType = ContentType.json;
+          request.headers.set('Accept', 'text/event-stream');
+          if (credential != null) {
+            request.headers.set('Authorization', credential);
+          }
+          request.add(
+            encodeRequest(
+              input: {'scope': scope(), 'conversation_id': conversation},
+            ),
+          );
+          final response = await request.close().timeout(timeout);
+          if (response.statusCode != 200 ||
+              response.headers.contentType?.mimeType != 'text/event-stream') {
+            throw const FormatException('Live reply stream unavailable.');
+          }
+          var pending = '';
+          await for (final part
+              in response
+                  .timeout(const Duration(seconds: 45))
+                  .transform(utf8.decoder)) {
+            if (stopped) break;
+            pending += part;
+            if (pending.length > maxResponseBytes) {
+              throw const FormatException('Reply stream frame too large.');
+            }
+            int newline;
+            while ((newline = pending.indexOf('\n')) >= 0) {
+              final line = pending.substring(0, newline).trimRight();
+              pending = pending.substring(newline + 1);
+              if (!line.startsWith('data:')) continue;
+              final value = jsonDecode(line.substring(5));
+              if (value is! List || value.length > 128) {
+                throw const FormatException('Invalid reply snapshot.');
+              }
+              if (!stopped) {
+                events.add(
+                  value.map(ReplyPreview.fromJson).toList(growable: false),
+                );
+              }
+            }
+          }
+          // A clean end (for example a controller restart, which loses
+          // every preview) is still a disconnect the reader must see.
+          if (!stopped) {
+            throw const FormatException('Live reply stream ended.');
+          }
+        } on Exception {
+          if (!stopped) {
+            events.addError(
+              const FormatException('Live replies disconnected; reconnecting.'),
+            );
+          }
+        } finally {
+          active?.close(force: true);
+          active = null;
+        }
+        if (!stopped) await Future<void>.delayed(const Duration(seconds: 2));
+      }
+    }
+
+    events = StreamController<List<ReplyPreview>>(
+      onListen: () => unawaited(run()),
+      onCancel: () {
+        stopped = true;
+        active?.close(force: true);
+      },
+    );
+    return events.stream;
+  }
 
   /// Runs one query. Queries carry no submission key and are safe to reissue.
   Future<ResultEnvelope> query(

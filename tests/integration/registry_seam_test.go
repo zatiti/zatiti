@@ -53,7 +53,7 @@ func viewOf(m contract.Module, edit func(contract.Descriptor) (contract.Descript
 	return view
 }
 
-// realModules constructs the sixteen landed modules over real platform
+// realModules constructs the seventeen landed modules over real platform
 // custody without opening storage: descriptor-level tests need no database.
 func realModules(t *testing.T) []contract.Module {
 	t.Helper()
@@ -72,7 +72,7 @@ func realModules(t *testing.T) []contract.Module {
 }
 
 // TestRealRegistryAssemblesLandedModules: the real registry assembles the
-// sixteen real modules unedited and exposes the whole frozen public
+// seventeen real modules unedited and exposes the whole frozen public
 // surface.
 func TestRealRegistryAssemblesLandedModules(t *testing.T) {
 	t.Parallel()
@@ -80,8 +80,8 @@ func TestRealRegistryAssemblesLandedModules(t *testing.T) {
 	if err != nil {
 		t.Fatalf("registry.New over the landed modules: %v", err)
 	}
-	if n := len(reg.Public()); n != 205 {
-		t.Fatalf("registry exposes %d public operations, the frozen catalog holds 205", n)
+	if n := len(reg.Public()); n != 211 {
+		t.Fatalf("registry exposes %d public operations, the frozen catalog holds 211", n)
 	}
 }
 
@@ -147,21 +147,21 @@ func TestLandedPublicDescriptorsMatchFrozenCatalog(t *testing.T) {
 			t.Errorf("operation %s drifts from the frozen catalog: %s", id, drift)
 		}
 	}
-	// The frozen catalog holds 205 public operations; the registry owns two
+	// The frozen catalog holds 211 public operations; the registry owns two
 	// (capabilities.list, capabilities.schema) and the domains the rest.
-	if audited != 203 {
-		t.Fatalf("audited %d domain public descriptors, want 203", audited)
+	if audited != 209 {
+		t.Fatalf("audited %d domain public descriptors, want 209", audited)
 	}
 }
 
-// TestRealRegistryRoutesLocalIO: internal/application routes the twelve
+// TestRealRegistryRoutesLocalIO: internal/application routes the fourteen
 // registered local IO operations through application.IOLookup. This is a
 // type-level seam, so no registry instance is needed to observe it.
 func TestRealRegistryRoutesLocalIO(t *testing.T) {
 	t.Parallel()
 	var catalog application.Catalog = (*registry.Registry)(nil)
 	if _, ok := catalog.(application.IOLookup); !ok {
-		t.Fatal("*registry.Registry does not implement application.IOLookup; internal/application/dispatch.go requires it for the twelve local IO operations")
+		t.Fatal("*registry.Registry does not implement application.IOLookup; internal/application/dispatch.go requires it for the fourteen local IO operations")
 	}
 }
 

@@ -50,6 +50,9 @@ func (openaiProtocol) limits() protocolLimits {
 		SupportsContinuation: false,
 		MinOutputTokens:      openaiMinOutputTokens,
 		SupportsReconcile:    true,
+		// The pinned OpenAPI document defines the Responses streaming
+		// events; live streaming has not been qualified.
+		StreamsReplyEvents: true,
 	}
 }
 

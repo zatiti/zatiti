@@ -28,8 +28,9 @@ type IOPlan struct {
 
 // IOResult carries local work metadata or a fault from Perform.
 type IOResult struct {
-	Data  json.RawMessage
-	Fault *Fault
+	Data           json.RawMessage
+	PersistentData json.RawMessage
+	Fault          *Fault
 }
 
 // LocalIO is the local-file, secure-helper and backup execution seam owned

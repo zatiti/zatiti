@@ -11,6 +11,7 @@ import 'action_review_dialog.dart';
 import 'message_composer.dart';
 import 'theme.dart';
 import 'widgets.dart';
+import 'reply_stream_view.dart';
 
 class ConversationView extends StatelessWidget {
   const ConversationView({
@@ -355,6 +356,12 @@ class _ThreadState extends State<_Thread> {
             ),
           for (final m in c?.messages ?? const <ChatMessage>[])
             _MessageBubble(message: m),
+          if (c != null)
+            ReplyStreamView(
+              key: ValueKey('stream-${c.id.value}'),
+              controller: controller,
+              conversation: c.id,
+            ),
           // A worker turn's other six states — acknowledgement, refusal,
           // review-waiting and blocked-setup — already render as their own
           // dedicated card below (an outgoing bubble, a decision card, a

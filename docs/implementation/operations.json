@@ -1,5 +1,5 @@
 {
-  "revision": 18,
+  "revision": 20,
   "$defs": {
     "Scope": {
       "type": "object",
@@ -11389,6 +11389,123 @@
         "context_capture",
         "adapter_profile",
         "connection_version"
+      ]
+    },
+    "VoiceSettings": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "input_connection": {
+          "$ref": "#/$defs/Ref"
+        },
+        "output_connection": {
+          "$ref": "#/$defs/Ref"
+        },
+        "transcription_model": {
+          "type": "string",
+          "enum": [
+            "openai/whisper-large-v3-turbo"
+          ]
+        },
+        "speech_model": {
+          "type": "string",
+          "enum": [
+            "hexgrad/kokoro-82m",
+            "deepgram/flux-tts:free"
+          ]
+        },
+        "voice": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "language": {
+          "type": "string",
+          "maxLength": 8
+        },
+        "style": {
+          "type": "string",
+          "enum": [
+            "conversational",
+            "agent-update",
+            "coach",
+            "verbatim"
+          ]
+        },
+        "budget_micro_units": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10000000
+        },
+        "call_allowance_micro_units": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100000
+        },
+        "advisory_cost_acknowledged": {
+          "const": true,
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "input_connection",
+        "output_connection",
+        "transcription_model",
+        "speech_model",
+        "voice",
+        "language",
+        "style",
+        "budget_micro_units",
+        "call_allowance_micro_units",
+        "advisory_cost_acknowledged"
+      ]
+    },
+    "VoiceSession": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "conversation_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "active",
+            "ended",
+            "expired"
+          ]
+        },
+        "settings": {
+          "$ref": "#/$defs/VoiceSettings"
+        },
+        "reserved_micro_units": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
+        "calls": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
+        "expires_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "conversation_id",
+        "state",
+        "settings",
+        "reserved_micro_units",
+        "calls",
+        "expires_at"
       ]
     }
   },
@@ -27393,7 +27510,8 @@
         "effects",
         "execution",
         "tasks",
-        "scheduling"
+        "scheduling",
+        "voice"
       ],
       "scope_required": [
         "installation_id"
@@ -27453,7 +27571,8 @@
       "callers": [
         "effects",
         "execution",
-        "installation"
+        "installation",
+        "voice"
       ],
       "scope_required": []
     },
@@ -32048,6 +32167,608 @@
         "controller"
       ],
       "scope_required": []
+    },
+    {
+      "id": "voice.session.begin",
+      "version": 1,
+      "owner": "voice",
+      "visibility": "public",
+      "mode": "mutation",
+      "effect": "local",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "scope": {
+            "$ref": "#/$defs/Scope"
+          },
+          "conversation_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "settings": {
+            "$ref": "#/$defs/VoiceSettings"
+          }
+        },
+        "required": [
+          "scope",
+          "conversation_id",
+          "settings"
+        ]
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "resource": {
+            "$ref": "#/$defs/VoiceSession"
+          }
+        },
+        "required": [
+          "resource"
+        ]
+      },
+      "behavior": "Start a human-only voice session bound to this actor, conversation and controller generation, with separate voice-only connections, explicit disclosure consent and advisory budget. No model work occurs in this transaction.",
+      "cli": [
+        "voice",
+        "session",
+        "begin"
+      ],
+      "mcp": "zatiti_voice_session_begin",
+      "submission_key": true,
+      "expected_version": false,
+      "callers": [],
+      "scope_required": [
+        "installation_id"
+      ]
+    },
+    {
+      "id": "voice.session.get",
+      "version": 1,
+      "owner": "voice",
+      "visibility": "public",
+      "mode": "query",
+      "effect": "local",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "scope": {
+            "$ref": "#/$defs/Scope"
+          },
+          "session_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "scope",
+          "session_id"
+        ]
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "resource": {
+            "$ref": "#/$defs/VoiceSession"
+          }
+        },
+        "required": [
+          "resource"
+        ]
+      },
+      "behavior": "Read or end the actor-owned scoped voice session. End fences late audio and does not cancel accepted worker tasks.",
+      "cli": [
+        "voice",
+        "session",
+        "get"
+      ],
+      "mcp": "zatiti_voice_session_get",
+      "submission_key": false,
+      "expected_version": false,
+      "callers": [],
+      "scope_required": [
+        "installation_id"
+      ]
+    },
+    {
+      "id": "voice.session.end",
+      "version": 1,
+      "owner": "voice",
+      "visibility": "public",
+      "mode": "mutation",
+      "effect": "local",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "scope": {
+            "$ref": "#/$defs/Scope"
+          },
+          "session_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "scope",
+          "session_id"
+        ]
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "resource": {
+            "$ref": "#/$defs/VoiceSession"
+          }
+        },
+        "required": [
+          "resource"
+        ]
+      },
+      "behavior": "Read or end the actor-owned scoped voice session. End fences late audio and does not cancel accepted worker tasks.",
+      "cli": [
+        "voice",
+        "session",
+        "end"
+      ],
+      "mcp": "zatiti_voice_session_end",
+      "submission_key": true,
+      "expected_version": false,
+      "callers": [],
+      "scope_required": [
+        "installation_id"
+      ]
+    },
+    {
+      "id": "voice.transcribe",
+      "version": 1,
+      "owner": "voice",
+      "visibility": "public",
+      "mode": "mutation",
+      "effect": "disclosure",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "scope": {
+            "$ref": "#/$defs/Scope"
+          },
+          "session_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "audio": {
+            "type": "string",
+            "minLength": 60,
+            "maxLength": 700000
+          }
+        },
+        "required": [
+          "scope",
+          "session_id",
+          "audio"
+        ]
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "call_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "text": {
+            "type": "string",
+            "maxLength": 8192
+          },
+          "audio": {
+            "type": "string",
+            "maxLength": 12000000
+          },
+          "media_type": {
+            "type": "string",
+            "maxLength": 8192
+          },
+          "billing": {
+            "type": "string",
+            "enum": [
+              "estimated",
+              "unknown",
+              "no_charge"
+            ]
+          },
+          "reserved_micro_units": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9223372036854775807
+          }
+        },
+        "required": [
+          "session_id",
+          "call_id",
+          "text",
+          "audio",
+          "media_type",
+          "billing",
+          "reserved_micro_units"
+        ]
+      },
+      "behavior": "Human-only bounded WAV transcription, separate voice credential, durable intent and conservative accounting reservation. Exactly one network call outside Unit; no retries or fallback. Transcript is not sent until ordinary conversation.message.send.",
+      "cli": [
+        "voice",
+        "transcribe"
+      ],
+      "mcp": "zatiti_voice_transcribe",
+      "submission_key": true,
+      "expected_version": false,
+      "callers": [],
+      "scope_required": [
+        "installation_id"
+      ]
+    },
+    {
+      "id": "voice.speak",
+      "version": 1,
+      "owner": "voice",
+      "visibility": "public",
+      "mode": "mutation",
+      "effect": "disclosure",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "scope": {
+            "$ref": "#/$defs/Scope"
+          },
+          "session_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "message_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "scope",
+          "session_id",
+          "message_id"
+        ]
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "call_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "text": {
+            "type": "string",
+            "maxLength": 8192
+          },
+          "audio": {
+            "type": "string",
+            "maxLength": 12000000
+          },
+          "media_type": {
+            "type": "string",
+            "maxLength": 8192
+          },
+          "billing": {
+            "type": "string",
+            "enum": [
+              "estimated",
+              "unknown",
+              "no_charge"
+            ]
+          },
+          "reserved_micro_units": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9223372036854775807
+          }
+        },
+        "required": [
+          "session_id",
+          "call_id",
+          "text",
+          "audio",
+          "media_type",
+          "billing",
+          "reserved_micro_units"
+        ]
+      },
+      "behavior": "Read an actually disclosed worker reply from the bound conversation. Narrate supplies canonical craft; optional bounded craft rewrite and speech calls use voice credentials only. No tools or approvals. Durable intent, no retries, late results fenced by session/generation.",
+      "cli": [
+        "voice",
+        "speak"
+      ],
+      "mcp": "zatiti_voice_speak",
+      "submission_key": true,
+      "expected_version": false,
+      "callers": [],
+      "scope_required": [
+        "installation_id"
+      ]
+    },
+    {
+      "id": "voice.speak.phrase",
+      "version": 1,
+      "owner": "voice",
+      "visibility": "public",
+      "mode": "mutation",
+      "effect": "disclosure",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "scope": {
+            "$ref": "#/$defs/Scope"
+          },
+          "session_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "stream_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "phrase_index": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000
+          }
+        },
+        "required": [
+          "scope",
+          "session_id",
+          "stream_id",
+          "phrase_index"
+        ]
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "call_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "text": {
+            "type": "string",
+            "maxLength": 8192
+          },
+          "audio": {
+            "type": "string",
+            "maxLength": 12000000
+          },
+          "media_type": {
+            "type": "string",
+            "maxLength": 8192
+          },
+          "billing": {
+            "type": "string",
+            "enum": [
+              "estimated",
+              "unknown",
+              "no_charge"
+            ]
+          },
+          "reserved_micro_units": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9223372036854775807
+          }
+        },
+        "required": [
+          "session_id",
+          "call_id",
+          "text",
+          "audio",
+          "media_type",
+          "billing",
+          "reserved_micro_units"
+        ]
+      },
+      "behavior": "Synthesize one stable Narrate chunk of an authorized worker reply preview. Text is resolved by the controller; client-supplied prose is never accepted. Dedicated speech credentials, accounting and session fences apply.",
+      "cli": [
+        "voice",
+        "speak",
+        "phrase"
+      ],
+      "mcp": "zatiti_voice_speak_phrase",
+      "submission_key": true,
+      "expected_version": false,
+      "callers": [],
+      "scope_required": [
+        "installation_id"
+      ]
+    },
+    {
+      "id": "_voice.craft",
+      "version": 1,
+      "owner": "voice",
+      "visibility": "internal",
+      "mode": "query",
+      "effect": "local",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "scope": {
+            "$ref": "#/$defs/Scope"
+          },
+          "conversation_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "recipient_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "scope",
+          "conversation_id",
+          "recipient_id"
+        ]
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "style": {
+            "type": "string",
+            "maxLength": 8192
+          },
+          "session_id": {
+            "type": "string",
+            "maxLength": 8192
+          }
+        },
+        "required": [
+          "style",
+          "session_id"
+        ]
+      },
+      "behavior": "Resolve the initiating human voice session for execution context; pin Narrate craft in the persisted model context. Never return credentials.",
+      "cli": [],
+      "mcp": null,
+      "submission_key": false,
+      "expected_version": false,
+      "callers": [
+        "execution"
+      ],
+      "scope_required": [
+        "installation_id"
+      ]
+    },
+    {
+      "id": "_connections.voice.resolve",
+      "version": 1,
+      "owner": "connections",
+      "visibility": "internal",
+      "mode": "query",
+      "effect": "local",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "scope": {
+            "$ref": "#/$defs/Scope"
+          },
+          "connection": {
+            "$ref": "#/$defs/Ref"
+          },
+          "destination": {
+            "type": "string",
+            "enum": [
+              "https://openrouter.ai/api/v1/audio/transcriptions",
+              "https://openrouter.ai/api/v1/audio/speech",
+              "https://openrouter.ai/api/v1/chat/completions"
+            ]
+          }
+        },
+        "required": [
+          "scope",
+          "connection",
+          "destination"
+        ]
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "credential_ref": {
+            "type": "string",
+            "maxLength": 8192
+          }
+        },
+        "required": [
+          "credential_ref"
+        ]
+      },
+      "behavior": "Resolve current voice-only OpenRouter connection, exact version, scope, revocation and destination. This explicit interactive advisory mode permits a captured unverified credential; no successful probe is invented. Voice-only destinations exclude reasoning endpoints.",
+      "cli": [],
+      "mcp": null,
+      "submission_key": false,
+      "expected_version": false,
+      "callers": [
+        "voice"
+      ],
+      "scope_required": [
+        "installation_id"
+      ]
+    },
+    {
+      "id": "_messaging.voice.read",
+      "version": 1,
+      "owner": "messaging",
+      "visibility": "internal",
+      "mode": "query",
+      "effect": "local",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "scope": {
+            "$ref": "#/$defs/Scope"
+          },
+          "conversation_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "message_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "scope",
+          "conversation_id"
+        ]
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "text": {
+            "type": "string",
+            "maxLength": 8192
+          }
+        },
+        "required": [
+          "text"
+        ]
+      },
+      "behavior": "Verify current actor is a participant and requested reply was actually disclosed to that actor; reject own messages and inaccessible history. With no message, validate conversation only.",
+      "cli": [],
+      "mcp": null,
+      "submission_key": false,
+      "expected_version": false,
+      "callers": [
+        "voice"
+      ],
+      "scope_required": [
+        "installation_id"
+      ]
     }
   ]
 }

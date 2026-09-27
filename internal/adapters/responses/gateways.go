@@ -75,7 +75,10 @@ func validateV2Pricing(provider, _ string, routing json.RawMessage, p wireRespon
 }
 
 func (g gatewayProtocol) limits() protocolLimits {
-	return protocolLimits{BoundsOutputTokens: true, MinOutputTokens: 1, SupportsReconcile: false}
+	// OpenRouter documents Responses streaming events for this endpoint;
+	// live streaming has not been qualified. Experiential's streaming
+	// contract is undocumented here, so it never streams.
+	return protocolLimits{BoundsOutputTokens: true, MinOutputTokens: 1, SupportsReconcile: false, StreamsReplyEvents: g.provider == "openrouter"}
 }
 func (g gatewayProtocol) validateProfile(p protocolProfile) error {
 	wantEndpoint, wantMode := "", "stateless"

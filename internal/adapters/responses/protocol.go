@@ -71,6 +71,11 @@ type protocolLimits struct {
 	// SupportsReconcile is true only when reconcile is a documented
 	// authoritative lookup rather than a refusal.
 	SupportsReconcile bool
+	// StreamsReplyEvents is true only when the upstream contract documents
+	// Responses server-sent events: function-call argument deltas and a
+	// terminal response.* event carrying the full response object. Only
+	// then may a model step ask for a stream to preview reply text.
+	StreamsReplyEvents bool
 }
 
 // protocolProfile is the profile-level configuration a protocol sees: the

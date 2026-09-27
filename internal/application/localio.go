@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"encoding/json"
 
 	"github.com/zatiti/zatiti/internal/contract"
 )
@@ -128,7 +129,14 @@ func (a *Application) invokeIOMutation(
 			}
 			final = contract.Result{Schema: contract.SchemaResult, CommandID: st.commandID, Payload: payload}
 		}
-		return a.commandFinish(wctx, u, st.commandID, final)
+		persisted := final
+		if ioResult.Fault == nil && len(ioResult.PersistentData) > 0 {
+			if !json.Valid(ioResult.PersistentData) {
+				return internalFault("local IO persistence payload is invalid JSON")
+			}
+			persisted.Data = append(json.RawMessage(nil), ioResult.PersistentData...)
+		}
+		return a.commandFinish(wctx, u, st.commandID, persisted)
 	})
 	if err != nil {
 		return a.refusedFinish(ctx, actor, desc, scope, st.commandID, err)

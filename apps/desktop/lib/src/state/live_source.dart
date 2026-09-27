@@ -662,10 +662,12 @@ class LiveWorkspaceSource implements WorkspaceSource {
   ResourceSubmission<DraftedResource> prepareProviderConnection({
     required wire.ProviderDescriptor provider,
     required String accountIdentity,
+    bool voiceOnly = false,
   }) => _LiveResourceSubmission(
     api.prepareProviderConnection(
       provider: provider,
       accountIdentity: accountIdentity,
+      voiceOnly: voiceOnly,
     ),
     (data) {
       final o = StrictObject(data, 'connection.create');

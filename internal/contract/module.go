@@ -60,4 +60,5 @@ type Dependencies struct {
 	Ports   Ports
 	Secrets SecretStore
 	Blobs   BlobStore
+	Streams ReplyStreams
 }

@@ -488,14 +488,18 @@ func (c *Controller) driveOneProposal(ctx context.Context, sess *session, info t
 		return
 	}
 	p := prep.Resource
+	var probe normalizedProposalProbe
+	if json.Unmarshal(p.NormalizedProposal, &probe) != nil {
+		return
+	}
 	if p.State != "prepared" {
 		// Recorded inline (reply/clarify/report_outputs/cycle_decision/
 		// refused) by execution's own interpretation stage: nothing further
-		// for this package to drive.
-		return
-	}
-	var probe normalizedProposalProbe
-	if json.Unmarshal(p.NormalizedProposal, &probe) != nil {
+		// for this package to drive. A recorded reply is the only point a
+		// streamed preview of it may be marked committed.
+		if p.State == "recorded" && probe.Kind == "reply" && c.deps.Streams != nil {
+			c.deps.Streams.Commit(info.TurnID, probe.Text)
+		}
 		return
 	}
 	switch probe.Kind {

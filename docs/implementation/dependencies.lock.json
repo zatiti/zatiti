@@ -1,11 +1,11 @@
 {
-  "revision": 4,
+  "revision": 5,
   "module": "github.com/zatiti/zatiti",
   "go_directive": "1.26.0",
   "toolchain": "go1.26.2",
-  "recorded": "2026-09-24",
+  "recorded": "2026-09-26",
   "owner": "integration (serialized root-file exception per ADR 001)",
-  "scope_note": "Dependency resolution and upstream qualification only. This file records resolved pins and observed evidence; it does not claim upstream behavior beyond what was executed. Regenerate via the named commands when changing any pin; do not edit go.mod pins independently of this report. Revision 2 (P02, implementation-remediation) reconciled this report against the actual source tree after revision 1 left a stale forward-looking claim in qualified_features: fyne.io/fyne/v2 was removed from go.mod/go.sum on 2026-09-19 (fdba444, following ADR 002's Flutter replacement of the native Go desktop six days earlier), but the prior revision still asserted 'Fyne v2.8.1 compiles and links' as though it were a current qualified feature. That claim is moved to historical_evidence below, clearly labeled as a fact about a build that no longer exists in the module graph, not a current qualification. No fyne import remains anywhere in Go source; the only surviving string 'fyne' is packaging/desktop_test.go asserting the framework is rejected as capability_unsupported. Revision 3 refreshes the public Serenity inspection to b4febdf7 after upstream changed; it records observed narrow improvements while preserving the full first-chat hard gate. Rev10 native Mac package/CI code is implementation in progress, not release qualification. Revision 4 records the Mac hosted-Serenity selection and a read-only public HTTP probe on 2026-09-24; it does not qualify authenticated memory semantics or change any Go module pin.",
+  "scope_note": "Dependency resolution and upstream qualification only. This file records resolved pins and observed evidence; it does not claim upstream behavior beyond what was executed. Regenerate via the named commands when changing any pin; do not edit go.mod pins independently of this report. Revision 2 (P02, implementation-remediation) reconciled this report against the actual source tree after revision 1 left a stale forward-looking claim in qualified_features: fyne.io/fyne/v2 was removed from go.mod/go.sum on 2026-09-19 (fdba444, following ADR 002's Flutter replacement of the native Go desktop six days earlier), but the prior revision still asserted 'Fyne v2.8.1 compiles and links' as though it were a current qualified feature. That claim is moved to historical_evidence below, clearly labeled as a fact about a build that no longer exists in the module graph, not a current qualification. No fyne import remains anywhere in Go source; the only surviving string 'fyne' is packaging/desktop_test.go asserting the framework is rejected as capability_unsupported. Revision 3 refreshes the public Serenity inspection to b4febdf7 after upstream changed; it records observed narrow improvements while preserving the full first-chat hard gate. Rev10 native Mac package/CI code is implementation in progress, not release qualification. Revision 4 records the Mac hosted-Serenity selection and a read-only public HTTP probe on 2026-09-24; it does not qualify authenticated memory semantics or change any Go module pin. Revision 5 records the published Narrate module pin and verified checksum for voice craft and bounded OpenRouter speech; live provider and native voice behavior remain unqualified.",
   "historical_evidence": [
     {
       "module": "fyne.io/fyne/v2",
@@ -49,6 +49,15 @@
           "Optional extensions (sampling/elicitation/resources/prompts/task) are present in the SDK but disabled during qualification per the internal/mcp brief; leaving them unconfigured is the adapter's responsibility, not the SDK's default in every path."
         ]
       }
+    },
+    {
+      "module": "github.com/narrate-it/narrate",
+      "version": "v0.0.0-20260926182619-c43bf2e0c0b3",
+      "sum": "h1:BSm74hvr1kWaxTJl9NDJonJtmuGaELJdeRdMEPotNnY=",
+      "license": "Not stated; the Narrate repository has no LICENSE file",
+      "role": "Narration craft and bounded OpenRouter speech transport (internal/voice)",
+      "qualified": false,
+      "qualification_note": "Published commit c43bf2e0c0b3 resolves through the Go module proxy and is checksum-pinned. Narrate unit tests pass; this does not qualify live OpenRouter routes, provider pricing, or native voice behavior."
     },
     {
       "module": "modernc.org/sqlite",

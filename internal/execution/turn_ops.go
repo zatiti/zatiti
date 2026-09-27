@@ -683,19 +683,30 @@ func (s *Service) dispatchModelEffect(ctx context.Context, unit contract.Unit, t
 // until a model step actually dispatches and records one — an honest
 // prerequisite_missing, never a fabricated placeholder.
 func (s *Service) handleProposalPrepare(ctx context.Context, unit contract.Unit, in proposalPrepareInput) (contract.Outcome[proposalBody], error) {
+	// An already interpreted proposal is returned whatever the caller's
+	// expected version: interpretation bumps the turn's version in the
+	// same call that records the proposal, so a follow-up lookup always
+	// carries the version from before. The fence guards only the case
+	// where no proposal exists yet.
+	current, err := loadTurn(ctx, unit, in.TurnID)
+	if err != nil {
+		return contract.Outcome[proposalBody]{}, err
+	}
+	if current != nil && current.InstallationID == installationOf(unit) {
+		existing, err := findProposalByKey(ctx, unit, current.ID, in.StepIndex, in.ProposalID)
+		if err != nil {
+			return contract.Outcome[proposalBody]{}, err
+		}
+		if existing != nil {
+			return completedOutcome(proposalBody{Resource: proposalOut(existing)})
+		}
+	}
 	t, err := loadTurnForUpdate(ctx, unit, in.TurnID, in.ExpectedVersion)
 	if err != nil {
 		return contract.Outcome[proposalBody]{}, err
 	}
 	if t.InstallationID != installationOf(unit) {
 		return contract.Outcome[proposalBody]{}, permissionDenied("turn %s belongs to another installation", t.ID)
-	}
-	existing, err := findProposalByKey(ctx, unit, t.ID, in.StepIndex, in.ProposalID)
-	if err != nil {
-		return contract.Outcome[proposalBody]{}, err
-	}
-	if existing != nil {
-		return completedOutcome(proposalBody{Resource: proposalOut(existing)})
 	}
 	return contract.Outcome[proposalBody]{}, prerequisiteMissing(
 		"no normalized model evidence is persisted for turn %s step %d proposal %s",

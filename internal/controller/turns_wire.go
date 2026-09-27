@@ -137,6 +137,7 @@ type normalizedProposalProbe struct {
 	Operation        string          `json:"operation,omitempty"`
 	OperationVersion int64           `json:"operation_version,omitempty"`
 	Input            json.RawMessage `json:"input,omitempty"`
+	Text             string          `json:"text,omitempty"`
 }
 
 type wireMessage struct {

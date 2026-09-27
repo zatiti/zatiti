@@ -197,6 +197,9 @@ func mcpNameFor(id string) string {
 // LocalIO Prepare/Perform/Finish seam. Only registered operations in this
 // set whose owning module implements contract.LocalIO are routed there.
 var localIOOperations = map[string]bool{
+	"voice.transcribe":          true,
+	"voice.speak":               true,
+	"voice.speak.phrase":        true,
 	"artifact.upload.chunk":     true,
 	"artifact.upload.finish":    true,
 	"artifact.upload.cancel":    true,

@@ -151,7 +151,7 @@ func runServeOnce(ctx context.Context, cfg config, h *installationHandle, log *s
 		}
 	}
 	srv, err := server.New(server.Config{
-		SocketPath: cfg.SocketPath, RemoteAddress: cfg.RemoteAddress, TLSConfig: tlsCfg, MaxBodyBytes: defaultMaxBodySize,
+		Streams: h.streams, SocketPath: cfg.SocketPath, RemoteAddress: cfg.RemoteAddress, TLSConfig: tlsCfg, MaxBodyBytes: defaultMaxBodySize,
 	}, h.app)
 	if err != nil {
 		return err
@@ -300,6 +300,7 @@ func superviseController(ctx context.Context, h *installationHandle, adapters ma
 		return err
 	}
 	collab := controller.Collaborators{
+		Streams:  h.streams,
 		Identity: identity,
 		Blobs:    h.plat.Blobs(),
 		Jobs:     jobs,

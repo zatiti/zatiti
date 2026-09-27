@@ -150,7 +150,11 @@ type fakePorts struct {
 	processed       []recordedProcessed
 	evidence        []recordedEvidence
 	published       []recordedPublish
-	seq             int
+	// voiceCraft answers _voice.craft: the active voice session for the
+	// requester, or none when empty.
+	voiceCraft map[string]string
+	crafts     []json.RawMessage
+	seq        int
 }
 
 func newFakePorts() *fakePorts {
@@ -607,6 +611,12 @@ func (p *fakePorts) Call(ctx context.Context, unit contract.Unit, inv contract.I
 		body = struct {
 			Resource wireTask `json:"resource"`
 		}{*task}
+	case peerMessagingHistory:
+		// Conversation turns read prior history; these fixtures have none.
+		body = map[string]any{"items": []wireMessage{}, "complete": true}
+	case "_voice.craft":
+		p.crafts = append(p.crafts, inv.Input)
+		body = map[string]string{"style": p.voiceCraft["style"], "session_id": p.voiceCraft["session_id"]}
 	default:
 		p.mu.Unlock()
 		return contract.Payload{}, &contract.Fault{
