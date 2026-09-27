@@ -189,10 +189,11 @@ func (f *fixture) command(op, key string) (retainedCommand, error) {
 
 // principalRow is the public projection of a principal.
 type principalRow struct {
-	ID    contract.ID    `json:"id"`
-	Kind  string         `json:"kind"`
-	Name  string         `json:"name"`
-	Scope contract.Scope `json:"scope"`
+	ID      contract.ID    `json:"id"`
+	Kind    string         `json:"kind"`
+	Name    string         `json:"name"`
+	Scope   contract.Scope `json:"scope"`
+	Revoked bool           `json:"revoked"`
 }
 
 // principals lists every principal of the installation.
@@ -209,6 +210,8 @@ func (f *fixture) principals() []principalRow {
 // expectPrincipals asserts the installation holds exactly the bootstrap
 // pair, the human owner and the controller's scoped service principal
 // (internal/identity/service_principal.go), plus the named client agents.
+// Worker principals (revision 21: one per configured worker, the bootstrap
+// chief included) are asserted by worker_principal_test.go, not here.
 func (f *fixture) expectPrincipals(agents ...string) {
 	f.t.Helper()
 	want := map[string]string{"Integration Owner": contract.KindHuman, "controller": contract.KindService}
@@ -218,6 +221,9 @@ func (f *fixture) expectPrincipals(agents ...string) {
 	rows := f.principals()
 	got := map[string]string{}
 	for _, r := range rows {
+		if r.Kind == contract.KindWorker {
+			continue
+		}
 		if r.Scope.InstallationID != f.installationID {
 			f.t.Errorf("principal %s %q is scoped to installation %s", r.Kind, r.Name, r.Scope.InstallationID)
 		}

@@ -47,65 +47,7 @@ import (
 //   - output publication: uploading and reading the artifacts a task
 //     produces or consumes. Never artifact.export, which is a bulk/
 //     administrative operation closer to backup custody.
-var workerVisibleOperations = map[string]bool{
-	// authorized configuration authoring/inspection
-	"configuration.draft.create":  true,
-	"configuration.draft.discard": true,
-	"configuration.draft.get":     true,
-	"configuration.draft.list":    true,
-	"configuration.draft.update":  true,
-	"configuration.plan":          true,
-	"configuration.plan.get":      true,
-	"configuration.plan.list":     true,
-	"configuration.revision.get":  true,
-	"configuration.revision.list": true,
-
-	// task/delegation/responsibility actions
-	"task.accept":            true,
-	"task.assign":            true,
-	"task.cancel":            true,
-	"task.create":            true,
-	"task.delegate":          true,
-	"task.dependencies":      true,
-	"task.get":               true,
-	"task.list":              true,
-	"task.retry":             true,
-	"task.start":             true,
-	"task.update":            true,
-	"responsibility.archive": true,
-	"responsibility.create":  true,
-	"responsibility.get":     true,
-	"responsibility.list":    true,
-	"responsibility.pause":   true,
-	"responsibility.resume":  true,
-	"responsibility.update":  true,
-
-	// approved memory/messaging operations
-	"memory.inspect":            true,
-	"memory.list":               true,
-	"memory.promote":            true,
-	"memory.recall":             true,
-	"memory.remember":           true,
-	"memory.retract":            true,
-	"mailbox.ack":               true,
-	"mailbox.list":              true,
-	"mailbox.send":              true,
-	"conversation.create":       true,
-	"conversation.get":          true,
-	"conversation.list":         true,
-	"conversation.message.list": true,
-	"conversation.message.send": true,
-	"conversation.update":       true,
-
-	// output publication
-	"artifact.get":           true,
-	"artifact.list":          true,
-	"artifact.read":          true,
-	"artifact.upload.begin":  true,
-	"artifact.upload.cancel": true,
-	"artifact.upload.chunk":  true,
-	"artifact.upload.finish": true,
-}
+var workerVisibleOperations = contract.WorkerVisibleOperationSet()
 
 // workerActorChainSeed marks the dispatch chain WorkerOperator opens to
 // resolve a worker's actor through identity. It must never collide with a
@@ -249,7 +191,13 @@ func (a *Application) ExecuteWorker(ctx context.Context, request contract.Worker
 func (a *Application) resolveWorkerActor(ctx context.Context, workerID contract.ID, installation contract.ID) (contract.Actor, error) {
 	actor := contract.Actor{PrincipalID: workerID, Kind: contract.KindWorker}
 	scope := contract.Scope{InstallationID: installation}
-	err := a.db.Read(ctx, a.systemActor, scope, func(u contract.Unit) error {
+	// The read runs as the worker itself. _identity.authority admits only a
+	// registered, unrevoked caller, and a.systemActor is an unregistered
+	// per-process id, so resolving under it refused every worker -- even a
+	// registered one -- as "caller principal is not registered". Running as
+	// the candidate worker makes identity's own liveness check the
+	// registration check: an unknown or revoked worker id is refused.
+	err := a.db.Read(ctx, actor, scope, func(u contract.Unit) error {
 		wctx := withState(ctx, &dispatchState{chain: []string{workerActorChainSeed}, unit: u})
 		return a.revalidateAuthority(wctx, u, actor, scope)
 	})
