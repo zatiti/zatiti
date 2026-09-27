@@ -1,6 +1,6 @@
 # Implementation assignment: `internal/adapters/github`
 
-Generated specification revision 20; source digest `9713c6797abb90a1d7f2b52bbf71e6d8e46f5b9a5b047f9fa6b9ba1779952edc`. This file is committed implementation context. Do not independently edit it. Everything required from the product specification and adjacent interfaces is embedded below; no RFC copy is required.
+Generated specification revision 20; source digest `12bac05c16b2d84709878d5182f795a7304757c14acf99d2277eedf989049d3d`. This file is committed implementation context. Do not independently edit it. Everything required from the product specification and adjacent interfaces is embedded below; no RFC copy is required.
 
 ## Mission and scope
 

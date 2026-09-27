@@ -473,6 +473,10 @@ func (f *fx) executionTick(ctx context.Context, u contract.Unit, input json.RawM
 	return map[string]any{"attempt_ids": []string{}}, err
 }
 
+func (f *fx) voiceSweep(ctx context.Context, u contract.Unit, input json.RawMessage) (any, error) {
+	return map[string]any{"settled": 0}, nil
+}
+
 func (f *fx) attemptResource(id contract.ID) map[string]any {
 	stamp := f.clock.Now().Format(time.RFC3339Nano)
 	return map[string]any{

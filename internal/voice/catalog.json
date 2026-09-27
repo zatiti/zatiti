@@ -1209,5 +1209,55 @@
     "scope_required": [
       "installation_id"
     ]
+  },
+  {
+    "id": "_voice.sweep",
+    "version": 1,
+    "owner": "voice",
+    "visibility": "internal",
+    "mode": "mutation",
+    "effect": "local",
+    "input_schema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "now": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        }
+      },
+      "required": [
+        "now",
+        "limit"
+      ]
+    },
+    "output_schema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "settled": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        }
+      },
+      "required": [
+        "settled"
+      ]
+    },
+    "behavior": "Settle, as advisory estimates of their full reservation, up to limit voice calls in this installation that stayed pending or unknown past the call bound, releasing their accounting concurrency slots whether or not their actor uses voice again. Never contacts a provider.",
+    "cli": [],
+    "mcp": null,
+    "submission_key": false,
+    "expected_version": false,
+    "callers": [
+      "controller"
+    ],
+    "scope_required": []
   }
 ]

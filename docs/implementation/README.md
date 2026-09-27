@@ -2,7 +2,7 @@
 
 Revision 20. **Implementation exists; this is the frozen contributor specification, not release qualification.**
 
-38 implementation roots; 211 public operations; 103 internal owner methods; 153 source blocks with explicit ownership; 147 named acceptance cases covering Z01–Z21 and release journeys. The repository contains implementation code; passing package tests do not establish external service or release qualification.
+38 implementation roots; 211 public operations; 104 internal owner methods; 153 source blocks with explicit ownership; 147 named acceptance cases covering Z01–Z21 and release journeys. The repository contains implementation code; passing package tests do not establish external service or release qualification.
 
 Each root already contains a complete committed AGENTS.md: local mission, allowed imports, owned requirements, exact Go interfaces, incoming/outgoing operation schemas, persistence/recovery rules and named acceptance criteria. An agent can implement from that file without the RFC. Scope prompts intentionally repeat necessary contracts; do not edit generated copies independently.
 

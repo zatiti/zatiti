@@ -271,6 +271,7 @@ type assembly struct {
 	rec      *recorder
 	modules  []contract.Module // the real modules, unedited
 	assembly []contract.Module // what the registry was built over
+	db       contract.Database
 }
 
 const ownerKey = "assembly/owner"
@@ -312,6 +313,7 @@ func assemble(t *testing.T) *assembly {
 	a := &assembly{
 		secrets: &custodySecrets{SecretStore: plat.Secrets(), refs: map[string]string{}},
 		rec:     &recorder{},
+		db:      db,
 	}
 	clock := &assemblyClock{now: time.Date(2026, 1, 5, 9, 0, 0, 0, time.UTC)}
 	router := application.NewPorts()
@@ -534,6 +536,33 @@ func TestRealRegistryDrivesApplication(t *testing.T) {
 	}
 	if a.rec.saw("voice.speak.phrase", 1) {
 		t.Fatal("voice.speak.phrase ran through Module.Handle instead of the LocalIO phases")
+	}
+
+	// The controller's periodic voice sweep reaches the voice owner through
+	// the real registry and its internal caller allowlist.
+	var controllerActor contract.Actor
+	for _, m := range a.modules {
+		id, ok := m.(interface {
+			ControllerPrincipal(context.Context, contract.Reader) (contract.Actor, error)
+		})
+		if !ok {
+			continue
+		}
+		err = a.db.Read(ctx, bootstrap, scope, func(u contract.Unit) error {
+			var rErr error
+			controllerActor, rErr = id.ControllerPrincipal(ctx, u)
+			return rErr
+		})
+		if err != nil {
+			t.Fatalf("controller principal: %v", err)
+		}
+	}
+	swept, err := a.app.Internal(ctx, controllerActor, scope, contract.Invocation{
+		Operation: "_voice.sweep", Version: 1,
+		Input: mustJSON(t, map[string]any{"now": time.Now().UTC(), "limit": 10}),
+	})
+	if err != nil || swept.Status != contract.StatusCompleted {
+		t.Fatalf("_voice.sweep through Internal: %v (%s)", err, swept.Status)
 	}
 
 	// Public routing never reaches an internal operation.

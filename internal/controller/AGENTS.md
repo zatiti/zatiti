@@ -1,6 +1,6 @@
 # Implementation assignment: `internal/controller`
 
-Generated specification revision 20; source digest `9713c6797abb90a1d7f2b52bbf71e6d8e46f5b9a5b047f9fa6b9ba1779952edc`. This file is committed implementation context. Do not independently edit it. Everything required from the product specification and adjacent interfaces is embedded below; no RFC copy is required.
+Generated specification revision 20; source digest `12bac05c16b2d84709878d5182f795a7304757c14acf99d2277eedf989049d3d`. This file is committed implementation context. Do not independently edit it. Everything required from the product specification and adjacent interfaces is embedded below; no RFC copy is required.
 
 ## Mission and scope
 
@@ -20,7 +20,7 @@ Local proving focus: Duplicate controller, startup crash generation, dispatch ex
 
 Incoming callers: entrypoint/assembly or tests via the explicit Go API.
 
-Outgoing owner calls: `_connections.validation.record`, `_connections.discovery.record`, `_scheduling.wake.due`, `_scheduling.wake.admit`, `_effects.admit`, `_effects.claim`, `_effects.record`, `_effects.pending`, `_execution.tick`, `_execution.context`, `_execution.observation`, `_execution.fence`, `_messaging.admit`, `_memory.record`, `_artifacts.publish`, `_installation.restore.record`, `_execution.enqueue`, `_tasks.ready`, `_execution.job.pending`, `_execution.job.claim`, `_execution.job.record`, `_execution.verification.record`, `_execution.turn.admit`, `_execution.work.pending`, `_execution.work.claim`, `_execution.context.prepare`, `_execution.context.commit`, `_execution.proposal.prepare`, `_execution.proposal.record`, `_execution.report`, `_execution.verification.pending`, `_execution.verification.claim`, `_tasks.dependencies.wake`, `_messaging.ready`, `_effects.reconciliation.prepare`, `_effects.reconciliation.record`, `_skills.evaluation.record`, `_configuration.export.prepare`, `_configuration.export.record`, `_effects.restore.merge`, `_identity.restore.merge`, `_memory.restore.merge`, `_installation.restore.overlay`, `_execution.turn.observation`, `_configuration.execution_profile.qualify.record`, `_configuration.execution_profile.qualify.finish`. Each exact input/output schema appears below. Calls retain current Unit/authority; owner allowlists are mandatory.
+Outgoing owner calls: `_connections.validation.record`, `_connections.discovery.record`, `_scheduling.wake.due`, `_scheduling.wake.admit`, `_effects.admit`, `_effects.claim`, `_effects.record`, `_effects.pending`, `_execution.tick`, `_execution.context`, `_execution.observation`, `_execution.fence`, `_messaging.admit`, `_memory.record`, `_artifacts.publish`, `_installation.restore.record`, `_execution.enqueue`, `_tasks.ready`, `_execution.job.pending`, `_execution.job.claim`, `_execution.job.record`, `_execution.verification.record`, `_execution.turn.admit`, `_execution.work.pending`, `_execution.work.claim`, `_execution.context.prepare`, `_execution.context.commit`, `_execution.proposal.prepare`, `_execution.proposal.record`, `_execution.report`, `_execution.verification.pending`, `_execution.verification.claim`, `_tasks.dependencies.wake`, `_messaging.ready`, `_effects.reconciliation.prepare`, `_effects.reconciliation.record`, `_skills.evaluation.record`, `_configuration.export.prepare`, `_configuration.export.record`, `_effects.restore.merge`, `_identity.restore.merge`, `_memory.restore.merge`, `_installation.restore.overlay`, `_execution.turn.observation`, `_configuration.execution_profile.qualify.record`, `_configuration.execution_profile.qualify.finish`, `_voice.sweep`. Each exact input/output schema appears below. Calls retain current Unit/authority; owner allowlists are mandatory.
 
 ### Imported package APIs and behavior
 
@@ -1402,6 +1402,21 @@ Input schema:
 Output data schema:
 ```json
 {"type":"object","additionalProperties":false,"properties":{"items":{"type":"array","items":{"$ref":"#/$defs/Task"},"maxItems":500}},"required":["items"]}
+```
+
+### `_voice.sweep` v1 — voice / internal / mutation / local
+
+Allowed internal callers: controller. Submission key: not required at this internal/query/bootstrap boundary.
+
+Settle, as advisory estimates of their full reservation, up to limit voice calls in this installation that stayed pending or unknown past the call bound, releasing their accounting concurrency slots whether or not their actor uses voice again. Never contacts a provider.
+
+Input schema:
+```json
+{"type":"object","additionalProperties":false,"properties":{"now":{"type":"string","format":"date-time"},"limit":{"type":"integer","minimum":1,"maximum":100}},"required":["now","limit"]}
+```
+Output data schema:
+```json
+{"type":"object","additionalProperties":false,"properties":{"settled":{"type":"integer","minimum":0,"maximum":9223372036854775807}},"required":["settled"]}
 ```
 
 ### Local schema definitions

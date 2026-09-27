@@ -162,3 +162,79 @@ func TestBeginningASessionEndsTheConversationsEarlierOne(t *testing.T) {
 }
 
 func jsonDecode(b []byte, v any) error { return json.Unmarshal(b, v) }
+
+func TestSweepSettlesEveryActorsStaleCallsInTheInstallation(t *testing.T) {
+	e := newPhraseEnv(t)
+	e.offer(e.human.PrincipalID, contract.ReplyPreview{ID: "s", VoiceSession: e.session, State: "generated", Phrases: []string{"One.", "Two.", "Three."}})
+	for i := 0; i < 3; i++ {
+		if _, err := e.prepare(e.human, "s", i); err != nil {
+			t.Fatalf("prepare %d: %v", i, err)
+		}
+	}
+	// A call in another installation must never be touched.
+	other := contract.Scope{InstallationID: contract.NewID()}
+	err := e.db.Write(e.ctx, e.human, other, func(u contract.Unit) error {
+		otherSession := contract.NewID()
+		if _, err := u.ExecContext(e.ctx, "INSERT INTO voice_sessions(id,actor_id,scope_json,generation,data) VALUES(?,?,?,?,?)", otherSession, e.human.PrincipalID, string(raw(other)), u.Generation(), "{}"); err != nil {
+			return err
+		}
+		_, err := u.ExecContext(e.ctx, "INSERT INTO voice_calls(id,session_id,operation,reservation_id,state,amount,request_digest,created_at) VALUES(?,?,?,?,?,?,?,?)",
+			contract.NewID(), otherSession, "voice.speak.phrase", contract.NewID(), "unknown", 1000, "d", e.clock.now.UTC().Format(time.RFC3339Nano))
+		return err
+	})
+	if err != nil {
+		t.Fatalf("seed other installation: %v", err)
+	}
+	// The controller runs the sweep under its own service identity, not the
+	// call's actor, who never uses voice again.
+	controller := contract.Actor{PrincipalID: contract.NewID(), Kind: contract.KindService}
+	sweep := func(limit int) int {
+		t.Helper()
+		var out struct {
+			Settled int `json:"settled"`
+		}
+		err := e.db.Write(e.ctx, controller, e.scope, func(u contract.Unit) error {
+			in := raw(map[string]any{"now": e.clock.now.Add(staleCallAfter + time.Second), "limit": limit})
+			p, err := e.svc.Handle(e.ctx, u, contract.Invocation{Operation: "_voice.sweep", Version: 1, Input: in})
+			if err != nil {
+				return err
+			}
+			return jsonDecode(p.Data, &out)
+		})
+		if err != nil {
+			t.Fatalf("sweep: %v", err)
+		}
+		return out.Settled
+	}
+	if n := sweep(2); n != 2 || len(e.ports.settles) != 2 {
+		t.Fatalf("bounded sweep settled %d (%d settles), want 2", n, len(e.ports.settles))
+	}
+	if n := sweep(100); n != 1 || len(e.ports.settles) != 3 {
+		t.Fatalf("second sweep settled %d (%d settles), want the remaining 1", n, len(e.ports.settles))
+	}
+	for _, in := range e.ports.settles {
+		usage, _ := in["usage"].(map[string]any)
+		if in["authoritative_nonexecution"] != false || usage["estimated"] != float64(1000) || usage["advisory"] != true {
+			t.Fatalf("swept settlement %v, want a conservative advisory estimate of the reservation", in)
+		}
+	}
+	if n := sweep(100); n != 0 || len(e.ports.settles) != 3 {
+		t.Fatalf("repeat sweep settled %d, want 0", n)
+	}
+}
+
+func TestSweepLeavesCallsInsideTheBound(t *testing.T) {
+	e := newPhraseEnv(t)
+	e.offer(e.human.PrincipalID, contract.ReplyPreview{ID: "s", VoiceSession: e.session, State: "generated", Phrases: []string{"One."}})
+	if _, err := e.prepare(e.human, "s", 0); err != nil {
+		t.Fatalf("prepare: %v", err)
+	}
+	err := e.db.Write(e.ctx, e.human, e.scope, func(u contract.Unit) error {
+		in := raw(map[string]any{"now": e.clock.now.Add(staleCallAfter - time.Second), "limit": 10})
+		_, err := e.svc.Handle(e.ctx, u, contract.Invocation{Operation: "_voice.sweep", Version: 1, Input: in})
+		return err
+	})
+	if err != nil || len(e.ports.settles) != 0 {
+		t.Fatalf("sweep inside the bound settled %d (%v), want 0", len(e.ports.settles), err)
+	}
+}
