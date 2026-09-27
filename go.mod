@@ -5,8 +5,8 @@ go 1.26.0
 toolchain go1.26.2
 
 require (
-	github.com/narrate-it/narrate v0.0.0-20260926180643-c43bf2e0c0b3
 	github.com/modelcontextprotocol/go-sdk v1.7.0
+	github.com/narrate-it/narrate v0.0.0-20260926182619-c43bf2e0c0b3
 	github.com/spf13/cobra v1.10.2
 	modernc.org/sqlite v1.58.0
 )
