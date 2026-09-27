@@ -443,6 +443,9 @@ class _VoiceModeDialogState extends State<_VoiceModeDialog> {
           _playing = current.stream;
           try {
             await _voiceChannel.invokeMethod<void>('play', {'audio': audio});
+            if (!_withdrawn.contains(current.stream)) {
+              _speech.markSpoken(current);
+            }
           } finally {
             _playing = null;
           }

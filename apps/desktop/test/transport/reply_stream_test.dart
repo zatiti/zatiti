@@ -25,6 +25,7 @@ String _preview(
   'text': text,
   'state': state,
   'phrases': phrases,
+  'sequence': 1,
 });
 
 void main() {

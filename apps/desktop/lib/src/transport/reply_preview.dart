@@ -10,6 +10,7 @@ class ReplyPreview {
     voiceSession = o.optionalString('voice_session_id');
     text = o.string('text');
     state = o.string('state');
+    sequence = o.integer('sequence');
     phrases = o
         .list('phrases')
         .map((v) {
@@ -24,6 +25,7 @@ class ReplyPreview {
         id.length > 256 ||
         text.runes.length > 8192 ||
         phrases.length > 1000 ||
+        sequence < 1 ||
         !const {
           'streaming',
           'generated',
@@ -35,5 +37,6 @@ class ReplyPreview {
   }
   late final String id, source, turn, worker, text, state;
   late final String? voiceSession;
+  late final int sequence;
   late final List<String> phrases;
 }

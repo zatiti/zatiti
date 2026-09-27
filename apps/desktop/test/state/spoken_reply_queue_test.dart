@@ -10,6 +10,7 @@ ReplyPreview _p(
   String source = 'm1',
   String session = 's1',
   String worker = 'w1',
+  int sequence = 1,
 }) => ReplyPreview.fromJson({
   'id': id,
   'source_message_id': source,
@@ -19,6 +20,7 @@ ReplyPreview _p(
   'text': phrases.join(' '),
   'state': state,
   'phrases': phrases,
+  'sequence': sequence,
 });
 
 List<String> _drain(SpokenReplyQueue q) {
@@ -87,19 +89,58 @@ void main() {
     q.offer([
       _p('a', ['One.', 'Two.']),
     ]);
-    expect(q.take()!.stream, 'a');
+    final played = q.take()!;
+    expect(played.stream, 'a');
+    q.markSpoken(played);
     final withdrawn = q.offer([
       _p('a', ['One.'], state: 'interrupted'),
     ]);
     expect(withdrawn, {'a'});
     expect(_drain(q), isEmpty);
     // The retried attempt for the same message is still followed, but does
-    // not repeat what was already queued with the same text.
+    // not repeat what was already played with the same text.
     q.offer([
       _p('a', ['One.'], state: 'interrupted'),
-      _p('b', ['One.', 'Two, again.']),
+      _p('b', ['One.', 'Two, again.'], sequence: 2),
     ]);
     expect(_drain(q), ['b:1']);
+  });
+
+  test('a retry speaks phrases the interrupted attempt never played', () {
+    q.offer([
+      _p('a', ['One.', 'Two.']),
+    ]);
+    // a:0 was taken for synthesis but interrupted before it played; a:1
+    // was still queued.
+    expect(q.take()!.stream, 'a');
+    q.offer([
+      _p('a', ['One.'], state: 'interrupted'),
+    ]);
+    q.offer([
+      _p('b', ['One.', 'Two.'], sequence: 2),
+    ]);
+    expect(_drain(q), ['b:0', 'b:1']);
+  });
+
+  test('a full queue offers the overflow again on the next snapshot', () {
+    q = SpokenReplyQueue(maxQueued: 1)
+      ..expect(session: 's1', source: 'm1', workers: {'w1'});
+    q.offer([
+      _p('a', ['One.', 'Two.']),
+    ]);
+    expect(_drain(q), ['a:0']);
+    q.offer([
+      _p('a', ['One.', 'Two.']),
+    ]);
+    expect(_drain(q), ['a:1']);
+  });
+
+  test('follows the most recently published preview', () {
+    final shown = q.followed([
+      _p('newer', ['Later.'], sequence: 5),
+      _p('older', ['Earlier.'], sequence: 2),
+    ]);
+    expect(shown!.id, 'newer');
   });
 
   test('a new message starts a new generation', () {

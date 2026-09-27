@@ -16,10 +16,14 @@ class SpokenReplyQueue {
   // Every stream:index ever queued, so a reconnect's repeated snapshot
   // never queues a phrase twice.
   final Set<String> _queued = {};
-  // Phrase texts already queued per source message, so a retried attempt
+  // Phrase texts already played per source message, so a retried attempt
   // (a new stream for the same message) does not repeat what the
-  // interrupted attempt already said.
+  // interrupted attempt already said. A phrase counts only once
+  // [markSpoken] reports it played; one that was queued, withdrawn or
+  // dropped is still spoken by the retry.
   final Map<String, Map<int, String>> _saidBySource = {};
+  // Source message and text of every queued stream:index, for [markSpoken].
+  final Map<String, (String, String)> _queuedText = {};
   String? _session;
   String? _source;
   Set<String> _workers = const {};
@@ -69,20 +73,23 @@ class SpokenReplyQueue {
         withdrawn.add(p.id);
         continue;
       }
-      final said = _saidBySource.putIfAbsent(source, () => {});
+      final said = _saidBySource[source] ?? const {};
       for (var i = 0; i < p.phrases.length; i++) {
-        if (!_queued.add('${p.id}:$i')) continue;
-        if (said[i] == p.phrases[i]) continue;
-        said[i] = p.phrases[i];
-        if (_pending.length < maxQueued) {
-          _pending.add((stream: p.id, index: i, generation: _generation));
-        }
+        final key = '${p.id}:$i';
+        if (_queued.contains(key) || said[i] == p.phrases[i]) continue;
+        // A full queue leaves the phrase unqueued so a later snapshot
+        // offers it again.
+        if (_pending.length >= maxQueued) break;
+        _queued.add(key);
+        _queuedText[key] = (source, p.phrases[i]);
+        _pending.add((stream: p.id, index: i, generation: _generation));
       }
     }
     return withdrawn;
   }
 
-  /// The newest followed, uninterrupted preview in [previews], for display.
+  /// The newest followed, uninterrupted preview in [previews], by the
+  /// controller's publication sequence, for display.
   ReplyPreview? followed(List<ReplyPreview> previews) {
     ReplyPreview? out;
     for (final p in previews) {
@@ -90,11 +97,21 @@ class SpokenReplyQueue {
           p.source == _source &&
           p.voiceSession == _session &&
           _workers.contains(p.worker) &&
-          p.state != 'interrupted') {
+          p.state != 'interrupted' &&
+          (out == null || p.sequence > out.sequence)) {
         out = p;
       }
     }
     return out;
+  }
+
+  /// Records that [phrase] finished playing, so a retried attempt for the
+  /// same message does not repeat it.
+  void markSpoken(SpokenPhrase phrase) {
+    final queued = _queuedText['${phrase.stream}:${phrase.index}'];
+    if (queued == null) return;
+    final (source, text) = queued;
+    _saidBySource.putIfAbsent(source, () => {})[phrase.index] = text;
   }
 
   /// Removes and returns the next current phrase, skipping stale ones.
