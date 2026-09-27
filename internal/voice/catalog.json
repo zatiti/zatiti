@@ -305,6 +305,7 @@
     "mcp": "zatiti_voice_session_begin",
     "submission_key": true,
     "expected_version": false,
+    "callers": [],
     "scope_required": [
       "installation_id"
     ]
@@ -523,6 +524,7 @@
     "mcp": "zatiti_voice_session_get",
     "submission_key": false,
     "expected_version": false,
+    "callers": [],
     "scope_required": [
       "installation_id"
     ]
@@ -741,6 +743,7 @@
     "mcp": "zatiti_voice_session_end",
     "submission_key": true,
     "expected_version": false,
+    "callers": [],
     "scope_required": [
       "installation_id"
     ]
@@ -852,8 +855,7 @@
         "media_type",
         "billing",
         "reserved_micro_units"
-      ],
-      "$defs": {}
+      ]
     },
     "behavior": "Human-only bounded WAV transcription, separate voice credential, durable intent and conservative accounting reservation. Exactly one network call outside Unit; no retries or fallback. Transcript is not sent until ordinary conversation.message.send.",
     "cli": [
@@ -863,6 +865,7 @@
     "mcp": "zatiti_voice_transcribe",
     "submission_key": true,
     "expected_version": false,
+    "callers": [],
     "scope_required": [
       "installation_id"
     ]
@@ -973,8 +976,7 @@
         "media_type",
         "billing",
         "reserved_micro_units"
-      ],
-      "$defs": {}
+      ]
     },
     "behavior": "Read an actually disclosed worker reply from the bound conversation. Narrate supplies canonical craft; optional bounded craft rewrite and speech calls use voice credentials only. No tools or approvals. Durable intent, no retries, late results fenced by session/generation.",
     "cli": [
@@ -984,6 +986,226 @@
     "mcp": "zatiti_voice_speak",
     "submission_key": true,
     "expected_version": false,
+    "callers": [],
+    "scope_required": [
+      "installation_id"
+    ]
+  },
+  {
+    "id": "voice.speak.phrase",
+    "version": 1,
+    "owner": "voice",
+    "visibility": "public",
+    "mode": "mutation",
+    "effect": "disclosure",
+    "input_schema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "scope": {
+          "$ref": "#/$defs/Scope"
+        },
+        "session_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "stream_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "phrase_index": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000
+        }
+      },
+      "required": [
+        "scope",
+        "session_id",
+        "stream_id",
+        "phrase_index"
+      ],
+      "$defs": {
+        "Scope": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "installation_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "organization_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "project_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "worker_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "task_id": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "required": [
+            "installation_id"
+          ]
+        }
+      }
+    },
+    "output_schema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "session_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "call_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "text": {
+          "type": "string",
+          "maxLength": 8192
+        },
+        "audio": {
+          "type": "string",
+          "maxLength": 12000000
+        },
+        "media_type": {
+          "type": "string",
+          "maxLength": 8192
+        },
+        "billing": {
+          "type": "string",
+          "enum": [
+            "estimated",
+            "unknown",
+            "no_charge"
+          ]
+        },
+        "reserved_micro_units": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        }
+      },
+      "required": [
+        "session_id",
+        "call_id",
+        "text",
+        "audio",
+        "media_type",
+        "billing",
+        "reserved_micro_units"
+      ]
+    },
+    "behavior": "Synthesize one stable Narrate chunk of an authorized worker reply preview. Text is resolved by the controller; client-supplied prose is never accepted. Dedicated speech credentials, accounting and session fences apply.",
+    "cli": [
+      "voice",
+      "speak",
+      "phrase"
+    ],
+    "mcp": "zatiti_voice_speak_phrase",
+    "submission_key": true,
+    "expected_version": false,
+    "callers": [],
+    "scope_required": [
+      "installation_id"
+    ]
+  },
+  {
+    "id": "_voice.craft",
+    "version": 1,
+    "owner": "voice",
+    "visibility": "internal",
+    "mode": "query",
+    "effect": "local",
+    "input_schema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "scope": {
+          "$ref": "#/$defs/Scope"
+        },
+        "conversation_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "recipient_id": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "required": [
+        "scope",
+        "conversation_id",
+        "recipient_id"
+      ],
+      "$defs": {
+        "Scope": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "installation_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "organization_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "project_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "worker_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "task_id": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "required": [
+            "installation_id"
+          ]
+        }
+      }
+    },
+    "output_schema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "style": {
+          "type": "string",
+          "maxLength": 8192
+        },
+        "session_id": {
+          "type": "string",
+          "maxLength": 8192
+        }
+      },
+      "required": [
+        "style",
+        "session_id"
+      ]
+    },
+    "behavior": "Resolve the initiating human voice session for execution context; pin Narrate craft in the persisted model context. Never return credentials.",
+    "cli": [],
+    "mcp": null,
+    "submission_key": false,
+    "expected_version": false,
+    "callers": [
+      "execution"
+    ],
     "scope_required": [
       "installation_id"
     ]

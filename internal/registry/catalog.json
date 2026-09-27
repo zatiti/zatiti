@@ -19963,6 +19963,104 @@
       ]
     },
     {
+      "id": "voice.speak.phrase",
+      "version": 1,
+      "owner": "voice",
+      "visibility": "public",
+      "mode": "mutation",
+      "effect": "disclosure",
+      "cli": [
+        "voice",
+        "speak",
+        "phrase"
+      ],
+      "mcp": "zatiti_voice_speak_phrase",
+      "submission_key": true,
+      "description": "Synthesize one stable Narrate chunk of an authorized worker reply preview. Text is resolved by the controller; client-supplied prose is never accepted. Dedicated speech credentials, accounting and session fences apply.",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "scope": {
+            "$ref": "#/$defs/Scope"
+          },
+          "session_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "stream_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "phrase_index": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000
+          }
+        },
+        "required": [
+          "scope",
+          "session_id",
+          "stream_id",
+          "phrase_index"
+        ]
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "call_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "text": {
+            "type": "string",
+            "maxLength": 8192
+          },
+          "audio": {
+            "type": "string",
+            "maxLength": 12000000
+          },
+          "media_type": {
+            "type": "string",
+            "maxLength": 8192
+          },
+          "billing": {
+            "type": "string",
+            "enum": [
+              "estimated",
+              "unknown",
+              "no_charge"
+            ]
+          },
+          "reserved_micro_units": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9223372036854775807
+          }
+        },
+        "required": [
+          "session_id",
+          "call_id",
+          "text",
+          "audio",
+          "media_type",
+          "billing",
+          "reserved_micro_units"
+        ]
+      },
+      "completion": null,
+      "expected_version": false,
+      "scope_required": [
+        "installation_id"
+      ]
+    },
+    {
       "id": "voice.transcribe",
       "version": 1,
       "owner": "voice",

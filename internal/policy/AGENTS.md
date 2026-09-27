@@ -1,6 +1,6 @@
 # Implementation assignment: `internal/policy`
 
-Generated specification revision 19; source digest `3c050769e50c3874a3d19859a6ad5d5c0f8667c00109bc80d49c808c5e9530b1`. This file is committed implementation context. Do not independently edit it. Everything required from the product specification and adjacent interfaces is embedded below; no RFC copy is required.
+Generated specification revision 20; source digest `5954adca80e3dcc1057eda91564a78bf00153a53a317cb0277a79607da2e079c`. This file is committed implementation context. Do not independently edit it. Everything required from the product specification and adjacent interfaces is embedded below; no RFC copy is required.
 
 ## Mission and scope
 
@@ -30,7 +30,7 @@ These briefs are embedded so you need not read a sibling prompt to discover its 
 
 ## Shared foundation contract
 
-# Frozen implementation contract, revision 19
+# Frozen implementation contract, revision 20
 
 Revision 19 adds human conversational voice through the `voice` owner. The explicitly registered `voice.transcribe` and `voice.speak` operations use the phased IO boundary for bounded interactive external speech, with durable intent and separate accounting admission before leaving the transaction. They are not worker execution profiles or autonomous tool effects. Every session requires explicit disclosure consent and acknowledgment that OpenRouter speech billing is advisory (transcription routing cannot enforce a provider price cap). Dedicated voice-only connections exclude `/responses`; raw keys remain in SecretStore. The phase's accepted command is never automatically retried after a crash or ambiguous response. Unknown reservations remain visible. Narrate owns craft and provider transport, while Zatiti owns current-authority checks, accounting, conversation identity and session fencing. Desktop only captures and plays audio and uses catalogued operations; no direct model calls or sidecar. Native Mac permission, echo and latency testing remains qualification work.
 
@@ -501,6 +501,15 @@ This serialized amendment resolves Z-M2's independent review counterexamples. It
 Executable regression coverage must include unverified bootstrap through effects and callback, forged/replayed/stale intent rejection, catalog mutation between admit/claim, full-envelope tampering, lost handshake response, staged-context failure, callback bounds zero/one/sixteen and overflow with server-counted requests. Controlled fixtures are not live-provider or release qualification.
 
 Revision 4 integration details: a connections callback uses the recorded effects observation for outcome and provenance. If the observation contains staged outputs, the owner verifies the controller's publication mapping against artifact metadata (scope, digest, size, media type, classification and availability), reconstructs only the permitted locator substitutions, and persists that normalized recorded evidence. Callback-supplied outcome, usage or tool facts never replace recorded truth. The controller defers an explicit connection callback operation before admission if its linked job is absent from the current bounded scan; absence is not permission to discard the callback. Generic MCP cannot attest same-account credential rotation: `connection.rotate` returns `capability_unsupported` for MCP and leaves any existing intent untouched; a separately reviewed connection is required.
+
+
+## Streaming worker replies and direct voice craft
+
+The integration owner adds contract.ReplyStreams, ReplyRoute and ReplyPreview. Dependencies and AdapterDependencies receive the same optional per-controller ReplyStreams instance; entrypoint recreates it on each assembly. Controller owns the bounded ephemeral hub. Execution registers trusted context-digest routes outside Unit after assembling the captured context. Routes bind initiating principal, installation, conversation, worker, turn and optional voice session. Only the sealed reply tool text is eligible; free text, reasoning and other tool arguments are never broadcast. Preview states are streaming, generated, committed and interrupted. Committed means execution recorded a reply proposal with exactly the preview's text; it is not durable conversation history, and a reply preview never claims message admission. A preview fault (an unparseable reply prefix, a rewrite of disclosed text, or a final reply that does not extend the preview) withdraws only that preview as interrupted; it never fails or makes unknown the model step, whose terminal provider response stays authoritative. Terminal failed or incomplete responses reach the ordinary decoder. Stream interruption does not imply rollback or cancel worker tasks.
+
+Server exposes POST /v1/replies/stream using the standard request envelope with scope and conversation_id, no submission key. It authenticates each snapshot and authorizes conversation.message.list through Application before disclosure. SSE data frames contain bounded current ReplyPreview arrays; coalescing and reconnect cannot duplicate commands. Previews expire and are lost on restart; durable history remains authoritative. The route is requester-only; other conversation participants receive durable history through existing operations.
+
+Voice owns _voice.craft (execution-only) and voice.speak.phrase. Execution captures Narrate canonical instructions directly in model context; no post-generation rewrite call is made. Phrase text is resolved from an authorized immutable prefix using Narrate Chunker, never arbitrary client text. Phrases are append-only: once published, phrase index i never changes text. Before a reply is generated only text through the last sentence or paragraph boundary (or a word break past the phrase bound) is released; each released span is chunked on its own, never re-chunked with later text. An interrupted preview keeps its released phrases, adds no tail, and cannot be spoken. A second voice.speak.phrase command for the same session, stream and index is refused as a conflict before accounting admission; replay of the same submission key is unaffected. Provider keys, accounting, session/credential rechecks and audio nonretention remain unchanged.
 
 ## Owned product requirements
 

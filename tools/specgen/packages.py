@@ -249,3 +249,8 @@ pkg('voice','internal/voice','domain','contract','Own human conversational voice
 for package in P:
  if package['name']=='zatiti': package['imports'].append('voice')
  if package['path']=='cmd/zatiti' and 'voice' not in package['imports']: package['imports'].append('voice')
+
+# Streaming previews and direct craft are coordinated across these owners.
+for p in P:
+ if p['name'] in ['execution','controller','responses','server','voice','desktop']:
+  p['design'] += ' Revision 20: authorized reply-tool text previews use a bounded recipient-scoped stream. Provider text streams retain terminal evidence; controller pushes snapshots over authenticated HTTP event streams. Execution pins Narrate craft in voice context; speech synthesizes append-only stable Narrate chunks directly without rewriting. A preview is committed only after execution records a reply proposal with its exact text; preview faults never fail the model step. No preview state claims durable message commitment.'
