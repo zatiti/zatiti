@@ -14,6 +14,8 @@ import '../transport/envelope.dart';
 import '../transport/errors.dart';
 import '../transport/operations.dart';
 import '../transport/strict_json.dart';
+import '../transport/reply_preview.dart';
+import '../state/spoken_reply_queue.dart';
 
 const _voiceChannel = MethodChannel('zatiti/voice');
 const _voiceEvents = EventChannel('zatiti/voice/events');
@@ -57,10 +59,11 @@ class _VoiceModeDialogState extends State<_VoiceModeDialog> {
   String? _session;
   bool _busy = false;
   bool _closed = false;
-  bool _awaitReply = false;
-  bool _polling = false;
-  int _turnGeneration = 0;
-  Set<String> _known = {};
+  StreamSubscription<List<ReplyPreview>>? _replyEvents;
+  final SpokenReplyQueue _speech = SpokenReplyQueue();
+  final Set<String> _withdrawn = {};
+  bool _speaking = false;
+  String? _playing;
   Set<String> _workerIds = {};
 
   bool _isVoiceConnection(wire.Connection c) =>
@@ -89,8 +92,7 @@ class _VoiceModeDialogState extends State<_VoiceModeDialog> {
   void dispose() {
     if (!_closed) {
       _closed = true;
-      _turnGeneration++;
-      _awaitReply = false;
+      _speech.interrupt();
       unawaited(_releaseOnDispose());
     }
     super.dispose();
@@ -98,6 +100,7 @@ class _VoiceModeDialogState extends State<_VoiceModeDialog> {
 
   Future<void> _releaseOnDispose() async {
     try {
+      await _replyEvents?.cancel();
       await _nativeEvents?.cancel();
       await _voiceChannel.invokeMethod<void>('stop');
     } on Exception {
@@ -233,9 +236,16 @@ class _VoiceModeDialogState extends State<_VoiceModeDialog> {
       if (session == null) {
         throw const FormatException('Voice session ID missing.');
       }
-      final old = await _source.api.listMessages(widget.conversation.value);
-      if (_closed || !mounted || _session != session) return;
-      _known = old.map((m) => m.id).toSet();
+      _replyEvents = _source.api.client
+          .watchReplies(widget.conversation.value)
+          .listen(
+            _onReplies,
+            onError: (Object _) {
+              if (mounted) {
+                setState(() => _status = 'Reconnecting to live replies…');
+              }
+            },
+          );
       _nativeEvents = _voiceEvents.receiveBroadcastStream().listen(
         _onNative,
         onError: (Object error) {
@@ -269,9 +279,8 @@ class _VoiceModeDialogState extends State<_VoiceModeDialog> {
       ? e.fault.message
       : 'check the controller and dedicated key';
 
-  void _interrupt({bool keepWaiting = true}) {
-    _turnGeneration++;
-    _awaitReply = keepWaiting && _session != null;
+  void _interrupt() {
+    _speech.interrupt();
     unawaited(_interruptAudio());
   }
 
@@ -287,10 +296,9 @@ class _VoiceModeDialogState extends State<_VoiceModeDialog> {
     if (event is! Map || _closed) return;
     final type = event['type'];
     if (type == 'utterance' && event['audio'] is Uint8List) {
-      _turnGeneration++;
       unawaited(_transcribe((event['audio'] as Uint8List)));
     } else if (type == 'speech_start') {
-      _interrupt(keepWaiting: false);
+      _interrupt();
       if (mounted) setState(() => _status = 'Listening to you…');
     } else if (type == 'playback_ended' && mounted) {
       setState(() => _status = 'Listening. Say something to continue.');
@@ -341,20 +349,26 @@ class _VoiceModeDialogState extends State<_VoiceModeDialog> {
               'Sending your words to the selected conversation. Voice charge: $billing.';
         });
       }
-      final message = _source.prepareMessage(
-        ConversationId(widget.conversation.value),
-        text,
+      final message = _source.api.prepareMessageSend(
+        conversationId: widget.conversation.value,
+        body: text,
       );
-      await _source.submit(message);
+      _speech.expect(
+        session: session,
+        source: message.messageId,
+        workers: _workerIds,
+      );
+      final sent = await _source.api.client.submit(message.submission);
+      if (sent.status != ResultStatus.completed) {
+        throw const FormatException('Message was not confirmed.');
+      }
       if (_closed) return;
-      _awaitReply = true;
       if (mounted) {
         setState(() {
           _busy = false;
           _status = 'Waiting for the worker…';
         });
       }
-      if (!_polling) unawaited(_pollReply(session));
     } on Exception catch (e) {
       if (mounted) {
         setState(() {
@@ -367,99 +381,94 @@ class _VoiceModeDialogState extends State<_VoiceModeDialog> {
     }
   }
 
-  Future<void> _pollReply(String session) async {
-    if (_polling) return;
-    _polling = true;
+  void _onReplies(List<ReplyPreview> previews) {
+    if (_closed || _session == null) return;
+    final withdrawn = _speech.offer(previews);
+    _withdrawn.addAll(withdrawn);
+    if (_playing != null && withdrawn.contains(_playing)) {
+      unawaited(_interruptAudio());
+    }
+    final shown = _speech.followed(previews);
+    if (shown != null && mounted) setState(() => _transcript = shown.text);
+    if (!_speaking) unawaited(_drainSpeech());
+  }
+
+  /// Synthesizes one phrase the controller resolves from the authorized
+  /// preview; the client never supplies the text.
+  Future<Uint8List> _synthesize(SpokenPhrase phrase) async {
+    final data = await _submit(Operations.voiceSpeakPhrase, {
+      'scope': _scope(),
+      'session_id': _session,
+      'stream_id': phrase.stream,
+      'phrase_index': phrase.index,
+    });
+    final out = StrictObject(data, 'spoken phrase');
+    final session = out.string('session_id');
+    out.string('call_id');
+    out.string('text');
+    final audio = base64Decode(out.string('audio'));
+    final media = out.string('media_type');
+    out.string('billing');
+    out.integer('reserved_micro_units');
+    out.finish();
+    if (session != _session ||
+        media != 'audio/mpeg' ||
+        audio.isEmpty ||
+        audio.length > 4 * 1024 * 1024) {
+      throw const FormatException('Invalid speech audio.');
+    }
+    return Uint8List.fromList(audio);
+  }
+
+  /// Plays queued phrases in order, synthesizing the next phrase while the
+  /// current one plays so consecutive phrases do not wait on each other.
+  Future<void> _drainSpeech() async {
+    if (_speaking || _closed) return;
+    _speaking = true;
+    Future<Uint8List>? nextAudio;
     try {
-      while (!_closed && _session == session) {
-        await Future<void>.delayed(const Duration(milliseconds: 900));
-        if (!_awaitReply || _busy) continue;
-        try {
-          final pollTurn = _turnGeneration;
-          final messages = await _source.api.listMessages(
-            widget.conversation.value,
-          );
-          if (_busy || pollTurn != _turnGeneration) continue;
-          for (final m in messages) {
-            if (_closed ||
-                _session != session ||
-                _busy ||
-                pollTurn != _turnGeneration) {
-              break;
-            }
-            if (_known.contains(m.id)) continue;
-            if (!_workerIds.contains(m.senderId)) {
-              _known.add(m.id);
-              continue;
-            }
-            if (m.state != wire.MessageState.admitted &&
-                m.state != wire.MessageState.acknowledged) {
-              continue;
-            }
-            _known.add(m.id);
-            _awaitReply = false;
-            final turn = pollTurn;
-            if (mounted) {
-              setState(() => _status = 'Preparing ${m.senderId}’s reply…');
-            }
-            final data = await _submit(Operations.voiceSpeak, {
-              'scope': _scope(),
-              'session_id': session,
-              'message_id': m.id,
-            });
-            final out = StrictObject(data, 'spoken reply');
-            final returnedSession = out.string('session_id');
-            out.string('call_id');
-            final text = out.string('text');
-            final audio = base64Decode(out.string('audio'));
-            final media = out.string('media_type');
-            final billing = out.string('billing');
-            out.integer('reserved_micro_units');
-            out.finish();
-            if (_closed ||
-                _session != session ||
-                returnedSession != session ||
-                turn != _turnGeneration) {
-              break;
-            }
-            // Narrated presentation accompanies the original durable message.
-            if (mounted) {
-              setState(() {
-                _transcript = text;
-                _status = 'Speaking reply. Voice charge: $billing.';
-              });
-            }
-            if (media != 'audio/mpeg' ||
-                audio.isEmpty ||
-                audio.length > 4 * 1024 * 1024) {
-              throw const FormatException('Invalid speech audio.');
-            }
-            await _voiceChannel.invokeMethod<void>('play', {
-              'audio': Uint8List.fromList(audio),
-            });
-            if (!_closed && _session == session && turn == _turnGeneration) {
-              _awaitReply = true;
-            }
-          }
-        } on Exception catch (e) {
+      var current = _speech.take();
+      var currentAudio = current == null ? null : _synthesize(current);
+      while (current != null && currentAudio != null && !_closed) {
+        final audio = await currentAudio;
+        final next = _speech.take();
+        nextAudio = next == null ? null : _synthesize(next);
+        if (_speech.isCurrent(current) &&
+            !_withdrawn.contains(current.stream)) {
           if (mounted) {
             setState(
-              () => _status = 'Reply audio unavailable: ${_safeError(e)}',
+              () => _status = 'Speaking. You can interrupt at any time.',
             );
           }
-          _awaitReply = false;
+          _playing = current.stream;
+          try {
+            await _voiceChannel.invokeMethod<void>('play', {'audio': audio});
+          } finally {
+            _playing = null;
+          }
         }
+        current = next ?? _speech.take();
+        currentAudio = next != null
+            ? nextAudio
+            : (current == null ? null : _synthesize(current));
+        nextAudio = null;
+      }
+    } on Exception catch (e) {
+      nextAudio?.ignore();
+      _speech.clear();
+      if (mounted) {
+        setState(() => _status = 'Reply audio unavailable: ${_safeError(e)}');
       }
     } finally {
-      _polling = false;
+      _speaking = false;
     }
   }
 
   Future<void> _end({bool sendEnd = true}) async {
     if (_closed) return;
     _closed = true;
-    _turnGeneration++;
-    _awaitReply = false;
+    _speech.interrupt();
+    await _replyEvents?.cancel();
     await _nativeEvents?.cancel();
     try {
       await _voiceChannel.invokeMethod<void>('stop');

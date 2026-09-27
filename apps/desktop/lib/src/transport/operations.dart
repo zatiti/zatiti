@@ -70,6 +70,9 @@ abstract final class Operations {
   static const voiceTranscribe = OperationDescriptor.mutation(
     'voice.transcribe',
   );
+  static const voiceSpeakPhrase = OperationDescriptor.mutation(
+    'voice.speak.phrase',
+  );
   static const voiceSpeak = OperationDescriptor.mutation('voice.speak');
   static const conversationMessageSend = OperationDescriptor.mutation(
     'conversation.message.send',
@@ -192,6 +195,7 @@ abstract final class Operations {
     voiceSessionEnd,
     voiceTranscribe,
     voiceSpeak,
+    voiceSpeakPhrase,
     conversationCreate,
     conversationUpdate,
     reviewList,

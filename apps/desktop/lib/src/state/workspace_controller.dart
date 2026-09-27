@@ -712,6 +712,9 @@ class WorkspaceController extends ChangeNotifier {
   /// cached and [refresh] is false. Failures are recorded as a per-
   /// conversation notice rather than surfaced as a workspace-wide error:
   /// this must cost the open conversation, not everything else on screen.
+  Future<void> refreshStreamedMessages(ConversationId id) =>
+      _ensureMessages(id, refresh: true);
+
   Future<void> _ensureMessages(
     ConversationId id, {
     bool refresh = false,
