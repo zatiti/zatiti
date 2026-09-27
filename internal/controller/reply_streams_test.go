@@ -185,3 +185,62 @@ func TestReplyPreviewsExpireAndStayBounded(t *testing.T) {
 		t.Fatalf("retained %d expired previews, want none", got)
 	}
 }
+
+// Previews are ordered by first publication, not by their random IDs, and
+// a full table admits the newest reply by evicting the oldest finished one.
+func TestReplySnapshotIsChronologicalAndAdmitsTheNewest(t *testing.T) {
+	now := time.Unix(0, 0)
+	h := NewReplyHub()
+	h.now = func() time.Time { now = now.Add(time.Millisecond); return now }
+	r := testRoute("human-1")
+	ids := []string{"z-first", "a-second", "m-third"}
+	for _, id := range ids {
+		h.Publish(r, id, "Hi.", "generated")
+	}
+	got := h.Snapshot(r.Recipient, r.Scope.InstallationID, r.Conversation)
+	for i, p := range got {
+		if p.ID != ids[i] || p.Sequence != int64(i+1) {
+			t.Fatalf("snapshot[%d] = %s seq %d, want %s seq %d", i, p.ID, p.Sequence, ids[i], i+1)
+		}
+	}
+	h.Publish(r, "a-second", "Hi.", "generated") // terminal: ignored, keeps its sequence
+	for i := 3; i < maxReplyPreviews; i++ {
+		h.Publish(r, strings.Repeat("s", i), "Hi.", "streaming")
+	}
+	h.Publish(r, "newest", "Hi.", "streaming")
+	got = h.Snapshot(r.Recipient, r.Scope.InstallationID, r.Conversation)
+	if len(got) != maxReplyPreviews || got[len(got)-1].ID != "newest" {
+		t.Fatalf("full table: %d previews, last %q; want %d ending with the newest", len(got), got[len(got)-1].ID, maxReplyPreviews)
+	}
+	if got[0].ID != "a-second" {
+		t.Fatalf("evicted the wrong preview; first is now %q, want the oldest finished one gone", got[0].ID)
+	}
+}
+
+func TestReplyRoutesEvictTheOldestWhenFull(t *testing.T) {
+	now := time.Unix(0, 0)
+	h := NewReplyHub()
+	h.now = func() time.Time { now = now.Add(time.Millisecond); return now }
+	for i := 0; i <= maxReplyRoutes; i++ {
+		h.Register(contract.Digest(strings.Repeat("d", i+1)), testRoute("human-1"))
+	}
+	if _, ok := h.Route(contract.Digest(strings.Repeat("d", maxReplyRoutes+1))); !ok {
+		t.Fatal("newest route was refused by a full table")
+	}
+	if _, ok := h.Route(contract.Digest("d")); ok {
+		t.Fatal("oldest route was kept instead of evicted")
+	}
+}
+
+func TestReplyPhrasesReleaseAtScriptTerminalsAndLongUnspacedRuns(t *testing.T) {
+	if got := releasable("今日は晴れです。明日は"); got != len("今日は晴れです。") {
+		t.Fatalf("releasable after a full-width stop = %d, want %d", got, len("今日は晴れです。"))
+	}
+	if got := releasable("3.14 is pi"); got != 0 {
+		t.Fatalf("releasable split a decimal: %d", got)
+	}
+	long := strings.Repeat("字", maxPhraseRunes+20)
+	if got := releasable(long); got != len(strings.Repeat("字", maxPhraseRunes)) {
+		t.Fatalf("releasable of an unspaced run = %d, want a cut at %d runes", got, maxPhraseRunes)
+	}
+}

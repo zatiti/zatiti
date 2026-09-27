@@ -21,7 +21,10 @@ type ReplyPreview struct {
 	Worker       ID       `json:"worker_id"`
 	VoiceSession ID       `json:"voice_session_id,omitempty"`
 	Text         string   `json:"text"`
-	State        string   `json:"state"` // streaming | generated | interrupted
+	State        string   `json:"state"` // streaming | generated | committed | interrupted
+	// Sequence orders previews by first publication within one controller
+	// run; it is assigned once and never changes.
+	Sequence int64 `json:"sequence"`
 }
 
 // ReplyStreams is an ephemeral, bounded preview channel. It is not a durable

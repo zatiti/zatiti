@@ -12,8 +12,8 @@ import (
 	"github.com/zatiti/zatiti/internal/contract"
 )
 
-// Hub bounds. Previews are provisional display state, so every bound
-// drops new input rather than blocking worker generation.
+// Hub bounds. Previews are provisional display state, so a full table evicts
+// its oldest entries rather than refusing new ones or blocking generation.
 const (
 	maxReplyRoutes      = 512
 	maxReplyPreviews    = 128
@@ -48,6 +48,7 @@ type ReplyHub struct {
 	routes   map[contract.Digest]retainedRoute
 	replies  map[string]retainedReply
 	watchers map[replyKey]map[chan struct{}]bool
+	sequence int64
 }
 
 func NewReplyHub() *ReplyHub {
@@ -75,8 +76,15 @@ func (h *ReplyHub) Register(d contract.Digest, r contract.ReplyRoute) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.prune()
-	if len(h.routes) >= maxReplyRoutes {
-		return
+	if _, ok := h.routes[d]; !ok && len(h.routes) >= maxReplyRoutes {
+		var oldest contract.Digest
+		var at time.Time
+		for k, v := range h.routes {
+			if oldest == "" || v.at.Before(at) {
+				oldest, at = k, v.at
+			}
+		}
+		delete(h.routes, oldest)
 	}
 	h.routes[d] = retainedRoute{r, h.now()}
 }
@@ -103,12 +111,16 @@ func (h *ReplyHub) Publish(r contract.ReplyRoute, id, text, state string) {
 		return
 	}
 	if !ok && len(h.replies) >= maxReplyPreviews {
-		return
+		h.evictPreview()
 	}
 	v := retainedReply{route: r, at: h.now()}
 	if ok {
 		v.consumed = old.consumed
 		v.preview.Phrases = old.preview.Phrases
+		v.preview.Sequence = old.preview.Sequence
+	} else {
+		h.sequence++
+		v.preview.Sequence = h.sequence
 	}
 	if state != "interrupted" {
 		// An interrupted reply keeps the phrases it already had; its
@@ -124,6 +136,24 @@ func (h *ReplyHub) Publish(r contract.ReplyRoute, id, text, state string) {
 	v.preview.VoiceSession, v.preview.Text, v.preview.State = r.VoiceSession, text, state
 	h.replies[id] = v
 	h.notify(r)
+}
+
+// evictPreview drops the oldest finished preview, or the oldest preview when
+// every retained one is still streaming, so new replies are never refused.
+func (h *ReplyHub) evictPreview() {
+	victim, finished := "", false
+	var at time.Time
+	for id, v := range h.replies {
+		done := v.preview.State != "streaming"
+		if victim == "" || (done && !finished) || (done == finished && v.at.Before(at)) {
+			victim, finished, at = id, done, v.at
+		}
+	}
+	if victim != "" {
+		gone := h.replies[victim].route
+		delete(h.replies, victim)
+		h.notify(gone)
+	}
 }
 
 // notify wakes every watcher of r's recipient view without blocking; the
@@ -172,7 +202,7 @@ func (h *ReplyHub) Snapshot(actor, installation, conversation contract.ID) []con
 			out = append(out, p)
 		}
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	sort.Slice(out, func(i, j int) bool { return out[i].Sequence < out[j].Sequence })
 	return out
 }
 
@@ -234,6 +264,10 @@ func releasable(s string) int {
 			if n, _ := utf8.DecodeRuneInString(s[next:]); unicode.IsSpace(n) {
 				end = next
 			}
+		case r > unicode.MaxASCII && unicode.Is(unicode.Sentence_Terminal, r):
+			// Full-width and other script terminals (。！？।) end a
+			// sentence without a following space.
+			end = next
 		}
 	}
 	if utf8.RuneCountInString(s[end:]) > maxPhraseRunes {
@@ -249,9 +283,19 @@ func releasable(s string) int {
 			}
 			runes++
 		}
-		if cut > 0 {
-			end += cut
+		if cut == 0 {
+			// Scripts written without spaces are cut by rune count.
+			cut = len(tail)
+			runes = 0
+			for i := range tail {
+				if runes == maxPhraseRunes {
+					cut = i
+					break
+				}
+				runes++
+			}
 		}
+		end += cut
 	}
 	return end
 }
