@@ -50,6 +50,8 @@ and no Rosetta:
       `command.get` against the release build.
 - [ ] Provider key rotation (`connection.rotate`) and revocation
       (`connection.revoke`) work through the signed credential helper.
+      Rotation first needs code: today a rotation job is admitted but never
+      runs, so it stays pending.
 - [ ] Backup, restore, and restart come back paused, then resume after
       reconciliation, on the release build.
 - [ ] A decision on restoring onto a different Mac: either build and qualify

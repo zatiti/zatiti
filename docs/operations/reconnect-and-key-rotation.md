@@ -50,13 +50,30 @@ context, logs, or diagnostics.
 
 ### Same-account rotation
 
-`connection.rotate` replaces the credential of an existing connection with
-another credential **for the same provider account**. The controller first
-runs a validation probe with the new credential and checks that it belongs
-to the same account. Only then does it replace the old one. If the new key
-belongs to a different account, rotation is refused. Changing accounts means
-creating a new connection and getting it reviewed. Generic MCP connections
-can't prove the account is the same, so rotation is refused for them.
+**Not yet available:** `connection.rotate` accepts a rotation request and
+creates a pending job, but nothing in the current source runs that job. The
+controller doesn't dispatch a validation probe for it, and no code replaces
+the stored credential or completes the job. The job stays `pending`. Until
+that's implemented, use [Revoke a connection
+immediately](#revoke-a-connection-immediately) for a compromised key, and
+expect that setting up a replacement connection is also incomplete (see the
+note in that section).
+
+The designed behavior is as follows. `connection.rotate` replaces the
+credential of an existing connection with another credential **for the same
+provider account**. The controller first runs a validation probe with the
+new credential and checks that it belongs to the same account. Only then
+does it replace the old one. If the new key belongs to a different account,
+the replacement doesn't happen. Changing accounts means creating a new
+connection and getting it reviewed.
+
+What the current source already enforces when it accepts the request:
+
+- A generic MCP connection is refused with `capability_unsupported`, because
+  it can't prove the account is the same.
+- A revoked or inactive connection is refused.
+- A request whose `expected_version` doesn't match the connection is refused
+  with `stale_version`.
 
 1. Create the new key in the provider's dashboard. Don't revoke the old key
    yet.
@@ -77,8 +94,11 @@ can't prove the account is the same, so rotation is refused for them.
 
    Rotation runs as a job. Follow it with `job.get` using the returned job
    ID. A job status never treats the provider accepting a request as
-   confirmed success.
+   confirmed success. In the current source the job stays `pending`; see the
+   note at the start of this section.
 4. After the job succeeds, revoke the old key in the provider's dashboard.
+   Don't revoke the old key while the job is still pending, or the
+   connection is left without a working credential.
 
 ### Revoke a connection immediately
 
@@ -94,6 +114,12 @@ through the connection immediately. It keeps a record of effects whose
 outcome is still unresolved, along with an obligation to clean up the stored
 secret. Revoking the connection doesn't revoke the key at the provider; do
 that in the provider's dashboard.
+
+**Not yet available:** a working replacement isn't established yet. A new
+connection must pass `connection.validate` before it can be used, and that
+validation hasn't been shown to complete end to end against a live
+provider. Plan for a revoked connection to stay unusable until a
+replacement is validated.
 
 ## Rotate the exposed OpenRouter key before the qualification probe
 
