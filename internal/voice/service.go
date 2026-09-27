@@ -115,7 +115,16 @@ func (s *Service) Descriptors() []contract.Descriptor { return s.descriptors }
 func (s *Service) Migrations() []contract.Migration {
 	body := `CREATE TABLE voice_sessions (id TEXT PRIMARY KEY, actor_id TEXT NOT NULL, scope_json TEXT NOT NULL, generation INTEGER NOT NULL, data TEXT NOT NULL);
  CREATE TABLE voice_calls (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, operation TEXT NOT NULL, reservation_id TEXT NOT NULL, state TEXT NOT NULL, amount INTEGER NOT NULL, request_digest TEXT NOT NULL, result_json TEXT NOT NULL DEFAULT '{}');`
-	return []contract.Migration{{Owner: "voice", Version: 1, SQL: body, SHA256: contract.Hash([]byte(body))}}
+	// Version 2 records when each call was admitted and the reservation
+	// version its last settlement left, so a call whose outcome stayed
+	// unknown (or whose Finish never ran) can be resolved later instead of
+	// holding its accounting concurrency slot forever.
+	calls := `ALTER TABLE voice_calls ADD COLUMN created_at TEXT NOT NULL DEFAULT '';
+ ALTER TABLE voice_calls ADD COLUMN reservation_version INTEGER NOT NULL DEFAULT 1;`
+	return []contract.Migration{
+		{Owner: "voice", Version: 1, SQL: body, SHA256: contract.Hash([]byte(body))},
+		{Owner: "voice", Version: 2, SQL: calls, SHA256: contract.Hash([]byte(calls))},
+	}
 }
 func withoutDefs(schema json.RawMessage) json.RawMessage {
 	var document map[string]json.RawMessage
@@ -230,6 +239,14 @@ func (s *Service) Handle(ctx context.Context, u contract.Unit, inv contract.Invo
 		if _, err = s.credential(ctx, u, in.Settings.Output, "/audio/speech"); err != nil {
 			return contract.Payload{}, err
 		}
+		if err = s.resolveStale(ctx, u); err != nil {
+			return contract.Payload{}, err
+		}
+		// One active session per actor, installation and conversation, so
+		// reply previews bind to the session the human is using now.
+		if err = s.endConversationSessions(ctx, u, in.Conversation); err != nil {
+			return contract.Payload{}, err
+		}
 		sess := Session{ID: s.deps.IDs.New(), Conversation: in.Conversation, Settings: in.Settings, State: "active", Expires: s.deps.Clock.Now().Add(time.Hour)}
 		_, err = u.ExecContext(ctx, "INSERT INTO voice_sessions(id,actor_id,scope_json,generation,data) VALUES(?,?,?,?,?)", sess.ID, u.Actor().PrincipalID, string(raw(u.Scope())), u.Generation(), string(raw(sess)))
 		return completed(map[string]any{"resource": sess}), err
@@ -239,6 +256,9 @@ func (s *Service) Handle(ctx context.Context, u contract.Unit, inv contract.Invo
 			return contract.Payload{}, err
 		}
 		if inv.Operation == "voice.session.end" {
+			if err = s.resolveStale(ctx, u); err != nil {
+				return contract.Payload{}, err
+			}
 			sess.State = "ended"
 			if err = s.save(ctx, u, sess); err != nil {
 				return contract.Payload{}, err
@@ -258,6 +278,9 @@ func (s *Service) Prepare(ctx context.Context, u contract.Unit, inv contract.Inv
 	if inv.Operation != "voice.transcribe" && inv.Operation != "voice.speak" && inv.Operation != "voice.speak.phrase" {
 		return plan, fault(contract.CodeInvalidInput, "unsupported voice IO")
 	}
+	if err = s.resolveStale(ctx, u); err != nil {
+		return plan, err
+	}
 	sess, err := s.load(ctx, u, in.Session)
 	if err != nil {
 		return plan, err
@@ -275,9 +298,13 @@ func (s *Service) Prepare(ctx context.Context, u contract.Unit, inv contract.Inv
 			return plan, err
 		}
 	}
+	digest := contract.Hash(inv.Input)
 	if inv.Operation == "voice.speak.phrase" {
+		// Refuse a second call for the same phrase whatever the request's
+		// byte form: the key is the phrase itself, not the client's JSON.
+		digest = phraseDigest(sess.ID, in.Stream, in.Phrase)
 		var seen int
-		if err := u.QueryRowContext(ctx, "SELECT COUNT(*) FROM voice_calls WHERE session_id=? AND operation=? AND request_digest=?", sess.ID, inv.Operation, contract.Hash(inv.Input)).Scan(&seen); err != nil {
+		if err := u.QueryRowContext(ctx, "SELECT COUNT(*) FROM voice_calls WHERE session_id=? AND operation=? AND request_digest=?", sess.ID, inv.Operation, digest).Scan(&seen); err != nil {
 			return plan, err
 		}
 		if seen > 0 {
@@ -327,7 +354,7 @@ func (s *Service) Prepare(ctx context.Context, u contract.Unit, inv contract.Inv
 	if err = s.save(ctx, u, sess); err != nil {
 		return plan, err
 	}
-	_, err = u.ExecContext(ctx, "INSERT INTO voice_calls(id,session_id,operation,reservation_id,state,amount,request_digest) VALUES(?,?,?,?,?,?,?)", id, sess.ID, inv.Operation, reservation.Resource.ID, "pending", cost, contract.Hash(inv.Input))
+	_, err = u.ExecContext(ctx, "INSERT INTO voice_calls(id,session_id,operation,reservation_id,state,amount,request_digest,created_at) VALUES(?,?,?,?,?,?,?,?)", id, sess.ID, inv.Operation, reservation.Resource.ID, "pending", cost, digest, s.deps.Clock.Now().UTC().Format(time.RFC3339Nano))
 	if err != nil {
 		return plan, err
 	}
@@ -369,6 +396,12 @@ func (s *Service) Perform(ctx context.Context, plan contract.IOPlan) (contract.I
 	}
 	out := result{Session: p.Session.ID, Call: plan.ID, Billing: "unknown", Reserved: p.Session.Reserved}
 	failed := func(err error) (contract.IOResult, error) {
+		// Narrate reports whether the request may have reached the provider.
+		// Errors that are not CallErrors are raised before any network I/O.
+		var call *openrouter.CallError
+		if !errors.As(err, &call) || !call.MayHaveExecuted {
+			out.Billing = "no_charge"
+		}
 		return contract.IOResult{Data: raw(out), Fault: fault(contract.CodeOutcomeUnknown, "voice request failed or interrupted; check session usage before starting a new call")}, nil
 	}
 	if s.deps.Secrets == nil {
@@ -436,7 +469,7 @@ func (s *Service) Finish(ctx context.Context, u contract.Unit, plan contract.IOP
 	case "unknown":
 		usage["unknown"] = p.Amount
 	}
-	var settled map[string]any
+	var settled settledReservation
 	if err = s.peer(ctx, u, "_accounting.settle", map[string]any{"reservation_id": p.Reservation, "expected_version": 1, "usage": usage, "authoritative_nonexecution": out.Billing == "no_charge"}, &settled); err != nil {
 		return contract.Payload{}, err
 	}
@@ -464,10 +497,96 @@ func (s *Service) Finish(ctx context.Context, u contract.Unit, plan contract.IOP
 		out.Audio = ""
 		out.Text = ""
 	}
-	_, err = u.ExecContext(ctx, "UPDATE voice_calls SET state=?,result_json=? WHERE id=? AND state='pending'", out.Billing, string(raw(map[string]any{"billing": out.Billing, "reserved_micro_units": out.Reserved})), plan.ID)
+	_, err = u.ExecContext(ctx, "UPDATE voice_calls SET state=?,result_json=?,reservation_version=? WHERE id=? AND state='pending'", out.Billing, string(raw(map[string]any{"billing": out.Billing, "reserved_micro_units": out.Reserved})), settled.Resource.Version, plan.ID)
 	if err != nil {
 		return contract.Payload{}, err
 	}
 	// Mutate the result bytes as well: Application uses IOResult.Data on failure.
 	return completed(out), nil
+}
+
+// staleCallAfter is how long a voice call may stay pending or unknown before
+// it is resolved. It comfortably exceeds Perform's 110-second provider bound.
+const staleCallAfter = 5 * time.Minute
+
+type settledReservation struct {
+	Resource struct {
+		Version int64 `json:"version"`
+	} `json:"resource"`
+}
+
+func phraseDigest(session contract.ID, stream string, index int) contract.Digest {
+	return contract.Hash(raw([]any{session, stream, index}))
+}
+
+// endConversationSessions ends this actor's other active sessions for the
+// conversation in the current installation.
+func (s *Service) endConversationSessions(ctx context.Context, u contract.Unit, conversation contract.ID) error {
+	rows, err := u.QueryContext(ctx, "SELECT data FROM voice_sessions WHERE actor_id=? AND scope_json=?", u.Actor().PrincipalID, string(raw(u.Scope())))
+	if err != nil {
+		return err
+	}
+	var open []Session
+	for rows.Next() {
+		var data string
+		var sess Session
+		if err := rows.Scan(&data); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		if json.Unmarshal([]byte(data), &sess) == nil && sess.Conversation == conversation && sess.State == "active" {
+			open = append(open, sess)
+		}
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	for _, sess := range open {
+		sess.State = "ended"
+		if err := s.save(ctx, u, sess); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// resolveStale settles this actor's voice calls whose outcome stayed unknown,
+// or whose Finish never ran, once they are older than staleCallAfter. Each
+// is settled conservatively as an advisory estimate of its full reserved
+// amount, which keeps the budget counters conservative while releasing the
+// accounting concurrency slot the call held.
+func (s *Service) resolveStale(ctx context.Context, u contract.Unit) error {
+	cutoff := s.deps.Clock.Now().Add(-staleCallAfter).UTC().Format(time.RFC3339Nano)
+	rows, err := u.QueryContext(ctx, `SELECT c.id,c.reservation_id,c.state,c.amount,c.reservation_version FROM voice_calls c JOIN voice_sessions v ON v.id=c.session_id
+ WHERE v.actor_id=? AND v.scope_json=? AND c.state IN ('pending','unknown') AND c.created_at<>'' AND c.created_at<?`, u.Actor().PrincipalID, string(raw(u.Scope())), cutoff)
+	if err != nil {
+		return err
+	}
+	type stale struct {
+		id, reservation, state string
+		amount, version        int64
+	}
+	var calls []stale
+	for rows.Next() {
+		var c stale
+		if err := rows.Scan(&c.id, &c.reservation, &c.state, &c.amount, &c.version); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		calls = append(calls, c)
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	for _, c := range calls {
+		usage := map[string]any{"currency": "USD", "spent": 0, "reserved": 0, "estimated": c.amount, "unknown": 0, "advisory": true}
+		var settled settledReservation
+		if err := s.peer(ctx, u, "_accounting.settle", map[string]any{"reservation_id": c.reservation, "expected_version": c.version, "usage": usage, "authoritative_nonexecution": false}, &settled); err != nil {
+			return err
+		}
+		if _, err := u.ExecContext(ctx, "UPDATE voice_calls SET state='estimated',reservation_version=? WHERE id=? AND state=?", settled.Resource.Version, c.id, c.state); err != nil {
+			return err
+		}
+	}
+	return nil
 }

@@ -12,10 +12,6 @@ import (
 	"github.com/zatiti/zatiti/internal/storage"
 )
 
-type fixedClock struct{ now time.Time }
-
-func (c fixedClock) Now() time.Time { return c.now }
-
 type countingIDs struct{ n int }
 
 func (c *countingIDs) New() contract.ID {
@@ -25,7 +21,10 @@ func (c *countingIDs) New() contract.ID {
 
 // stubPorts answers only the peer calls phrase speech makes before leaving
 // the transaction.
-type stubPorts struct{ reserves int }
+type stubPorts struct {
+	reserves int
+	settles  []map[string]any
+}
 
 func (p *stubPorts) Call(_ context.Context, _ contract.Unit, inv contract.Invocation) (contract.Payload, error) {
 	var body any
@@ -37,6 +36,12 @@ func (p *stubPorts) Call(_ context.Context, _ contract.Unit, inv contract.Invoca
 	case "_accounting.reserve":
 		p.reserves++
 		body = map[string]any{"resource": map[string]any{"id": "reservation"}}
+	case "_accounting.settle":
+		var in map[string]any
+		_ = json.Unmarshal(inv.Input, &in)
+		p.settles = append(p.settles, in)
+		version, _ := in["expected_version"].(float64)
+		body = map[string]any{"resource": map[string]any{"id": in["reservation_id"], "version": int64(version) + 1}}
 	default:
 		return contract.Payload{}, errors.New("unexpected peer call " + inv.Operation)
 	}
@@ -63,7 +68,12 @@ func (s *scopedStreams) Snapshot(actor, installation, conversation contract.ID) 
 	return s.previews[[3]contract.ID{actor, installation, conversation}]
 }
 
+type stepClock struct{ now time.Time }
+
+func (c *stepClock) Now() time.Time { return c.now }
+
 type phraseEnv struct {
+	clock   *stepClock
 	ctx     context.Context
 	db      contract.Database
 	svc     *Service
@@ -85,7 +95,8 @@ func newPhraseEnv(t *testing.T) *phraseEnv {
 	t.Cleanup(func() { _ = db.Close() })
 	e := &phraseEnv{ctx: ctx, db: db, ports: &stubPorts{}, streams: &scopedStreams{previews: map[[3]contract.ID][]contract.ReplyPreview{}}}
 	now := time.Date(2026, 9, 26, 12, 0, 0, 0, time.UTC)
-	e.svc, err = New(contract.Dependencies{Clock: fixedClock{now}, IDs: &countingIDs{}, Ports: e.ports, Streams: e.streams})
+	e.clock = &stepClock{now: now}
+	e.svc, err = New(contract.Dependencies{Clock: e.clock, IDs: &countingIDs{}, Ports: e.ports, Streams: e.streams})
 	if err != nil {
 		t.Fatalf("voice.New: %v", err)
 	}
