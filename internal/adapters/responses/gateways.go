@@ -150,7 +150,10 @@ func (g gatewayProtocol) encode(in protocolRequest, _ string) (protocolCall, err
 		if r.PriceCeiling != nil {
 			p["max_price"] = map[string]json.Number{"prompt": json.Number(r.PriceCeiling.Input), "completion": json.Number(r.PriceCeiling.Output)}
 		}
-		b, _ := json.Marshal(p)
+		b, err := json.Marshal(p)
+		if err != nil {
+			return protocolCall{}, fmt.Errorf("openrouter routing encode failed: %w", err)
+		}
 		body["provider"] = b
 		base.Header.Set("X-OpenRouter-Metadata", "enabled")
 	case "experiential":
