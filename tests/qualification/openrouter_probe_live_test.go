@@ -8,10 +8,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"math/big"
 	"net/http"
 	"os"
 	"os/exec"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -101,20 +103,9 @@ func TestOpenRouterProfileQualificationProbe(t *testing.T) {
 		c.notRun("live probe requires Keychain service/account, connection UUID, model, pinned routing JSON and a positive %s", openRouterCostCeiling)
 	}
 
-	var route openRouterRouteSelection
-	if err := json.Unmarshal([]byte(routingRaw), &route); err != nil {
-		c.fail("%s must be a valid OpenRouter routing object", openRouterRouting)
-	}
-	if len(route.Only) != 1 || strings.TrimSpace(route.Only[0]) == "" || route.AllowFallbacks || !route.RequireParameters || route.PriceCeiling.Currency != "USD" {
-		c.fail("the pinned route must name exactly one provider, disable fallbacks, require parameters and include a USD price ceiling")
-	}
-	inputRate, err := exactMicroRate(route.PriceCeiling.Input)
+	route, inputRate, outputRate, err := parseProbeRoute(routingRaw)
 	if err != nil {
-		c.fail("routing price_ceiling.input_per_million must be a positive exact decimal: %v", err)
-	}
-	outputRate, err := exactMicroRate(route.PriceCeiling.Output)
-	if err != nil {
-		c.fail("routing price_ceiling.output_per_million must be a positive exact decimal: %v", err)
+		c.fail("%s: %v", openRouterRouting, err)
 	}
 	maximum, err := probeWorstCaseCost(inputRate, outputRate)
 	if err != nil {
@@ -161,23 +152,16 @@ func TestOpenRouterProfileQualificationProbe(t *testing.T) {
 		Adapter: "responses", Action: actionJSON, CredentialRef: secrets.ref,
 		Deadline: time.Now().Add(35 * time.Second),
 	}
+	c.attach("operation_id", dispatch.OperationID)
+	c.attach("attempt_id", dispatch.AttemptID)
 	obs, err := adapter.Invoke(context.Background(), dispatch)
+	c.attach("physical_requests", transport.calls.Load())
 	if err != nil {
 		c.fail("responses.Invoke refused the selected qualification probe: %v", err)
 	}
-	var evidence liveEvidence
-	if err := json.Unmarshal(obs.Evidence, &evidence); err != nil {
-		c.fail("provider evidence did not decode: %v", err)
-	}
-	if transport.calls.Load() != 1 {
-		c.fail("physical requests = %d, want exactly one", transport.calls.Load())
-	}
-	if obs.Disposition != contract.DispositionSucceeded {
-		c.fail("probe disposition=%s http=%d code=%q: %s", obs.Disposition, evidence.PhysicalCall.HTTPStatus, evidence.PhysicalCall.ErrorCode, evidence.PhysicalCall.ErrorMessage)
-	}
-	if err := probe.checkStagedRequest(blobs, evidence); err != nil {
-		c.fail("%v", err)
-	}
+	// Scan for leaked credential bytes, then retain every record of the
+	// billable request before any assertion can end the case, so a failed or
+	// unknown outcome still carries the IDs an operator needs to resolve it.
 	for label, raw := range map[string][]byte{
 		"evidence": obs.Evidence, "usage": obs.Usage, "provider reference": []byte(obs.ProviderReference),
 	} {
@@ -190,13 +174,36 @@ func TestOpenRouterProfileQualificationProbe(t *testing.T) {
 			c.fail("credential bytes leaked into a staged blob")
 		}
 	}
-	c.attach("physical_requests", transport.calls.Load())
 	c.attach("response_evidence", json.RawMessage(obs.Evidence))
 	c.attach("usage", json.RawMessage(obs.Usage))
+	var evidence liveEvidence
+	if err := json.Unmarshal(obs.Evidence, &evidence); err != nil {
+		c.fail("provider evidence did not decode: %v", err)
+	}
+	if n := len(evidence.StagedOutputs); n > 0 {
+		c.attach("provider_response", json.RawMessage(blobs.bytesOf(evidence.StagedOutputs[n-1].Digest)))
+	}
+	if transport.calls.Load() != 1 {
+		c.fail("physical requests = %d, want exactly one; do not rerun until non-execution of the extra requests is established", transport.calls.Load())
+	}
+	if obs.Disposition != contract.DispositionSucceeded {
+		rerun := ""
+		if obs.Disposition == contract.DispositionUnknown {
+			rerun = "; the outcome is unknown, so a rerun is forbidden until authoritative non-execution is established"
+		}
+		c.fail("probe disposition=%s http=%d code=%q: %s%s", obs.Disposition, evidence.PhysicalCall.HTTPStatus, evidence.PhysicalCall.ErrorCode, evidence.PhysicalCall.ErrorMessage, rerun)
+	}
+	if err := probe.checkStagedRequest(blobs, evidence); err != nil {
+		c.fail("%v", err)
+	}
+	spent, err := probe.checkCharge(evidence, obs.Evidence)
+	c.attach("observed_charge_micro_usd", spent)
+	if err != nil {
+		c.fail("%v", err)
+	}
 	if len(evidence.StagedOutputs) == 0 {
 		c.fail("successful probe did not retain the provider response artifact")
 	}
-	c.attach("provider_response", json.RawMessage(blobs.bytesOf(evidence.StagedOutputs[len(evidence.StagedOutputs)-1].Digest)))
 	c.observe("one fixed probe succeeded via OpenRouter model %s on pinned route %s; max cost ceiling=%d micro-USD; profile=%s", model, route.Only[0], maxCost, profileDigest)
 }
 
@@ -277,6 +284,8 @@ func (p openRouterProbe) checkStagedRequest(blobs *memoryBlobs, evidence liveEvi
 			Only              []string `json:"only"`
 			AllowFallbacks    bool     `json:"allow_fallbacks"`
 			RequireParameters bool     `json:"require_parameters"`
+			DataCollection    string   `json:"data_collection"`
+			ZDR               bool     `json:"zdr"`
 			MaxPrice          struct {
 				Prompt     json.Number `json:"prompt"`
 				Completion json.Number `json:"completion"`
@@ -291,16 +300,89 @@ func (p openRouterProbe) checkStagedRequest(blobs *memoryBlobs, evidence liveEvi
 		wire.Provider.MaxPrice.Prompt.String() != p.route.PriceCeiling.Input || wire.Provider.MaxPrice.Completion.String() != p.route.PriceCeiling.Output {
 		return errors.New("staged provider request did not preserve the selected model, exact route, output bound and hard price ceiling")
 	}
+	for _, v := range p.route.Privacy {
+		if (v == "zero_retention" && !wire.Provider.ZDR) || (v != "zero_retention" && wire.Provider.DataCollection != "deny") {
+			return fmt.Errorf("staged provider request did not carry the selected privacy control %q", v)
+		}
+	}
 	return nil
+}
+
+// checkCharge fails a nominally successful probe whose adapter accounting
+// reports a post-success finding, an unpriced charge, or a charge above the
+// approved ceiling. It returns the charge it compared.
+func (p openRouterProbe) checkCharge(evidence liveEvidence, raw json.RawMessage) (int64, error) {
+	var usage struct {
+		Output struct {
+			Usage struct {
+				Billing    string `json:"billing"`
+				Accounting struct {
+					Spent     int64 `json:"spent"`
+					Estimated int64 `json:"estimated"`
+				} `json:"accounting"`
+			} `json:"usage"`
+		} `json:"output"`
+	}
+	if err := json.Unmarshal(raw, &usage); err != nil {
+		return 0, fmt.Errorf("provider usage did not decode: %w", err)
+	}
+	u := usage.Output.Usage
+	charge := u.Accounting.Spent
+	if u.Billing == "bounded_estimate" {
+		charge = u.Accounting.Estimated
+	}
+	if evidence.PhysicalCall.ErrorCode != "" {
+		return charge, fmt.Errorf("adapter reported %q after the provider call", evidence.PhysicalCall.ErrorCode)
+	}
+	if u.Billing != "observed" && u.Billing != "bounded_estimate" {
+		return charge, fmt.Errorf("probe charge was %q, want observed or bounded_estimate", u.Billing)
+	}
+	if charge > p.maxCost {
+		return charge, fmt.Errorf("probe charge %d micro-USD exceeds the approved ceiling %d", charge, p.maxCost)
+	}
+	return charge, nil
 }
 
 type exactRate struct{ num, den int64 }
 
+// frozenDecimal is the ResponsesRoutingOpenRouter price pattern; big.Rat
+// alone also accepts signs, leading zeros, underscores and hex forms that
+// are not JSON numbers.
+var frozenDecimal = regexp.MustCompile(`^(0|[1-9][0-9]*)(\.[0-9]{1,18})?$`)
+
+// parseProbeRoute strictly decodes the operator's routing selection and
+// checks it against the frozen OpenRouter route shape before any request.
+func parseProbeRoute(raw string) (route openRouterRouteSelection, in, out exactRate, err error) {
+	dec := json.NewDecoder(strings.NewReader(raw))
+	dec.DisallowUnknownFields()
+	if err = dec.Decode(&route); err != nil {
+		return route, in, out, fmt.Errorf("must be a valid OpenRouter routing object: %w", err)
+	}
+	if dec.More() {
+		return route, in, out, errors.New("must hold exactly one routing object")
+	}
+	if len(route.Only) != 1 || strings.TrimSpace(route.Only[0]) == "" || route.AllowFallbacks || !route.RequireParameters || route.PriceCeiling.Currency != "USD" {
+		return route, in, out, errors.New("the pinned route must name exactly one provider, disable fallbacks, require parameters and include a USD price ceiling")
+	}
+	for _, v := range route.Privacy {
+		if v != "no_training" && v != "data_policy" && v != "zero_retention" {
+			return route, in, out, fmt.Errorf("privacy value %q is not one of no_training, data_policy, zero_retention", v)
+		}
+	}
+	if in, err = exactMicroRate(route.PriceCeiling.Input); err != nil {
+		return route, in, out, fmt.Errorf("price_ceiling.input_per_million: %w", err)
+	}
+	if out, err = exactMicroRate(route.PriceCeiling.Output); err != nil {
+		return route, in, out, fmt.Errorf("price_ceiling.output_per_million: %w", err)
+	}
+	return route, in, out, nil
+}
+
 // OpenRouter's USD-per-million token ceiling has the same numeric value as
 // micro-USD per token, so it maps exactly without floating-point rounding.
 func exactMicroRate(value string) (exactRate, error) {
-	if strings.ContainsAny(value, "/eE") || strings.HasPrefix(value, ".") || strings.HasSuffix(value, ".") {
-		return exactRate{}, fmt.Errorf("rate must use ordinary decimal notation")
+	if len(value) > 64 || !frozenDecimal.MatchString(value) {
+		return exactRate{}, fmt.Errorf("rate %q must be a plain decimal matching %s", value, frozenDecimal)
 	}
 	r, ok := new(big.Rat).SetString(value)
 	if !ok || r.Sign() <= 0 || !r.Num().IsInt64() || !r.Denom().IsInt64() {
@@ -309,12 +391,26 @@ func exactMicroRate(value string) (exactRate, error) {
 	return exactRate{num: r.Num().Int64(), den: r.Denom().Int64()}, nil
 }
 
+// probeWorstCaseCost rounds the input and output charges up separately and
+// then adds them, exactly as the adapter's reservation does.
 func probeWorstCaseCost(input, output exactRate) (int64, error) {
-	in := new(big.Rat).Mul(new(big.Rat).SetFrac(big.NewInt(input.num), big.NewInt(input.den)), big.NewRat(openRouterMaxInput, 1))
-	out := new(big.Rat).Mul(new(big.Rat).SetFrac(big.NewInt(output.num), big.NewInt(output.den)), big.NewRat(openRouterMaxOutput, 1))
-	total := new(big.Rat).Add(in, out)
-	quotient, remainder := new(big.Int), new(big.Int)
-	quotient.QuoRem(total.Num(), total.Denom(), remainder)
+	in, err := ceilCharge(input, openRouterMaxInput)
+	if err != nil {
+		return 0, err
+	}
+	out, err := ceilCharge(output, openRouterMaxOutput)
+	if err != nil {
+		return 0, err
+	}
+	if in > math.MaxInt64-out {
+		return 0, fmt.Errorf("worst-case amount exceeds signed 64-bit micro-USD")
+	}
+	return in + out, nil
+}
+
+func ceilCharge(rate exactRate, tokens int64) (int64, error) {
+	total := new(big.Int).Mul(big.NewInt(rate.num), big.NewInt(tokens))
+	quotient, remainder := new(big.Int).QuoRem(total, big.NewInt(rate.den), new(big.Int))
 	if remainder.Sign() > 0 {
 		quotient.Add(quotient, big.NewInt(1))
 	}
@@ -344,16 +440,28 @@ func (f *fixedResponseTransport) RoundTrip(r *http.Request) (*http.Response, err
 // a mismatch between the probe and the adapter's enforced-cost, routing or
 // worst-case reservation rules fails here instead of on a billable call.
 func TestOpenRouterProbeDocumentsAreAcceptedOffline(t *testing.T) {
-	var route openRouterRouteSelection
-	if err := json.Unmarshal([]byte(`{"only":["DeepInfra"],"allow_fallbacks":false,"require_parameters":true,`+
-		`"price_ceiling":{"currency":"USD","input_per_million":"0.2","output_per_million":"1.25"}}`), &route); err != nil {
-		t.Fatal(err)
+	for _, tc := range []struct {
+		name, routing string
+		worst         int64
+	}{
+		// 256 input tokens at 0.2 plus 16 output tokens at 1.25 is 51.2 + 20, rounded up.
+		{"single-rounding-agrees", `{"only":["DeepInfra"],"allow_fallbacks":false,"require_parameters":true,` +
+			`"price_ceiling":{"currency":"USD","input_per_million":"0.2","output_per_million":"1.25"}}`, 72},
+		// 25.6 and 0.16 round up separately to 26 + 1; one combined rounding would give 26.
+		{"per-charge-rounding", `{"only":["DeepInfra"],"allow_fallbacks":false,"require_parameters":true,` +
+			`"privacy":["no_training","zero_retention"],` +
+			`"price_ceiling":{"currency":"USD","input_per_million":"0.1","output_per_million":"0.01"}}`, 27},
+	} {
+		t.Run(tc.name, func(t *testing.T) { runOfflineProbe(t, tc.routing, tc.worst) })
 	}
-	inputRate, err := exactMicroRate(route.PriceCeiling.Input)
-	if err != nil {
-		t.Fatal(err)
-	}
-	outputRate, err := exactMicroRate(route.PriceCeiling.Output)
+}
+
+// runOfflineProbe drives the probe's documents through the real adapter at
+// the probe's worst case (accepted, one request) and one micro-USD below it
+// (refused for budget before any request).
+func runOfflineProbe(t *testing.T, routing string, wantWorst int64) {
+	t.Helper()
+	route, inputRate, outputRate, err := parseProbeRoute(routing)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -361,9 +469,8 @@ func TestOpenRouterProbeDocumentsAreAcceptedOffline(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// 256 input tokens at 0.2 plus 16 output tokens at 1.25 is 71.2, rounded up.
-	if worst != 72 {
-		t.Fatalf("worst-case reservation = %d micro-USD, want 72", worst)
+	if worst != wantWorst {
+		t.Fatalf("worst-case reservation = %d micro-USD, want %d", worst, wantWorst)
 	}
 	probe := openRouterProbe{
 		model: "z-ai/glm-flash-latest", connectionID: "0a000000-0000-4000-8000-0000000000c1",
@@ -403,6 +510,9 @@ func TestOpenRouterProbeDocumentsAreAcceptedOffline(t *testing.T) {
 	if err := probe.checkStagedRequest(blobs, evidence); err != nil {
 		t.Fatal(err)
 	}
+	if charge, err := probe.checkCharge(evidence, obs.Evidence); err != nil || charge <= 0 {
+		t.Fatalf("charge check: charge=%d err=%v", charge, err)
+	}
 	for _, body := range append(blobs.all(), obs.Evidence, obs.Usage) {
 		if bytes.Contains(body, secret) {
 			t.Fatal("credential bytes leaked into retained output")
@@ -430,5 +540,47 @@ func TestOpenRouterProbeDocumentsAreAcceptedOffline(t *testing.T) {
 	var fault *contract.Fault
 	if !errors.As(err, &fault) || fault.Code != contract.CodeBudgetUnavailable || transport.calls != 0 {
 		t.Fatalf("underfunded probe: err=%v physical requests=%d, want budget refusal before any request", err, transport.calls)
+	}
+}
+
+// TestOpenRouterProbeRejectsMalformedRoutes proves the pre-send guard refuses
+// route selections the frozen schema forbids, which would otherwise reach the
+// wire without the pinned route or price ceiling.
+func TestOpenRouterProbeRejectsMalformedRoutes(t *testing.T) {
+	route := func(extra, input string) string {
+		return `{"only":["DeepInfra"],"allow_fallbacks":false,"require_parameters":true,` + extra +
+			`"price_ceiling":{"currency":"USD","input_per_million":"` + input + `","output_per_million":"1.25"}}`
+	}
+	for _, raw := range []string{
+		route("", "+0.2"), route("", "00.2"), route("", "0x10"), route("", "0b1"), route("", "0o7"),
+		route("", "1p-2"), route("", "1_000"), route("", "1e3"), route("", ".5"), route("", "0"),
+		route(`"privacy":["bogus"],`, "0.2"), route(`"extra":true,`, "0.2"),
+	} {
+		if _, _, _, err := parseProbeRoute(raw); err == nil {
+			t.Errorf("parseProbeRoute accepted %s", raw)
+		}
+	}
+}
+
+// TestOpenRouterProbeChargeGuard proves a nominal success still fails when the
+// adapter flags a post-success finding, cannot price the call, or reports a
+// charge above the approved ceiling.
+func TestOpenRouterProbeChargeGuard(t *testing.T) {
+	probe := openRouterProbe{maxCost: 72}
+	for name, tc := range map[string]struct {
+		code, evidence string
+		ok             bool
+	}{
+		"bounded":      {"", `{"output":{"usage":{"billing":"bounded_estimate","accounting":{"estimated":40}}}}`, true},
+		"observed":     {"", `{"output":{"usage":{"billing":"observed","accounting":{"spent":72}}}}`, true},
+		"over-ceiling": {"", `{"output":{"usage":{"billing":"observed","accounting":{"spent":73}}}}`, false},
+		"unknown":      {"", `{"output":{"usage":{"billing":"unknown","accounting":{"unknown":72}}}}`, false},
+		"adapter-flag": {"input_token_bound_exceeded", `{"output":{"usage":{"billing":"observed","accounting":{"spent":1}}}}`, false},
+	} {
+		var ev liveEvidence
+		ev.PhysicalCall.ErrorCode = tc.code
+		if _, err := probe.checkCharge(ev, json.RawMessage(tc.evidence)); (err == nil) != tc.ok {
+			t.Errorf("%s: err=%v, want ok=%v", name, err, tc.ok)
+		}
 	}
 }
