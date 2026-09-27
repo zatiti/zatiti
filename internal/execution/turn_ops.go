@@ -311,6 +311,27 @@ func (s *Service) handleWorkPending(ctx context.Context, unit contract.Unit, in 
 		}
 	}
 
+	// A staged conversation reply whose delivery failed or was interrupted
+	// is listed again, so the controller retries the same idempotent
+	// delivery instead of the reply being lost.
+	remaining = in.Limit - int64(len(items))
+	if remaining > 0 {
+		staged, err := listStagedReplyDeliveries(ctx, unit, installation, remaining)
+		if err != nil {
+			return contract.Outcome[workPendingBody]{}, err
+		}
+		for _, p := range staged {
+			t, err := loadTurn(ctx, unit, p.TurnID)
+			if err != nil {
+				return contract.Outcome[workPendingBody]{}, err
+			}
+			item := workItemOut("delivery", t)
+			step := p.StepIndex
+			item.ProposalID, item.StepIndex = p.ProposalID, &step
+			items = append(items, item)
+		}
+	}
+
 	return completedOutcome(workPendingBody{Items: items})
 }
 

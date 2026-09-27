@@ -155,6 +155,18 @@ func (c *Controller) driveWorkItems(ctx, workCtx context.Context, sess *session)
 				continue
 			}
 			c.advanceContext(ctx, workCtx, sess, item)
+		case workKindDelivery:
+			// Retry a staged conversation reply whose delivery failed or
+			// was interrupted. The delivery is idempotent (deterministic
+			// submission key and message id), and the item carries the
+			// turn's current version for the record fence.
+			if item.ProposalID == "" || item.StepIndex == nil {
+				continue
+			}
+			c.driveOneProposal(ctx, sess, turnRouteInfo{
+				TurnID: item.Turn.ID, StepIndex: *item.StepIndex, Version: item.Turn.Version,
+				WorkerID: item.Turn.WorkerID, Scope: item.Turn.Scope,
+			}, item.ProposalID)
 		case workKindProposal:
 			if outstanding[item.Turn.ID] {
 				// execution's own context.commit already dispatched this

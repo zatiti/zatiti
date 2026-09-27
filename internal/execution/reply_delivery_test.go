@@ -130,3 +130,72 @@ func TestReplyWithoutConversationIsRecordedInline(t *testing.T) {
 		t.Fatalf("turn state %q, want completed", turn.State)
 	}
 }
+
+// A controller restart fences in-flight turns, but a staged conversation
+// reply is already decided: fencing it would resume the turn and call the
+// model again (a second, billed step) while the first reply was never
+// delivered. The turn keeps its staged delivery for the new controller.
+func TestRestartFenceKeepsAStagedConversationReply(t *testing.T) {
+	f, _ := conversationTurnFixture(t)
+	e := f.e
+	ctx1 := f.dispatchStep(t)
+	f.deliver(t, buildModelOutput(t, ctx1, []wireModelToolProposal{replyProposal(t, "call-1", "Here is the answer.", ctx1)}))
+	before := e.readTurn(f.turnID)
+	e.mustOK(opFence, fenceInput{Generation: before.Generation + 1, Reason: "restart"})
+	if turn := e.readTurn(f.turnID); turn.State != "proposal_pending" {
+		t.Fatalf("turn state %q after fence, want proposal_pending with its staged reply", turn.State)
+	}
+}
+
+// An undelivered staged reply is rediscovered by the bounded work scan, so a
+// delivery that failed or was interrupted is retried rather than lost.
+func TestUndeliveredStagedReplyIsListedAsDeliveryWork(t *testing.T) {
+	f, _ := conversationTurnFixture(t)
+	e := f.e
+	ctx1 := f.dispatchStep(t)
+	f.deliver(t, buildModelOutput(t, ctx1, []wireModelToolProposal{replyProposal(t, "call-1", "Here is the answer.", ctx1)}))
+	var body workPendingBody
+	e.decode(e.mustOK(opWorkPending, workPendingInput{Limit: 10}).Data, &body)
+	var found *wireWorkItem
+	for i := range body.Items {
+		if body.Items[i].Kind == "delivery" {
+			found = &body.Items[i]
+		}
+	}
+	if found == nil || found.Turn.ID != f.turnID || found.ProposalID != "call-1" || found.StepIndex == nil || *found.StepIndex != 0 {
+		t.Fatalf("work.pending items = %+v, want one delivery item for call-1 at step 0", body.Items)
+	}
+
+	e.mustOK(opProposalRecord, proposalRecordInput{ProposalID: "call-1", ExpectedVersion: e.readTurn(f.turnID).Version, CommandID: e.ids.New()})
+	body = workPendingBody{}
+	e.decode(e.mustOK(opWorkPending, workPendingInput{Limit: 10}).Data, &body)
+	for _, it := range body.Items {
+		if it.Kind == "delivery" {
+			t.Fatalf("delivered reply still listed: %+v", it)
+		}
+	}
+}
+
+// One model step delivers at most one conversation reply: a second reply
+// call in the same response would post a second message and then fail to
+// record against the already-completed turn.
+func TestSecondConversationReplyInOneStepIsRefused(t *testing.T) {
+	f, _ := conversationTurnFixture(t)
+	e := f.e
+	ctx1 := f.dispatchStep(t)
+	f.deliver(t, buildModelOutput(t, ctx1, []wireModelToolProposal{
+		replyProposal(t, "call-1", "First.", ctx1),
+		replyProposal(t, "call-2", "Second.", ctx1),
+	}))
+	if row := findProposalRowForTest(t, e, f.turnID, 0, "call-1"); row.State != "prepared" {
+		t.Fatalf("first reply state %q, want prepared", row.State)
+	}
+	row := findProposalRowForTest(t, e, f.turnID, 0, "call-2")
+	var np normalizedProposal
+	if err := json.Unmarshal(row.NormalizedProposal, &np); err != nil {
+		t.Fatal(err)
+	}
+	if row.State != "recorded" || np.Kind != "refused" {
+		t.Fatalf("second reply state %q kind %q, want a recorded refusal", row.State, np.Kind)
+	}
+}

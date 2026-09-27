@@ -524,6 +524,17 @@ func (s *Service) interpretLocalDecision(ctx context.Context, unit contract.Unit
 		}
 		np := normalizedProposal{Kind: "reply", Text: decoded.Text}
 		if turn.ConversationID != "" {
+			// One step delivers at most one conversation reply: a second
+			// would post a second message and then fail to record against
+			// the turn the first one completed.
+			staged, err := hasStagedReplyDelivery(ctx, unit, turn.ID, base.StepIndex)
+			if err != nil {
+				return stepDisposition{}, err
+			}
+			if staged {
+				return s.recordRefused(ctx, unit, base, refusalMalformedProposal,
+					"a model step may deliver only one conversation reply")
+			}
 			return s.prepareReplyDelivery(ctx, unit, turn, base, np)
 		}
 		return s.recordInline(ctx, unit, base, np)

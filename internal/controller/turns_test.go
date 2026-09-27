@@ -509,3 +509,40 @@ func TestConversationReplyIsDeliveredUnderTheWorkersAuthority(t *testing.T) {
 		})
 	}
 }
+
+// A delivery that fails transiently is not lost: the staged reply is listed
+// again as delivery work and the same idempotent delivery is retried until
+// it is recorded.
+func TestFailedConversationReplyDeliveryIsRetried(t *testing.T) {
+	f := newFx(t)
+	f.blobs = newFakeBlobs()
+	hub := NewReplyHub()
+	f.streams = hub
+	op := &recordingOperator{failFirst: 1}
+	f.operator = op
+	provider := f.adapter(modelAdapterName)
+	worker := contract.NewID()
+	turn := f.turn(worker, "task", contract.NewID(), "pending")
+	_ = f.turnAttempt(turn.id2())
+	provider.reply = func(context.Context, contract.Dispatch) (contract.Observation, error) {
+		return modelObservation(conversationReplyEvidence(t, "doing well, thanks")), nil
+	}
+	c, sess := f.started()
+	for i := 0; i < 12; i++ {
+		if err := f.pass(c, sess); err != nil {
+			t.Fatalf("tick %d: %v", i, err)
+		}
+	}
+	calls := op.calls()
+	if len(calls) < 2 {
+		t.Fatalf("worker operator called %d times; the failed delivery was never retried", len(calls))
+	}
+	for _, call := range calls {
+		if call.ProposalID != "p1" || call.SubmissionKey != calls[0].SubmissionKey {
+			t.Fatalf("retry changed the delivery identity: %+v", calls)
+		}
+	}
+	if got := f.turnState(turn.id2()); got != "completed" {
+		t.Fatalf("turn state = %q, want completed after the retried delivery", got)
+	}
+}
