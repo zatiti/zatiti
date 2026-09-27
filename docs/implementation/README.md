@@ -1,6 +1,6 @@
 # Package implementation specification
 
-Revision 20. **Implementation exists; this is the frozen contributor specification, not release qualification.**
+Revision 21. **Implementation exists; this is the frozen contributor specification, not release qualification.**
 
 38 implementation roots; 211 public operations; 103 internal owner methods; 153 source blocks with explicit ownership; 147 named acceptance cases covering Z01–Z21 and release journeys. The repository contains implementation code; passing package tests do not establish external service or release qualification.
 
