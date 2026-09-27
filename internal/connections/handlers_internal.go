@@ -267,7 +267,10 @@ func handleResolve(ctx context.Context, s *Service, unit contract.Unit, inv cont
 		return contract.Payload{}, prerequisiteMissing("connection %s is archived and cannot dispatch", row.ID)
 	}
 	validationIntent := false
-	if row.Provider == "mcp" && row.ValidationState != connStateRevoked {
+	if row.ValidationState != connStateRevoked {
+		// Only the exact owner-created probe action admits a connection that
+		// is not yet valid (createGovernedProbe); any other action still
+		// needs a current successful validation below.
 		validationIntent, err = s.matchingMCPIntent(ctx, unit, row, in.OperationID, in.Action, "validate")
 		if err != nil {
 			return contract.Payload{}, err
@@ -539,6 +542,15 @@ func handleValidationRecord(ctx context.Context, s *Service, unit contract.Unit,
 	}
 	if row.Provider == "mcp" {
 		observation, replay, err := s.verifiedMCPCallback(ctx, unit, row, in.OperationID, in.AttemptID, "validate", in.Observation)
+		if err != nil {
+			return contract.Payload{}, err
+		}
+		if replay {
+			return s.completed(resourceOut{Resource: row.wire()})
+		}
+		in.Observation = observation
+	} else if in.OperationID != "" {
+		observation, replay, err := s.verifiedProbeCallback(ctx, unit, row, in.OperationID, in.AttemptID, "validate")
 		if err != nil {
 			return contract.Payload{}, err
 		}

@@ -135,6 +135,29 @@ func (s *Service) createMCPProbe(ctx context.Context, u contract.Unit, row conne
 	if err := s.mcpConnection(row); err != nil {
 		return wireJob{}, err
 	}
+	var par map[string]any
+	if err := json.Unmarshal(params, &par); err != nil {
+		return wireJob{}, err
+	}
+	par["control_reply_limit"] = s.mcpProfile.ControlLimit
+	par["profile_digest"] = s.mcpProfile.Digest
+	params, err := json.Marshal(par)
+	if err != nil {
+		return wireJob{}, err
+	}
+	return s.createGovernedProbe(ctx, u, row, tool, kind, params, s.mcpProfile.Endpoint, s.mcpProfile.bound(),
+		time.Duration(s.mcpProfile.TimeoutSeconds)*time.Second)
+}
+
+// createGovernedProbe prepares a connection probe as an ordinary governed
+// effect: the exact action, its linked durable job and the owner intent
+// that lets _connections.resolve admit this one action for a connection
+// that is not yet valid. Effects admission, dispatch and the callback to
+// _connections.validation.record then follow the controller's normal effect
+// path, so the probe is policy-checked, reserved and journaled like any
+// other external call. Every provider uses this path; MCP adds its profile
+// pins above.
+func (s *Service) createGovernedProbe(ctx context.Context, u contract.Unit, row connectionRow, tool contractRow, kind string, params json.RawMessage, destination string, bound wireMoney, timeout time.Duration) (wireJob, error) {
 	if _, found, err := s.loadPendingProbe(ctx, u, row.ID); err != nil {
 		return wireJob{}, err
 	} else if found {
@@ -156,18 +179,8 @@ func (s *Service) createMCPProbe(ctx context.Context, u contract.Unit, row conne
 	if snapshot.Resource.Revision < 1 {
 		return wireJob{}, prerequisiteMissing("configuration revision unavailable")
 	}
-	var par map[string]any
-	if err = json.Unmarshal(params, &par); err != nil {
-		return wireJob{}, err
-	}
-	par["control_reply_limit"] = s.mcpProfile.ControlLimit
-	par["profile_digest"] = s.mcpProfile.Digest
-	params, err = json.Marshal(par)
-	if err != nil {
-		return wireJob{}, err
-	}
 	now := s.clock.Now()
-	action := governedMCPAction{Scope: scopeFromContract(row.Scope), Tool: wireRef{ID: tool.ID, Version: tool.Version}, Connection: wireRef{ID: row.ID, Version: row.Version}, AccountIdentity: row.AccountIdentity, Destination: s.mcpProfile.Endpoint, Content: []wireArtifactRef{}, NotBefore: now, ExpiresAt: now.Add(time.Duration(s.mcpProfile.TimeoutSeconds) * time.Second), Preconditions: json.RawMessage(`{}`), ConfigurationRevision: snapshot.Resource.Revision, Parameters: params, CostBound: s.mcpProfile.bound()}
+	action := governedMCPAction{Scope: scopeFromContract(row.Scope), Tool: wireRef{ID: tool.ID, Version: tool.Version}, Connection: wireRef{ID: row.ID, Version: row.Version}, AccountIdentity: row.AccountIdentity, Destination: destination, Content: []wireArtifactRef{}, NotBefore: now, ExpiresAt: now.Add(timeout), Preconditions: json.RawMessage(`{}`), ConfigurationRevision: snapshot.Resource.Revision, Parameters: params, CostBound: bound}
 	actionRaw, err := json.Marshal(action)
 	if err != nil {
 		return wireJob{}, err
@@ -542,6 +555,64 @@ func (s *Service) verifiedMCPCallback(ctx context.Context, u contract.Unit, row 
 	if out.Observation.Disposition == obsSucceeded || out.Observation.Disposition == obsFailed || out.Observation.Disposition == obsUnknown || out.Observation.Disposition == obsNotSent {
 		_, err = u.ExecContext(ctx, `UPDATE connections_mcp_intents SET completed_attempt=? WHERE operation_id=? AND completed_attempt=''`, attempt, operation)
 		if err != nil {
+			return wireObservation{}, false, err
+		}
+	}
+	return out.Observation, false, nil
+}
+
+// verifiedProbeCallback is verifiedMCPCallback for built-in providers: the
+// observation used for validation is the one effects actually recorded for
+// the owner-created probe action, never the delivered copy, and each intent
+// completes once.
+func (s *Service) verifiedProbeCallback(ctx context.Context, u contract.Unit, row connectionRow, operation, attempt contract.ID, kind string) (wireObservation, bool, error) {
+	var connection contract.ID
+	var version int64
+	var storedKind, digest, completed string
+	err := u.QueryRowContext(ctx, `SELECT connection_id,connection_version,kind,action_digest,completed_attempt FROM connections_mcp_intents WHERE operation_id=?`, operation).Scan(&connection, &version, &storedKind, &digest, &completed)
+	if errors.Is(err, sql.ErrNoRows) {
+		return wireObservation{}, false, permissionDenied("callback has no owner-created probe intent")
+	}
+	if err != nil {
+		return wireObservation{}, false, err
+	}
+	if connection != row.ID || storedKind != kind || attempt == "" {
+		return wireObservation{}, false, permissionDenied("callback differs from its probe intent")
+	}
+	if completed != "" {
+		if completed == string(attempt) {
+			return wireObservation{}, true, nil
+		}
+		return wireObservation{}, false, conflictFault("probe intent completed by another attempt")
+	}
+	if version != row.Version {
+		return wireObservation{}, false, staleVersion("probe callback connection version changed")
+	}
+	input, err := json.Marshal(map[string]any{"operation_id": operation, "attempt_id": attempt})
+	if err != nil {
+		return wireObservation{}, false, err
+	}
+	payload, err := s.ports.Call(ctx, u, contract.Invocation{Operation: "_effects.callback.evidence", Version: 1, Input: input})
+	if err != nil {
+		return wireObservation{}, false, err
+	}
+	var out struct {
+		Action      json.RawMessage `json:"action"`
+		Observation wireObservation `json:"observation"`
+	}
+	if err = json.Unmarshal(payload.Data, &out); err != nil {
+		return wireObservation{}, false, err
+	}
+	canon, err := contract.Canonicalize(out.Action)
+	if err != nil {
+		return wireObservation{}, false, err
+	}
+	if string(contract.Hash(canon)) != digest {
+		return wireObservation{}, false, permissionDenied("recorded action differs from its probe intent")
+	}
+	switch out.Observation.Disposition {
+	case obsSucceeded, obsFailed, obsUnknown, obsNotSent:
+		if _, err = u.ExecContext(ctx, `UPDATE connections_mcp_intents SET completed_attempt=? WHERE operation_id=? AND completed_attempt=''`, attempt, operation); err != nil {
 			return wireObservation{}, false, err
 		}
 	}
