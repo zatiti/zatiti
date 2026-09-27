@@ -41,6 +41,14 @@ The full Go suite passed with `GOWORK=off`, resolving the published Narrate modu
 
 Voice source implementation and standalone dependency resolution are complete for this branch; they do not close native qualification or any Mac release gate.
 
+### Streaming replies and phrase speech (revision 20, branch `codex/streaming-voice`)
+
+Revision 20 adds live previews of the worker's `reply` tool text and phrase-by-phrase speech. It is source work on its own branch and is not merged into `main`.
+
+- **What exists in source.** The Responses adapter requests a stream only when a reply route is registered for the step's context and the protocol documents Responses streaming events (OpenAI and OpenRouter; not Experiential). Only reply-tool text is previewed. Free text, reasoning and other tool arguments are never published. The controller hub scopes previews to the requesting human, installation and conversation. `POST /v1/replies/stream` reauthorizes `conversation.message.list` before every frame. `voice.speak.phrase` speaks one append-only phrase that the controller resolves; the client never supplies the text. A second command for the same phrase is refused before accounting. In a voice session, execution pins Narrate's craft instructions into the persisted model context, so no second rewrite call is made.
+- **What is tested.** Go unit and fixture tests cover phrase stability as text grows, recipient scoping, reconnect snapshots, provider interruption, preview faults that must not fail the model step, commit only after a recorded reply with the same text, duplicate-phrase refusal, and craft injection. Flutter tests cover stream parsing, reconnect, the spoken-phrase queue (dedupe, barge-in, withdrawal of an interrupted attempt) and preview labels. All provider streams in these tests are synthetic.
+- **What is not established.** No live provider stream has been exercised; OpenAI and OpenRouter streaming are enabled from their documented contracts only. The end-to-end hosted reply path is still blocked upstream: the Responses adapter does not yet map tool calls to typed proposals (`tool_proposal_mapping_unspecified`), and a recorded `reply` proposal is not yet delivered as a durable conversation message. Until those land, a preview marked committed is shown as "live preview only, not in history yet", and previews are lost after 10 minutes or a controller restart. Native audio qualification (V4) also covers phrase playback, interruption and prefetch.
+
 ## Evidence available now
 
 - The integrated full Go suite passed: `go test -p 2 ./... -count=1 -timeout=20m`.
