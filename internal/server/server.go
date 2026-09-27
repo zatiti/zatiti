@@ -41,7 +41,7 @@ type Server struct {
 	// streamsDone is closed when Close begins, ending every open reply
 	// stream so graceful shutdown is not held open by an idle-free SSE
 	// connection.
-	streamsDone chan struct{}
+	streamsDone  chan struct{}
 	shutdownOnce sync.Once
 }
 
