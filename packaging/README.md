@@ -194,6 +194,33 @@ hosting layout or trust-key rotation path, so it cannot generate a secure
 bootstrap downloader yet. Those fields need a coordinated release descriptor
 revision before a public install command exists.
 
+## Mac release production
+
+`packaging/scripts/produce-mac-release.sh` chains the producer commands on a
+release-owner Mac: it signs and notarizes the per-architecture controller
+executables and desktop application, assembles and signs the four component
+manifests, writes the signed release descriptor (`mac-release`), builds each
+architecture's installer package (`mac-pkg`), signs, notarizes and staples
+it, and writes the signed six-asset delivery index (`mac-delivery`) and
+`SHA256SUMS`. It publishes nothing. The script header documents its input
+layout.
+
+Apple steps (`zatiti-pack apple --step codesign|productsign|notarize|staple`)
+read only identity and profile names from `ZATITI_APPLE_APP_IDENTITY`,
+`ZATITI_APPLE_INSTALLER_IDENTITY`, `ZATITI_APPLE_NOTARY_PROFILE` (a
+`notarytool store-credentials` keychain profile) and optionally
+`ZATITI_APPLE_KEYCHAIN`. Without them each step fails with
+`prerequisite_missing` ("not configured"), and the script stops before
+producing anything. `zatiti-pack apple --step status --require` reports which
+settings are missing. `--unsigned-dry-run` skips every Apple step to exercise
+the chain and marks its output `UNSIGNED-DRY-RUN`; that output is never a
+release.
+
+Release CI does not sign: the workflow policy forbids secrets, so signing is
+a local release-owner step. The controller and desktop delivery archives are
+`assemble-bundle` archives of each signed component tree, and each archive
+must be owner-only (`0600`) when `mac-pkg` binds it.
+
 ## Service launchers
 
 The controller runs as a per-user service that does not depend on the
