@@ -148,8 +148,11 @@ type fakePorts struct {
 	prepared        []contract.ID
 	effectsPrepared []recordedEffectsPrepare
 	processed       []recordedProcessed
-	evidence        []recordedEvidence
-	published       []recordedPublish
+	// processedConversation is the conversation_id _messaging.processed
+	// reports for the triggering message; empty reports none.
+	processedConversation contract.ID
+	evidence              []recordedEvidence
+	published             []recordedPublish
 	// voiceCraft answers _voice.craft: the active voice session for the
 	// requester, or none when empty.
 	voiceCraft map[string]string
@@ -441,6 +444,9 @@ func (p *fakePorts) Call(ctx context.Context, unit contract.Unit, inv contract.I
 			"task_ids": []any{}, "body": "", "attachments": []any{}, "state": "acknowledged",
 			"created_at": "2026-09-10T12:00:00.000000000Z",
 		}}
+		if p.processedConversation != "" {
+			body.(map[string]any)["resource"].(map[string]any)["conversation_id"] = p.processedConversation
+		}
 	case peerMessagingPending:
 		var in struct {
 			WorkerID contract.ID `json:"worker_id"`

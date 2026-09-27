@@ -25,6 +25,7 @@ const (
 const (
 	proposalKindLocalOperation = "local_operation"
 	proposalKindExternalTool   = "external_tool"
+	proposalKindReply          = "reply"
 )
 
 type wireTurnSource struct {

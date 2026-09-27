@@ -215,12 +215,28 @@ func (s *Service) handleTurnAdmit(ctx context.Context, unit contract.Unit, in tu
 		return contract.Outcome[turnBody]{}, err
 	}
 	if in.Source.Kind == "message" {
-		if _, err := s.callPeer(ctx, unit, peerMessagingProcessed, map[string]any{
+		data, err := s.callPeer(ctx, unit, peerMessagingProcessed, map[string]any{
 			"message_id":   in.Source.SourceID,
 			"recipient_id": in.WorkerID,
 			"turn_id":      t.ID,
-		}); err != nil {
+		})
+		if err != nil {
 			return contract.Outcome[turnBody]{}, err
+		}
+		// A message-triggered turn answers in the triggering message's
+		// conversation: bind it at admission, in this same transaction, so
+		// context assembly reads that conversation's authorized history and
+		// a recorded reply is delivered back into it.
+		if t.ConversationID == "" && len(data) > 0 {
+			processed, err := decodeResource[wireMessage]("messaging", data)
+			if err != nil {
+				return contract.Outcome[turnBody]{}, err
+			}
+			if processed.ConversationID != "" {
+				if err := bindTurnConversation(ctx, unit, t, processed.ConversationID); err != nil {
+					return contract.Outcome[turnBody]{}, err
+				}
+			}
 		}
 	}
 	return completedOutcome(turnBody{Resource: turnOut(t)})
@@ -783,8 +799,14 @@ func (s *Service) handleProposalRecord(ctx context.Context, unit contract.Unit, 
 	// this handler in production; a direct test call (as P14's own fixtures
 	// do) keeps the original unconditional transition unchanged.
 	t.State = "proposal_pending"
-	if kind := normalizedProposalKind(p.NormalizedProposal); kind == "local_operation" || kind == "external_tool" {
+	switch normalizedProposalKind(p.NormalizedProposal) {
+	case "local_operation", "external_tool":
 		t.State = "claimed"
+	case "reply":
+		// A conversation reply is left prepared only for its delivery as
+		// the worker's message; once delivered it is the turn's final
+		// answer, exactly as an inline-recorded reply is.
+		t.State = "completed"
 	}
 	t.UpdatedAt = now
 	if t.Limits.ModelSteps > 0 && t.StepsUsed >= t.Limits.ModelSteps {

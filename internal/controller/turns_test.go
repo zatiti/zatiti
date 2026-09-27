@@ -428,3 +428,84 @@ func TestRecordedReplyCommitsOnlyTheMatchingPreview(t *testing.T) {
 		}
 	}
 }
+
+// conversationReplyEvidence is a reply staged for delivery, as execution
+// stages it for a conversation-bound turn.
+func conversationReplyEvidence(t *testing.T, text string) json.RawMessage {
+	t.Helper()
+	input, _ := json.Marshal(map[string]any{"conversation_id": "conv", "body": text})
+	raw, err := json.Marshal(map[string]any{
+		"tool_proposals": []fxToolProposal{{ID: "p1", Kind: "reply", Text: text, Operation: "conversation.message.send", Input: input}},
+	})
+	if err != nil {
+		t.Fatalf("encode reply evidence: %v", err)
+	}
+	return raw
+}
+
+// A conversation reply is delivered as the worker's own message through
+// the worker operator, exactly once per proposal identity, and only a
+// recorded delivery commits the streamed preview and completes the turn.
+func TestConversationReplyIsDeliveredUnderTheWorkersAuthority(t *testing.T) {
+	for _, failing := range []bool{false, true} {
+		name := "delivered"
+		if failing {
+			name = "operator_refuses"
+		}
+		t.Run(name, func(t *testing.T) {
+			f := newFx(t)
+			f.blobs = newFakeBlobs()
+			hub := NewReplyHub()
+			f.streams = hub
+			op := &recordingOperator{}
+			if failing {
+				op.err = &contract.Fault{Code: contract.CodePermissionDenied, Message: "disclosure denied by policy"}
+			}
+			f.operator = op
+			provider := f.adapter(modelAdapterName)
+			worker := contract.NewID()
+			turn := f.turn(worker, "task", contract.NewID(), "pending")
+			_ = f.turnAttempt(turn.id2())
+			human := contract.NewID()
+			hub.Publish(contract.ReplyRoute{Scope: contract.Scope{InstallationID: f.install}, Recipient: human, Conversation: "conv", Worker: worker, Turn: turn.id2()},
+				"preview", "doing well, thanks", "generated")
+			provider.reply = func(context.Context, contract.Dispatch) (contract.Observation, error) {
+				return modelObservation(conversationReplyEvidence(t, "doing well, thanks")), nil
+			}
+			c, sess := f.started()
+			for i := 0; i < 12; i++ {
+				if err := f.pass(c, sess); err != nil {
+					t.Fatalf("tick %d: %v", i, err)
+				}
+			}
+			calls := op.calls()
+			if len(calls) == 0 {
+				t.Fatal("the reply was never handed to the worker operator")
+			}
+			first := calls[0]
+			if first.Operation != "conversation.message.send" || first.WorkerID != worker || first.ProposalID != "p1" ||
+				first.SubmissionKey != "worker-turn/"+string(turn.id2())+"/p1" {
+				t.Fatalf("worker request = %+v", first)
+			}
+			preview := hub.Snapshot(human, f.install, "conv")
+			if failing {
+				if got := f.turnState(turn.id2()); got == "completed" {
+					t.Fatal("turn completed although the reply was never delivered")
+				}
+				if len(preview) != 1 || preview[0].State == "committed" {
+					t.Fatalf("preview = %+v; an undelivered reply must not commit", preview)
+				}
+				return
+			}
+			if len(calls) != 1 {
+				t.Fatalf("worker operator called %d times, want exactly 1", len(calls))
+			}
+			if got := f.turnState(turn.id2()); got != "completed" {
+				t.Fatalf("turn state = %q, want completed", got)
+			}
+			if len(preview) != 1 || preview[0].State != "committed" {
+				t.Fatalf("preview = %+v, want committed", preview)
+			}
+		})
+	}
+}

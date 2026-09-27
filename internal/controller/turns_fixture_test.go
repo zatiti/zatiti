@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"sync"
 	"time"
 
 	"github.com/zatiti/zatiti/internal/contract"
@@ -567,9 +568,9 @@ func (f *fx) executionProposalRecord(ctx context.Context, u contract.Unit, input
 	}
 	var turnID string
 	var stepIndex int64
-	var state string
-	err := u.QueryRowContext(ctx, `SELECT turn_id, step_index, state FROM execution_proposals WHERE proposal_id = ?`, in.ProposalID).
-		Scan(&turnID, &stepIndex, &state)
+	var state, normalized string
+	err := u.QueryRowContext(ctx, `SELECT turn_id, step_index, state, normalized_proposal FROM execution_proposals WHERE proposal_id = ?`, in.ProposalID).
+		Scan(&turnID, &stepIndex, &state, &normalized)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, fxFault(contract.CodeNotFound, "proposal does not exist")
 	}
@@ -595,6 +596,12 @@ func (f *fx) executionProposalRecord(ctx context.Context, u contract.Unit, input
 	}
 	t.stepsUsed++
 	t.state = "claimed"
+	var kind struct {
+		Kind string `json:"kind"`
+	}
+	if json.Unmarshal([]byte(normalized), &kind) == nil && kind.Kind == "reply" {
+		t.state = "completed"
+	}
 	if err := t.save(ctx, u); err != nil {
 		return nil, err
 	}
@@ -678,6 +685,30 @@ func (f *fx) executionVerificationRecord(ctx context.Context, u contract.Unit, i
 }
 
 // ---- verifier / worker operator ----
+
+// recordingOperator is a contract.WorkerOperator that records each worker
+// request and answers with a fixed command, or fails with err.
+type recordingOperator struct {
+	mu       sync.Mutex
+	requests []contract.WorkerRequest
+	err      error
+}
+
+func (o *recordingOperator) ExecuteWorker(_ context.Context, req contract.WorkerRequest) (contract.Result, error) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.requests = append(o.requests, req)
+	if o.err != nil {
+		return contract.Result{}, o.err
+	}
+	return contract.Result{CommandID: contract.NewID()}, nil
+}
+
+func (o *recordingOperator) calls() []contract.WorkerRequest {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return append([]contract.WorkerRequest(nil), o.requests...)
+}
 
 // fakeVerifier independently establishes a controlled, always-"passed"
 // verification outcome by echoing the identifiers a real trusted verifier

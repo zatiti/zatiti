@@ -1447,6 +1447,22 @@ func insertTurn(ctx context.Context, unit contract.Unit, t *turnRow) error {
 	return err
 }
 
+// bindTurnConversation records the conversation a freshly admitted
+// message-triggered turn answers in. It runs in the admission transaction
+// and only fills an empty binding; the binding never changes afterwards.
+func bindTurnConversation(ctx context.Context, unit contract.Unit, t *turnRow, conversation contract.ID) error {
+	res, err := unit.ExecContext(ctx, `UPDATE execution_turns SET conversation_id = ?
+		WHERE id = ? AND version = ? AND conversation_id = ''`, string(conversation), string(t.ID), t.Version)
+	if err != nil {
+		return err
+	}
+	if err := expectOneRow(res); err != nil {
+		return err
+	}
+	t.ConversationID = conversation
+	return nil
+}
+
 // updateTurn applies a version-fenced mutation to one worker turn.
 func updateTurn(ctx context.Context, unit contract.Unit, t *turnRow) error {
 	contextJSON, err := encodeJSON(t.ContextArtifact)
