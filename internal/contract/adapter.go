@@ -65,4 +65,5 @@ type AdapterDependencies struct {
 	Secrets SecretStore
 	Clock   Clock
 	Blobs   BlobStore
+	Streams ReplyStreams
 }

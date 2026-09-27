@@ -41,6 +41,7 @@ type Config struct {
 // required; work that needs an absent optional collaborator stops at that
 // exact point with prerequisite_missing and stays inspectable.
 type Collaborators struct {
+	Streams contract.ReplyStreams
 	// Identity is the explicitly provisioned service principal every
 	// internal call runs under. It must be a current, unrevoked, unrestricted
 	// service identity of this installation.

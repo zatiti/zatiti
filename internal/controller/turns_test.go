@@ -386,3 +386,45 @@ func TestFairScanSkipsBlockedTurnAndPauseClosesAdmissionForOneWorkerOnly(t *test
 		t.Fatalf("provider calls = %d, want exactly 1 (only the eligible turn ever reaches model dispatch)", got)
 	}
 }
+
+// A streamed preview becomes committed only when execution recorded a
+// reply proposal with exactly its text; delivery alone commits nothing.
+func TestRecordedReplyCommitsOnlyTheMatchingPreview(t *testing.T) {
+	f := newFx(t)
+	f.blobs = newFakeBlobs()
+	hub := NewReplyHub()
+	f.streams = hub
+	provider := f.adapter(modelAdapterName)
+	worker := contract.NewID()
+	turn := f.turn(worker, "task", contract.NewID(), "pending")
+	_ = f.turnAttempt(turn.id2())
+	human := contract.NewID()
+	route := func(id contract.ID) contract.ReplyRoute {
+		return contract.ReplyRoute{Scope: contract.Scope{InstallationID: f.install}, Recipient: human, Conversation: "conv", Worker: worker, Turn: id}
+	}
+	hub.Publish(route(turn.id2()), "matching", "doing well, thanks", "generated")
+	hub.Publish(route(turn.id2()), "different", "something else", "generated")
+	hub.Publish(route(contract.NewID()), "other-turn", "doing well, thanks", "generated")
+	provider.reply = func(context.Context, contract.Dispatch) (contract.Observation, error) {
+		return modelObservation(replyEvidence(t, "doing well, thanks")), nil
+	}
+	c, sess := f.started()
+	for i := 0; i < 12; i++ {
+		if err := f.pass(c, sess); err != nil {
+			t.Fatalf("tick %d: %v", i, err)
+		}
+	}
+	if got := f.turnState(turn.id2()); got != "completed" {
+		t.Fatalf("turn state = %q, want completed", got)
+	}
+	want := map[string]string{"matching": "committed", "different": "generated", "other-turn": "generated"}
+	previews := hub.Snapshot(human, f.install, "conv")
+	if len(previews) != len(want) {
+		t.Fatalf("snapshot has %d previews, want %d", len(previews), len(want))
+	}
+	for _, p := range previews {
+		if p.State != want[p.ID] {
+			t.Errorf("preview %s state = %q, want %q", p.ID, p.State, want[p.ID])
+		}
+	}
+}

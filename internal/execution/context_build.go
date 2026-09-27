@@ -11,6 +11,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/narrate-it/narrate/narration"
 	"github.com/zatiti/zatiti/internal/contract"
 )
 
@@ -55,13 +56,14 @@ const (
 // already resolved and authorized, so perform makes no fresh authorization
 // decision of its own.
 type contextRecipe struct {
-	Scope            contract.Scope     `json:"scope"`
-	AttemptID        contract.ID        `json:"attempt_id"`
-	Worker           wireRef            `json:"worker"`
-	ExecutionProfile wireRef            `json:"execution_profile"`
-	AdapterProfile   json.RawMessage    `json:"adapter_profile,omitempty"`
-	SkillVersions    []wireRef          `json:"skill_versions"`
-	Components       []contextComponent `json:"components"`
+	ReplyRoute       *contract.ReplyRoute `json:"reply_route,omitempty"`
+	Scope            contract.Scope       `json:"scope"`
+	AttemptID        contract.ID          `json:"attempt_id"`
+	Worker           wireRef              `json:"worker"`
+	ExecutionProfile wireRef              `json:"execution_profile"`
+	AdapterProfile   json.RawMessage      `json:"adapter_profile,omitempty"`
+	SkillVersions    []wireRef            `json:"skill_versions"`
+	Components       []contextComponent   `json:"components"`
 }
 
 // contextComponent is one transcript entry or tool carried into the
@@ -261,6 +263,34 @@ func (s *Service) handleContextPrepare(ctx context.Context, unit contract.Unit, 
 		ExecutionProfile: wireRef{ID: worker.Profile.ID, Version: worker.Profile.Version},
 		AdapterProfile:   append(json.RawMessage(nil), worker.Profile.AdapterProfile...),
 		SkillVersions:    worker.SkillVersions,
+	}
+	if t.ConversationID != "" && s.deps.Streams != nil {
+		route := contract.ReplyRoute{Source: t.Source.SourceID, Scope: t.Scope, Recipient: t.RequesterID, Conversation: t.ConversationID, Worker: t.WorkerID, Turn: t.ID}
+		var craft struct {
+			Style   string `json:"style"`
+			Session string `json:"session_id"`
+		}
+		input, _ := json.Marshal(map[string]any{"scope": t.Scope, "conversation_id": t.ConversationID, "recipient_id": t.RequesterID})
+		payload, e := s.deps.Ports.Call(ctx, unit, contract.Invocation{Operation: "_voice.craft", Version: 1, Input: input})
+		if e != nil {
+			return contract.Outcome[contextPlanBody]{}, e
+		}
+		if e = json.Unmarshal(payload.Data, &craft); e != nil {
+			return contract.Outcome[contextPlanBody]{}, e
+		}
+		if craft.Session != "" {
+			route.VoiceSession = contract.ID(craft.Session)
+			instructions := "Write the reply as a spoken script, in short complete sentences, without Markdown. Keep detailed artifacts separate. Produce the script directly in the reply tool text; do not explain the craft instructions."
+			if craft.Style != "verbatim" {
+				c, e := narration.Assemble(craft.Style)
+				if e != nil {
+					return contract.Outcome[contextPlanBody]{}, e
+				}
+				instructions = c + "\n" + instructions
+			}
+			recipe.Components = append(recipe.Components, contextComponent{Kind: "instruction", Role: "developer", Origin: "effective_instruction", Text: instructions})
+		}
+		recipe.ReplyRoute = &route
 	}
 	refs := []wireArtifactRef{}
 
@@ -682,7 +712,11 @@ func (s *Service) PerformContext(ctx context.Context, plan contract.ContextPlan)
 	for i, ref := range plan.Refs {
 		refs[i] = contract.ArtifactRef{ID: ref.ID, Digest: ref.Digest}
 	}
-	return s.buildContextArtifact(ctx, plan.Scope, plan.TurnID, plan.AttemptID, plan.ConfigurationRevision, refs, plan.ByteBound, plan.TokenBound, recipe)
+	raw, err := s.buildContextArtifact(ctx, plan.Scope, plan.TurnID, plan.AttemptID, plan.ConfigurationRevision, refs, plan.ByteBound, plan.TokenBound, recipe)
+	if err == nil && recipe.ReplyRoute != nil && s.deps.Streams != nil {
+		s.deps.Streams.Register(contract.Hash(raw), *recipe.ReplyRoute)
+	}
+	return raw, err
 }
 
 func (s *Service) buildContextArtifact(ctx context.Context, scope contract.Scope, turnID, attemptID contract.ID, configurationRevision contract.Version, refs []contract.ArtifactRef, byteBound, tokenBound int64, recipe contextRecipe) (json.RawMessage, error) {

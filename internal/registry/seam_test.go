@@ -453,8 +453,8 @@ func TestSeamLandedShapeAssembles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("landed-shape assembly failed: %v", err)
 	}
-	if len(reg.Public()) != 210 {
-		t.Fatalf("Public() holds %d operations, want 210", len(reg.Public()))
+	if len(reg.Public()) != 211 {
+		t.Fatalf("Public() holds %d operations, want 211", len(reg.Public()))
 	}
 	for _, d := range reg.Public() {
 		if strings.HasPrefix(d.ID, "_") {

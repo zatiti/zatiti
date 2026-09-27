@@ -306,6 +306,7 @@ type fx struct {
 	verifier         contract.Verifier
 	operator         contract.WorkerOperator
 	restoreLifecycle RestoreLifecycle
+	streams          contract.ReplyStreams
 	restoreBackups   map[contract.ID]restoreBackupImage
 	restoreMerge     map[contract.ID]func(context.Context, contract.Unit) error
 	restoreOverlays  map[contract.ID]RestoreOverlayRef
@@ -429,7 +430,7 @@ func (f *fx) controller(own contract.Ownership) *Controller {
 	}
 	if err := c.Attach(Collaborators{
 		Identity: f.actor, Blobs: f.blobs, Context: fxContextPerformer{}, Jobs: f.jobs, Verifier: f.verifier, Operator: f.operator,
-		RestoreLifecycle: f.restoreLifecycle,
+		RestoreLifecycle: f.restoreLifecycle, Streams: f.streams,
 	}); err != nil {
 		f.t.Fatalf("Attach: %v", err)
 	}

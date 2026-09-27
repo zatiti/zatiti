@@ -49,17 +49,17 @@ func TestValidWAVEnforcesNativeCaptureContractAndBounds(t *testing.T) {
 	}
 }
 
-func TestSpeechAdmissionEstimateUsesAffordableRoutesAndNarrateRewrite(t *testing.T) {
+func TestSpeechAdmissionHasOneCallWithoutNarrateRewrite(t *testing.T) {
 	base := Settings{Allowance: 100, Speech: "deepgram/flux-tts:free", Style: "conversational"}
 	if cost, calls := estimate(base, "voice.transcribe", ""); cost != 100 || calls != 1 {
 		t.Fatalf("transcription admission = (%d,%d), want (100,1)", cost, calls)
 	}
-	if cost, calls := estimate(base, "voice.speak", "Hello"); cost != 1000 || calls != 2 {
-		t.Fatalf("free speech + Narrate craft admission = (%d,%d), want (1000,2)", cost, calls)
+	if cost, calls := estimate(base, "voice.speak", "Hello"); cost != 100 || calls != 1 {
+		t.Fatalf("direct free speech admission = (%d,%d), want (100,1)", cost, calls)
 	}
 	base.Speech = "hexgrad/kokoro-82m"
-	if cost, calls := estimate(base, "voice.speak", "Hello"); cost != 1004 || calls != 2 {
-		t.Fatalf("Kokoro plus Narrate craft admission = (%d,%d), want (1004,2)", cost, calls)
+	if cost, calls := estimate(base, "voice.speak", "Hello"); cost != 100 || calls != 1 {
+		t.Fatalf("Kokoro plus Narrate craft admission = (%d,%d), want (100,1)", cost, calls)
 	}
 	base.Style = "verbatim"
 	if cost, calls := estimate(base, "voice.speak", "Hello"); cost != 100 || calls != 1 {

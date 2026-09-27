@@ -62,7 +62,7 @@ func New(cfg Config, app *application.Application) (*Server, error) {
 		app:           app,
 		localListener: localListener,
 		localServer: &http.Server{
-			Handler:           newMux(&operationHandler{app: app, maxBodyBytes: cfg.MaxBodyBytes, origin: originLocal}),
+			Handler:           streamMux(&operationHandler{app: app, maxBodyBytes: cfg.MaxBodyBytes, origin: originLocal}, cfg.Streams),
 			ReadHeaderTimeout: readHeaderTimeout,
 		},
 	}
@@ -76,7 +76,7 @@ func New(cfg Config, app *application.Application) (*Server, error) {
 		}
 		s.remoteListener = remoteListener
 		s.remoteServer = &http.Server{
-			Handler:           newMux(&operationHandler{app: app, maxBodyBytes: cfg.MaxBodyBytes, origin: originRemote}),
+			Handler:           streamMux(&operationHandler{app: app, maxBodyBytes: cfg.MaxBodyBytes, origin: originRemote}, cfg.Streams),
 			ReadHeaderTimeout: readHeaderTimeout,
 		}
 	}

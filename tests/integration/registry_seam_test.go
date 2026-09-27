@@ -80,8 +80,8 @@ func TestRealRegistryAssemblesLandedModules(t *testing.T) {
 	if err != nil {
 		t.Fatalf("registry.New over the landed modules: %v", err)
 	}
-	if n := len(reg.Public()); n != 210 {
-		t.Fatalf("registry exposes %d public operations, the frozen catalog holds 210", n)
+	if n := len(reg.Public()); n != 211 {
+		t.Fatalf("registry exposes %d public operations, the frozen catalog holds 211", n)
 	}
 }
 
@@ -147,10 +147,10 @@ func TestLandedPublicDescriptorsMatchFrozenCatalog(t *testing.T) {
 			t.Errorf("operation %s drifts from the frozen catalog: %s", id, drift)
 		}
 	}
-	// The frozen catalog holds 210 public operations; the registry owns two
+	// The frozen catalog holds 211 public operations; the registry owns two
 	// (capabilities.list, capabilities.schema) and the domains the rest.
-	if audited != 208 {
-		t.Fatalf("audited %d domain public descriptors, want 208", audited)
+	if audited != 209 {
+		t.Fatalf("audited %d domain public descriptors, want 209", audited)
 	}
 }
 

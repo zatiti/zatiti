@@ -197,5 +197,6 @@ func adapterDependencies(h *installationHandle) contract.AdapterDependencies {
 		Secrets: h.plat.Secrets(),
 		Clock:   h.clock,
 		Blobs:   h.plat.Blobs(),
+		Streams: h.streams,
 	}
 }

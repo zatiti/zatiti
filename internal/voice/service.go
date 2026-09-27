@@ -12,7 +12,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/narrate-it/narrate/narration"
 	"github.com/narrate-it/narrate/speech/openrouter"
 	"github.com/zatiti/zatiti/internal/contract"
 )
@@ -52,6 +51,8 @@ type request struct {
 	Settings     Settings       `json:"settings,omitempty"`
 	Audio        string         `json:"audio,omitempty"`
 	Message      contract.ID    `json:"message_id,omitempty"`
+	Stream       string         `json:"stream_id,omitempty"`
+	Phrase       int            `json:"phrase_index,omitempty"`
 }
 type result struct {
 	Session  contract.ID `json:"session_id"`
@@ -97,13 +98,15 @@ func New(d contract.Dependencies) (*Service, error) {
 		CLI        []string        `json:"cli"`
 		MCP        string          `json:"mcp"`
 		Submission bool            `json:"submission_key"`
+		Visibility string          `json:"visibility"`
+		Callers    []string        `json:"callers"`
 	}
 	if err := json.Unmarshal(catalog, &ops); err != nil {
 		return nil, err
 	}
 	for _, o := range ops {
 		s.inputSchemas[o.ID] = o.Input
-		s.descriptors = append(s.descriptors, contract.Descriptor{ID: o.ID, Version: o.Version, Owner: "voice", Visibility: "public", Mode: o.Mode, Effect: o.Effect, InputSchema: withoutDefs(o.Input), OutputSchema: withoutDefs(o.Output), CLI: o.CLI, MCP: o.MCP, SubmissionKey: o.Submission, ScopeRequired: []string{"installation_id"}})
+		s.descriptors = append(s.descriptors, contract.Descriptor{ID: o.ID, Version: o.Version, Owner: "voice", Visibility: o.Visibility, Callers: o.Callers, Mode: o.Mode, Effect: o.Effect, InputSchema: withoutDefs(o.Input), OutputSchema: withoutDefs(o.Output), CLI: o.CLI, MCP: o.MCP, SubmissionKey: o.Submission, ScopeRequired: []string{"installation_id"}})
 	}
 	return s, nil
 }
@@ -209,6 +212,9 @@ func (s *Service) save(ctx context.Context, u contract.Unit, sess Session) error
 	return err
 }
 func (s *Service) Handle(ctx context.Context, u contract.Unit, inv contract.Invocation) (contract.Payload, error) {
+	if inv.Operation == "_voice.craft" {
+		return s.craft(ctx, u, inv)
+	}
 	in, err := s.decode(u, inv)
 	if err != nil {
 		return contract.Payload{}, err
@@ -223,11 +229,6 @@ func (s *Service) Handle(ctx context.Context, u contract.Unit, inv contract.Invo
 		}
 		if _, err = s.credential(ctx, u, in.Settings.Output, "/audio/speech"); err != nil {
 			return contract.Payload{}, err
-		}
-		if in.Settings.Style != "verbatim" {
-			if _, err = s.credential(ctx, u, in.Settings.Output, "/chat/completions"); err != nil {
-				return contract.Payload{}, err
-			}
 		}
 		sess := Session{ID: s.deps.IDs.New(), Conversation: in.Conversation, Settings: in.Settings, State: "active", Expires: s.deps.Clock.Now().Add(time.Hour)}
 		_, err = u.ExecContext(ctx, "INSERT INTO voice_sessions(id,actor_id,scope_json,generation,data) VALUES(?,?,?,?,?)", sess.ID, u.Actor().PrincipalID, string(raw(u.Scope())), u.Generation(), string(raw(sess)))
@@ -254,7 +255,7 @@ func (s *Service) Prepare(ctx context.Context, u contract.Unit, inv contract.Inv
 	if err != nil {
 		return plan, err
 	}
-	if inv.Operation != "voice.transcribe" && inv.Operation != "voice.speak" {
+	if inv.Operation != "voice.transcribe" && inv.Operation != "voice.speak" && inv.Operation != "voice.speak.phrase" {
 		return plan, fault(contract.CodeInvalidInput, "unsupported voice IO")
 	}
 	sess, err := s.load(ctx, u, in.Session)
@@ -268,6 +269,21 @@ func (s *Service) Prepare(ctx context.Context, u contract.Unit, inv contract.Inv
 	if err != nil {
 		return plan, err
 	}
+	if inv.Operation == "voice.speak.phrase" {
+		text, err = s.phrase(u, sess, in)
+		if err != nil {
+			return plan, err
+		}
+	}
+	if inv.Operation == "voice.speak.phrase" {
+		var seen int
+		if err := u.QueryRowContext(ctx, "SELECT COUNT(*) FROM voice_calls WHERE session_id=? AND operation=? AND request_digest=?", sess.ID, inv.Operation, contract.Hash(inv.Input)).Scan(&seen); err != nil {
+			return plan, err
+		}
+		if seen > 0 {
+			return plan, fault(contract.CodeConflict, "this phrase already has a speech call; it cannot be retried with a new command")
+		}
+	}
 	cost, count := estimate(sess.Settings, inv.Operation, text)
 	ref := sess.Settings.Input
 	path := "/audio/transcriptions"
@@ -277,7 +293,7 @@ func (s *Service) Prepare(ctx context.Context, u contract.Unit, inv contract.Inv
 			return plan, fault(contract.CodeInvalidInput, "audio must be mono 16kHz PCM16 WAV, at most 15 seconds")
 		}
 	}
-	if inv.Operation == "voice.speak" {
+	if inv.Operation == "voice.speak" || inv.Operation == "voice.speak.phrase" {
 		ref = sess.Settings.Output
 		path = "/audio/speech"
 		if strings.TrimSpace(text) == "" || len([]rune(text)) > 4000 {
@@ -331,12 +347,6 @@ func estimate(settings Settings, operation, text string) (int64, int64) {
 		return cost, calls
 	}
 	need := int64(0)
-	if settings.Style != "verbatim" {
-		// Narrate's fixed small-model rewrite is costed conservatively as
-		// $0.001 per short reply; this is advisory, not provider billing.
-		need += 1000
-		calls++
-	}
 	if settings.Speech == "hexgrad/kokoro-82m" {
 		// $0.62/M characters = 0.62 micro-USD/character. Round up.
 		need += (int64(len([]rune(text)))*62 + 99) / 100
@@ -387,17 +397,6 @@ func (s *Service) Perform(ctx context.Context, plan contract.IOPlan) (contract.I
 		out.Text = response.Text
 	} else {
 		text := p.Text
-		if p.Session.Settings.Style != "verbatim" {
-			rewriter := narration.Rewriter{Client: client, Style: p.Session.Settings.Style, DisableRetries: true}
-			parts, e := rewriter.RewriteAll(ctx, []narration.Chunk{{Text: text, First: true, Last: true}}, nil)
-			if e != nil {
-				return failed(e)
-			}
-			if len(parts) != 1 || len([]rune(parts[0])) > 4000 {
-				return failed(errors.New("narration bounds"))
-			}
-			text = parts[0]
-		}
 		response, e := client.Speak(ctx, p.Session.Settings.Speech, p.Session.Settings.Voice, text)
 		if e != nil {
 			return failed(e)
@@ -445,13 +444,19 @@ func (s *Service) Finish(ctx context.Context, u contract.Unit, plan contract.IOP
 		out.Audio = ""
 		out.Text = ""
 	}
+	if plan.Invocation.Operation == "voice.speak.phrase" {
+		if text, e := s.phrase(u, sess, p.Request); e != nil || text != p.Text {
+			out.Audio = ""
+			out.Text = ""
+		}
+	}
 	// Recheck disclosure and credential versions before returning any audio/text.
 	if _, err = s.readReply(ctx, u, sess.Conversation, p.Request.Message); err != nil {
 		out.Audio = ""
 		out.Text = ""
 	}
 	ref, path := sess.Settings.Input, "/audio/transcriptions"
-	if plan.Invocation.Operation == "voice.speak" {
+	if plan.Invocation.Operation == "voice.speak" || plan.Invocation.Operation == "voice.speak.phrase" {
 		ref = sess.Settings.Output
 		path = "/audio/speech"
 	}

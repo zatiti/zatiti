@@ -3,6 +3,7 @@ package server
 import (
 	"crypto/tls"
 	"fmt"
+	"github.com/zatiti/zatiti/internal/contract"
 )
 
 // Config selects the transports New binds. SocketPath is mandatory: the
@@ -12,6 +13,7 @@ import (
 // require and verify a client certificate. MaxBodyBytes bounds every request
 // envelope read from either transport.
 type Config struct {
+	Streams       contract.ReplyStreams
 	SocketPath    string
 	RemoteAddress string
 	TLSConfig     *tls.Config

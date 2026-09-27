@@ -383,6 +383,16 @@ func (a *Adapter) Invoke(ctx context.Context, dispatch contract.Dispatch) (contr
 	if err != nil {
 		return contract.Observation{}, err
 	}
+	if a.deps.Streams != nil && s.doc != nil && s.act.Kind == kindModelStep && a.protocol.limits().StreamsReplyEvents {
+		if _, ok := a.deps.Streams.Route(s.doc.Ref.Digest); ok {
+			var body map[string]json.RawMessage
+			if json.Unmarshal(call.Body, &body) == nil {
+				body["stream"] = json.RawMessage("true")
+				call.Body, _ = json.Marshal(body)
+				call.Header.Set("Accept", "text/event-stream")
+			}
+		}
+	}
 	return a.invokeModelStep(ctx, callCtx, dispatch, s, call)
 }
 
@@ -665,23 +675,42 @@ func (a *Adapter) physical(ctx, callCtx context.Context, call protocolCall, s *s
 	po.status = resp.StatusCode
 	po.header = resp.Header
 
-	body, readErr := io.ReadAll(io.LimitReader(resp.Body, a.profile.MaxResponseBytes+1))
+	var body, wire []byte
+	var readErr error
+	if resp.StatusCode == 200 && strings.HasPrefix(resp.Header.Get("Content-Type"), "text/event-stream") && s.doc != nil && a.deps.Streams != nil {
+		// A stream is decoded to its terminal response even if the preview
+		// route expired meanwhile; previews are then simply not published.
+		var hub contract.ReplyStreams
+		route, ok := a.deps.Streams.Route(s.doc.Ref.Digest)
+		if ok {
+			hub = a.deps.Streams
+		}
+		body, wire, readErr = readReplyStream(resp.Body, a.profile.MaxResponseBytes, hub, route, s.request.AttemptID)
+	} else {
+		body, readErr = io.ReadAll(io.LimitReader(resp.Body, a.profile.MaxResponseBytes+1))
+		wire = body
+	}
 	po.finished = a.now()
 	po.readErr = readErr
 	if int64(len(body)) > a.profile.MaxResponseBytes {
 		body = body[:a.profile.MaxResponseBytes]
 		po.truncated = true
 	}
+	if int64(len(wire)) > a.profile.MaxResponseBytes {
+		wire = wire[:a.profile.MaxResponseBytes]
+		po.truncated = true
+	}
 	po.body = body
 
 	// Best-effort: a staging failure must never erase an observation of a
-	// call that may have been billed.
-	if len(body) > 0 {
+	// call that may have been billed. A stream cut before its terminal
+	// response has no body but still has wire evidence.
+	if len(wire) > 0 {
 		mediaType := resp.Header.Get("Content-Type")
 		if mediaType == "" || len(mediaType) > 256 {
 			mediaType = "application/octet-stream"
 		}
-		stagedBody, err := stageBytes(ctx, a.deps.Blobs, scrubSecretBytes(s.secret, body), mediaType, s.classification, "provider_response")
+		stagedBody, err := stageBytes(ctx, a.deps.Blobs, scrubSecretBytes(s.secret, wire), mediaType, s.classification, "provider_response")
 		if err != nil {
 			po.stageErr = err
 		} else {
