@@ -5,6 +5,6 @@
   "description": "Zatiti Chrome extension (MV3). Tests run with node:test; this package has zero npm dependencies.",
   "type": "module",
   "scripts": {
-    "test": "node --test test/"
+    "test": "node --test \"test/*.test.mjs\""
   }
 }
