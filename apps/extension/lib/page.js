@@ -514,11 +514,11 @@ export function createPageExecutor({ cdp, tabs, now = Date.now, adapterSource } 
       case "text": {
         const session = await new DebuggerSession(cdp, now).begin();
         try {
+          // resolveTarget already probes the element and verifies identity
+          // (including a ferro-target payload when present); the probe's
+          // truncated text IS the governed page text.
           const { probe } = await resolveTarget(session, action);
-          const text = await session.evaluate(
-            `(${PROBE_SOURCE})(${JSON.stringify(action.selector)})`,
-          );
-          return { text: text?.facts?.text ?? probe?.facts?.text ?? "" };
+          return { text: probe.facts?.text ?? "" };
         } finally {
           await session.end();
         }
