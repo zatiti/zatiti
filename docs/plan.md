@@ -276,7 +276,7 @@ Waves are the single source of truth for parallelism. At most 8 sessions per wav
 - [ ] T2.4a Integration-owner pin: github.com/coder/websocket (dispatched alone)  verifies: [UC-B01, UC-B17]  runs-on: integration-owner
 - [ ] T1.2a Ferro public page package with execution identity fields  verifies: [UC-B03, UC-B05, UC-B15]  runs-on: cloud
 - [ ] T2.1 ADRs (controller WebSocket transport, extension security and pairing, native adapter governed effects, shared design tokens) and the milestone record  verifies: [UC-B01, UC-B05, UC-B07, UC-B10, UC-B17, UC-B19]  runs-on: cloud
-- [ ] T8.2 Page command executor with hit-test and focus-verified trusted input  verifies: [UC-B03, UC-B05, UC-B06, UC-B15]  runs-on: cloud
+- [x] T8.2 Page command executor with hit-test and focus-verified trusted input  verifies: [UC-B03, UC-B05, UC-B06, UC-B15]  runs-on: cloud
 
 ### Wave 3: E0T mapping spec T0T.3, transport-neutral dispatch seam T2.2a (integration-owner, solo at the boundary), controller reply driver T0T.10, tool-gap contract tests T0T.7, adapter.js identity fields T1.2c (local-mac) (5 agents)
 - [ ] T0T.3 internal/contract: sealed decision and adapter-tool operation mapping helpers  verifies: [UC-B00a, UC-B00c]  runs-on: integration-owner
