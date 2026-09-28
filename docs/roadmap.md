@@ -3128,6 +3128,17 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   records the resulting 401 as a typed refusal, never success. Real-key
   streaming is Z-M3's.
 
+- 2026-09-28 -- browser extension plan written (docs/plan.md, split into
+  docs/plans/): chat with a governed Zatiti agent from any Chrome tab while
+  Zatiti interacts with the page under the existing effects/review model.
+  Contract revision 22, after the tool-gap epic E0T closes contract
+  revision 21 (no model tool call becomes a typed proposal today;
+  internal/adapters/responses/interpret.go:176-185). Controller-hosted
+  WebSocket transport (GET /v1/ws, three listeners, internal/wshub), native
+  browser adapter importing github.com/sirerun/ferro as a library, MV3
+  extension in apps/extension with shared design tokens. 66 tasks across
+  14 waves, 3 done. ADRs 003-007.
+
 ## Blocked
 
 - 2026-09-10 — internal/adapters/responses and internal/adapters/serenity:
