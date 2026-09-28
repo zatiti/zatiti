@@ -284,10 +284,13 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
 - 2026-09-28 — browser-extension plan wave 1-2 (ship gate passed: Proceed,
   revision 21 first, minimal ferro v0.2.0). Wave 1 SHIPPED: T8.1 (PR #81,
   merged a5213b6) — MV3 scaffold, pinned id, vendored ferro placeholders,
-  15 node tests, CI 9/9. Wave 2 in flight: T8.2 (page command executor)
-  claimed and dispatched on branch t8-2-page-executor. T0.1 + T0T.1
-  (coordination gates, kind: human) pending David; the rest of wave 2
-  (T0T.2, T2.4a, T1.2a, T2.1, T0T.9) waits on them.
+  15 node tests, CI 9/9. Wave 2: T8.2 (page command executor: CDP
+  hit-test click, focus-verified trusted key/fill, named-keys-only,
+  sensitive-field refusal, full href/form-action identity) DONE (PR #82)
+  — 69 node tests green across the package; also fixed T8.1's broken
+  npm-test script (glob form). T0.1 + T0T.1 (coordination gates,
+  kind: human) pending David; the rest of wave 2 (T0T.2, T2.4a, T1.2a,
+  T2.1, T0T.9) waits on them.
 - 2026-09-11 to 2026-09-14 -- wave 2 is fully landed: memory, artifacts,
   evidence, installation, cli, server, mcp, adapters/github and
   adapters/httpread, all 9 wave-2-tail packages plus everything landed
