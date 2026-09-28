@@ -280,6 +280,12 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   green post-merge; worktree removed.
 
 ## In progress
+
+- 2026-09-28 — browser-extension plan wave 1 (ship gate passed: Proceed,
+  revision 21 first, minimal ferro v0.2.0). T8.1 SHIPPED (PR #81, merged
+  a5213b6): MV3 scaffold, pinned id, vendored ferro placeholders, 15 node
+  tests, CI 9/9. T0.1 + T0T.1 (coordination gates, kind: human) pending
+  David; they block wave 2.
 - 2026-09-11 to 2026-09-14 -- wave 2 is fully landed: memory, artifacts,
   evidence, installation, cli, server, mcp, adapters/github and
   adapters/httpread, all 9 wave-2-tail packages plus everything landed

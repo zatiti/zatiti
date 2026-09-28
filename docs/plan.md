@@ -268,7 +268,7 @@ Waves are the single source of truth for parallelism. At most 8 sessions per wav
 - [x] T1.4 Tag ferro v0.1.0 (rename only)  verifies: [UC-B03, UC-B05]  runs-on: human
 - [ ] T0.1 Coordination gate: bridge ownership, revision N, reserved ids, lane agreements, root owners for the controller transport  verifies: [UC-B03, UC-B05, UC-B07, UC-B17]  runs-on: human
 - [ ] T0T.1 Coordination gate: revision 21 slot, lane agreements, gap-0 owner, defect-D placement  verifies: [UC-B00a, UC-B00b, UC-B00c, UC-B00d, UC-B00e]  runs-on: human
-- [ ] T8.1 Extension scaffold, pinned id, placeholder vendored ferro scripts  verifies: [UC-B01, UC-B03, UC-B10]  runs-on: cloud
+- [x] T8.1 Extension scaffold, pinned id, placeholder vendored ferro scripts  verifies: [UC-B01, UC-B03, UC-B10]  runs-on: cloud
 
 ### Wave 2: Contract revision 21 (T0T.2) and the dependency lock (T2.4a) dispatched solo at the wave boundary; ferro page package T1.2a, spec part A T2.1, extension scaffold T8.2, E0T relay-protocol types T0T.9 (6 agents)
 - [ ] T0T.2 Spec revision 21: ContextToolDefinition operation mapping, mapping and durable-reply rules, ADR  verifies: [UC-B00a, UC-B00b, UC-B00d]  runs-on: integration-owner
