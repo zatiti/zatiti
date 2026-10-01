@@ -132,7 +132,7 @@ func migrations() []contract.Migration {
 		Version: 3,
 		SQL:     schemaV3,
 		SHA256:  contract.Hash([]byte(schemaV3)),
-	}}
+	}, {Owner: ownerName, Version: 4, SQL: schemaV4, SHA256: contract.Hash([]byte(schemaV4))}}
 }
 
 // schemaV3 pins the exact secret-free adapter configuration resolved for a
@@ -140,3 +140,7 @@ func migrations() []contract.Migration {
 // never follow a later worker selection.
 const schemaV3 = `ALTER TABLE effects_operations ADD COLUMN adapter_profile_json TEXT NOT NULL DEFAULT '';
 ALTER TABLE effects_operations ADD COLUMN profile_connection_version INTEGER NOT NULL DEFAULT 0;`
+
+// Legacy rows have no recoverable authority and remain inspectable, but may
+// not be admitted by inventing an authorizing principal.
+const schemaV4 = `ALTER TABLE effects_operations ADD COLUMN subject_json TEXT NOT NULL DEFAULT '';`

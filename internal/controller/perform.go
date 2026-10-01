@@ -39,6 +39,32 @@ func (c *Controller) perform(workCtx context.Context, sess *session, e entry, d 
 	c.settleEffect(workCtx, sess, e, false)
 }
 
+// dispatchParameters returns the adapter parameters of a claimed dispatch.
+// Effects stores and replays the whole governed Action; every adapter's own
+// strict schema covers only that action's parameters, so the envelope is
+// unwrapped here for every adapter, not only MCP. An action without a
+// parameters field is not a governed envelope: MCP refuses it outright (raw
+// parameters never bypass the governed envelope), while the other adapters
+// receive it unchanged exactly as they did before governed actions existed.
+func dispatchParameters(d contract.Dispatch) (json.RawMessage, bool) {
+	var envelope struct {
+		Parameters json.RawMessage `json:"parameters"`
+	}
+	if err := json.Unmarshal(d.Action, &envelope); err != nil {
+		if d.Adapter == "mcp" {
+			return nil, false
+		}
+		return d.Action, true
+	}
+	if len(envelope.Parameters) == 0 {
+		if d.Adapter == "mcp" {
+			return nil, false
+		}
+		return d.Action, true
+	}
+	return envelope.Parameters, true
+}
+
 // observe invokes the adapter once and returns a schema-valid observation.
 // After a claim, an error or a malformed return cannot prove the provider
 // did nothing, so both are kept as unknown; the controller never reports a
@@ -49,13 +75,11 @@ func (c *Controller) observe(ctx context.Context, adapter contract.Adapter, d co
 			obs = c.unestablished(bound, "adapter_panic", "the adapter panicked during the call")
 		}
 	}()
-	if d.Adapter == "mcp" {
-		var action wireAction
-		if err := json.Unmarshal(d.Action, &action); err != nil || len(action.Parameters) == 0 {
-			return c.unestablished(bound, "invalid_mcp_dispatch", "governed MCP dispatch has no pinned parameters")
-		}
-		d.Action = action.Parameters
+	params, ok := dispatchParameters(d)
+	if !ok {
+		return c.unestablished(bound, "invalid_dispatch", "governed dispatch has no pinned parameters")
 	}
+	d.Action = params
 	got, err := adapter.Invoke(ctx, d)
 	if err != nil {
 		code := "adapter_error"

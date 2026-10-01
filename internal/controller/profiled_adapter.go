@@ -66,6 +66,31 @@ func (c *Controller) adapterForDispatch(d contract.Dispatch) (contract.Adapter, 
 	return adapter, nil
 }
 
+// builtinToolAdapters maps the adapter identifier each seeded built-in tool
+// contract names (internal/connections/migrations.go) to the name its
+// adapter registers under (contract.Adapter.Name). Without it a dispatch of
+// a built-in tool never finds its adapter: the contracts name
+// "zatiti/model-responses/v1" while the Responses adapter registers as
+// "responses".
+var builtinToolAdapters = map[string]string{
+	"zatiti/model-responses/v1":      "responses",
+	"zatiti/provider-rest-read/v1":   "github",
+	"zatiti/provider-rest-mutate/v1": "github",
+	"zatiti/public-http-read/v1":     "httpread",
+	"zatiti/memory-read/v1":          "serenity",
+}
+
+// registeredAdapterName resolves a tool contract's adapter identifier to a
+// registered adapter name. Unknown identifiers pass through unchanged, so a
+// contract naming a registered adapter directly (for example "mcp") keeps
+// working and an unregistered one still fails closed.
+func registeredAdapterName(id string) string {
+	if name, ok := builtinToolAdapters[id]; ok {
+		return name
+	}
+	return id
+}
+
 // responsesProfileConnection reads only the minimal untrusted profile
 // fields needed to reject an incomplete pinned connection before dispatch.
 // The profile factory performs the full strict schema and evidence check;

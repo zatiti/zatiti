@@ -1,6 +1,6 @@
 # Implementation assignment: `internal/reviews`
 
-Generated specification revision 20; source digest `12bac05c16b2d84709878d5182f795a7304757c14acf99d2277eedf989049d3d`. This file is committed implementation context. Do not independently edit it. Everything required from the product specification and adjacent interfaces is embedded below; no RFC copy is required.
+Generated specification revision 24; source digest `7ecbe154c42881da4db25ce5eeddacf501c2e4e8ff59dcc411260f7b868d7cb5`. This file is committed implementation context. Do not independently edit it. Everything required from the product specification and adjacent interfaces is embedded below; no RFC copy is required.
 
 ## Mission and scope
 
@@ -30,7 +30,7 @@ These briefs are embedded so you need not read a sibling prompt to discover its 
 
 ## Shared foundation contract
 
-# Frozen implementation contract, revision 20
+# Frozen implementation contract, revision 24
 
 Revision 19 adds human conversational voice through the `voice` owner. The explicitly registered `voice.transcribe` and `voice.speak` operations use the phased IO boundary for bounded interactive external speech, with durable intent and separate accounting admission before leaving the transaction. They are not worker execution profiles or autonomous tool effects. Every session requires explicit disclosure consent and acknowledgment that OpenRouter speech billing is advisory (transcription routing cannot enforce a provider price cap). Dedicated voice-only connections exclude `/responses`; raw keys remain in SecretStore. The phase's accepted command is never automatically retried after a crash or ambiguous response. Unknown reservations remain visible. Narrate owns craft and provider transport, while Zatiti owns current-authority checks, accounting, conversation identity and session fencing. Desktop only captures and plays audio and uses catalogued operations; no direct model calls or sidecar. Native Mac permission, echo and latency testing remains qualification work.
 
@@ -510,6 +510,39 @@ The integration owner adds contract.ReplyStreams, ReplyRoute and ReplyPreview. D
 Server exposes POST /v1/replies/stream using the standard request envelope with scope and conversation_id, no submission key. It authenticates each snapshot and authorizes conversation.message.list through Application before disclosure. SSE data frames contain bounded current ReplyPreview arrays ordered by each preview's sequence, a number assigned at first publication that never changes; a full hub evicts its oldest routes and oldest finished previews rather than refusing new ones; coalescing and reconnect cannot duplicate commands. Previews expire and are lost on restart; durable history remains authoritative. The route is requester-only; other conversation participants receive durable history through existing operations.
 
 Voice owns _voice.craft (execution-only) and voice.speak.phrase. Execution captures Narrate canonical instructions directly in model context; no post-generation rewrite call is made. Phrase text is resolved from an authorized immutable prefix using Narrate Chunker, never arbitrary client text. Phrases are append-only: once published, phrase index i never changes text. Before a reply is generated only text through the last sentence or paragraph boundary (or a word break past the phrase bound) is released; each released span is chunked on its own, never re-chunked with later text. An interrupted preview keeps its released phrases, adds no tail, and cannot be spoken. A second voice.speak.phrase command for the same session, stream and index is refused as a conflict before accounting admission; replay of the same submission key is unaffected. Provider keys, accounting, session/credential rechecks and audio nonretention remain unchanged.
+
+
+
+## Revision 21 — sealed decision tool mapping and conversation reply delivery
+
+A model adapter may now produce a typed `ModelToolProposal` for exactly one class of tool call: a call of a sealed local decision tool (`reply`, `clarify`, `report_outputs`, `cycle_decision`) that the dispatched context declares under its deterministic identity, `contract.LocalDecisionToolID(name)` (the UUID-shaped prefix of `sha256("zatiti.local-decision-tool/<name>")`) at version 1. Its `operation_id` is the sealed, non-provider identifier `contract.LocalDecisionOperationID(name)` (`zatiti.local-decision/<name>`) and `operation_version` is 1; `id` is the provider call id and `source_context` the dispatched context artifact. This is a local decision identity, not a provider or catalog operation mapping: execution still authorizes by the tool identity against its own sealed set, validates the input against the sealed schema and checks `source_context`. The mapping is all-or-nothing per response: any call that is not a well-formed sealed decision call (undeclared tool, product tool, forged identity, missing or duplicate call id, arguments that are not a bounded JSON object) leaves `tool_proposals` empty and is flagged `tool_proposal_mapping_unspecified`, so a reply is never acted on while a sibling tool call is silently dropped.
+
+A message-triggered `WorkerTurn` is bound at admission, in the same transaction as `_messaging.processed`, to the triggering message's conversation. A `reply` in a conversation-bound turn is not recorded inline: execution stages the exact `conversation.message.send` (conversation, a message id derived from the proposal key `(turn, step, proposal id)`, the reply text, no attachments or tasks, the conversation's own scope) and leaves the proposal `prepared`. The controller performs it through `contract.WorkerOperator` under the worker's own actor with the deterministic `worker-turn/<turn>/<proposal>` submission key, never under the controller's identity, and reports it through `_execution.proposal.record`, which records the reply and completes the turn. Only then is the streamed preview committed. A refused or interrupted delivery leaves the proposal prepared and the turn `proposal_pending` with a visible controller obligation; nothing is fabricated and no further model step is dispatched. `_execution.work.pending` lists each such undelivered staged reply as a `delivery` work item carrying its `proposal_id` and `step_index`, so the controller retries the same idempotent delivery on later ticks, and `_execution.fence` leaves such a turn `proposal_pending` instead of parking it for recovery, because resuming it would dispatch a second model step for an answer already decided. One model step stages at most one conversation reply; a further `reply` call in the same response is recorded as a `malformed_proposal` refusal. A reply in a turn with no conversation is recorded inline as before.
+
+
+## Revision 22 — worker identity principals
+
+Revision 22 registers configured workers as identity principals so `contract.WorkerOperator` can resolve a worker's own actor. Identity's `_identity.activate` now handles worker changes routed with a configuration candidate: create or update registers or moves the worker principal, and archive or delete revokes it with its grants. The new internal `_identity.worker.sync` (caller: configuration) performs the same idempotent registration for the bootstrap chief and for backfill; `_configuration.worker.principals.sync` (caller: controller) passes every configured worker to it once per controller session so existing installations gain principals. A worker principal's id equals its worker id. It records the worker's organization and holds exactly one standing, installation-scoped, non-delegable allow grant (organization-scoped grants would not cover installation-scoped conversations such as the owner's chat with the chief) whose capabilities are the frozen worker-visible local operation allowlist plus `messaging.disclosure.deliver` (which every message send asks policy for), now declared once as `contract.WorkerVisibleOperations` and used by both the application executor and identity. No caller supplies or widens that grant, sync never re-grants an existing principal or reactivates a revoked one, and the owner can still narrow or revoke it through ordinary identity operations, and policy, task scope and tool bindings continue to gate every call.
+
+
+## Revision 23: persisted effect authorization subjects
+
+Effects persists the authenticated preparing Actor alongside each immutable operation. Controller admission and claim authenticate the controller first, then Application resolves the operation's persisted subject through the Effects owner's narrow `contract.EffectSubjectResolver` capability. Resolution, current principal authority checks, policy, review, reservation and claim share one transaction. Nested calls use that logical subject while preserving the original transaction and generation. Clients and controller invocation inputs cannot choose a replacement principal. Legacy operations without a subject remain inspectable and fail admission with prerequisite_missing; no principal is invented on migration or restore.
+
+Execution implements the same owner capability for context preparation, context commit, turn observations and worker effect preparation. It resolves the exact persisted turn or context plan, installation, generation and step. Callback routes identify the turn, while source_id identifies an individual effect; these IDs need not be identical. Application resolves worker authority before Effects accepts that route. Internal connection resolution permits inherited ancestor resources while continuing to refuse sibling scopes. Responses model output is extracted from its schema-validated physical evidence and bound to the exact dispatched operation and published physical request artifact; that artifact is distinct from the turn's input context. Prepare-session callbacks support chief chat without fabricating a task or Attempt. Unknown session outcomes never trigger another session request.
+
+```go
+type EffectSubjectResolver interface {
+    ResolveEffectSubject(context.Context, Unit, Invocation) (Actor, Scope, error)
+}
+```
+
+Registry exposes `EffectSubjectFor(owner string) (contract.EffectSubjectResolver, bool)` only for the assembled owner's implementation. Application requires this capability for the designated boundaries and fails closed when absent. It never gives domains a general actor-substitution API.
+
+
+## Revision 24: bounded installation-wide voice settlement
+
+The controller calls `_voice.sweep` once per tick with a bounded batch limit. The voice owner settles stale pending or unknown calls as advisory estimates of their full reservation, releasing their accounting concurrency slots even when the initiating actor never returns. The sweep contacts no provider and preserves the existing per-actor settlement semantics.
 
 ## Owned product requirements
 

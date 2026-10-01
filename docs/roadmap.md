@@ -279,7 +279,14 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   in-code); no new contract questions. Module-wide 27-package verify
   green post-merge; worktree removed.
 
-## In progress
+## In flight
+
+- 2026-09-28 — browser-extension plan execution (ship gate passed: Proceed,
+  revision 21 first, minimal ferro v0.2.0). Session drained on the two
+  kind:human coordination gates (T0.1, T0T.1) — David decides how they get
+  done. Shipped this session: T8.1 (PR #81, a5213b6) extension scaffold;
+  T8.2 (PR #82, 9c9ffbd) page command executor. Full state and resume
+  instructions: docs/handover.md (branch `handover`, commit 43cb053).
 - 2026-09-11 to 2026-09-14 -- wave 2 is fully landed: memory, artifacts,
   evidence, installation, cli, server, mcp, adapters/github and
   adapters/httpread, all 9 wave-2-tail packages plus everything landed
@@ -3127,6 +3134,17 @@ tests, race under lease, mutation red→green, rebase, ff-merge).
   acceptance runs a placeholder Bearer token against `/api/mcp` and
   records the resulting 401 as a typed refusal, never success. Real-key
   streaming is Z-M3's.
+
+- 2026-09-28 -- browser extension plan written (docs/plan.md, split into
+  docs/plans/): chat with a governed Zatiti agent from any Chrome tab while
+  Zatiti interacts with the page under the existing effects/review model.
+  Contract revision 22, after the tool-gap epic E0T closes contract
+  revision 21 (no model tool call becomes a typed proposal today;
+  internal/adapters/responses/interpret.go:176-185). Controller-hosted
+  WebSocket transport (GET /v1/ws, three listeners, internal/wshub), native
+  browser adapter importing github.com/sirerun/ferro as a library, MV3
+  extension in apps/extension with shared design tokens. 66 tasks across
+  14 waves, 3 done. ADRs 003-007.
 
 ## Blocked
 

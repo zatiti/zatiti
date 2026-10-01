@@ -327,10 +327,13 @@ profile.
    `service_tier: default`; any deviation reported by the provider makes
    the amount `unknown`. Revision-3 item: `cached_input_rate`,
    `cache_write_rate`.
-8. **Tool proposals** (`interpret.go`, the `tool_proposal_mapping_unspecified`
-   flag): unchanged from the base adapter; `function_call` items are
-   decoded but no typed `ModelToolProposal` can be built without a
-   tool-to-operation mapping.
+8. **Tool proposals** (`interpret.go`, `toolProposals`): a `function_call`
+   naming a sealed local decision tool declared in the context under its
+   deterministic identity becomes a typed `ModelToolProposal` with the
+   sealed operation mapping (contract revision 21). A response containing
+   any other call maps nothing and is flagged
+   `tool_proposal_mapping_unspecified`; the raw calls stay in the staged
+   provider response.
 9. **`max_output_tokens` below 16** is refused (`capability_unsupported`)
    because the API cannot enforce a smaller ceiling.
 

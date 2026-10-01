@@ -552,8 +552,8 @@ func TestRefusalAndContinuationAreCarried(t *testing.T) {
 }
 
 // A model tool proposal is an observation. The adapter never executes one,
-// and -- because the frozen contract gives it no tool-to-operation mapping
-// -- never fabricates a typed one either.
+// and -- because the contract maps only the sealed local decision tools
+// (revision 21) -- never fabricates a typed one for a product tool.
 func TestToolCallsAreNeverExecutedNorFabricated(t *testing.T) {
 	t.Parallel()
 	body := `{"ref":"r3","state":"completed","finish":"tool_calls","calls":[{"id":"c1","name":"fetch_source","args":{"url":"https://sources.example.test/a"}}],"tokens":{"in":5,"out":5}}`

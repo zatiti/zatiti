@@ -1,0 +1,26 @@
+{
+  "manifest_version": 3,
+  "name": "Zatiti",
+  "version": "0.1.0",
+  "description": "Chat with a governed Zatiti agent from any Chrome tab.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA8n6VWrJiTzFTbF8YVZLgYJ1wuZn4KK9+kkQ9TWN0X2FL43wJy/C3omKq/2e5jv2jyDQB19IZi6EDXv/eBHKK3wIogoDTMYw7PiuBx1TxzzYmKg3rWVfu6aujoqHw4IX/098Hv/2xjhoKL94bVV6ccx1ckOpbMy/+wYBhdWlD0xazyunDyHnYWt3H5owID/jHBh0Qrauifjr0uBI3t0Y7pwX8jRmtXdhp+qXfdRyKfJHaGC1CY/kiy2JFd9mIvfYraVZNupusVryevcCjPNn7tMZ49idp4+Fltu0kfaOwyeJrkG9fVkuX8MmJtiPSMJHgc1DWIhIIBK5eNjX7e8emsQIDAQAB",
+  "minimum_chrome_version": "116",
+  "permissions": [
+    "sidePanel",
+    "storage",
+    "alarms",
+    "debugger",
+    "scripting",
+    "tabs"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "side_panel": {
+    "default_path": "panel/sidepanel.html"
+  },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'; connect-src ws://127.0.0.1:*"
+  }
+}

@@ -309,6 +309,10 @@ func (c *Controller) claim(ctx, workCtx context.Context, sess *session, e entry)
 		c.unsent(ctx, sess, e, internalFault("claimed dispatch does not match attempt %s of generation %d", e.AttemptID, sess.generation))
 		return false
 	}
+	// The adapter validates dispatch.Adapter against its own name, so the
+	// dispatch it receives carries the registered name, not the tool
+	// contract's built-in identifier.
+	d.Adapter = registeredAdapterName(d.Adapter)
 	adapter, err := c.adapterForDispatch(d)
 	if err != nil {
 		c.unsent(ctx, sess, e, faultOf(err))

@@ -523,6 +523,10 @@ type fxToolProposal struct {
 	Kind   string `json:"kind"`
 	Text   string `json:"text,omitempty"`
 	Digest string `json:"result_digest,omitempty"`
+	// Operation/Input stage a conversation reply's delivery, as execution
+	// does for a conversation-bound turn: the reply stays prepared.
+	Operation string          `json:"operation,omitempty"`
+	Input     json.RawMessage `json:"input,omitempty"`
 }
 
 // interpretTurnObservation is the fake's turn-aware branch of
@@ -552,9 +556,13 @@ func (f *fx) interpretTurnObservation(ctx context.Context, u contract.Unit, turn
 	}
 	stepIndex := t.stepsUsed
 	for _, tp := range body.ToolProposals {
-		normalized, _ := json.Marshal(map[string]any{"kind": tp.Kind, "text": tp.Text})
+		np := map[string]any{"kind": tp.Kind, "text": tp.Text}
+		if tp.Operation != "" {
+			np["operation"], np["operation_version"], np["input"] = tp.Operation, 1, tp.Input
+		}
+		normalized, _ := json.Marshal(np)
 		state := "recorded"
-		if tp.Kind == "local_operation" || tp.Kind == "external_tool" {
+		if tp.Kind == "local_operation" || tp.Kind == "external_tool" || tp.Operation != "" {
 			state = "prepared"
 		}
 		if _, err := u.ExecContext(ctx, `INSERT INTO execution_proposals (turn_id, step_index, proposal_id, normalized_proposal, state, created_at)
@@ -564,6 +572,9 @@ func (f *fx) interpretTurnObservation(ctx context.Context, u contract.Unit, turn
 		switch tp.Kind {
 		case "reply":
 			t.state = "completed"
+			if state == "prepared" {
+				t.state = "proposal_pending"
+			}
 		case "report_outputs":
 			t.state = "reporting"
 			if in.AttemptID != "" {

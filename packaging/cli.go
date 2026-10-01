@@ -43,6 +43,14 @@ Signature:
   sign              sign a manifest with an Ed25519 key
   verify            verify a manifest signature, and optionally its tree
 
+Mac release production (outputs are local files; nothing is published):
+  mac-release       verify four signed components and sign the release descriptor
+  mac-pkg           build one architecture's unsigned installer package
+  mac-delivery      measure the six final assets and sign the delivery index
+  apple             Apple codesign, productsign, notarize or staple; "status"
+                    reports configuration, and every step fails closed with
+                    prerequisite_missing when its ZATITI_APPLE_* setting is absent
+
 Installation lifecycle (controller or desktop, "--apply" to act, else a dry run):
   install           plan (and, with --apply, install or upgrade) a release
   uninstall         plan (and, with --apply, uninstall) a release
@@ -111,6 +119,10 @@ var cliCommands = map[string]func([]string, io.Writer) error{
 	"audit":           cliAudit,
 	"inspect":         cliInspect,
 	"master-key":      cliMasterKey,
+	"mac-release":     cliMacRelease,
+	"mac-pkg":         cliMacPkg,
+	"mac-delivery":    cliMacDelivery,
+	"apple":           cliApple,
 }
 
 // cliExitCode maps a driver error to a process exit code. A nil error is 0.

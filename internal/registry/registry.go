@@ -23,7 +23,8 @@ type Registry struct {
 
 	// localIO maps each registered local IO operation to the owning module's
 	// own contract.LocalIO implementation.
-	localIO map[string]contract.LocalIO
+	localIO          map[string]contract.LocalIO
+	subjectResolvers map[string]contract.EffectSubjectResolver
 
 	publicList []*entry // public operations, sorted by ID
 
@@ -91,11 +92,12 @@ func New(modules []contract.Module) (*Registry, error) {
 		return nil, fmt.Errorf("registry: embedded catalog: %w", err)
 	}
 	r := &Registry{
-		catalog:    cat,
-		entries:    make(map[versionKey]*entry, len(cat.document.Operations)),
-		registered: make(map[string]bool, len(cat.document.Operations)),
-		current:    make(map[string]int64, len(cat.document.Operations)),
-		localIO:    make(map[string]contract.LocalIO, len(localIOOperations)),
+		catalog:          cat,
+		entries:          make(map[versionKey]*entry, len(cat.document.Operations)),
+		registered:       make(map[string]bool, len(cat.document.Operations)),
+		current:          make(map[string]int64, len(cat.document.Operations)),
+		localIO:          make(map[string]contract.LocalIO, len(localIOOperations)),
+		subjectResolvers: make(map[string]contract.EffectSubjectResolver),
 	}
 
 	// Registry-owned capabilities first so module names cannot shadow them.
@@ -116,6 +118,9 @@ func New(modules []contract.Module) (*Registry, error) {
 			return nil, fmt.Errorf("registry: module %q is assembled more than once", name)
 		}
 		seen[name] = true
+		if resolver, ok := module.(contract.EffectSubjectResolver); ok {
+			r.subjectResolvers[name] = resolver
+		}
 		local, _ := module.(contract.LocalIO)
 		descriptors := module.Descriptors()
 		for i := range descriptors {
@@ -390,4 +395,10 @@ func wrapHandler(d contract.Descriptor, mergedInput json.RawMessage, fn contract
 // fault builds a contract.Fault error with a formatted message.
 func fault(code, format string, args ...any) *contract.Fault {
 	return &contract.Fault{Code: code, Message: fmt.Sprintf(format, args...)}
+}
+
+// EffectSubjectFor exposes only the owner-implemented subject resolver.
+func (r *Registry) EffectSubjectFor(owner string) (contract.EffectSubjectResolver, bool) {
+	resolver, ok := r.subjectResolvers[owner]
+	return resolver, ok
 }

@@ -38,6 +38,10 @@ var opMetas = []opMeta{
 		callers: []string{"configuration", "application"}},
 	{id: "_configuration.bootstrap", visibility: "internal", mode: "mutation", submission: false,
 		callers: []string{"installation"}},
+	// Revision 21: backfill worker principals for installations created
+	// before identity registered them; called once per controller session.
+	{id: "_configuration.worker.principals.sync", visibility: "internal", mode: "mutation", submission: false,
+		callers: []string{"controller"}},
 	// Revision 3: the export/import durable job ledger seam (P00-008). Prepare
 	// persists the export plan through _execution.job.create before any bytes
 	// stage; record publishes the job/artifact once bytes are staged outside
@@ -256,6 +260,7 @@ type handlerFunc func(ctx context.Context, s *Service, unit contract.Unit, inv c
 var handlers = map[string]handlerFunc{
 	"_configuration.activate":                                handleActivate,
 	"_configuration.bootstrap":                               handleBootstrap,
+	"_configuration.worker.principals.sync":                  handleWorkerPrincipalsSync,
 	"_configuration.export.prepare":                          handleExportPrepare,
 	"_configuration.export.record":                           handleExportRecord,
 	"_configuration.execution_profile.resolve":               handleResolveExecutionProfile,

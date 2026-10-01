@@ -3,6 +3,7 @@ package connections
 import (
 	"context"
 	"encoding/json"
+	"time"
 
 	"github.com/zatiti/zatiti/internal/contract"
 )
@@ -180,27 +181,34 @@ func handleValidatePublic(ctx context.Context, s *Service, unit contract.Unit, i
 		}
 		return s.completed(jobOut{Resource: job})
 	}
-	probeInput, err := marshalData(struct {
-		Scope           wireScope       `json:"scope"`
-		ConnectionID    contract.ID     `json:"connection_id"`
-		ExpectedVersion int64           `json:"expected_version"`
-		Tool            wireRef         `json:"tool"`
-		Action          json.RawMessage `json:"action"`
-	}{Scope: in.Scope, ConnectionID: in.ID, ExpectedVersion: in.ExpectedVersion,
-		Tool: wireRef{ID: tool.ID, Version: tool.Version}, Action: action})
-	if err != nil {
-		return contract.Payload{}, err
+	destination, derr := probeDestination(row, tool)
+	if derr != nil {
+		return contract.Payload{}, derr
 	}
-	job, err := s.createJob(ctx, unit, "connection.validate", probeInput)
+	job, err := s.createGovernedProbe(ctx, unit, row, tool, "validate", action, destination, tool.CostBound,
+		time.Duration(tool.TimeoutSeconds)*time.Second)
 	if err != nil {
-		return contract.Payload{}, err
-	}
-	if err := s.recordPendingProbe(ctx, unit, pendingProbeRow{
-		ConnectionID: row.ID, JobID: job.ID, JobVersion: job.Version, Kind: "validate",
-	}, s.clock.Now()); err != nil {
 		return contract.Payload{}, err
 	}
 	return s.completed(jobOut{Resource: job})
+}
+
+// probeDestination picks the one destination a built-in validation probe is
+// sent to: the first destination the connection binds that the tool contract
+// also permits (a tool with no destinations inherits the connection's), else
+// the connection's first destination. _connections.resolve rechecks both
+// containments at dispatch and refuses a destination the tool does not
+// permit, so the fallback never widens what can be sent.
+func probeDestination(row connectionRow, tool contractRow) (string, *contract.Fault) {
+	for _, d := range row.Destinations {
+		if len(tool.Destinations) == 0 || contains(tool.Destinations, d) {
+			return d, nil
+		}
+	}
+	if len(row.Destinations) > 0 {
+		return row.Destinations[0], nil
+	}
+	return "", prerequisiteMissing("connection %s binds no destination to validate against", row.ID)
 }
 
 // refuseInactive blocks new external work on archived or revoked

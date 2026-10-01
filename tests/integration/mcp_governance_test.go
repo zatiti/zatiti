@@ -244,17 +244,31 @@ func exerciseMCPStaleCatalog(t *testing.T, f *fixture, conn contract.ID, version
 // recheck at admission, through the normal owner-reviewed grant lifecycle.
 func (f *fixture) grantMCPController(t *testing.T, capability string) {
 	t.Helper()
-	input := map[string]any{"scope": f.scope(), "definition": map[string]any{"principal_id": f.controllerIdentity().PrincipalID, "scope": f.scope(), "capabilities": []string{capability}, "destinations": []string{governedMCPEndpoint}, "denied": false}}
-	_, err := f.invoke(f.owner, "grant.create", "mcp-grant-stage-"+capability, input)
+	f.grantController(t, "mcp", capability, governedMCPEndpoint)
+}
+
+// grantController grants the trusted controller one capability for one
+// destination through the owner-reviewed grant lifecycle.
+func (f *fixture) grantController(t testing.TB, key, capability, destination string) {
+	t.Helper()
+	input := map[string]any{"scope": f.scope(), "definition": map[string]any{"principal_id": f.controllerIdentity().PrincipalID, "scope": f.scope(), "capabilities": []string{capability}, "destinations": []string{destination}, "denied": false}}
+	_, err := f.invoke(f.owner, "grant.create", key+"-grant-stage-"+capability, input)
 	if err == nil {
 		return
 	}
 	digest := requiredDigest(t, err)
-	f.approve(f.findReview(digest), "mcp-grant-review-"+capability)
-	f.must(f.owner, "grant.create", "mcp-grant-apply-"+capability, input)
+	f.approve(f.findReview(digest), key+"-grant-review-"+capability)
+	f.must(f.owner, "grant.create", key+"-grant-apply-"+capability, input)
 }
 
 func (f *fixture) configureMCPBudget(t *testing.T) {
+	t.Helper()
+	f.configureBudget(t, "mcp")
+}
+
+// configureBudget activates an installation budget through the reviewed
+// configuration lifecycle.
+func (f *fixture) configureBudget(t testing.TB, key string) {
 	t.Helper()
 	// Read the actual numeric head; Revision.version is the resource version,
 	// not the configuration sequence required by draft.create.
@@ -265,19 +279,19 @@ func (f *fixture) configureMCPBudget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	created := f.must(f.owner, "configuration.draft.create", "mcp-budget-draft", map[string]any{"scope": f.scope(), "base_revision": head})
+	created := f.must(f.owner, "configuration.draft.create", key+"-budget-draft", map[string]any{"scope": f.scope(), "base_revision": head})
 	var body struct {
 		Resource draftRef `json:"resource"`
 	}
 	decode(t, created.Data, &body)
 	limits := map[string]any{"currency": "USD", "spend_micro_units": 10000, "concurrency": 4, "model_steps": 10, "child_count": 10, "delegation_depth": 5, "attempt_seconds": 1800, "root_deadline": "2027-01-01T00:00:00Z"}
-	updated := f.must(f.owner, "configuration.draft.update", "mcp-budget-change", map[string]any{"scope": f.scope(), "id": body.Resource.ID, "expected_version": body.Resource.Version, "changes": []any{map[string]any{"kind": "budget", "action": "create", "id": f.installationID, "expected_version": 0, "definition": limits}}})
+	updated := f.must(f.owner, "configuration.draft.update", key+"-budget-change", map[string]any{"scope": f.scope(), "id": body.Resource.ID, "expected_version": body.Resource.Version, "changes": []any{map[string]any{"kind": "budget", "action": "create", "id": f.installationID, "expected_version": 0, "definition": limits}}})
 	decode(t, updated.Data, &body)
-	plan := f.plan("mcp-budget-plan", body.Resource)
-	_, err = f.apply("mcp-budget-apply-1", plan)
+	plan := f.plan(key+"-budget-plan", body.Resource)
+	_, err = f.apply(key+"-budget-apply-1", plan)
 	digest := requiredDigest(t, err)
-	f.approve(f.findReview(digest), "mcp-budget-review")
-	if _, err = f.apply("mcp-budget-apply-2", plan); err != nil {
+	f.approve(f.findReview(digest), key+"-budget-review")
+	if _, err = f.apply(key+"-budget-apply-2", plan); err != nil {
 		t.Fatal(err)
 	}
 }

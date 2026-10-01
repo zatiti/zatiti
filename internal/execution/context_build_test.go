@@ -196,8 +196,8 @@ func TestContextCommitProducesSchemaValidOrderedContextAndModelStepAction(t *tes
 			}
 		}
 	}
-	if !foundModelTool {
-		t.Fatalf("context tools %+v do not carry the resolved model-dispatch tool %s", doc.Tools, toolID)
+	if foundModelTool {
+		t.Fatalf("context tools offer the model dispatcher %s as a decision tool", toolID)
 	}
 	localNames := map[string]bool{}
 	for _, tool := range doc.Tools {

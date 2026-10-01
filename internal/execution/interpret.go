@@ -64,9 +64,10 @@ type wireModelToolProposal struct {
 type normalizedProposal struct {
 	Kind string `json:"kind"` // reply | clarify | report_outputs | cycle_decision | local_operation | external_tool | refused
 
-	Text     string                  `json:"text,omitempty"`     // reply
-	Question string                  `json:"question,omitempty"` // clarify
-	Bindings []reportBindingProposal `json:"bindings,omitempty"` // report_outputs
+	Text      string                  `json:"text,omitempty"`       // reply
+	MessageID contract.ID             `json:"message_id,omitempty"` // reply delivered into the turn's conversation
+	Question  string                  `json:"question,omitempty"`   // clarify
+	Bindings  []reportBindingProposal `json:"bindings,omitempty"`   // report_outputs
 
 	Decision string `json:"decision,omitempty"`  // cycle_decision
 	Reason   string `json:"reason,omitempty"`    // cycle_decision / refused explanation
@@ -104,11 +105,8 @@ const (
 // tool.id is matched against the identical, independently recomputed set --
 // never trusted merely because the model asserts a name.
 func localDecisionToolID(id contract.ID) string {
-	for _, name := range []string{
-		contract.LocalDecisionToolReply, contract.LocalDecisionToolClarify,
-		contract.LocalDecisionToolReportOutputs, contract.LocalDecisionToolCycleDecision,
-	} {
-		if uuidFromDigest(sha256Hex([]byte("zatiti.local-decision-tool/"+name))) == id {
+	for _, name := range contract.LocalDecisionToolNames() {
+		if contract.LocalDecisionToolID(name) == id {
 			return name
 		}
 	}
@@ -134,37 +132,9 @@ func (s *Service) interpretTurnObservation(ctx context.Context, unit contract.Un
 			"observation disposition %q carries no model output to interpret", in.Observation.Disposition)
 	}
 
-	schema, err := modelOutputSchema()
+	output, err := decodeTurnModelOutput(in.Observation.Evidence, in.OperationID, turn)
 	if err != nil {
-		return contract.Outcome[attemptBody]{}, fmt.Errorf("execution: load model output schema: %w", err)
-	}
-	if err := contract.ValidateSchema(schema, in.Observation.Evidence); err != nil {
-		return contract.Outcome[attemptBody]{}, invalidInput(
-			"malformed model output: %v", err)
-	}
-	var output wireModelOutput
-	if err := contract.DecodeStrict(in.Observation.Evidence, &output); err != nil {
-		return contract.Outcome[attemptBody]{}, invalidInput("malformed model output: %v", err)
-	}
-	if output.Schema != "zatiti.model-output/v1" {
-		return contract.Outcome[attemptBody]{}, invalidInput(
-			"model output schema %q is not the accepted zatiti.model-output/v1", output.Schema)
-	}
-
-	// The request_context binds this response to the exact context this
-	// turn actually dispatched -- never to whatever the model claims. A
-	// mismatch (stale, replayed against a superseded context, or simply
-	// wrong) is a malformed/untrustworthy delivery, refused as a whole
-	// rather than partially trusted.
-	if turn.ContextArtifact == nil {
-		return contract.Outcome[attemptBody]{}, conflict(
-			"turn %s has no committed context to interpret a response against", turn.ID)
-	}
-	if output.RequestContext.Kind != "artifact" || output.RequestContext.Artifact == nil ||
-		output.RequestContext.Artifact.ID != turn.ContextArtifact.ID ||
-		output.RequestContext.Artifact.Digest != turn.ContextArtifact.Digest {
-		return contract.Outcome[attemptBody]{}, invalidInput(
-			"model output request_context does not match turn %s's committed context", turn.ID)
+		return contract.Outcome[attemptBody]{}, err
 	}
 
 	if len(output.ToolProposals) == 0 {
@@ -306,12 +276,19 @@ type wireResponsesEvidence struct {
 // unlinked provider conversation"); it parks the turn waiting on the typed
 // effect reason for explicit recovery instead.
 func (s *Service) interpretPrepareSessionObservation(ctx context.Context, unit contract.Unit, turn *turnRow, a *attemptRow, dispatch *turnDispatchRow, in observationInput) (contract.Outcome[attemptBody], error) {
+	if _, err := s.prepareSessionForTurn(ctx, unit, turn, dispatch, in); err != nil {
+		return contract.Outcome[attemptBody]{}, err
+	}
+	return completedOutcome(attemptBody{Resource: attemptOut(a)})
+}
+
+func (s *Service) prepareSessionForTurn(ctx context.Context, unit contract.Unit, turn *turnRow, dispatch *turnDispatchRow, in observationInput) (contract.Outcome[turnBody], error) {
 	if dispatch.State != "prepared" {
 		// Already interpreted once (a redelivered/duplicate observation for
 		// the identical operation_ref): refused outright rather than
 		// re-persisting a session or re-dispatching a second model_step,
 		// mirroring the legacy pre-turn path's own already-recorded refusal.
-		return contract.Outcome[attemptBody]{}, conflict(
+		return contract.Outcome[turnBody]{}, conflict(
 			"prepare_session dispatch %s for turn %s is already %s; observation replay is refused",
 			dispatch.ID, turn.ID, dispatch.State)
 	}
@@ -319,71 +296,74 @@ func (s *Service) interpretPrepareSessionObservation(ctx context.Context, unit c
 	if in.Observation.Disposition != "succeeded" && in.Observation.Disposition != "accepted" {
 		if in.Observation.Disposition == "unknown" {
 			if err := insertObligation(ctx, unit, s.newID(), "unknown_effect",
-				turn.InstallationID, a.RunID, a.ID, dispatch.ID,
+				turn.InstallationID, turn.RunID, turn.AttemptID, dispatch.ID,
 				"prepare_session outcome reported unknown; inspect the provider reference before recovery -- "+
 					"a fresh prepare_session is never dispatched against an unconfirmed result", now); err != nil {
-				return contract.Outcome[attemptBody]{}, err
+				return contract.Outcome[turnBody]{}, err
 			}
 		} else if err := updateTurnDispatchState(ctx, unit, dispatch.ID, "failed"); err != nil {
-			return contract.Outcome[attemptBody]{}, err
+			return contract.Outcome[turnBody]{}, err
 		}
 		turn.State = "waiting"
 		turn.WaitingReason = waitingEffect
+		if in.Observation.Disposition == "unknown" {
+			turn.WaitingReason = waitingRecovery
+		}
 		turn.NextWake = time.Time{}
 		turn.UpdatedAt = now
 		if err := updateTurn(ctx, unit, turn); err != nil {
-			return contract.Outcome[attemptBody]{}, err
+			return contract.Outcome[turnBody]{}, err
 		}
 		if err := emitTransition(ctx, unit, eventTurnWaiting, turn.ID, turn.Version); err != nil {
-			return contract.Outcome[attemptBody]{}, err
+			return contract.Outcome[turnBody]{}, err
 		}
-		return completedOutcome(attemptBody{Resource: attemptOut(a)})
+		return completedOutcome(turnBody{Resource: turnOut(turn)})
 	}
 
 	schema, err := responsesEvidenceSchema()
 	if err != nil {
-		return contract.Outcome[attemptBody]{}, fmt.Errorf("execution: load responses evidence schema: %w", err)
+		return contract.Outcome[turnBody]{}, fmt.Errorf("execution: load responses evidence schema: %w", err)
 	}
 	if err := contract.ValidateSchema(schema, in.Observation.Evidence); err != nil {
-		return contract.Outcome[attemptBody]{}, invalidInput("malformed prepare_session evidence: %v", err)
+		return contract.Outcome[turnBody]{}, invalidInput("malformed prepare_session evidence: %v", err)
 	}
 	var evidence wireResponsesEvidence
 	if err := contract.DecodeStrict(in.Observation.Evidence, &evidence); err != nil {
-		return contract.Outcome[attemptBody]{}, invalidInput("malformed prepare_session evidence: %v", err)
+		return contract.Outcome[turnBody]{}, invalidInput("malformed prepare_session evidence: %v", err)
 	}
 	if evidence.Schema != "zatiti.responses.evidence/v1" {
-		return contract.Outcome[attemptBody]{}, invalidInput(
+		return contract.Outcome[turnBody]{}, invalidInput(
 			"prepare_session evidence schema %q is not the accepted zatiti.responses.evidence/v1", evidence.Schema)
 	}
 	if evidence.SessionHandle == "" {
-		return contract.Outcome[attemptBody]{}, invalidInput("prepare_session evidence carries no session_handle")
+		return contract.Outcome[turnBody]{}, invalidInput("prepare_session evidence carries no session_handle")
 	}
 
 	if err := updateTurnDispatchState(ctx, unit, dispatch.ID, "recorded"); err != nil {
-		return contract.Outcome[attemptBody]{}, err
+		return contract.Outcome[turnBody]{}, err
 	}
 	turn.SessionHandle = evidence.SessionHandle
 
 	plan, err := latestCommittedContextPlan(ctx, unit, turn.ID)
 	if err != nil {
-		return contract.Outcome[attemptBody]{}, err
+		return contract.Outcome[turnBody]{}, err
 	}
 	if turn.ContextArtifact == nil {
-		return contract.Outcome[attemptBody]{}, conflict(
+		return contract.Outcome[turnBody]{}, conflict(
 			"turn %s confirmed a session but has no committed context to dispatch model_step against", turn.ID)
 	}
 	if err := s.dispatchModelEffect(ctx, unit, turn, plan, *turn.ContextArtifact, now); err != nil {
-		return contract.Outcome[attemptBody]{}, err
+		return contract.Outcome[turnBody]{}, err
 	}
 
 	turn.UpdatedAt = now
 	if err := updateTurn(ctx, unit, turn); err != nil {
-		return contract.Outcome[attemptBody]{}, err
+		return contract.Outcome[turnBody]{}, err
 	}
 	if err := emitTransition(ctx, unit, eventTurnSessionPrepared, turn.ID, turn.Version); err != nil {
-		return contract.Outcome[attemptBody]{}, err
+		return contract.Outcome[turnBody]{}, err
 	}
-	return completedOutcome(attemptBody{Resource: attemptOut(a)})
+	return completedOutcome(turnBody{Resource: turnOut(turn)})
 }
 
 // stepDisposition is the outcome of interpreting one proposal, enough to
@@ -401,7 +381,9 @@ func dispositionFor(np normalizedProposal, state string) stepDisposition {
 	d := stepDisposition{kind: np.Kind, completed: state == "recorded"}
 	switch np.Kind {
 	case "reply":
-		d.terminal = true
+		// A conversation reply stays prepared until it is delivered as the
+		// worker's message; only a recorded reply ends the turn.
+		d.terminal = state == "recorded"
 	case "clarify":
 		d.waiting = waitingClarification
 	case "report_outputs":
@@ -523,6 +505,20 @@ func (s *Service) interpretLocalDecision(ctx context.Context, unit contract.Unit
 			return stepDisposition{}, err
 		}
 		np := normalizedProposal{Kind: "reply", Text: decoded.Text}
+		if turn.ConversationID != "" {
+			// One step delivers at most one conversation reply: a second
+			// would post a second message and then fail to record against
+			// the turn the first one completed.
+			staged, err := hasStagedReplyDelivery(ctx, unit, turn.ID, base.StepIndex)
+			if err != nil {
+				return stepDisposition{}, err
+			}
+			if staged {
+				return s.recordRefused(ctx, unit, base, refusalMalformedProposal,
+					"a model step may deliver only one conversation reply")
+			}
+			return s.prepareReplyDelivery(ctx, unit, turn, base, np)
+		}
 		return s.recordInline(ctx, unit, base, np)
 
 	case contract.LocalDecisionToolClarify:
@@ -915,4 +911,45 @@ func validateMCPProposal(comp *contextComponent, conn wireConnection, tool wireT
 		return fmt.Errorf("MCP classification is not restricted")
 	}
 	return nil
+}
+
+// replyDeliveryOperation is the ordinary public operation a conversation
+// reply is delivered through, under the worker's own authority.
+const replyDeliveryOperation = "conversation.message.send"
+
+// prepareReplyDelivery stages a reply in a conversation-bound turn for
+// delivery as the worker's durable message. Execution cannot send it
+// itself: delivery is a governed disclosure that must run under the
+// worker's own authenticated actor (contract.WorkerOperator, outside any
+// Unit), never under the controller's administrative identity. The exact
+// conversation.message.send request is staged here and the proposal left
+// prepared; the caller performs it and reports back through
+// _execution.proposal.record, which completes the turn. The message id is
+// derived from the proposal key (turn, step, proposal id) and the caller's
+// submission key from the proposal, so a retried delivery replays instead
+// of posting twice.
+func (s *Service) prepareReplyDelivery(ctx context.Context, unit contract.Unit, turn *turnRow, base *proposalRow, np normalizedProposal) (stepDisposition, error) {
+	messageID := uuidFromDigest(sha256Hex([]byte(fmt.Sprintf("zatiti.reply-message/%s/%d/%s", turn.ID, base.StepIndex, base.ProposalID))))
+	scope := contract.Scope{InstallationID: turn.Scope.InstallationID, OrganizationID: turn.Scope.OrganizationID, ProjectID: turn.Scope.ProjectID}
+	input, err := json.Marshal(map[string]any{
+		"scope": scope, "conversation_id": turn.ConversationID, "message_id": messageID,
+		"body": np.Text, "attachments": []wireArtifactRef{}, "task_ids": []contract.ID{},
+	})
+	if err != nil {
+		return stepDisposition{}, err
+	}
+	np.MessageID = messageID
+	np.Operation = replyDeliveryOperation
+	np.OperationVersion = 1
+	np.Input = input
+	raw, err := json.Marshal(np)
+	if err != nil {
+		return stepDisposition{}, err
+	}
+	base.NormalizedProposal = raw
+	base.State = "prepared"
+	if err := insertProposal(ctx, unit, base); err != nil {
+		return stepDisposition{}, err
+	}
+	return stepDisposition{kind: "reply", completed: false}, nil
 }
