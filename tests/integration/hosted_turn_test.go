@@ -751,20 +751,8 @@ func TestResponsesAdapterMapsSealedReplyCallToTypedProposal(t *testing.T) {
 	}
 }
 
-// TestWorkerReplyDeliveryStopsAtMissingWorkerPrincipal documents where
-// the reply path stops against the real owners after gaps 1 and 2 are
-// closed. Execution stages a conversation reply as the exact
-// conversation.message.send its worker must perform under its own
-// authority, and the controller hands it to contract.WorkerOperator. The
-// controller service principal cannot send it instead: its only standing
-// grant is identity authority (internal/identity/service_principal.go), so
-// messaging's disclosure policy gate refuses it, correctly. But no worker --
-// not even the bootstrap chief -- is ever registered as an identity
-// principal (installation bootstrap creates only the human owner and the
-// controller service identity), so WorkerOperator refuses every worker
-// actor and no reply is posted. The message never appears and nothing is
-// fabricated.
-func TestWorkerReplyDeliveryStopsAtMissingWorkerPrincipal(t *testing.T) {
+// TestWorkerReplyDeliveryUsesRegisteredWorkerPrincipal checks durable history under the worker actor.
+func TestWorkerReplyDeliveryUsesRegisteredWorkerPrincipal(t *testing.T) {
 	t.Parallel()
 	f := newBootstrappedFixture(t)
 	_, chief := f.rootOrganization()
@@ -788,15 +776,15 @@ func TestWorkerReplyDeliveryStopsAtMissingWorkerPrincipal(t *testing.T) {
 		}),
 		SubmissionKey: "worker-turn/" + string(turnID) + "/" + proposalID,
 	})
-	if faultCode(err) != contract.CodePermissionDenied || !strings.Contains(err.Error(), "not registered") {
-		t.Fatalf("worker reply delivery err = %v; if the chief is now a registered principal, this gap has closed -- replace this test with a delivered-reply readback", err)
+	if err != nil {
+		t.Fatalf("worker reply delivery: %v", err)
 	}
 	history := f.must(f.owner, "conversation.message.list", "", map[string]any{"scope": f.scope(), "conversation_id": conversation.Resource.ID})
 	var list struct {
 		Items []any `json:"items"`
 	}
 	decode(t, history.Data, &list)
-	if len(list.Items) != 0 {
-		t.Fatalf("owner history = %s, want no fabricated reply", history.Data)
+	if len(list.Items) != 1 {
+		t.Fatalf("owner history = %s, want one delivered worker reply", history.Data)
 	}
 }

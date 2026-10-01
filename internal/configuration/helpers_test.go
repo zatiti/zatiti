@@ -157,6 +157,8 @@ func (p *fakePorts) Call(ctx context.Context, unit contract.Unit, inv contract.I
 		}}
 	case strings.HasSuffix(inv.Operation, ".activate"):
 		body = versionsOutput{Versions: []wireRef{}}
+	case inv.Operation == "_identity.worker.sync":
+		body = versionsResult{Versions: []wireRef{}}
 	case inv.Operation == "_connections.resolve":
 		var in struct {
 			Scope       wireScope `json:"scope"`

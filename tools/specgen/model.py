@@ -3,7 +3,7 @@ from copy import deepcopy
 
 # Specification revision. Bump with every coordinated contract revision; the renderer
 # refuses to render unless contracts.md names the same revision in its title.
-REVISION=21
+REVISION=22
 
 S={'type':'string','maxLength':8192}
 ID={'type':'string','format':'uuid'}
@@ -261,6 +261,9 @@ for owner in ['identity','configuration','skills','connections','policy','accoun
     internal('activate',owner,obj(candidate=ref('Candidate')),obj(versions=arr(ref('Ref'))),'Apply owned exact sealed candidate slice inside compiler transaction; caller must hold configuration-apply context established by application. No public activation flag or second compiler.','configuration application'.split())
 internal('authority','identity',fields({'principal_id':ID,'scope':ref('Scope')}),one('Authority'),'Read current principal, grants, expiry/revocations and restrictions; no grants from claimed profile/name or proposed policy.',['application','policy','reviews','configuration','execution','effects'],mode='query')
 internal('bootstrap','identity',obj(owner_id=ID,credential_id=ID,store_ref=S,name=S,installation_id=ID),one('Principal'),'Create one initial human owner and scoped service identities in exclusive bootstrap transaction. Credential bytes were stored by trusted helper beforehand.',['installation'])
+D['WorkerPrincipal']=obj(worker_id=ID,organization_id=ID,active=BOOL)
+internal('worker.sync','identity',obj(workers=arr(ref('WorkerPrincipal'))),obj(versions=arr(ref('Ref'))),'Idempotently register each active configured worker as a live principal of kind worker whose id equals the worker id, recording its installation and organization, holding exactly one standing allow grant: the frozen worker-visible local operation allowlist (contract.WorkerVisibleOperations) plus messaging.disclosure.deliver, which message sends require, installation-scoped so installation-scoped conversations are covered, no wildcard, no destination restriction beyond tool bindings, no expiry, no parent, never delegable. An inactive entry revokes that principal and its grants. Refuses an id already held by a non-worker principal. Never widens or resurrects: an existing worker principal is never re-granted (an owner-revoked or narrowed grant stays so) and a revoked one is never reactivated; re-sync only moves the principal\'s recorded organization. WorkerOperator envelope intersection, policy worker-binding/task fences and owner rules still narrow every call. Caller-supplied grants are not accepted.',['configuration'])
+internal('worker.principals.sync','configuration',obj(installation_id=ID),obj(versions=arr(ref('Ref'))),'Backfill: pass every configured worker (active or archived) of this installation to _identity.worker.sync so installations created before revision 22 gain worker principals. Idempotent; called by the controller once per session start.',['controller'])
 internal('restrict','identity',obj(principal_id=ID,capability=S,reason=S),one('Disposition'),'Atomically narrow/revoke effective grant before future admission, never expand.',['policy','installation'])
 internal('promote','identity',obj(principal_id=ID,qualification=ref('Qualification'),ceiling_grant_id=ID),one('Grant'),'Activate exact evidence-qualified narrow grant after old-policy rule check; verify ceiling/current rule version and immutable qualification.',['policy'])
 internal('stage','configuration',obj(scope=ref('Scope'),change=ref('Change'),**{'draft_id?':ID}),one('Draft'),'Strictly validate typed definition schema then append draft change. No effective mutation. For creates allocate identity once using submission replay.',['configuration','skills','connections','policy','accounting','scheduling','memory'])

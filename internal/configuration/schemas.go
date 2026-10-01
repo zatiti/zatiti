@@ -38,11 +38,13 @@ const (
 	schemaImportIn  = `{"type":"object","additionalProperties":false,"properties":{"scope":{"$ref":"#/$defs/Scope"},"artifact":{"$ref":"#/$defs/ArtifactRef"},"rebindings":{"type":"array","items":{"type":"object","additionalProperties":false,"properties":{"source_ref":{"type":"string","maxLength":8192},"destination_ref":{"type":"string","maxLength":8192}},"required":["source_ref","destination_ref"]},"maxItems":4096},"draft_id":{"type":"string","format":"uuid"}},"required":["scope","artifact","rebindings"]}`
 	schemaImportOut = `{"type":"object","additionalProperties":false,"properties":{"draft":{"$ref":"#/$defs/Draft"},"diagnostics":{"type":"array","items":{"$ref":"#/$defs/Diagnostic"},"maxItems":4096}},"required":["draft","diagnostics"]}`
 
-	schemaStageIn      = `{"type":"object","additionalProperties":false,"properties":{"scope":{"$ref":"#/$defs/Scope"},"change":{"$ref":"#/$defs/Change"},"draft_id":{"type":"string","format":"uuid"}},"required":["scope","change"]}`
-	schemaSnapshotIn   = `{"type":"object","additionalProperties":false,"properties":{"scope":{"$ref":"#/$defs/Scope"}},"required":["scope"]}`
-	schemaSnapshotOut  = `{"type":"object","additionalProperties":false,"properties":{"resource":{"$ref":"#/$defs/ScopeSnapshot"}},"required":["resource"]}`
-	schemaBootstrapIn  = `{"type":"object","additionalProperties":false,"properties":{"installation_id":{"type":"string","format":"uuid"},"owner_id":{"type":"string","format":"uuid"},"organization_id":{"type":"string","format":"uuid"},"chief_id":{"type":"string","format":"uuid"}},"required":["installation_id","owner_id","organization_id","chief_id"]}`
-	schemaBootstrapOut = `{"type":"object","additionalProperties":false,"properties":{"organization":{"$ref":"#/$defs/Organization"},"chief":{"$ref":"#/$defs/Worker"}},"required":["organization","chief"]}`
+	schemaStageIn                 = `{"type":"object","additionalProperties":false,"properties":{"scope":{"$ref":"#/$defs/Scope"},"change":{"$ref":"#/$defs/Change"},"draft_id":{"type":"string","format":"uuid"}},"required":["scope","change"]}`
+	schemaSnapshotIn              = `{"type":"object","additionalProperties":false,"properties":{"scope":{"$ref":"#/$defs/Scope"}},"required":["scope"]}`
+	schemaSnapshotOut             = `{"type":"object","additionalProperties":false,"properties":{"resource":{"$ref":"#/$defs/ScopeSnapshot"}},"required":["resource"]}`
+	schemaWorkerPrincipalsSyncIn  = `{"type":"object","additionalProperties":false,"properties":{"installation_id":{"type":"string","format":"uuid"}},"required":["installation_id"]}`
+	schemaWorkerPrincipalsSyncOut = `{"type":"object","additionalProperties":false,"properties":{"versions":{"type":"array","items":{"$ref":"#/$defs/Ref"},"maxItems":4096}},"required":["versions"]}`
+	schemaBootstrapIn             = `{"type":"object","additionalProperties":false,"properties":{"installation_id":{"type":"string","format":"uuid"},"owner_id":{"type":"string","format":"uuid"},"organization_id":{"type":"string","format":"uuid"},"chief_id":{"type":"string","format":"uuid"}},"required":["installation_id","owner_id","organization_id","chief_id"]}`
+	schemaBootstrapOut            = `{"type":"object","additionalProperties":false,"properties":{"organization":{"$ref":"#/$defs/Organization"},"chief":{"$ref":"#/$defs/Worker"}},"required":["organization","chief"]}`
 
 	// schemaExportPrepareIn/schemaExportRecordIn are _configuration.export.prepare
 	// and _configuration.export.record's frozen revision-3 inputs: the
@@ -97,6 +99,7 @@ var operationSchemaBodies = map[string]opSchemas{
 	"_accounting.validate":                                   {schemaCandidateIn, schemaValidateOut},
 	"_configuration.activate":                                {schemaCandidateIn, schemaActivateOut},
 	"_configuration.bootstrap":                               {schemaBootstrapIn, schemaBootstrapOut},
+	"_configuration.worker.principals.sync":                  {schemaWorkerPrincipalsSyncIn, schemaWorkerPrincipalsSyncOut},
 	"_configuration.export.prepare":                          {schemaExportPrepareIn, schemaGetOut("Job")},
 	"_configuration.execution_profile.resolve":               {`{"type":"object","additionalProperties":false,"properties":{"scope":{"$ref":"#/$defs/Scope"},"profile":{"$ref":"#/$defs/Ref"}},"required":["scope","profile"]}`, `{"type":"object","additionalProperties":false,"properties":{"resource":{"$ref":"#/$defs/ExecutionProfile"}},"required":["resource"]}`},
 	"_configuration.execution_profile.qualification.resolve": {`{"type":"object","additionalProperties":false,"properties":{"qualification_id":{"type":"string","format":"uuid"}},"required":["qualification_id"]}`, `{"type":"object","additionalProperties":false,"properties":{"candidate":{"$ref":"#/$defs/ExecutionProfileCandidate"},"profile_digest":{"type":"string","pattern":"^[0-9a-f]{64}$"}},"required":["candidate","profile_digest"]}`},

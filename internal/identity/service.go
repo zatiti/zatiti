@@ -18,6 +18,7 @@ const (
 	opPromote      = "_identity.promote"
 	opRestoreMerge = "_identity.restore.merge"
 	opRestrict     = "_identity.restrict"
+	opWorkerSync   = "_identity.worker.sync"
 	opRevocations  = "_identity.revocations"
 	opValidate     = "_identity.validate"
 
@@ -134,6 +135,11 @@ func (s *Service) assemble() error {
 			ID: opRestoreMerge, Version: descriptorVersion, Owner: owner,
 			Visibility: contract.VisibilityInternal, Mode: contract.ModeMutation, Effect: contract.EffectLocal,
 			Callers: []string{"controller"},
+		},
+		{
+			ID: opWorkerSync, Version: descriptorVersion, Owner: owner,
+			Visibility: contract.VisibilityInternal, Mode: contract.ModeMutation, Effect: contract.EffectLocal,
+			Callers: []string{"configuration"},
 		},
 		{
 			ID: opRestrict, Version: descriptorVersion, Owner: owner,
@@ -277,6 +283,7 @@ func (s *Service) assemble() error {
 		opPromote:         bind(s, opPromote, s.promote),
 		opRestoreMerge:    bind(s, opRestoreMerge, s.restoreMerge),
 		opRestrict:        bind(s, opRestrict, s.restrict),
+		opWorkerSync:      bind(s, opWorkerSync, s.workerSync),
 		opRevocations:     bind(s, opRevocations, s.revocations),
 		opValidate:        bind(s, opValidate, s.validate),
 		opCredProvision:   bind(s, opCredProvision, s.credentialProvision),
