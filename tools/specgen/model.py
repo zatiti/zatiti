@@ -3,7 +3,7 @@ from copy import deepcopy
 
 # Specification revision. Bump with every coordinated contract revision; the renderer
 # refuses to render unless contracts.md names the same revision in its title.
-REVISION=21
+REVISION=22
 
 S={'type':'string','maxLength':8192}
 ID={'type':'string','format':'uuid'}
@@ -263,7 +263,7 @@ internal('authority','identity',fields({'principal_id':ID,'scope':ref('Scope')})
 internal('bootstrap','identity',obj(owner_id=ID,credential_id=ID,store_ref=S,name=S,installation_id=ID),one('Principal'),'Create one initial human owner and scoped service identities in exclusive bootstrap transaction. Credential bytes were stored by trusted helper beforehand.',['installation'])
 D['WorkerPrincipal']=obj(worker_id=ID,organization_id=ID,active=BOOL)
 internal('worker.sync','identity',obj(workers=arr(ref('WorkerPrincipal'))),obj(versions=arr(ref('Ref'))),'Idempotently register each active configured worker as a live principal of kind worker whose id equals the worker id, recording its installation and organization, holding exactly one standing allow grant: the frozen worker-visible local operation allowlist (contract.WorkerVisibleOperations) plus messaging.disclosure.deliver, which message sends require, installation-scoped so installation-scoped conversations are covered, no wildcard, no destination restriction beyond tool bindings, no expiry, no parent, never delegable. An inactive entry revokes that principal and its grants. Refuses an id already held by a non-worker principal. Never widens or resurrects: an existing worker principal is never re-granted (an owner-revoked or narrowed grant stays so) and a revoked one is never reactivated; re-sync only moves the principal\'s recorded organization. WorkerOperator envelope intersection, policy worker-binding/task fences and owner rules still narrow every call. Caller-supplied grants are not accepted.',['configuration'])
-internal('worker.principals.sync','configuration',obj(installation_id=ID),obj(versions=arr(ref('Ref'))),'Backfill: pass every configured worker (active or archived) of this installation to _identity.worker.sync so installations created before revision 21 gain worker principals. Idempotent; called by the controller once per session start.',['controller'])
+internal('worker.principals.sync','configuration',obj(installation_id=ID),obj(versions=arr(ref('Ref'))),'Backfill: pass every configured worker (active or archived) of this installation to _identity.worker.sync so installations created before revision 22 gain worker principals. Idempotent; called by the controller once per session start.',['controller'])
 internal('restrict','identity',obj(principal_id=ID,capability=S,reason=S),one('Disposition'),'Atomically narrow/revoke effective grant before future admission, never expand.',['policy','installation'])
 internal('promote','identity',obj(principal_id=ID,qualification=ref('Qualification'),ceiling_grant_id=ID),one('Grant'),'Activate exact evidence-qualified narrow grant after old-policy rule check; verify ceiling/current rule version and immutable qualification.',['policy'])
 internal('stage','configuration',obj(scope=ref('Scope'),change=ref('Change'),**{'draft_id?':ID}),one('Draft'),'Strictly validate typed definition schema then append draft change. No effective mutation. For creates allocate identity once using submission replay.',['configuration','skills','connections','policy','accounting','scheduling','memory'])
@@ -447,7 +447,7 @@ D['ProposalRecord']=obj(
     **{'command_id?':ID,'effect_operation_id?':ID,'result_artifact?':ref('ArtifactRef')})
 D['CallbackRoute']=obj(kind=enum('worker_turn','job','memory','skill','connection'),**{'turn_id?':ID,'step_index?':INT,'job_id?':ID})
 D['OperationAttempt']=obj(attempt_id=ID,generation=VER)
-D['WorkItem']=obj(id=ID,kind=enum('claim','context','proposal','resume'),scope=ref('Scope'),turn=ref('WorkerTurn'),**{'run_id?':ID})
+D['WorkItem']=obj(id=ID,kind=enum('claim','context','proposal','resume','delivery'),scope=ref('Scope'),turn=ref('WorkerTurn'),**{'run_id?':ID,'proposal_id?':{'type':'string','minLength':1,'maxLength':256},'step_index?':{'type':'integer','minimum':0}})
 D['ContextPlan']=obj(id=ID,turn_id=ID,expected_version=VER,generation=VER,scope=ref('Scope'),**{'attempt_id?':ID},refs=arr(ref('ArtifactRef')),configuration_revision=VER,byte_bound=INT,token_bound=INT,recipe=JSON)
 
 # Unique source identity (installation_id, source_kind, source_id, source_version,
@@ -457,7 +457,7 @@ D['ContextPlan']=obj(id=ID,turn_id=ID,expected_version=VER,generation=VER,scope=
 # unique (turn_id, step_index, proposal_id) is the proposal deduplication fence, and
 # the same key with different bytes is submission_conflict.
 internal('turn.admit','execution',obj(source=ref('TurnSource'),worker_id=ID,scope=ref('Scope'),requester_id=ID),one('WorkerTurn'),'Admit or return the existing WorkerTurn for its unique source identity; derive requester/limits from the durable source, never from asserted proposal fields. A message arriving during an active turn is admitted as a safe-boundary injection durably linked to that turn, never silently dropped or processed twice. One active decision stream per worker/task lane; different eligible workers may run concurrently within aggregate limits.',['controller','scheduling'])
-internal('work.pending','execution',obj(limit={'type':'integer','minimum':1,'maximum':100}),obj(items=arr(ref('WorkItem'),100)),'Bounded scan of typed claim/context/proposal/resume work items, including ready hosted runs and safely waiting turns; excludes cooperative auto-claims, which continue to use the public run.claim path.',['controller'],mode='query')
+internal('work.pending','execution',obj(limit={'type':'integer','minimum':1,'maximum':100}),obj(items=arr(ref('WorkItem'),100)),'Bounded scan of typed claim/context/proposal/resume/delivery work items (delivery names a staged conversation reply not yet delivered, by proposal_id and step_index), including ready hosted runs and safely waiting turns; excludes cooperative auto-claims, which continue to use the public run.claim path.',['controller'],mode='query')
 internal('work.claim','execution',obj(work_id=ID,expected_version=VER,generation=VER),obj(item=ref('WorkItem'),claim_token=S,version=VER),'Return the immutable work item plus a claim token/version; a retry against the same key inspects and returns the same claim rather than creating a second one.',['controller'])
 internal('context.prepare','execution',obj(turn_id=ID,expected_version=VER,generation=VER),one('ContextPlan'),'Build a versioned immutable context plan naming exact authorized refs, versions and byte/token bounds inside the transaction; no IO, no provider call and no bytes read here.',['controller'])
 internal('context.commit','execution',obj(plan_id=ID,expected_version=VER,generation=VER,staged_context=ref('Adapter_ArtifactLocator')),one('WorkerTurn'),'Publish the plan bytes/metadata and commit the pinned context after rechecking generation, referenced versions and current authority. A stale plan is discarded and rebuilt without spending or sending.',['controller'])

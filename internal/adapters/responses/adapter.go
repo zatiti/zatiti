@@ -445,7 +445,7 @@ func (a *Adapter) invokeModelStep(ctx, callCtx context.Context, dispatch contrac
 
 	physical := a.basePhysicalEvidence(dispatch, po)
 	output := baseModelOutput(po)
-	in := interpretation{secret: s.secret, bounds: s.bounds, inputBound: s.bound, classification: s.classification, stageErr: po.stageErr}
+	in := interpretation{secret: s.secret, bounds: s.bounds, inputBound: s.bound, classification: s.classification, stageErr: po.stageErr, doc: s.doc}
 	if reason, message := po.failure(); reason != "" {
 		if po.doErr != nil {
 			physical.RequestSent, in.disposition, physical.Confirmation = classifyNetworkError(po.doErr)
@@ -561,7 +561,7 @@ func (a *Adapter) Reconcile(ctx context.Context, dispatch contract.Dispatch) (co
 	staged := po.staged()
 	physical := a.basePhysicalEvidence(dispatch, po)
 	output := baseModelOutput(po)
-	in := interpretation{secret: s.secret, bounds: s.bounds, inputBound: s.bound, classification: s.classification, stageErr: po.stageErr, reconcile: true}
+	in := interpretation{secret: s.secret, bounds: s.bounds, inputBound: s.bound, classification: s.classification, stageErr: po.stageErr, reconcile: true, doc: s.doc}
 	if reason, message := po.failure(); reason != "" {
 		if po.doErr != nil {
 			physical.RequestSent, _, _ = classifyNetworkError(po.doErr)

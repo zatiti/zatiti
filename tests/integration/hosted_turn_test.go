@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -27,68 +28,44 @@ import (
 // behavior rather than a fabricated success, exactly where production code
 // honestly stops today.
 //
-// Four independently confirmed, pre-existing production gaps (none
-// invented nor worked around here; all cited to source) make "the model
-// decides autonomously and replies" unreachable through real code on this
-// tree right now. Gap 0 was found while building this card's own
-// controller fixture (not pre-briefed) and turned out to be the most
-// fundamental of the four -- it blocks the chain even before gaps 1-3 are
-// ever reached:
+// Status of the production gaps this file has tracked (none invented nor
+// worked around here; all cited to source):
 //
-//  0. internal/connections implements no contract.LocalJobRunner (zero
-//     `func...RunJob` anywhere in internal/connections/*.go), and
-//     connection.validate's own job carries no operation_id at creation,
-//     so the controller's generic job-claim phase can never claim or drive
-//     it: "no job runner is attached for connections/connection.validate."
-//     No connection can ever leave validation_state "unverified" through
-//     real production code, on this tree, today -- which _connections.
-//     resolve requires before any hosted (or external-tool) dispatch can
-//     resolve a tool/connection pair. See
-//     TestConnectionValidateJobHasNoRunnerAndStaysPendingForever below.
-//  1. internal/adapters/responses/interpret.go's interpret() (the 2xx
-//     decoded-response branch) never converts a decoded tool_calls entry
-//     into a typed wireModelToolProposal -- it only flags
-//     "tool_proposal_mapping_unspecified" and returns (interpret.go:159-
-//     167); evidence.go:197-198 defaults ModelOutput.tool_proposals to an
-//     empty slice whenever nothing set it, which is always. The adapter's
-//     own comment names the reason: ModelToolProposal requires
-//     operation_id/operation_version and "neither the action nor
-//     ContextToolDefinition carries that mapping, so this package has no
-//     honest source for them" -- a real contract gap, not a bug this
-//     package could quietly patch.
-//  2. internal/execution/interpret.go's interpretTurnObservation refuses
-//     invalid_input the instant it sees output.ToolProposals is empty
-//     (interpret.go:169-178: "a hosted turn cannot progress on text alone"),
-//     for EVERY disposition including a plain text-only reply. Given (1)
-//     always empties tool_proposals, every real hosted model_step
-//     observation is refused at this exact point today, regardless of task-
-//     vs-message-triggered and regardless of what the model said.
-//  3. Separately and even earlier in the pipeline: a message/responsibility-
-//     triggered turn is never given an AttemptID (only a task-triggered
-//     turn gets one, via _execution.enqueue's automatic turn admission --
-//     internal/execution/turn_ops.go's autoClaimHostedRun), and
-//     dispatchModelEffect's own model_step dispatch is gated on
-//     t.AttemptID != "" (turn_ops.go:571). So a bare chat message to a
-//     hosted worker never even reaches a physical call: the controller
-//     correctly declines to dispatch into a dead end rather than
-//     fabricating an attempt. This is already logged (docs/roadmap.md,
-//     2026-09-21, P16/P22 landing notes: "a bare chat/responsibility turn
-//     ... has no schema-valid path to receive a ModelOutput today").
+//  0. OPEN. internal/connections implements no contract.LocalJobRunner, and
+//     connection.validate's own job carries no operation_id at creation, so
+//     the controller's generic job-claim phase can never claim or drive it:
+//     "no job runner is attached for connections/connection.validate." No
+//     connection ever leaves validation_state "unverified" through real
+//     production code, which _connections.resolve requires before any
+//     hosted dispatch. See
+//     TestConnectionValidateJobHasNoRunnerAndStaysPendingForever.
+//  1. CLOSED (revision 21). The Responses adapter maps a model call of a
+//     sealed local decision tool, declared in the dispatched context under
+//     its deterministic identity, to a typed ModelToolProposal with the
+//     sealed operation mapping (contract.LocalDecisionOperationID). Any other
+//     tool call still maps nothing and is flagged
+//     tool_proposal_mapping_unspecified. See
+//     TestResponsesAdapterMapsSealedReplyCallToTypedProposal.
+//  2. CLOSED in execution and the controller. A reply recorded in a
+//     conversation-bound turn is staged as the exact conversation.message.
+//     send its worker performs under its own authority through
+//     contract.WorkerOperator; recording that delivery completes the turn
+//     and commits its streamed preview. A message-triggered turn is bound to
+//     its triggering conversation at admission.
+//  3. CLOSED earlier: every committed hosted turn dispatches, including chat
+//     turns without an execution Attempt (turn_ops.go, dispatchModelEffect).
+//  4. OPEN. No worker, not even the bootstrap chief, is registered as an
+//     identity principal, so contract.WorkerOperator refuses every worker
+//     actor and the staged reply is never posted. See
+//     TestWorkerReplyDeliveryStopsAtMissingWorkerPrincipal.
 //
-// TestConnectionValidateJobHasNoRunnerAndStaysPendingForever proves gap 0
-// directly. TestHostedTurnsNeverDispatchGivenAnUnverifiableConnection
-// proves its consequence: neither a chat message nor a task ever causes a
-// single physical call, because gap 0 blocks connection resolution before
-// gaps 1-3 are ever reached. TestResponsesAdapterDispatches
-// PrepareSessionAndModelStepAgainstControlledProvider proves, independent
-// of gap 0 (it calls Adapter.Invoke directly, bypassing connections
-// entirely), that the adapter itself genuinely completes two real physical
-// calls against a controlled provider -- the proof that gaps 1/2 are real
-// adapter/execution-layer gaps, not an artifact of this fixture's own
-// wiring being broken. None of these tests work around any gap with
-// test-side production code; each asserts the CURRENT correct behavior,
-// exactly as this card's restore-protocol section requires for that
-// separate, already-known gap.
+// TestHostedTurnsNeverDispatchGivenAnUnverifiableConnection proves gap 0's
+// consequence end to end: neither a chat message nor a task ever causes a
+// physical call. TestResponsesAdapterDispatchesPrepareSessionAndModelStep
+// AgainstControlledProvider proves, independent of gap 0, that the adapter
+// completes real physical calls against a controlled provider. Each test
+// asserts the CURRENT correct behavior, exactly as this card's
+// restore-protocol section requires for that separate, already-known gap.
 
 // openaiProtocolRevision is internal/adapters/responses/openai.go's
 // unexported constant naming the one qualified wire protocol revision this
@@ -177,6 +154,14 @@ func (s *openaiProviderServer) handle(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case strings.HasSuffix(r.URL.Path, "/conversations"):
 		body = fmt.Sprintf(`{"id":"conv_%s","object":"conversation"}`, strings.ReplaceAll(string(contract.NewID()), "-", ""))
+	case strings.HasSuffix(r.URL.Path, "/responses") && requestDeclaresReplyTool(r):
+		// A context that offers the sealed reply decision tool gets the
+		// model's answer through it, exactly as a hosted worker replies.
+		body = fmt.Sprintf(`{"id":"resp_%s","object":"response","status":"completed",`+
+			`"output":[{"type":"function_call","id":"fc_1","call_id":"call_reply_1","name":"reply","status":"completed",`+
+			`"arguments":"{\"text\":\"acknowledged\"}"}],`+
+			`"usage":{"input_tokens":12,"output_tokens":4,"total_tokens":16}}`,
+			strings.ReplaceAll(string(contract.NewID()), "-", ""))
 	case strings.HasSuffix(r.URL.Path, "/responses"):
 		body = fmt.Sprintf(`{"id":"resp_%s","object":"response","status":"completed",`+
 			`"output":[{"type":"message","role":"assistant","status":"completed",`+
@@ -193,6 +178,29 @@ func (s *openaiProviderServer) handle(w http.ResponseWriter, r *http.Request) {
 		// that already failed mid-response.
 		return
 	}
+}
+
+// requestDeclaresReplyTool reports whether a model_step request offers the
+// sealed reply function tool.
+func requestDeclaresReplyTool(r *http.Request) bool {
+	raw, err := io.ReadAll(r.Body)
+	if err != nil {
+		return false
+	}
+	var req struct {
+		Tools []struct {
+			Name string `json:"name"`
+		} `json:"tools"`
+	}
+	if json.Unmarshal(raw, &req) != nil {
+		return false
+	}
+	for _, t := range req.Tools {
+		if t.Name == contract.LocalDecisionToolReply {
+			return true
+		}
+	}
+	return false
 }
 
 // profileDigestWithoutCapabilityEvidence reproduces internal/adapters/
@@ -660,11 +668,123 @@ func TestResponsesAdapterDispatchesPrepareSessionAndModelStepAgainstControlledPr
 	if evidence.SessionHandle != prepareObs.ProviderReference {
 		t.Fatalf("model_step evidence session_handle %q, want the prepare_session handle %q", evidence.SessionHandle, prepareObs.ProviderReference)
 	}
-	// This is the exact, independently confirmed gap this file's top doc
-	// comment cites: a real completed response with real output carries no
-	// tool proposals, because the adapter has no honest operation_id/
-	// operation_version to mint one with.
+	// Bare model text is never a governed decision: with no tool call there
+	// is nothing to map, so the evidence carries no proposal.
 	if len(evidence.Output.ToolProposals) != 0 {
-		t.Fatalf("model_step evidence carries %d tool_proposals; the known adapter gap (interpret.go's tool_proposal_mapping_unspecified) appears to have closed -- update this test and hosted_turn_test.go's doc comment", len(evidence.Output.ToolProposals))
+		t.Fatalf("text-only model_step evidence carries %d tool_proposals, want 0", len(evidence.Output.ToolProposals))
+	}
+}
+
+// TestResponsesAdapterMapsSealedReplyCallToTypedProposal closes gap 1: the
+// real adapter, over a real TLS round trip to a controlled provider, turns
+// the model's call of the sealed reply decision tool -- declared in the
+// context exactly as execution's context builder declares it -- into one
+// typed ModelToolProposal bound to the context that was sent.
+func TestResponsesAdapterMapsSealedReplyCallToTypedProposal(t *testing.T) {
+	t.Parallel()
+	f := newBootstrappedFixture(t)
+	provider := newOpenAIProviderServer(t)
+	adapter := buildResponsesAdapter(t, f, provider)
+	credRef, err := f.secrets.Put(context.Background(), "integration/direct-adapter-reply-credential", []byte("fake-provider-api-key"))
+	if err != nil {
+		t.Fatalf("custody credential: %v", err)
+	}
+	replyID := contract.LocalDecisionToolID(contract.LocalDecisionToolReply)
+	replyTool := map[string]any{"id": replyID, "version": 1}
+	contextBody := mustJSON(map[string]any{
+		"schema": "zatiti.context/v1", "attempt_id": contract.NewID(),
+		"scope": map[string]any{"installation_id": f.installationID}, "configuration_revision": 1,
+		"worker":            map[string]any{"id": contract.NewID(), "version": 1},
+		"execution_profile": map[string]any{"id": contract.NewID(), "version": 1},
+		"skill_versions":    []any{}, "messages": []any{}, "source_artifacts": []any{},
+		"tools": []any{map[string]any{
+			"tool": replyTool, "name": contract.LocalDecisionToolReply,
+			"description": "sealed local decision tool: reply", "input_schema": json.RawMessage(contract.ReplyProposalSchema),
+			"output_schema": map[string]any{}, "effect": "local", "destinations": []string{},
+			"binding_id": replyID, "schema_digest": contract.Hash(contract.ReplyProposalSchema),
+		}},
+		"capture": "complete", "created_at": "2026-01-01T00:00:00Z",
+	})
+	contextArtifact := f.uploadArtifact("direct-adapter-reply-context", contextBody, "application/json")
+	stepObs, err := adapter.Invoke(context.Background(), contract.Dispatch{
+		OperationID: contract.NewID(), AttemptID: contract.NewID(), Generation: 1,
+		Adapter: "responses", CredentialRef: credRef, Deadline: f.clock.Now().Add(time.Minute),
+		Action: mustJSON(map[string]any{
+			"schema": "zatiti.responses.action/v1", "kind": "model_step", "session_handle": "conv_integration",
+			"context_artifact":  map[string]any{"id": contextArtifact.ID, "digest": contextArtifact.Digest},
+			"max_output_tokens": 128, "tool_contract_versions": []any{replyTool},
+		}),
+	})
+	if err != nil {
+		t.Fatalf("model_step Invoke: %v", err)
+	}
+	if stepObs.Disposition != "succeeded" || provider.callCount() != 1 {
+		t.Fatalf("disposition %q after %d calls: %s", stepObs.Disposition, provider.callCount(), stepObs.Evidence)
+	}
+	var evidence struct {
+		PhysicalCall struct {
+			ErrorCode string `json:"error_code"`
+		} `json:"physical_call"`
+		Output struct {
+			ToolProposals []struct {
+				ID               string          `json:"id"`
+				Tool             map[string]any  `json:"tool"`
+				OperationID      string          `json:"operation_id"`
+				OperationVersion int64           `json:"operation_version"`
+				Input            json.RawMessage `json:"input"`
+				SourceContext    struct {
+					ID     contract.ID     `json:"id"`
+					Digest contract.Digest `json:"digest"`
+				} `json:"source_context"`
+			} `json:"tool_proposals"`
+		} `json:"output"`
+	}
+	decode(t, stepObs.Evidence, &evidence)
+	if evidence.PhysicalCall.ErrorCode != "" || len(evidence.Output.ToolProposals) != 1 {
+		t.Fatalf("evidence = %s", stepObs.Evidence)
+	}
+	p := evidence.Output.ToolProposals[0]
+	if p.ID != "call_reply_1" || p.Tool["id"] != string(replyID) || p.OperationID != "zatiti.local-decision/reply" ||
+		p.OperationVersion != 1 || p.SourceContext.ID != contextArtifact.ID || string(p.SourceContext.Digest) != contextArtifact.Digest ||
+		string(p.Input) != `{"text":"acknowledged"}` {
+		t.Fatalf("proposal = %+v (input %s)", p, p.Input)
+	}
+}
+
+// TestWorkerReplyDeliveryUsesRegisteredWorkerPrincipal checks durable history under the worker actor.
+func TestWorkerReplyDeliveryUsesRegisteredWorkerPrincipal(t *testing.T) {
+	t.Parallel()
+	f := newBootstrappedFixture(t)
+	_, chief := f.rootOrganization()
+	conv := f.must(f.owner, "conversation.create", "reply-shape-conv", map[string]any{
+		"scope": f.scope(), "kind": "direct", "participant_ids": []contract.ID{f.owner.PrincipalID, chief}, "title": "reply",
+	})
+	var conversation struct {
+		Resource struct {
+			ID contract.ID `json:"id"`
+		} `json:"resource"`
+	}
+	decode(t, conv.Data, &conversation)
+	turnID, proposalID := contract.NewID(), "call_reply_1"
+	_, err := f.app.ExecuteWorker(context.Background(), contract.WorkerRequest{
+		TurnID: turnID, ProposalID: proposalID, WorkerID: chief,
+		Scope:     contract.Scope{InstallationID: f.installationID, WorkerID: chief},
+		Operation: "conversation.message.send", Version: 1,
+		Input: mustJSON(map[string]any{
+			"scope": f.scope(), "conversation_id": conversation.Resource.ID, "message_id": contract.NewID(),
+			"body": "acknowledged", "attachments": []any{}, "task_ids": []contract.ID{},
+		}),
+		SubmissionKey: "worker-turn/" + string(turnID) + "/" + proposalID,
+	})
+	if err != nil {
+		t.Fatalf("worker reply delivery: %v", err)
+	}
+	history := f.must(f.owner, "conversation.message.list", "", map[string]any{"scope": f.scope(), "conversation_id": conversation.Resource.ID})
+	var list struct {
+		Items []any `json:"items"`
+	}
+	decode(t, history.Data, &list)
+	if len(list.Items) != 1 {
+		t.Fatalf("owner history = %s, want one delivered worker reply", history.Data)
 	}
 }

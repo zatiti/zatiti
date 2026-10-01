@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"sync"
 	"time"
 
 	"github.com/zatiti/zatiti/internal/contract"
@@ -333,6 +334,45 @@ func (f *fx) executionWorkPending(ctx context.Context, u contract.Unit, input js
 		}
 		items = append(items, map[string]any{"id": r.id, "kind": kind, "scope": json.RawMessage(t.scope), "turn": t.wire()})
 	}
+	// A staged conversation reply not yet delivered is listed as delivery
+	// work, as execution's own work.pending lists it.
+	staged, err := u.QueryContext(ctx, `SELECT p.turn_id, p.step_index, p.proposal_id, p.normalized_proposal
+		FROM execution_proposals p JOIN execution_turns t ON t.id = p.turn_id
+		WHERE p.state = 'prepared' AND t.state <> 'completed' ORDER BY p.created_at`)
+	if err != nil {
+		return nil, err
+	}
+	type stagedRow struct {
+		turn, proposal, normalized string
+		step                       int64
+	}
+	var deliveries []stagedRow
+	for staged.Next() {
+		var r stagedRow
+		if err := staged.Scan(&r.turn, &r.step, &r.proposal, &r.normalized); err != nil {
+			_ = staged.Close()
+			return nil, err
+		}
+		deliveries = append(deliveries, r)
+	}
+	if err := staged.Close(); err != nil {
+		return nil, err
+	}
+	for _, r := range deliveries {
+		var np struct {
+			Kind      string `json:"kind"`
+			Operation string `json:"operation"`
+		}
+		if json.Unmarshal([]byte(r.normalized), &np) != nil || np.Kind != "reply" || np.Operation == "" {
+			continue
+		}
+		t, err := loadFxTurnByID(ctx, u, contract.ID(r.turn))
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, map[string]any{"id": r.turn, "kind": "delivery", "scope": json.RawMessage(t.scope), "turn": t.wire(),
+			"proposal_id": r.proposal, "step_index": r.step})
+	}
 	return map[string]any{"items": items}, nil
 }
 
@@ -567,9 +607,9 @@ func (f *fx) executionProposalRecord(ctx context.Context, u contract.Unit, input
 	}
 	var turnID string
 	var stepIndex int64
-	var state string
-	err := u.QueryRowContext(ctx, `SELECT turn_id, step_index, state FROM execution_proposals WHERE proposal_id = ?`, in.ProposalID).
-		Scan(&turnID, &stepIndex, &state)
+	var state, normalized string
+	err := u.QueryRowContext(ctx, `SELECT turn_id, step_index, state, normalized_proposal FROM execution_proposals WHERE proposal_id = ?`, in.ProposalID).
+		Scan(&turnID, &stepIndex, &state, &normalized)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, fxFault(contract.CodeNotFound, "proposal does not exist")
 	}
@@ -595,6 +635,12 @@ func (f *fx) executionProposalRecord(ctx context.Context, u contract.Unit, input
 	}
 	t.stepsUsed++
 	t.state = "claimed"
+	var kind struct {
+		Kind string `json:"kind"`
+	}
+	if json.Unmarshal([]byte(normalized), &kind) == nil && kind.Kind == "reply" {
+		t.state = "completed"
+	}
 	if err := t.save(ctx, u); err != nil {
 		return nil, err
 	}
@@ -678,6 +724,35 @@ func (f *fx) executionVerificationRecord(ctx context.Context, u contract.Unit, i
 }
 
 // ---- verifier / worker operator ----
+
+// recordingOperator is a contract.WorkerOperator that records each worker
+// request and answers with a fixed command, or fails with err.
+type recordingOperator struct {
+	mu        sync.Mutex
+	requests  []contract.WorkerRequest
+	err       error
+	failFirst int // transient failures before the first success
+}
+
+func (o *recordingOperator) ExecuteWorker(_ context.Context, req contract.WorkerRequest) (contract.Result, error) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.requests = append(o.requests, req)
+	if o.failFirst > 0 {
+		o.failFirst--
+		return contract.Result{}, &contract.Fault{Code: contract.CodeControllerUnavailable, Message: "transient failure", Retryable: true}
+	}
+	if o.err != nil {
+		return contract.Result{}, o.err
+	}
+	return contract.Result{CommandID: contract.NewID()}, nil
+}
+
+func (o *recordingOperator) calls() []contract.WorkerRequest {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return append([]contract.WorkerRequest(nil), o.requests...)
+}
 
 // fakeVerifier independently establishes a controlled, always-"passed"
 // verification outcome by echoing the identifiers a real trusted verifier

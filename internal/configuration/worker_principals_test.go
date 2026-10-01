@@ -39,5 +39,5 @@ func TestBootstrapAndBackfillRegisterWorkerPrincipals(t *testing.T) {
 	}
 
 	other := contract.NewID()
-	env.expectFault("_configuration.worker.principals.sync", workerPrincipalsSyncIn{InstallationID: other}, contract.CodePermissionDenied)
+	_ = env.expectFault("_configuration.worker.principals.sync", workerPrincipalsSyncIn{InstallationID: other}, contract.CodePermissionDenied)
 }

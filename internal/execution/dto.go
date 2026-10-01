@@ -398,6 +398,10 @@ type wireWorkItem struct {
 	Scope contract.Scope `json:"scope"`
 	Turn  wireWorkerTurn `json:"turn"`
 	RunID contract.ID    `json:"run_id,omitempty"`
+	// ProposalID and StepIndex name the staged conversation reply a
+	// "delivery" item asks the controller to deliver.
+	ProposalID string `json:"proposal_id,omitempty"`
+	StepIndex  *int64 `json:"step_index,omitempty"`
 }
 
 // wireArtifactLocator mirrors Adapter_ArtifactLocator: kind "artifact" names

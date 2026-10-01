@@ -1,0 +1,17 @@
+{
+  "description": "Placeholder vendored ferro extension scripts, re-vendored from the pinned ferro v0.2.0 module by T8.5.",
+  "ferro_ref": "59178db",
+  "source": "github.com/sirerun/ferro, extension/ directory",
+  "files": {
+    "adapter.js": {
+      "sha256": "6167b0a5f89867b544410431cddb46a0cf5a3afb66fa7232ed58f0ca9ba1fe2c",
+      "bytes": 20333,
+      "note": "Byte-for-byte from ferro 59178db except one header-comment line scrubbed of a local filesystem path; executable code is unmodified."
+    },
+    "content.js": {
+      "sha256": "bef447e1f33011922181e73ac47adb5768f9ae75a1b920250fbca636378d3e78",
+      "bytes": 1866,
+      "note": "Byte-for-byte from ferro 59178db."
+    }
+  }
+}
