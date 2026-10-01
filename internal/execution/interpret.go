@@ -64,9 +64,10 @@ type wireModelToolProposal struct {
 type normalizedProposal struct {
 	Kind string `json:"kind"` // reply | clarify | report_outputs | cycle_decision | local_operation | external_tool | refused
 
-	Text     string                  `json:"text,omitempty"`     // reply
-	Question string                  `json:"question,omitempty"` // clarify
-	Bindings []reportBindingProposal `json:"bindings,omitempty"` // report_outputs
+	Text      string                  `json:"text,omitempty"`       // reply
+	MessageID contract.ID             `json:"message_id,omitempty"` // reply delivered into the turn's conversation
+	Question  string                  `json:"question,omitempty"`   // clarify
+	Bindings  []reportBindingProposal `json:"bindings,omitempty"`   // report_outputs
 
 	Decision string `json:"decision,omitempty"`  // cycle_decision
 	Reason   string `json:"reason,omitempty"`    // cycle_decision / refused explanation
@@ -104,11 +105,8 @@ const (
 // tool.id is matched against the identical, independently recomputed set --
 // never trusted merely because the model asserts a name.
 func localDecisionToolID(id contract.ID) string {
-	for _, name := range []string{
-		contract.LocalDecisionToolReply, contract.LocalDecisionToolClarify,
-		contract.LocalDecisionToolReportOutputs, contract.LocalDecisionToolCycleDecision,
-	} {
-		if uuidFromDigest(sha256Hex([]byte("zatiti.local-decision-tool/"+name))) == id {
+	for _, name := range contract.LocalDecisionToolNames() {
+		if contract.LocalDecisionToolID(name) == id {
 			return name
 		}
 	}
@@ -401,7 +399,9 @@ func dispositionFor(np normalizedProposal, state string) stepDisposition {
 	d := stepDisposition{kind: np.Kind, completed: state == "recorded"}
 	switch np.Kind {
 	case "reply":
-		d.terminal = true
+		// A conversation reply stays prepared until it is delivered as the
+		// worker's message; only a recorded reply ends the turn.
+		d.terminal = state == "recorded"
 	case "clarify":
 		d.waiting = waitingClarification
 	case "report_outputs":
@@ -523,6 +523,20 @@ func (s *Service) interpretLocalDecision(ctx context.Context, unit contract.Unit
 			return stepDisposition{}, err
 		}
 		np := normalizedProposal{Kind: "reply", Text: decoded.Text}
+		if turn.ConversationID != "" {
+			// One step delivers at most one conversation reply: a second
+			// would post a second message and then fail to record against
+			// the turn the first one completed.
+			staged, err := hasStagedReplyDelivery(ctx, unit, turn.ID, base.StepIndex)
+			if err != nil {
+				return stepDisposition{}, err
+			}
+			if staged {
+				return s.recordRefused(ctx, unit, base, refusalMalformedProposal,
+					"a model step may deliver only one conversation reply")
+			}
+			return s.prepareReplyDelivery(ctx, unit, turn, base, np)
+		}
 		return s.recordInline(ctx, unit, base, np)
 
 	case contract.LocalDecisionToolClarify:
@@ -915,4 +929,45 @@ func validateMCPProposal(comp *contextComponent, conn wireConnection, tool wireT
 		return fmt.Errorf("MCP classification is not restricted")
 	}
 	return nil
+}
+
+// replyDeliveryOperation is the ordinary public operation a conversation
+// reply is delivered through, under the worker's own authority.
+const replyDeliveryOperation = "conversation.message.send"
+
+// prepareReplyDelivery stages a reply in a conversation-bound turn for
+// delivery as the worker's durable message. Execution cannot send it
+// itself: delivery is a governed disclosure that must run under the
+// worker's own authenticated actor (contract.WorkerOperator, outside any
+// Unit), never under the controller's administrative identity. The exact
+// conversation.message.send request is staged here and the proposal left
+// prepared; the caller performs it and reports back through
+// _execution.proposal.record, which completes the turn. The message id is
+// derived from the proposal key (turn, step, proposal id) and the caller's
+// submission key from the proposal, so a retried delivery replays instead
+// of posting twice.
+func (s *Service) prepareReplyDelivery(ctx context.Context, unit contract.Unit, turn *turnRow, base *proposalRow, np normalizedProposal) (stepDisposition, error) {
+	messageID := uuidFromDigest(sha256Hex([]byte(fmt.Sprintf("zatiti.reply-message/%s/%d/%s", turn.ID, base.StepIndex, base.ProposalID))))
+	scope := contract.Scope{InstallationID: turn.Scope.InstallationID, OrganizationID: turn.Scope.OrganizationID, ProjectID: turn.Scope.ProjectID}
+	input, err := json.Marshal(map[string]any{
+		"scope": scope, "conversation_id": turn.ConversationID, "message_id": messageID,
+		"body": np.Text, "attachments": []wireArtifactRef{}, "task_ids": []contract.ID{},
+	})
+	if err != nil {
+		return stepDisposition{}, err
+	}
+	np.MessageID = messageID
+	np.Operation = replyDeliveryOperation
+	np.OperationVersion = 1
+	np.Input = input
+	raw, err := json.Marshal(np)
+	if err != nil {
+		return stepDisposition{}, err
+	}
+	base.NormalizedProposal = raw
+	base.State = "prepared"
+	if err := insertProposal(ctx, unit, base); err != nil {
+		return stepDisposition{}, err
+	}
+	return stepDisposition{kind: "reply", completed: false}, nil
 }

@@ -1,5 +1,5 @@
 {
-  "revision": 20,
+  "revision": 21,
   "$defs": {
     "Scope": {
       "type": "object",
@@ -10073,7 +10073,8 @@
             "claim",
             "context",
             "proposal",
-            "resume"
+            "resume",
+            "delivery"
           ]
         },
         "scope": {
@@ -10085,6 +10086,15 @@
         "run_id": {
           "type": "string",
           "format": "uuid"
+        },
+        "proposal_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "step_index": {
+          "type": "integer",
+          "minimum": 0
         }
       },
       "required": [
@@ -30092,7 +30102,7 @@
           "items"
         ]
       },
-      "behavior": "Bounded scan of typed claim/context/proposal/resume work items, including ready hosted runs and safely waiting turns; excludes cooperative auto-claims, which continue to use the public run.claim path.",
+      "behavior": "Bounded scan of typed claim/context/proposal/resume/delivery work items (delivery names a staged conversation reply not yet delivered, by proposal_id and step_index), including ready hosted runs and safely waiting turns; excludes cooperative auto-claims, which continue to use the public run.claim path.",
       "cli": [],
       "mcp": null,
       "submission_key": false,

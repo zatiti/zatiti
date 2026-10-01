@@ -633,7 +633,7 @@ func localDecisionTools() []wireContextTool {
 	}
 	out := make([]wireContextTool, 0, len(specs))
 	for _, spec := range specs {
-		id := uuidFromDigest(sha256Hex([]byte("zatiti.local-decision-tool/" + spec.name)))
+		id := contract.LocalDecisionToolID(spec.name)
 		digest := sha256Hex(spec.schema)
 		out = append(out, wireContextTool{
 			Tool:         wireRef{ID: id, Version: 1},

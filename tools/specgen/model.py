@@ -3,7 +3,7 @@ from copy import deepcopy
 
 # Specification revision. Bump with every coordinated contract revision; the renderer
 # refuses to render unless contracts.md names the same revision in its title.
-REVISION=20
+REVISION=21
 
 S={'type':'string','maxLength':8192}
 ID={'type':'string','format':'uuid'}
@@ -444,7 +444,7 @@ D['ProposalRecord']=obj(
     **{'command_id?':ID,'effect_operation_id?':ID,'result_artifact?':ref('ArtifactRef')})
 D['CallbackRoute']=obj(kind=enum('worker_turn','job','memory','skill','connection'),**{'turn_id?':ID,'step_index?':INT,'job_id?':ID})
 D['OperationAttempt']=obj(attempt_id=ID,generation=VER)
-D['WorkItem']=obj(id=ID,kind=enum('claim','context','proposal','resume'),scope=ref('Scope'),turn=ref('WorkerTurn'),**{'run_id?':ID})
+D['WorkItem']=obj(id=ID,kind=enum('claim','context','proposal','resume','delivery'),scope=ref('Scope'),turn=ref('WorkerTurn'),**{'run_id?':ID,'proposal_id?':{'type':'string','minLength':1,'maxLength':256},'step_index?':{'type':'integer','minimum':0}})
 D['ContextPlan']=obj(id=ID,turn_id=ID,expected_version=VER,generation=VER,scope=ref('Scope'),**{'attempt_id?':ID},refs=arr(ref('ArtifactRef')),configuration_revision=VER,byte_bound=INT,token_bound=INT,recipe=JSON)
 
 # Unique source identity (installation_id, source_kind, source_id, source_version,
@@ -454,7 +454,7 @@ D['ContextPlan']=obj(id=ID,turn_id=ID,expected_version=VER,generation=VER,scope=
 # unique (turn_id, step_index, proposal_id) is the proposal deduplication fence, and
 # the same key with different bytes is submission_conflict.
 internal('turn.admit','execution',obj(source=ref('TurnSource'),worker_id=ID,scope=ref('Scope'),requester_id=ID),one('WorkerTurn'),'Admit or return the existing WorkerTurn for its unique source identity; derive requester/limits from the durable source, never from asserted proposal fields. A message arriving during an active turn is admitted as a safe-boundary injection durably linked to that turn, never silently dropped or processed twice. One active decision stream per worker/task lane; different eligible workers may run concurrently within aggregate limits.',['controller','scheduling'])
-internal('work.pending','execution',obj(limit={'type':'integer','minimum':1,'maximum':100}),obj(items=arr(ref('WorkItem'),100)),'Bounded scan of typed claim/context/proposal/resume work items, including ready hosted runs and safely waiting turns; excludes cooperative auto-claims, which continue to use the public run.claim path.',['controller'],mode='query')
+internal('work.pending','execution',obj(limit={'type':'integer','minimum':1,'maximum':100}),obj(items=arr(ref('WorkItem'),100)),'Bounded scan of typed claim/context/proposal/resume/delivery work items (delivery names a staged conversation reply not yet delivered, by proposal_id and step_index), including ready hosted runs and safely waiting turns; excludes cooperative auto-claims, which continue to use the public run.claim path.',['controller'],mode='query')
 internal('work.claim','execution',obj(work_id=ID,expected_version=VER,generation=VER),obj(item=ref('WorkItem'),claim_token=S,version=VER),'Return the immutable work item plus a claim token/version; a retry against the same key inspects and returns the same claim rather than creating a second one.',['controller'])
 internal('context.prepare','execution',obj(turn_id=ID,expected_version=VER,generation=VER),one('ContextPlan'),'Build a versioned immutable context plan naming exact authorized refs, versions and byte/token bounds inside the transaction; no IO, no provider call and no bytes read here.',['controller'])
 internal('context.commit','execution',obj(plan_id=ID,expected_version=VER,generation=VER,staged_context=ref('Adapter_ArtifactLocator')),one('WorkerTurn'),'Publish the plan bytes/metadata and commit the pinned context after rechecking generation, referenced versions and current authority. A stale plan is discarded and rebuilt without spending or sending.',['controller'])
