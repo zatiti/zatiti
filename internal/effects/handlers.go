@@ -983,6 +983,27 @@ func (s *Service) handleClaim(ctx context.Context, unit contract.Unit, in claimI
 	if action.ExpiresAt.Before(now) {
 		return contract.Outcome[dispatchResourceBody]{}, conflict("action of operation %s expired before dispatch", o.ID)
 	}
+	policy, err := s.policyDecision(ctx, unit, action.Scope, action)
+	if err != nil {
+		return contract.Outcome[dispatchResourceBody]{}, err
+	}
+	switch policy.Decision {
+	case policyAllow:
+	case policyDeny:
+		return contract.Outcome[dispatchResourceBody]{}, permissionDenied("current policy no longer authorizes operation %s", o.ID)
+	case policyPrerequisiteMissing:
+		return contract.Outcome[dispatchResourceBody]{}, prerequisiteMissing("current policy refuses dispatch of operation %s: %s", o.ID, strings.Join(policy.Reasons, "; "))
+	case policyReview:
+		review, err := s.reviewsCheck(ctx, unit, reviewsCheckInput{Scope: action.Scope, ActionDigest: o.ActionDigest})
+		if err != nil {
+			return contract.Outcome[dispatchResourceBody]{}, err
+		}
+		if !review.Eligible || review.Decision == nil || review.Decision.Decision != decisionApprove || review.Decision.ActionDigest != o.ActionDigest {
+			return contract.Outcome[dispatchResourceBody]{}, reviewRequired("current exact review for action %s is not satisfied", o.ActionDigest)
+		}
+	default:
+		return contract.Outcome[dispatchResourceBody]{}, permissionDenied("current policy has no recognized authorization for operation %s", o.ID)
+	}
 	_, currentConnection, err := s.resolveDispatch(ctx, unit, o.ID, storedAction, action)
 	if err != nil {
 		return contract.Outcome[dispatchResourceBody]{}, err
