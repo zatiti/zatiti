@@ -1,6 +1,6 @@
 # Implementation assignment: `internal/storage`
 
-Generated specification revision 22; source digest `66eae0e086992264b290e76d93a706ca46ed38ee2b8c78847f51d4e9a6c94a37`. This file is committed implementation context. Do not independently edit it. Everything required from the product specification and adjacent interfaces is embedded below; no RFC copy is required.
+Generated specification revision 22; source digest `ed63f2e561d1e38f6849eccad54f2f3c2d5c27ac9174730f5095b0fb826a1e00`. This file is committed implementation context. Do not independently edit it. Everything required from the product specification and adjacent interfaces is embedded below; no RFC copy is required.
 
 ## Mission and scope
 
@@ -521,7 +521,6 @@ A message-triggered `WorkerTurn` is bound at admission, in the same transaction 
 ## Revision 22 — worker identity principals
 
 Revision 22 registers configured workers as identity principals so `contract.WorkerOperator` can resolve a worker's own actor. Identity's `_identity.activate` now handles worker changes routed with a configuration candidate: create or update registers or moves the worker principal, and archive or delete revokes it with its grants. The new internal `_identity.worker.sync` (caller: configuration) performs the same idempotent registration for the bootstrap chief and for backfill; `_configuration.worker.principals.sync` (caller: controller) passes every configured worker to it once per controller session so existing installations gain principals. A worker principal's id equals its worker id. It records the worker's organization and holds exactly one standing, installation-scoped, non-delegable allow grant (organization-scoped grants would not cover installation-scoped conversations such as the owner's chat with the chief) whose capabilities are the frozen worker-visible local operation allowlist plus `messaging.disclosure.deliver` (which every message send asks policy for), now declared once as `contract.WorkerVisibleOperations` and used by both the application executor and identity. No caller supplies or widens that grant, sync never re-grants an existing principal or reactivates a revoked one, and the owner can still narrow or revoke it through ordinary identity operations, and policy, task scope and tool bindings continue to gate every call.
-
 
 ## Owned product requirements
 
