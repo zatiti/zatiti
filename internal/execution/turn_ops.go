@@ -2,6 +2,7 @@ package execution
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 
 	"github.com/zatiti/zatiti/internal/contract"
@@ -215,12 +216,28 @@ func (s *Service) handleTurnAdmit(ctx context.Context, unit contract.Unit, in tu
 		return contract.Outcome[turnBody]{}, err
 	}
 	if in.Source.Kind == "message" {
-		if _, err := s.callPeer(ctx, unit, peerMessagingProcessed, map[string]any{
+		data, err := s.callPeer(ctx, unit, peerMessagingProcessed, map[string]any{
 			"message_id":   in.Source.SourceID,
 			"recipient_id": in.WorkerID,
 			"turn_id":      t.ID,
-		}); err != nil {
+		})
+		if err != nil {
 			return contract.Outcome[turnBody]{}, err
+		}
+		// A message-triggered turn answers in the triggering message's
+		// conversation: bind it at admission, in this same transaction, so
+		// context assembly reads that conversation's authorized history and
+		// a recorded reply is delivered back into it.
+		if t.ConversationID == "" && len(data) > 0 {
+			processed, err := decodeResource[wireMessage]("messaging", data)
+			if err != nil {
+				return contract.Outcome[turnBody]{}, err
+			}
+			if processed.ConversationID != "" {
+				if err := bindTurnConversation(ctx, unit, t, processed.ConversationID); err != nil {
+					return contract.Outcome[turnBody]{}, err
+				}
+			}
 		}
 	}
 	return completedOutcome(turnBody{Resource: turnOut(t)})
@@ -291,6 +308,27 @@ func (s *Service) handleWorkPending(ctx context.Context, unit contract.Unit, in 
 		}
 		for _, t := range awaitingProposal {
 			items = append(items, workItemOut("proposal", t))
+		}
+	}
+
+	// A staged conversation reply whose delivery failed or was interrupted
+	// is listed again, so the controller retries the same idempotent
+	// delivery instead of the reply being lost.
+	remaining = in.Limit - int64(len(items))
+	if remaining > 0 {
+		staged, err := listStagedReplyDeliveries(ctx, unit, installation, remaining)
+		if err != nil {
+			return contract.Outcome[workPendingBody]{}, err
+		}
+		for _, p := range staged {
+			t, err := loadTurn(ctx, unit, p.TurnID)
+			if err != nil {
+				return contract.Outcome[workPendingBody]{}, err
+			}
+			item := workItemOut("delivery", t)
+			step := p.StepIndex
+			item.ProposalID, item.StepIndex = p.ProposalID, &step
+			items = append(items, item)
 		}
 	}
 
@@ -783,8 +821,16 @@ func (s *Service) handleProposalRecord(ctx context.Context, unit contract.Unit, 
 	// this handler in production; a direct test call (as P14's own fixtures
 	// do) keeps the original unconditional transition unchanged.
 	t.State = "proposal_pending"
-	if kind := normalizedProposalKind(p.NormalizedProposal); kind == "local_operation" || kind == "external_tool" {
+	switch normalizedProposalKind(p.NormalizedProposal) {
+	case "local_operation", "external_tool":
 		t.State = "claimed"
+	case "reply":
+		// A conversation reply is left prepared only for its delivery as
+		// the worker's message; once that delivery is recorded it is the
+		// turn's final answer, exactly as an inline-recorded reply is.
+		if stagedReplyDelivery(p.NormalizedProposal) {
+			t.State = "completed"
+		}
 	}
 	t.UpdatedAt = now
 	if t.Limits.ModelSteps > 0 && t.StepsUsed >= t.Limits.ModelSteps {
@@ -796,6 +842,13 @@ func (s *Service) handleProposalRecord(ctx context.Context, unit contract.Unit, 
 		return contract.Outcome[turnBody]{}, err
 	}
 	return completedOutcome(turnBody{Resource: turnOut(t)})
+}
+
+// stagedReplyDelivery reports whether a normalized reply was staged for
+// delivery into a conversation (prepareReplyDelivery).
+func stagedReplyDelivery(raw json.RawMessage) bool {
+	var np normalizedProposal
+	return json.Unmarshal(raw, &np) == nil && np.Kind == "reply" && np.Operation == replyDeliveryOperation && np.MessageID != ""
 }
 
 // artifactRefEqual reports whether two optional artifact refs name the same

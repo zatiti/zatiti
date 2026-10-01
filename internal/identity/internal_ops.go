@@ -17,9 +17,15 @@ import (
 // identity owns no draftable kind so they perform no live changes).
 
 func (s *Service) activate(ctx context.Context, unit contract.Unit, in candidateInput) (contract.Payload, error) {
-	// Identity owns no compiler-draftable kind: activation of any candidate
-	// changes nothing in this domain, so the version list is empty.
-	return completed(versionsOut{Versions: []refOut{}})
+	// Identity owns no compiler-draftable kind, but a worker definition in
+	// the candidate carries its principal (revision 21): creating or
+	// updating a worker registers or moves that principal, archiving or
+	// deleting it revokes the principal, inside this same transaction.
+	versions, err := s.activateWorkerChanges(ctx, unit, in.Candidate)
+	if err != nil {
+		return contract.Payload{}, err
+	}
+	return completed(versionsOut{Versions: versions})
 }
 
 func (s *Service) validate(ctx context.Context, unit contract.Unit, in candidateInput) (contract.Payload, error) {

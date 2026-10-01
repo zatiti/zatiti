@@ -404,6 +404,16 @@ func (s *Service) stageOperation(ctx context.Context, unit contract.Unit, scope 
 			return nil, err
 		}
 		if existing != nil {
+			var priorActor contract.Actor
+			if existing.SubjectJSON == "" {
+				return nil, prerequisiteMissing("operation lacks a persisted authorization subject")
+			}
+			if err := json.Unmarshal([]byte(existing.SubjectJSON), &priorActor); err != nil {
+				return nil, err
+			}
+			if priorActor != unit.Actor() {
+				return nil, submissionConflict("source identity is bound to a different authorization subject")
+			}
 			if existing.ActionDigest != string(a.Digest) {
 				return nil, submissionConflict("source identity %s is already bound to action digest %s",
 					sourceKey, existing.ActionDigest)
@@ -419,7 +429,12 @@ func (s *Service) stageOperation(ctx context.Context, unit contract.Unit, scope 
 		}
 		routeJSON = string(raw)
 	}
+	subjectJSON, err := json.Marshal(unit.Actor())
+	if err != nil {
+		return nil, err
+	}
 	o := &operationRow{
+		SubjectJSON:              string(subjectJSON),
 		ID:                       s.deps.IDs.New(),
 		Version:                  1,
 		InstallID:                scope.InstallationID,
@@ -602,7 +617,14 @@ func actionModel(action wireAction) string {
 // before it is persisted alongside the action (P00-006): a route naming a
 // turn or job other than this effect's own source is refused outright.
 func (s *Service) handlePrepare(ctx context.Context, unit contract.Unit, in prepareInput) (contract.Outcome[operationResourceBody], error) {
-	if err := validateCallbackRoute(in.CallbackRoute, in.SourceID); err != nil {
+	// Application resolves worker authority from the persisted turn before
+	// execution enters this handler. SourceID identifies the individual
+	// effect; the callback names its turn, which can contain several effects.
+	routeSource := in.SourceID
+	if in.CallbackRoute != nil && in.CallbackRoute.Kind == "worker_turn" && in.CallbackRoute.TurnID != nil && unit.Actor().Kind == contract.KindWorker && unit.Actor().PrincipalID == in.Scope.WorkerID {
+		routeSource = *in.CallbackRoute.TurnID
+	}
+	if err := validateCallbackRoute(in.CallbackRoute, routeSource); err != nil {
 		return contract.Outcome[operationResourceBody]{}, err
 	}
 	o, err := s.stageOperation(ctx, unit, in.Scope, in.Action, string(in.SourceID), "", "", in.CallbackRoute, in.QualificationID)

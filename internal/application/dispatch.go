@@ -191,6 +191,20 @@ func (a *Application) Internal(ctx context.Context, actor contract.Actor, scope 
 			if err := a.revalidateAuthority(wctx, u, actor, scope); err != nil {
 				return err
 			}
+			subjectOwner := ""
+			if effectAdmission(desc.ID) {
+				subjectOwner = "effects"
+			}
+			if desc.ID == "_execution.context.prepare" || desc.ID == "_execution.context.commit" || desc.ID == "_execution.turn.observation" {
+				subjectOwner = "execution"
+			}
+			if subjectOwner != "" {
+				var subjectErr error
+				wctx, u, subjectErr = a.effectSubject(wctx, u, subjectOwner, invocation)
+				if subjectErr != nil {
+					return subjectErr
+				}
+			}
 			p, hErr := handler(wctx, u, invocation)
 			if hErr != nil {
 				return hErr
@@ -310,6 +324,20 @@ func (a *Application) dispatchNested(ctx context.Context, unit contract.Unit, ca
 	wctx := withState(ctx, &dispatchState{chain: next, unit: unit})
 	invocation.Version = version
 	invocation.Operation = desc.ID
+	subjectOwner := ""
+	if desc.ID == "_effects.prepare" && caller == "execution" {
+		subjectOwner = "execution"
+	}
+	if effectAdmission(desc.ID) {
+		subjectOwner = "effects"
+	}
+	if subjectOwner != "" {
+		var subjectErr error
+		wctx, unit, subjectErr = a.effectSubject(wctx, unit, subjectOwner, invocation)
+		if subjectErr != nil {
+			return contract.Payload{}, subjectErr
+		}
+	}
 	return handler(wctx, unit, invocation)
 }
 

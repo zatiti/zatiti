@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -16,77 +17,7 @@ import (
 	"github.com/zatiti/zatiti/internal/contract"
 )
 
-// This file is P46 item 1's Responses-adapter half ("the actual controller,
-// Responses adapter pointed at a controlled provider") and item 2's honest
-// account of the hosted half of "message-to-chief-to-task-to-tool-to-
-// output-to-verification-to-reply": it proves the real controller really
-// dispatches the real internal/adapters/responses adapter's two-effect
-// prepare_session/model_step split against a controlled provider server --
-// a genuine physical TLS round trip, not a handler-only shortcut -- and
-// then documents, with a passing test asserting the CURRENT correct
-// behavior rather than a fabricated success, exactly where production code
-// honestly stops today.
-//
-// Four production gaps once made "the model decides autonomously and
-// replies" unreachable through real code on this tree. Gap 0 -- the
-// connections validation probe never being driven -- is CLOSED on this
-// branch (see the change note below); gaps 1-3 are owned by the separate
-// reply-delivery change and are described here as the remaining ceiling:
-//
-//  0. CLOSED: connection.validate's job used to carry no operation_id and
-//     internal/connections implemented no contract.LocalJobRunner, so the
-//     job was never claimed and no connection ever left validation_state
-//     "unverified". connection.validate now admits its probe as a governed
-//     effect (createGovernedProbe), whose linked job carries the operation
-//     identity; the controller dispatches it through the ordinary effect
-//     path and _connections.validation.record completes the job. See
-//     TestConnectionValidateProbeMakesTheConnectionValid below.
-//  1. internal/adapters/responses/interpret.go's interpret() (the 2xx
-//     decoded-response branch) never converts a decoded tool_calls entry
-//     into a typed wireModelToolProposal -- it only flags
-//     "tool_proposal_mapping_unspecified" and returns (interpret.go:159-
-//     167); evidence.go:197-198 defaults ModelOutput.tool_proposals to an
-//     empty slice whenever nothing set it, which is always. The adapter's
-//     own comment names the reason: ModelToolProposal requires
-//     operation_id/operation_version and "neither the action nor
-//     ContextToolDefinition carries that mapping, so this package has no
-//     honest source for them" -- a real contract gap, not a bug this
-//     package could quietly patch.
-//  2. internal/execution/interpret.go's interpretTurnObservation refuses
-//     invalid_input the instant it sees output.ToolProposals is empty
-//     (interpret.go:169-178: "a hosted turn cannot progress on text alone"),
-//     for EVERY disposition including a plain text-only reply. Given (1)
-//     always empties tool_proposals, every real hosted model_step
-//     observation is refused at this exact point today, regardless of task-
-//     vs-message-triggered and regardless of what the model said.
-//  3. Separately and even earlier in the pipeline: a message/responsibility-
-//     triggered turn is never given an AttemptID (only a task-triggered
-//     turn gets one, via _execution.enqueue's automatic turn admission --
-//     internal/execution/turn_ops.go's autoClaimHostedRun), and
-//     dispatchModelEffect's own model_step dispatch is gated on
-//     t.AttemptID != "" (turn_ops.go:571). So a bare chat message to a
-//     hosted worker never even reaches a physical call: the controller
-//     correctly declines to dispatch into a dead end rather than
-//     fabricating an attempt. This is already logged (docs/roadmap.md,
-//     2026-09-21, P16/P22 landing notes: "a bare chat/responsibility turn
-//     ... has no schema-valid path to receive a ModelOutput today").
-//
-// TestConnectionValidateProbeMakesTheConnectionValid proves gap 0 is
-// closed: the governed probe really runs, exactly one physical prepare_
-// session call reaches the controlled provider, and the connection becomes
-// valid with a freshness bound.
-// TestHostedMessageTurnGetsPastConnectionResolution proves the consequence:
-// a chat message's turn is no longer refused at connection resolution; it
-// now stops at the context-build gap the reply-delivery change owns. TestResponsesAdapterDispatches
-// PrepareSessionAndModelStepAgainstControlledProvider proves, independent
-// of gap 0 (it calls Adapter.Invoke directly, bypassing connections
-// entirely), that the adapter itself genuinely completes two real physical
-// calls against a controlled provider -- the proof that gaps 1/2 are real
-// adapter/execution-layer gaps, not an artifact of this fixture's own
-// wiring being broken. None of these tests work around any gap with
-// test-side production code; each asserts the CURRENT correct behavior,
-// exactly as this card's restore-protocol section requires for that
-// separate, already-known gap.
+// Hosted adapter and governed connection-validation integration tests.
 
 // openaiProtocolRevision is internal/adapters/responses/openai.go's
 // unexported constant naming the one qualified wire protocol revision this
@@ -175,6 +106,14 @@ func (s *openaiProviderServer) handle(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case strings.HasSuffix(r.URL.Path, "/conversations"):
 		body = fmt.Sprintf(`{"id":"conv_%s","object":"conversation"}`, strings.ReplaceAll(string(contract.NewID()), "-", ""))
+	case strings.HasSuffix(r.URL.Path, "/responses") && requestDeclaresReplyTool(r):
+		// A context that offers the sealed reply decision tool gets the
+		// model's answer through it, exactly as a hosted worker replies.
+		body = fmt.Sprintf(`{"id":"resp_%s","object":"response","status":"completed",`+
+			`"output":[{"type":"function_call","id":"fc_1","call_id":"call_reply_1","name":"reply","status":"completed",`+
+			`"arguments":"{\"text\":\"acknowledged\"}"}],`+
+			`"usage":{"input_tokens":12,"output_tokens":4,"total_tokens":16}}`,
+			strings.ReplaceAll(string(contract.NewID()), "-", ""))
 	case strings.HasSuffix(r.URL.Path, "/responses"):
 		body = fmt.Sprintf(`{"id":"resp_%s","object":"response","status":"completed",`+
 			`"output":[{"type":"message","role":"assistant","status":"completed",`+
@@ -191,6 +130,29 @@ func (s *openaiProviderServer) handle(w http.ResponseWriter, r *http.Request) {
 		// that already failed mid-response.
 		return
 	}
+}
+
+// requestDeclaresReplyTool reports whether a model_step request offers the
+// sealed reply function tool.
+func requestDeclaresReplyTool(r *http.Request) bool {
+	raw, err := io.ReadAll(r.Body)
+	if err != nil {
+		return false
+	}
+	var req struct {
+		Tools []struct {
+			Name string `json:"name"`
+		} `json:"tools"`
+	}
+	if json.Unmarshal(raw, &req) != nil {
+		return false
+	}
+	for _, t := range req.Tools {
+		if t.Name == contract.LocalDecisionToolReply {
+			return true
+		}
+	}
+	return false
 }
 
 // profileDigestWithoutCapabilityEvidence reproduces internal/adapters/
@@ -333,10 +295,14 @@ func (cf *controllerFixture) wireHostedWorker(orgID contract.ID, key string) (wo
 	})
 	connID := f.findConnectionByAccount(account)
 
+	// Validation admits a governed prepare_session probe. The controller
+	// claims it and records the result before hosted dispatch can resolve
+	// this connection.
+
 	f.activate(key+"-binding", "binding.create", map[string]any{
 		"definition": map[string]any{
 			"scope": f.scope(), "kind": "tool", "target_id": modelResponsesToolID,
-			"permissions": []string{"invoke"}, "destinations": []string{},
+			"permissions": []string{"invoke", string(modelResponsesToolID)}, "destinations": []string{},
 		},
 	})
 	bindingID := f.findBindingByTarget(modelResponsesToolID)
@@ -349,6 +315,7 @@ func (cf *controllerFixture) wireHostedWorker(orgID contract.ID, key string) (wo
 			"profile": map[string]any{
 				"id": contract.NewID(), "version": 1,
 				"executor": "hosted", "model": "integration-test-model", "connection_id": connID,
+				"connection_version":   2,
 				"provider_destination": modelResponsesDomainDestination, "capabilities": []string{},
 				"cost_bound":     map[string]any{"currency": "USD", "micro_units": 1000000},
 				"classification": "internal", "context_capture": "complete",
@@ -360,14 +327,6 @@ func (cf *controllerFixture) wireHostedWorker(orgID contract.ID, key string) (wo
 			},
 		},
 	})
-	// connection.validate admits a governed prepare_session probe: the
-	// owner grants the controller exactly the model-responses capability
-	// for this destination and sets an installation budget through the
-	// normal reviewed lifecycles, then (last, because the probe action pins
-	// the configuration revision current when it is created) the controller admits, dispatches and
-	// records the probe like any other effect.
-	f.grantController(f.t, key, string(modelResponsesToolID), modelResponsesDomainDestination)
-	f.configureBudget(f.t, key)
 	f.must(f.owner, "connection.validate", key+"-validate", map[string]any{
 		"scope": f.scope(), "id": connID, "expected_version": 1,
 	})
@@ -468,57 +427,6 @@ func TestConnectionValidateProbeMakesTheConnectionValid(t *testing.T) {
 	}
 }
 
-// TestHostedMessageTurnGetsPastConnectionResolution: a chat message's turn
-// is no longer refused at connection resolution. On this tree the turn still
-// stops later, at context build, because a message-triggered turn carries no
-// conversation binding yet and its already-acknowledged message is no longer
-// in the pending inbox -- the conversation-bound-turns gap, owned by the
-// separate reply-delivery change. This test proves the connection blocker
-// this lane owns is gone: the validation probe really ran and the turn's
-// remaining fault names the inbox, never the unvalidated connection.
-func TestHostedMessageTurnGetsPastConnectionResolution(t *testing.T) {
-	t.Parallel()
-	f := newBootstrappedFixture(t)
-	provider := newOpenAIProviderServer(t)
-	adapter := buildResponsesAdapter(t, f, provider)
-	cf := attachController(t, f, controllerFixtureOptions{adapters: map[string]contract.Adapter{"responses": adapter}})
-
-	worker, connID := cf.wireHostedWorker(cf.mustRootOrg(t), "hosted-past-resolve")
-	waitFor(t, 20*time.Second, "the hosted worker's connection to become valid", func() bool {
-		status := f.must(f.owner, "connection.get", "", map[string]any{"scope": f.scope(), "id": connID})
-		return strings.Contains(string(status.Data), `"validation_state":"valid"`)
-	})
-
-	conv := f.must(f.owner, "conversation.create", "hosted-past-conv", map[string]any{
-		"scope": f.scope(), "kind": "direct", "participant_ids": []contract.ID{f.owner.PrincipalID, worker}, "title": "hosted chat",
-	})
-	var conversation struct {
-		Resource struct {
-			ID contract.ID `json:"id"`
-		} `json:"resource"`
-	}
-	decode(t, conv.Data, &conversation)
-	f.must(f.owner, "conversation.message.send", "hosted-past-msg", map[string]any{
-		"scope": f.scope(), "conversation_id": conversation.Resource.ID, "message_id": contract.NewID(),
-		"body": "hello, hosted worker", "attachments": []any{}, "task_ids": []contract.ID{},
-	})
-
-	waitFor(t, 30*time.Second, "the turn to stop at context build, never at connection resolution", func() bool {
-		fault := cf.ctl.Status().LastFault
-		if fault == nil {
-			return false
-		}
-		// The connection gate is gone: a fault about validation at this point
-		// would mean the blocker returned.
-		if strings.Contains(fault.Message, "has never been validated") ||
-			strings.Contains(fault.Message, "not validated for dispatch") {
-			t.Fatalf("turn still refused at connection resolution: %s", fault.Message)
-		}
-		return fault.Code == contract.CodePrerequisiteMissing &&
-			strings.Contains(fault.Message, "authorized inbox")
-	})
-}
-
 // mustRootOrg is f.rootOrganization's org half, named for callers here that
 // do not need the chief id.
 func (cf *controllerFixture) mustRootOrg(t testing.TB) contract.ID {
@@ -609,11 +517,208 @@ func TestResponsesAdapterDispatchesPrepareSessionAndModelStepAgainstControlledPr
 	if evidence.SessionHandle != prepareObs.ProviderReference {
 		t.Fatalf("model_step evidence session_handle %q, want the prepare_session handle %q", evidence.SessionHandle, prepareObs.ProviderReference)
 	}
-	// This is the exact, independently confirmed gap this file's top doc
-	// comment cites: a real completed response with real output carries no
-	// tool proposals, because the adapter has no honest operation_id/
-	// operation_version to mint one with.
+	// Bare model text is never a governed decision: with no tool call there
+	// is nothing to map, so the evidence carries no proposal.
 	if len(evidence.Output.ToolProposals) != 0 {
-		t.Fatalf("model_step evidence carries %d tool_proposals; the known adapter gap (interpret.go's tool_proposal_mapping_unspecified) appears to have closed -- update this test and hosted_turn_test.go's doc comment", len(evidence.Output.ToolProposals))
+		t.Fatalf("text-only model_step evidence carries %d tool_proposals, want 0", len(evidence.Output.ToolProposals))
 	}
 }
+
+// TestResponsesAdapterMapsSealedReplyCallToTypedProposal closes gap 1: the
+// real adapter, over a real TLS round trip to a controlled provider, turns
+// the model's call of the sealed reply decision tool -- declared in the
+// context exactly as execution's context builder declares it -- into one
+// typed ModelToolProposal bound to the context that was sent.
+func TestResponsesAdapterMapsSealedReplyCallToTypedProposal(t *testing.T) {
+	t.Parallel()
+	f := newBootstrappedFixture(t)
+	provider := newOpenAIProviderServer(t)
+	adapter := buildResponsesAdapter(t, f, provider)
+	credRef, err := f.secrets.Put(context.Background(), "integration/direct-adapter-reply-credential", []byte("fake-provider-api-key"))
+	if err != nil {
+		t.Fatalf("custody credential: %v", err)
+	}
+	replyID := contract.LocalDecisionToolID(contract.LocalDecisionToolReply)
+	replyTool := map[string]any{"id": replyID, "version": 1}
+	contextBody := mustJSON(map[string]any{
+		"schema": "zatiti.context/v1", "attempt_id": contract.NewID(),
+		"scope": map[string]any{"installation_id": f.installationID}, "configuration_revision": 1,
+		"worker":            map[string]any{"id": contract.NewID(), "version": 1},
+		"execution_profile": map[string]any{"id": contract.NewID(), "version": 1},
+		"skill_versions":    []any{}, "messages": []any{}, "source_artifacts": []any{},
+		"tools": []any{map[string]any{
+			"tool": replyTool, "name": contract.LocalDecisionToolReply,
+			"description": "sealed local decision tool: reply", "input_schema": json.RawMessage(contract.ReplyProposalSchema),
+			"output_schema": map[string]any{}, "effect": "local", "destinations": []string{},
+			"binding_id": replyID, "schema_digest": contract.Hash(contract.ReplyProposalSchema),
+		}},
+		"capture": "complete", "created_at": "2026-01-01T00:00:00Z",
+	})
+	contextArtifact := f.uploadArtifact("direct-adapter-reply-context", contextBody, "application/json")
+	stepObs, err := adapter.Invoke(context.Background(), contract.Dispatch{
+		OperationID: contract.NewID(), AttemptID: contract.NewID(), Generation: 1,
+		Adapter: "responses", CredentialRef: credRef, Deadline: f.clock.Now().Add(time.Minute),
+		Action: mustJSON(map[string]any{
+			"schema": "zatiti.responses.action/v1", "kind": "model_step", "session_handle": "conv_integration",
+			"context_artifact":  map[string]any{"id": contextArtifact.ID, "digest": contextArtifact.Digest},
+			"max_output_tokens": 128, "tool_contract_versions": []any{replyTool},
+		}),
+	})
+	if err != nil {
+		t.Fatalf("model_step Invoke: %v", err)
+	}
+	if stepObs.Disposition != "succeeded" || provider.callCount() != 1 {
+		t.Fatalf("disposition %q after %d calls: %s", stepObs.Disposition, provider.callCount(), stepObs.Evidence)
+	}
+	var evidence struct {
+		PhysicalCall struct {
+			ErrorCode string `json:"error_code"`
+		} `json:"physical_call"`
+		Output struct {
+			ToolProposals []struct {
+				ID               string          `json:"id"`
+				Tool             map[string]any  `json:"tool"`
+				OperationID      string          `json:"operation_id"`
+				OperationVersion int64           `json:"operation_version"`
+				Input            json.RawMessage `json:"input"`
+				SourceContext    struct {
+					ID     contract.ID     `json:"id"`
+					Digest contract.Digest `json:"digest"`
+				} `json:"source_context"`
+			} `json:"tool_proposals"`
+		} `json:"output"`
+	}
+	decode(t, stepObs.Evidence, &evidence)
+	if evidence.PhysicalCall.ErrorCode != "" || len(evidence.Output.ToolProposals) != 1 {
+		t.Fatalf("evidence = %s", stepObs.Evidence)
+	}
+	p := evidence.Output.ToolProposals[0]
+	if p.ID != "call_reply_1" || p.Tool["id"] != string(replyID) || p.OperationID != "zatiti.local-decision/reply" ||
+		p.OperationVersion != 1 || p.SourceContext.ID != contextArtifact.ID || string(p.SourceContext.Digest) != contextArtifact.Digest ||
+		string(p.Input) != `{"text":"acknowledged"}` {
+		t.Fatalf("proposal = %+v (input %s)", p, p.Input)
+	}
+}
+
+// TestWorkerReplyDeliveryUsesRegisteredWorkerPrincipal checks durable history under the worker actor.
+func TestWorkerReplyDeliveryUsesRegisteredWorkerPrincipal(t *testing.T) {
+	t.Parallel()
+	f := newBootstrappedFixture(t)
+	_, chief := f.rootOrganization()
+	conv := f.must(f.owner, "conversation.create", "reply-shape-conv", map[string]any{
+		"scope": f.scope(), "kind": "direct", "participant_ids": []contract.ID{f.owner.PrincipalID, chief}, "title": "reply",
+	})
+	var conversation struct {
+		Resource struct {
+			ID contract.ID `json:"id"`
+		} `json:"resource"`
+	}
+	decode(t, conv.Data, &conversation)
+	turnID, proposalID := contract.NewID(), "call_reply_1"
+	_, err := f.app.ExecuteWorker(context.Background(), contract.WorkerRequest{
+		TurnID: turnID, ProposalID: proposalID, WorkerID: chief,
+		Scope:     contract.Scope{InstallationID: f.installationID, WorkerID: chief},
+		Operation: "conversation.message.send", Version: 1,
+		Input: mustJSON(map[string]any{
+			"scope": f.scope(), "conversation_id": conversation.Resource.ID, "message_id": contract.NewID(),
+			"body": "acknowledged", "attachments": []any{}, "task_ids": []contract.ID{},
+		}),
+		SubmissionKey: "worker-turn/" + string(turnID) + "/" + proposalID,
+	})
+	if err != nil {
+		t.Fatalf("worker reply delivery: %v", err)
+	}
+	history := f.must(f.owner, "conversation.message.list", "", map[string]any{"scope": f.scope(), "conversation_id": conversation.Resource.ID})
+	var list struct {
+		Items []any `json:"items"`
+	}
+	decode(t, history.Data, &list)
+	if len(list.Items) != 1 {
+		t.Fatalf("owner history = %s, want one delivered worker reply", history.Data)
+	}
+}
+
+func TestHostedMessageReplyPersistsAsTheWorker(t *testing.T) {
+	t.Parallel()
+	f := newBootstrappedFixture(t)
+	provider := newOpenAIProviderServer(t)
+	adapter := buildResponsesAdapter(t, f, provider)
+	var performer contract.ContextPerformer
+	for _, module := range f.modules {
+		if p, ok := module.(contract.ContextPerformer); ok {
+			performer = p
+			break
+		}
+	}
+	if performer == nil {
+		t.Fatal("assembled execution owner has no context performer")
+	}
+	cf := attachController(t, f, controllerFixtureOptions{
+		adapters: map[string]contract.Adapter{"responses": adapter}, context: performer,
+	})
+	worker, connection := cf.wireHostedWorker(cf.mustRootOrg(t), "hosted-durable-reply")
+	t.Cleanup(func() {
+		if t.Failed() {
+			t.Logf("controller status: %+v; provider calls: %v", cf.ctl.Status(), provider.callPaths())
+			operations := f.must(f.owner, "operation.list", "", map[string]any{"scope": f.scope(), "limit": 100})
+			t.Logf("operations: %s", operations.Data)
+			var listed struct {
+				Items []struct {
+					Action json.RawMessage `json:"action"`
+				} `json:"items"`
+			}
+			decode(t, operations.Data, &listed)
+			for _, operation := range listed.Items {
+				policy := f.must(f.owner, "policy.explain", "", map[string]any{"scope": f.scope(), "action": operation.Action})
+				t.Logf("probe policy: %s", policy.Data)
+			}
+		}
+	})
+	waitFor(t, 20*time.Second, "governed connection validation", func() bool {
+		status := f.must(f.owner, "connection.get", "", map[string]any{"scope": f.scope(), "id": connection})
+		return strings.Contains(string(status.Data), `"validation_state":"valid"`)
+	})
+	conversation := f.directConversation("hosted-durable-conversation", f.owner.PrincipalID, worker)
+	f.must(f.owner, "conversation.message.send", "hosted-durable-request", map[string]any{
+		"scope": f.scope(), "conversation_id": conversation, "message_id": contract.NewID(),
+		"body": "hello, hosted worker", "attachments": []any{}, "task_ids": []contract.ID{},
+	})
+	waitFor(t, 30*time.Second, "the durable worker reply in owner history", func() bool {
+		bodies := f.messageBodies(conversation)
+		return len(bodies) == 2 && (bodies[0] == "acknowledged" || bodies[1] == "acknowledged")
+	})
+	history := f.must(f.owner, "conversation.message.list", "", map[string]any{"scope": f.scope(), "conversation_id": conversation})
+	var messages struct {
+		Items []struct {
+			Body     string      `json:"body"`
+			SenderID contract.ID `json:"sender_id"`
+		} `json:"items"`
+	}
+	decode(t, history.Data, &messages)
+	replies := 0
+	for _, message := range messages.Items {
+		if message.Body == "acknowledged" && message.SenderID == worker {
+			replies++
+		}
+	}
+	if len(messages.Items) != 2 || replies != 1 {
+		t.Fatalf("durable history = %s", history.Data)
+	}
+	// One validation probe and exactly one prepare/model pair. No tool
+	// effect or second model step may be invented to deliver the reply.
+	paths := provider.callPaths()
+	if len(paths) != 3 || !strings.HasSuffix(paths[0], "/conversations") || !strings.HasSuffix(paths[1], "/conversations") || !strings.HasSuffix(paths[2], "/responses") {
+		t.Fatalf("hosted reply physical calls = %v", paths)
+	}
+}
+
+// TestResponsesAdapterDispatchesPrepareSessionAndModelStepAgainstControlledProvider
+// (P46 item 1, the controller-independent half: "the actual ... Responses
+// adapter pointed at a controlled provider"): proves the real internal/
+// adapters/responses adapter, constructed through its exact public
+// constructor with no test seam, genuinely completes both physical calls
+// of the revision-3 prepare_session/model_step split against a controlled
+// provider server -- a real TLS round trip, real evidence, a real returned
+// session handle. Adapter.Invoke is called directly here, as the
+// controller's perform path calls it, without connection resolution or
+// execution admission.

@@ -1014,6 +1014,11 @@ func handleBootstrap(ctx context.Context, s *Service, unit contract.Unit, inv co
 	if err := insertWorker(ctx, unit, chief); err != nil {
 		return contract.Payload{}, err
 	}
+	// The chief is created outside the compiler, so its identity principal
+	// is registered here, in the same transaction (revision 21).
+	if _, err := s.syncWorkerPrincipals(ctx, unit, []*workerRow{chief}); err != nil {
+		return contract.Payload{}, err
+	}
 	if err := bumpHead(ctx, unit, 1); err != nil {
 		return contract.Payload{}, err
 	}

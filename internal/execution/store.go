@@ -1,6 +1,8 @@
 package execution
 
 import (
+	"strings"
+
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -1447,6 +1449,22 @@ func insertTurn(ctx context.Context, unit contract.Unit, t *turnRow) error {
 	return err
 }
 
+// bindTurnConversation records the conversation a freshly admitted
+// message-triggered turn answers in. It runs in the admission transaction
+// and only fills an empty binding; the binding never changes afterwards.
+func bindTurnConversation(ctx context.Context, unit contract.Unit, t *turnRow, conversation contract.ID) error {
+	res, err := unit.ExecContext(ctx, `UPDATE execution_turns SET conversation_id = ?
+		WHERE id = ? AND version = ? AND conversation_id = ''`, string(conversation), string(t.ID), t.Version)
+	if err != nil {
+		return err
+	}
+	if err := expectOneRow(res); err != nil {
+		return err
+	}
+	t.ConversationID = conversation
+	return nil
+}
+
 // updateTurn applies a version-fenced mutation to one worker turn.
 func updateTurn(ctx context.Context, unit contract.Unit, t *turnRow) error {
 	contextJSON, err := encodeJSON(t.ContextArtifact)
@@ -1804,6 +1822,62 @@ func listProposalsForTurn(ctx context.Context, unit contract.Unit, turnID contra
 		out = append(out, p)
 	}
 	return out, rows.Err()
+}
+
+// listStagedReplyDeliveries returns, oldest first, up to limit prepared
+// conversation replies (prepareReplyDelivery) whose turn still waits for
+// that delivery.
+func listStagedReplyDeliveries(ctx context.Context, unit contract.Unit, installation contract.ID, limit int64) ([]*proposalRow, error) {
+	rows, err := unit.QueryContext(ctx, `SELECT `+prefixedProposalColumns("p")+` FROM execution_proposals p
+		JOIN execution_turns t ON t.id = p.turn_id
+		WHERE p.installation_id = ? AND p.state = 'prepared' AND t.state = 'proposal_pending'
+		ORDER BY p.created_at ASC, p.id ASC`, string(installation))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []*proposalRow
+	for rows.Next() {
+		p, err := scanProposal(rows.Scan)
+		if err != nil {
+			return nil, err
+		}
+		if stagedReplyDelivery(p.NormalizedProposal) && int64(len(out)) < limit {
+			out = append(out, p)
+		}
+	}
+	return out, rows.Err()
+}
+
+// hasStagedReplyDelivery reports whether turnID holds a prepared conversation
+// reply, optionally restricted to one step (step < 0 means any step).
+func hasStagedReplyDelivery(ctx context.Context, unit contract.Unit, turnID contract.ID, step int64) (bool, error) {
+	rows, err := unit.QueryContext(ctx, `SELECT `+proposalColumns+` FROM execution_proposals
+		WHERE turn_id = ? AND state IN ('prepared','recorded') AND (? < 0 OR step_index = ?)`, string(turnID), step, step)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = rows.Close() }()
+	found := false
+	for rows.Next() {
+		p, err := scanProposal(rows.Scan)
+		if err != nil {
+			return false, err
+		}
+		if stagedReplyDelivery(p.NormalizedProposal) && (step >= 0 || p.State == "prepared") {
+			found = true
+		}
+	}
+	return found, rows.Err()
+}
+
+// prefixedProposalColumns qualifies proposalColumns with a table alias.
+func prefixedProposalColumns(alias string) string {
+	cols := strings.Split(proposalColumns, ",")
+	for i, c := range cols {
+		cols[i] = alias + "." + strings.TrimSpace(c)
+	}
+	return strings.Join(cols, ", ")
 }
 
 // insertTurnContextLineage records one source that fed a turn's committed

@@ -17,6 +17,9 @@ const (
 	workKindContext  = "context"
 	workKindProposal = "proposal"
 	workKindResume   = "resume"
+	// workKindDelivery names a staged conversation reply whose delivery
+	// failed or was interrupted; it carries the proposal to deliver.
+	workKindDelivery = "delivery"
 )
 
 // Normalized-proposal kinds (execution's own private record shape, read only
@@ -25,6 +28,7 @@ const (
 const (
 	proposalKindLocalOperation = "local_operation"
 	proposalKindExternalTool   = "external_tool"
+	proposalKindReply          = "reply"
 )
 
 type wireTurnSource struct {
@@ -80,6 +84,9 @@ type wireWorkItem struct {
 	Scope contract.Scope `json:"scope"`
 	Turn  wireWorkerTurn `json:"turn"`
 	RunID contract.ID    `json:"run_id,omitempty"`
+	// ProposalID and StepIndex name a delivery item's staged reply.
+	ProposalID string `json:"proposal_id,omitempty"`
+	StepIndex  *int64 `json:"step_index,omitempty"`
 }
 
 type wireContextPlan struct {

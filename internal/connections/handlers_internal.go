@@ -256,7 +256,7 @@ func handleResolve(ctx context.Context, s *Service, unit contract.Unit, inv cont
 	if !found || row.Scope.InstallationID != unit.Scope().InstallationID {
 		return contract.Payload{}, notFound("connection %s is unknown in this installation", in.Connection.ID)
 	}
-	if !scopeCovers(in.Scope.toContract(), row.Scope) {
+	if !scopeCovers(in.Scope.toContract(), row.Scope) && !scopeCovers(row.Scope, in.Scope.toContract()) {
 		return contract.Payload{}, notFound("connection %s is unknown in this scope", in.Connection.ID)
 	}
 	if row.ID != in.Connection.ID || row.Version != in.Connection.Version {

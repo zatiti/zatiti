@@ -155,6 +155,18 @@ func (c *Controller) driveWorkItems(ctx, workCtx context.Context, sess *session)
 				continue
 			}
 			c.advanceContext(ctx, workCtx, sess, item)
+		case workKindDelivery:
+			// Retry a staged conversation reply whose delivery failed or
+			// was interrupted. The delivery is idempotent (deterministic
+			// submission key and message id), and the item carries the
+			// turn's current version for the record fence.
+			if item.ProposalID == "" || item.StepIndex == nil {
+				continue
+			}
+			c.driveOneProposal(ctx, sess, turnRouteInfo{
+				TurnID: item.Turn.ID, StepIndex: *item.StepIndex, Version: item.Turn.Version,
+				WorkerID: item.Turn.WorkerID, Scope: item.Turn.Scope,
+			}, item.ProposalID)
 		case workKindProposal:
 			if outstanding[item.Turn.ID] {
 				// execution's own context.commit already dispatched this
@@ -505,6 +517,13 @@ func (c *Controller) driveOneProposal(ctx context.Context, sess *session, info t
 	switch probe.Kind {
 	case proposalKindLocalOperation:
 		c.driveLocalOperation(ctx, sess, info, p, probe)
+	case proposalKindReply:
+		// A conversation reply is delivered as the worker's own message
+		// through the same worker-authority path; once that delivery is
+		// recorded, its streamed preview is committed.
+		if c.driveLocalOperation(ctx, sess, info, p, probe) && c.deps.Streams != nil {
+			c.deps.Streams.Commit(info.TurnID, probe.Text)
+		}
 	case proposalKindExternalTool:
 		if p.EffectOperationID != "" {
 			c.turnsMu.Lock()
@@ -516,14 +535,15 @@ func (c *Controller) driveOneProposal(ctx context.Context, sess *session, info t
 	}
 }
 
-// driveLocalOperation invokes a worker-authored local_operation proposal
+// driveLocalOperation invokes a worker-authored prepared proposal (a
+// local_operation, or a conversation reply's delivery)
 // through the real contract.WorkerOperator, under the worker's own
 // authenticated actor -- never a controller-privileged shortcut -- and
 // reports the outcome back through _execution.proposal.record. The
 // submission key is deterministic in the proposal id, so a retried call
 // (this package restarting mid-way, or a duplicate delivery) replays the
 // same authorized command instead of invoking the operation twice.
-func (c *Controller) driveLocalOperation(ctx context.Context, sess *session, info turnRouteInfo, p wireProposalRecord, probe normalizedProposalProbe) {
+func (c *Controller) driveLocalOperation(ctx context.Context, sess *session, info turnRouteInfo, p wireProposalRecord, probe normalizedProposalProbe) bool {
 	c.mu.Lock()
 	operator := c.deps.Operator
 	c.mu.Unlock()
@@ -531,7 +551,7 @@ func (c *Controller) driveLocalOperation(ctx context.Context, sess *session, inf
 		f := prerequisiteMissing(
 			"no worker operator is attached; turn %s's local_operation proposal %s cannot be driven", info.TurnID, p.ProposalID)
 		c.oblige(obligationProposal, info.TurnID, f)
-		return
+		return false
 	}
 	result, err := operator.ExecuteWorker(ctx, contract.WorkerRequest{
 		TurnID: info.TurnID, ProposalID: p.ProposalID, WorkerID: info.WorkerID, Scope: info.Scope,
@@ -542,7 +562,7 @@ func (c *Controller) driveLocalOperation(ctx context.Context, sess *session, inf
 		f := faultOf(err)
 		c.note(f)
 		c.oblige(obligationProposal, info.TurnID, f)
-		return
+		return false
 	}
 	err = c.write(func() error {
 		return c.call(ctx, sess, "_execution.proposal.record", proposalRecordInput{
@@ -552,9 +572,10 @@ func (c *Controller) driveLocalOperation(ctx context.Context, sess *session, inf
 	if err != nil {
 		c.note(err)
 		c.oblige(obligationProposal, info.TurnID, faultOf(err))
-		return
+		return false
 	}
 	c.resolve(obligationProposal, info.TurnID)
+	return true
 }
 
 // driveVerification bounded-scans sealed VerificationRequest work

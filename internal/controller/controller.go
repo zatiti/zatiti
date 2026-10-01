@@ -349,6 +349,7 @@ func (c *Controller) Run(ctx context.Context) error {
 		return err
 	}
 	defer func() { _ = sess.journal.close() }()
+	c.syncWorkerPrincipals(ctx, sess)
 
 	// Work outside transactions outlives the admission context: a closing
 	// client or a shutdown signal must not turn into a provider abort.

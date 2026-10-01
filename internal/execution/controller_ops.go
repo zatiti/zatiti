@@ -112,6 +112,19 @@ func (s *Service) handleFence(ctx context.Context, unit contract.Unit, in fenceI
 		return contract.Outcome[fenceBody]{}, err
 	}
 	for _, turn := range turns {
+		if turn.State == "proposal_pending" {
+			// A staged conversation reply is an answer already decided:
+			// parking the turn for recovery would resume it and dispatch a
+			// second, billed model step. It stays pending for the new
+			// controller's idempotent delivery (work.pending "delivery").
+			staged, err := hasStagedReplyDelivery(ctx, unit, turn.ID, -1)
+			if err != nil {
+				return contract.Outcome[fenceBody]{}, err
+			}
+			if staged {
+				continue
+			}
+		}
 		turn.State = "waiting"
 		turn.WaitingReason = waitingRecovery
 		turn.LeaseID = ""

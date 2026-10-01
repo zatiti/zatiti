@@ -230,7 +230,8 @@ func (d *faultyDB) Write(ctx context.Context, actor contract.Actor, scope contra
 // ---- catalog and injection ----
 
 type catalog struct {
-	ops map[string]catalogOp
+	subject contract.EffectSubjectResolver
+	ops     map[string]catalogOp
 }
 
 type catalogOp struct {
@@ -604,7 +605,7 @@ func (f *fx) handler(op string, checkOutput bool, fn ownerFunc) contract.Handler
 }
 
 func (f *fx) catalog() *catalog {
-	c := &catalog{ops: map[string]catalogOp{}}
+	c := &catalog{ops: map[string]catalogOp{}, subject: f}
 	add := func(id, owner, mode string, callers []string, h contract.Handler) {
 		c.ops[id] = catalogOp{h: h, desc: contract.Descriptor{
 			ID: id, Version: 1, Owner: owner, Visibility: contract.VisibilityInternal, Mode: mode, Callers: callers,
@@ -755,4 +756,36 @@ func (f *fx) identityAuthority(ctx context.Context, u contract.Unit, inv contrac
 		"grants": []any{}, "restrictions": []string{},
 	}})
 	return contract.Payload{Status: contract.StatusCompleted, Data: data}, nil
+}
+
+// This transport fixture prepares all stub-owner work under its one declared
+// service principal. Production subject persistence is proved by integration
+// tests with the real owners; the fake catalog exposes the same capability.
+func (c *catalog) EffectSubjectFor(owner string) (contract.EffectSubjectResolver, bool) {
+	if (owner != "effects" && owner != "execution") || c.subject == nil {
+		return nil, false
+	}
+	return c.subject, true
+}
+
+func (f *fx) ResolveEffectSubject(ctx context.Context, unit contract.Unit, invocation contract.Invocation) (contract.Actor, contract.Scope, error) {
+	if unit.Scope().InstallationID != f.install {
+		return contract.Actor{}, contract.Scope{}, fxFault(contract.CodePermissionDenied, "subject belongs to another installation")
+	}
+	if invocation.Operation == "_effects.admit" || invocation.Operation == "_effects.claim" || invocation.Operation == "_effects.reconciliation.prepare" {
+		var input struct {
+			OperationID contract.ID `json:"operation_id"`
+		}
+		if err := json.Unmarshal(invocation.Input, &input); err != nil {
+			return contract.Actor{}, contract.Scope{}, err
+		}
+		var count int
+		if err := unit.QueryRowContext(ctx, "SELECT COUNT(*) FROM effects_operations WHERE id = ?", input.OperationID).Scan(&count); err != nil {
+			return contract.Actor{}, contract.Scope{}, err
+		}
+		if count != 1 {
+			return contract.Actor{}, contract.Scope{}, fxFault(contract.CodeNotFound, "effect subject is unavailable")
+		}
+	}
+	return f.actor, f.scope(), nil
 }

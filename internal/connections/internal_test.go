@@ -542,3 +542,15 @@ func TestValidationRecordRefusals(t *testing.T) {
 		}, contract.CodeNotFound)
 	})
 }
+
+func TestResolveInheritsAncestorConnectionButRefusesSibling(t *testing.T) {
+	env := newEnv(t)
+	ancestor := env.seedConnection(func(w *wireConnection) { w.Destinations = []string{"api.github.com"} })
+	recordObservation(t, env, ancestor, obsSucceeded, ancestor.AccountIdentity, ancestor.AllowedScopes)
+	child := env.scope
+	child.WorkerID = env.ids.New()
+	env.mustOK("_connections.resolve", resolveIn{Scope: child, Connection: wireRef{ID: ancestor.ID, Version: 2}, Tool: wireRef{ID: toolRESTRead, Version: 1}, Destination: "api.github.com"})
+	sibling := env.seedConnection(func(w *wireConnection) { w.Scope.WorkerID = env.ids.New(); w.Destinations = []string{"api.github.com"} })
+	recordObservation(t, env, sibling, obsSucceeded, sibling.AccountIdentity, sibling.AllowedScopes)
+	_ = env.expectFault("_connections.resolve", resolveIn{Scope: child, Connection: wireRef{ID: sibling.ID, Version: 2}, Tool: wireRef{ID: toolRESTRead, Version: 1}, Destination: "api.github.com"}, contract.CodeNotFound)
+}
