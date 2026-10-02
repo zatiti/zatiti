@@ -174,6 +174,9 @@ class FileLocalStore implements LocalStore {
     }
     final base = switch (Platform.operatingSystem) {
       'macos' => '$home/Library/Application Support/Zatiti',
+      // iOS HOME is the app's sandbox container; only its Library and
+      // Documents subtrees are writable, so state lives beside macOS's.
+      'ios' => '$home/Library/Application Support/Zatiti',
       'linux' =>
         '${Platform.environment['XDG_DATA_HOME'] ?? '$home/.local/share'}/zatiti',
       _ => '$home/.zatiti',
