@@ -1,6 +1,6 @@
 # Implementation assignment: `internal/voice`
 
-Generated specification revision 23; source digest `f8bfbf0529e1526833dc8525d63bd65be5a361ec73d34a7febbf6902b14f5fa4`. This file is committed implementation context. Do not independently edit it. Everything required from the product specification and adjacent interfaces is embedded below; no RFC copy is required.
+Generated specification revision 24; source digest `7ecbe154c42881da4db25ce5eeddacf501c2e4e8ff59dcc411260f7b868d7cb5`. This file is committed implementation context. Do not independently edit it. Everything required from the product specification and adjacent interfaces is embedded below; no RFC copy is required.
 
 ## Mission and scope
 
@@ -12,13 +12,13 @@ Allowed production imports from this repository: `github.com/zatiti/zatiti/inter
 
 ## Implementation decisions and acceptance focus
 
-Own voice_* session and call tables. Register voice.session.begin/get/end and voice.transcribe/speak/speak.phrase. Human-only, actor/scope/conversation/generation bound sessions expire after one hour. Explicit dedicated OpenRouter voice connections never fall back to worker or ambient keys. Use Narrate as a Go library for craft and bounded single-attempt speech transport. Interactive voice is a declared LocalIO exception with durable intent and accounting reservation before network I/O, authorization recheck before disclosure, and no retries after ambiguity. Budget counters remain conservative across unknown outcomes; expose advisory billing honestly. No raw input audio in event logs. Synthesized audio is returned once to the live caller; durable command replay and evidence retain call metadata only. No sibling SQL. No automatic transmission of a transcript as a command. Bounded capture and output only; native playback interruption never claims task cancellation. Revision 20: authorized reply-tool text previews use a bounded recipient-scoped stream. Provider text streams retain terminal evidence; controller pushes snapshots over authenticated HTTP event streams. Execution pins Narrate craft in voice context; speech synthesizes append-only stable Narrate chunks directly without rewriting. A preview is committed only after execution records a reply proposal with its exact text; preview faults never fail the model step. No preview state claims durable message commitment.
+Own voice_* session and call tables. Register voice.session.begin/get/end and voice.transcribe/speak/speak.phrase, and the controller-only _voice.sweep, which settles installation-wide calls left pending or unknown past the call bound as advisory estimates so their accounting slots are released. Human-only, actor/scope/conversation/generation bound sessions expire after one hour. Explicit dedicated OpenRouter voice connections never fall back to worker or ambient keys. Use Narrate as a Go library for craft and bounded single-attempt speech transport. Interactive voice is a declared LocalIO exception with durable intent and accounting reservation before network I/O, authorization recheck before disclosure, and no retries after ambiguity. Budget counters remain conservative across unknown outcomes; expose advisory billing honestly. No raw input audio in event logs. Synthesized audio is returned once to the live caller; durable command replay and evidence retain call metadata only. No sibling SQL. No automatic transmission of a transcript as a command. Bounded capture and output only; native playback interruption never claims task cancellation. Revision 20: authorized reply-tool text previews use a bounded recipient-scoped stream. Provider text streams retain terminal evidence; controller pushes snapshots over authenticated HTTP event streams. Execution pins Narrate craft in voice context; speech synthesizes append-only stable Narrate chunks directly without rewriting. A preview is committed only after execution records a reply proposal with its exact text; preview faults never fail the model step. No preview state claims durable message commitment.
 
-Local proving focus: Credential separation, actor and scope isolation, disclosure intervals, malformed WAV and bounds, accounting admission, same-key no second Perform, generation and late-result fences, cancellation and unknown billing.
+Local proving focus: Credential separation, actor and scope isolation, disclosure intervals, malformed WAV and bounds, accounting admission, same-key no second Perform, generation and late-result fences, cancellation and unknown billing, bounded installation-wide stale-call sweep.
 
 ## Incoming and outgoing boundaries
 
-Incoming callers: execution, application (authenticated public operations).
+Incoming callers: controller, execution, application (authenticated public operations).
 
 Outgoing owner calls: `_accounting.reserve`, `_accounting.settle`, `_connections.voice.resolve`, `_messaging.voice.read`. Each exact input/output schema appears below. Calls retain current Unit/authority; owner allowlists are mandatory.
 
@@ -30,7 +30,7 @@ These briefs are embedded so you need not read a sibling prompt to discover its 
 
 ## Shared foundation contract
 
-# Frozen implementation contract, revision 23
+# Frozen implementation contract, revision 24
 
 Revision 19 adds human conversational voice through the `voice` owner. The explicitly registered `voice.transcribe` and `voice.speak` operations use the phased IO boundary for bounded interactive external speech, with durable intent and separate accounting admission before leaving the transaction. They are not worker execution profiles or autonomous tool effects. Every session requires explicit disclosure consent and acknowledgment that OpenRouter speech billing is advisory (transcription routing cannot enforce a provider price cap). Dedicated voice-only connections exclude `/responses`; raw keys remain in SecretStore. The phase's accepted command is never automatically retried after a crash or ambiguous response. Unknown reservations remain visible. Narrate owns craft and provider transport, while Zatiti owns current-authority checks, accounting, conversation identity and session fencing. Desktop only captures and plays audio and uses catalogued operations; no direct model calls or sidecar. Native Mac permission, echo and latency testing remains qualification work.
 
@@ -539,6 +539,11 @@ type EffectSubjectResolver interface {
 
 Registry exposes `EffectSubjectFor(owner string) (contract.EffectSubjectResolver, bool)` only for the assembled owner's implementation. Application requires this capability for the designated boundaries and fails closed when absent. It never gives domains a general actor-substitution API.
 
+
+## Revision 24: bounded installation-wide voice settlement
+
+The controller calls `_voice.sweep` once per tick with a bounded batch limit. The voice owner settles stale pending or unknown calls as advisory estimates of their full reservation, releasing their accounting concurrency slots even when the initiating actor never returns. The sweep contacts no provider and preserves the existing per-actor settlement semantics.
+
 ## Owned product requirements
 
 This foundation/support scope fulfills the shared contract and the specific ownership/acceptance brief above.
@@ -617,6 +622,21 @@ Input schema:
 Output data schema:
 ```json
 {"type":"object","additionalProperties":false,"properties":{"style":{"type":"string","maxLength":8192},"session_id":{"type":"string","maxLength":8192}},"required":["style","session_id"]}
+```
+
+### `_voice.sweep` v1 — voice / internal / mutation / local
+
+Allowed internal callers: controller. Submission key: not required at this internal/query/bootstrap boundary.
+
+Settle, as advisory estimates of their full reservation, up to limit voice calls in this installation that stayed pending or unknown past the call bound, releasing their accounting concurrency slots whether or not their actor uses voice again. Never contacts a provider.
+
+Input schema:
+```json
+{"type":"object","additionalProperties":false,"properties":{"now":{"type":"string","format":"date-time"},"limit":{"type":"integer","minimum":1,"maximum":100}},"required":["now","limit"]}
+```
+Output data schema:
+```json
+{"type":"object","additionalProperties":false,"properties":{"settled":{"type":"integer","minimum":0,"maximum":9223372036854775807}},"required":["settled"]}
 ```
 
 ### `voice.session.begin` v1 — voice / public / mutation / local
@@ -721,7 +741,7 @@ The schemas above resolve exclusively against this embedded `$defs` object. Inpu
 
 Tests are implementation deliverables, not claims of already executed qualification. Retain expected/observed results, exact source/config/tool versions and failure evidence.
 
-Credential separation, actor and scope isolation, disclosure intervals, malformed WAV and bounds, accounting admission, same-key no second Perform, generation and late-result fences, cancellation and unknown billing.
+Credential separation, actor and scope isolation, disclosure intervals, malformed WAV and bounds, accounting admission, same-key no second Perform, generation and late-result fences, cancellation and unknown billing, bounded installation-wide stale-call sweep.
 
 ## Delivery
 

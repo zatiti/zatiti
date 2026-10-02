@@ -93,7 +93,7 @@ func TestTickBoundsEveryScan(t *testing.T) {
 	if err := f.pass(c, sess); err != nil {
 		t.Fatalf("tick: %v", err)
 	}
-	for _, op := range []string{"_scheduling.wake.due", "_tasks.ready", "_execution.tick", "_execution.job.pending", "_effects.pending"} {
+	for _, op := range []string{"_scheduling.wake.due", "_tasks.ready", "_execution.tick", "_voice.sweep", "_execution.job.pending", "_effects.pending"} {
 		if got := f.limits[op]; got != 7 {
 			t.Fatalf("%s was scanned with limit %d, want the configured 7", op, got)
 		}

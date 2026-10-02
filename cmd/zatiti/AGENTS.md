@@ -1,6 +1,6 @@
 # Implementation assignment: `cmd/zatiti`
 
-Generated specification revision 23; source digest `f8bfbf0529e1526833dc8525d63bd65be5a361ec73d34a7febbf6902b14f5fa4`. This file is committed implementation context. Do not independently edit it. Everything required from the product specification and adjacent interfaces is embedded below; no RFC copy is required.
+Generated specification revision 24; source digest `7ecbe154c42881da4db25ce5eeddacf501c2e4e8ff59dcc411260f7b868d7cb5`. This file is committed implementation context. Do not independently edit it. Everything required from the product specification and adjacent interfaces is embedded below; no RFC copy is required.
 
 ## Mission and scope
 
@@ -152,11 +152,11 @@ This Go package and supporting templates own distribution assembly and lifecycle
 
 **`internal/voice`** — Own human conversational voice sessions, admission and speech evidence.
 
-Own voice_* session and call tables. Register voice.session.begin/get/end and voice.transcribe/speak/speak.phrase. Human-only, actor/scope/conversation/generation bound sessions expire after one hour. Explicit dedicated OpenRouter voice connections never fall back to worker or ambient keys. Use Narrate as a Go library for craft and bounded single-attempt speech transport. Interactive voice is a declared LocalIO exception with durable intent and accounting reservation before network I/O, authorization recheck before disclosure, and no retries after ambiguity. Budget counters remain conservative across unknown outcomes; expose advisory billing honestly. No raw input audio in event logs. Synthesized audio is returned once to the live caller; durable command replay and evidence retain call metadata only. No sibling SQL. No automatic transmission of a transcript as a command. Bounded capture and output only; native playback interruption never claims task cancellation. Revision 20: authorized reply-tool text previews use a bounded recipient-scoped stream. Provider text streams retain terminal evidence; controller pushes snapshots over authenticated HTTP event streams. Execution pins Narrate craft in voice context; speech synthesizes append-only stable Narrate chunks directly without rewriting. A preview is committed only after execution records a reply proposal with its exact text; preview faults never fail the model step. No preview state claims durable message commitment.
+Own voice_* session and call tables. Register voice.session.begin/get/end and voice.transcribe/speak/speak.phrase, and the controller-only _voice.sweep, which settles installation-wide calls left pending or unknown past the call bound as advisory estimates so their accounting slots are released. Human-only, actor/scope/conversation/generation bound sessions expire after one hour. Explicit dedicated OpenRouter voice connections never fall back to worker or ambient keys. Use Narrate as a Go library for craft and bounded single-attempt speech transport. Interactive voice is a declared LocalIO exception with durable intent and accounting reservation before network I/O, authorization recheck before disclosure, and no retries after ambiguity. Budget counters remain conservative across unknown outcomes; expose advisory billing honestly. No raw input audio in event logs. Synthesized audio is returned once to the live caller; durable command replay and evidence retain call metadata only. No sibling SQL. No automatic transmission of a transcript as a command. Bounded capture and output only; native playback interruption never claims task cancellation. Revision 20: authorized reply-tool text previews use a bounded recipient-scoped stream. Provider text streams retain terminal evidence; controller pushes snapshots over authenticated HTTP event streams. Execution pins Narrate craft in voice context; speech synthesizes append-only stable Narrate chunks directly without rewriting. A preview is committed only after execution records a reply proposal with its exact text; preview faults never fail the model step. No preview state claims durable message commitment.
 
 ## Shared foundation contract
 
-# Frozen implementation contract, revision 23
+# Frozen implementation contract, revision 24
 
 Revision 19 adds human conversational voice through the `voice` owner. The explicitly registered `voice.transcribe` and `voice.speak` operations use the phased IO boundary for bounded interactive external speech, with durable intent and separate accounting admission before leaving the transaction. They are not worker execution profiles or autonomous tool effects. Every session requires explicit disclosure consent and acknowledgment that OpenRouter speech billing is advisory (transcription routing cannot enforce a provider price cap). Dedicated voice-only connections exclude `/responses`; raw keys remain in SecretStore. The phase's accepted command is never automatically retried after a crash or ambiguous response. Unknown reservations remain visible. Narrate owns craft and provider transport, while Zatiti owns current-authority checks, accounting, conversation identity and session fencing. Desktop only captures and plays audio and uses catalogued operations; no direct model calls or sidecar. Native Mac permission, echo and latency testing remains qualification work.
 
@@ -664,6 +664,11 @@ type EffectSubjectResolver interface {
 ```
 
 Registry exposes `EffectSubjectFor(owner string) (contract.EffectSubjectResolver, bool)` only for the assembled owner's implementation. Application requires this capability for the designated boundaries and fails closed when absent. It never gives domains a general actor-substitution API.
+
+
+## Revision 24: bounded installation-wide voice settlement
+
+The controller calls `_voice.sweep` once per tick with a bounded batch limit. The voice owner settles stale pending or unknown calls as advisory estimates of their full reservation, releasing their accounting concurrency slots even when the initiating actor never returns. The sweep contacts no provider and preserves the existing per-actor settlement semantics.
 
 ## Owned product requirements
 

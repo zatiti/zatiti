@@ -3,7 +3,7 @@ from copy import deepcopy
 
 # Specification revision. Bump with every coordinated contract revision; the renderer
 # refuses to render unless contracts.md names the same revision in its title.
-REVISION = 23
+REVISION = 24
 
 S={'type':'string','maxLength':8192}
 ID={'type':'string','format':'uuid'}
@@ -654,6 +654,7 @@ add('voice.transcribe','voice',obj(scope=ref('Scope'),session_id=ID,audio={'type
 add('voice.speak','voice',obj(scope=ref('Scope'),session_id=ID,message_id=ID),voice_out,'Read an actually disclosed worker reply from the bound conversation. Narrate supplies canonical craft; optional bounded craft rewrite and speech calls use voice credentials only. No tools or approvals. Durable intent, no retries, late results fenced by session/generation.',effect='disclosure')
 add('voice.speak.phrase','voice',obj(scope=ref('Scope'),session_id=ID,stream_id={'type':'string','minLength':1,'maxLength':256},phrase_index={'type':'integer','minimum':0,'maximum':1000}),voice_out,'Synthesize one stable Narrate chunk of an authorized worker reply preview. Text is resolved by the controller; client-supplied prose is never accepted. Dedicated speech credentials, accounting and session fences apply.',effect='disclosure')
 internal('craft','voice',obj(scope=ref('Scope'),conversation_id=ID,recipient_id=ID),obj(style=S,session_id=S),'Resolve the initiating human voice session for execution context; pin Narrate craft in the persisted model context. Never return credentials.',['execution'],mode='query')
+internal('sweep','voice',obj(now=TIME,limit={'type':'integer','minimum':1,'maximum':100}),obj(settled=INT),'Settle, as advisory estimates of their full reservation, up to limit voice calls in this installation that stayed pending or unknown past the call bound, releasing their accounting concurrency slots whether or not their actor uses voice again. Never contacts a provider.',['controller'])
 internal('voice.resolve','connections',obj(scope=ref('Scope'),connection=ref('Ref'),destination=enum('https://openrouter.ai/api/v1/audio/transcriptions','https://openrouter.ai/api/v1/audio/speech','https://openrouter.ai/api/v1/chat/completions')),obj(credential_ref=S),'Resolve current voice-only OpenRouter connection, exact version, scope, revocation and destination. This explicit interactive advisory mode permits a captured unverified credential; no successful probe is invented. Voice-only destinations exclude reasoning endpoints.',['voice'],mode='query')
 internal('voice.read','messaging',obj(scope=ref('Scope'),conversation_id=ID,**{'message_id?':ID}),obj(text=S),'Verify current actor is a participant and requested reply was actually disclosed to that actor; reject own messages and inaccessible history. With no message, validate conversation only.',['voice'],mode='query')
 for operation in OPS:

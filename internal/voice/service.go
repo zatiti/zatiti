@@ -224,6 +224,9 @@ func (s *Service) Handle(ctx context.Context, u contract.Unit, inv contract.Invo
 	if inv.Operation == "_voice.craft" {
 		return s.craft(ctx, u, inv)
 	}
+	if inv.Operation == "_voice.sweep" {
+		return s.sweep(ctx, u, inv)
+	}
 	in, err := s.decode(u, inv)
 	if err != nil {
 		return contract.Payload{}, err
@@ -557,10 +560,41 @@ func (s *Service) endConversationSessions(ctx context.Context, u contract.Unit, 
 // accounting concurrency slot the call held.
 func (s *Service) resolveStale(ctx context.Context, u contract.Unit) error {
 	cutoff := s.deps.Clock.Now().Add(-staleCallAfter).UTC().Format(time.RFC3339Nano)
-	rows, err := u.QueryContext(ctx, `SELECT c.id,c.reservation_id,c.state,c.amount,c.reservation_version FROM voice_calls c JOIN voice_sessions v ON v.id=c.session_id
+	_, err := s.settleStale(ctx, u, `SELECT c.id,c.reservation_id,c.state,c.amount,c.reservation_version FROM voice_calls c JOIN voice_sessions v ON v.id=c.session_id
  WHERE v.actor_id=? AND v.scope_json=? AND c.state IN ('pending','unknown') AND c.created_at<>'' AND c.created_at<?`, u.Actor().PrincipalID, string(raw(u.Scope())), cutoff)
+	return err
+}
+
+// sweep is the controller's periodic pass over every actor's voice calls in
+// this installation. It settles the same stale calls resolveStale would, so
+// a call's accounting slot is released even when its actor never uses voice
+// again. The pass is bounded by limit; later ticks continue it.
+func (s *Service) sweep(ctx context.Context, u contract.Unit, inv contract.Invocation) (contract.Payload, error) {
+	var in struct {
+		Now   time.Time `json:"now"`
+		Limit int64     `json:"limit"`
+	}
+	if err := contract.ValidateSchema(s.inputSchemas[inv.Operation], inv.Input); err != nil {
+		return contract.Payload{}, err
+	}
+	if err := contract.DecodeStrict(inv.Input, &in); err != nil {
+		return contract.Payload{}, err
+	}
+	cutoff := in.Now.Add(-staleCallAfter).UTC().Format(time.RFC3339Nano)
+	n, err := s.settleStale(ctx, u, `SELECT c.id,c.reservation_id,c.state,c.amount,c.reservation_version FROM voice_calls c JOIN voice_sessions v ON v.id=c.session_id
+ WHERE json_extract(v.scope_json,'$.installation_id')=? AND c.state IN ('pending','unknown') AND c.created_at<>'' AND c.created_at<? ORDER BY c.created_at,c.id LIMIT ?`, string(u.Scope().InstallationID), cutoff, in.Limit)
 	if err != nil {
-		return err
+		return contract.Payload{}, err
+	}
+	return completed(map[string]any{"settled": n}), nil
+}
+
+// settleStale settles each call the query selects as an advisory estimate of
+// its full reservation and reports how many it settled.
+func (s *Service) settleStale(ctx context.Context, u contract.Unit, query string, args ...any) (int, error) {
+	rows, err := u.QueryContext(ctx, query, args...)
+	if err != nil {
+		return 0, err
 	}
 	type stale struct {
 		id, reservation, state string
@@ -571,22 +605,26 @@ func (s *Service) resolveStale(ctx context.Context, u contract.Unit) error {
 		var c stale
 		if err := rows.Scan(&c.id, &c.reservation, &c.state, &c.amount, &c.version); err != nil {
 			_ = rows.Close()
-			return err
+			return 0, err
 		}
 		calls = append(calls, c)
 	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return 0, err
+	}
 	if err := rows.Close(); err != nil {
-		return err
+		return 0, err
 	}
 	for _, c := range calls {
 		usage := map[string]any{"currency": "USD", "spent": 0, "reserved": 0, "estimated": c.amount, "unknown": 0, "advisory": true}
 		var settled settledReservation
 		if err := s.peer(ctx, u, "_accounting.settle", map[string]any{"reservation_id": c.reservation, "expected_version": c.version, "usage": usage, "authoritative_nonexecution": false}, &settled); err != nil {
-			return err
+			return 0, err
 		}
 		if _, err := u.ExecContext(ctx, "UPDATE voice_calls SET state='estimated',reservation_version=? WHERE id=? AND state=?", settled.Resource.Version, c.id, c.state); err != nil {
-			return err
+			return 0, err
 		}
 	}
-	return nil
+	return len(calls), nil
 }

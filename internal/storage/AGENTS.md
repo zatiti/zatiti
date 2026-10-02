@@ -1,6 +1,6 @@
 # Implementation assignment: `internal/storage`
 
-Generated specification revision 23; source digest `f8bfbf0529e1526833dc8525d63bd65be5a361ec73d34a7febbf6902b14f5fa4`. This file is committed implementation context. Do not independently edit it. Everything required from the product specification and adjacent interfaces is embedded below; no RFC copy is required.
+Generated specification revision 24; source digest `7ecbe154c42881da4db25ce5eeddacf501c2e4e8ff59dcc411260f7b868d7cb5`. This file is committed implementation context. Do not independently edit it. Everything required from the product specification and adjacent interfaces is embedded below; no RFC copy is required.
 
 ## Mission and scope
 
@@ -28,7 +28,7 @@ These briefs are embedded so you need not read a sibling prompt to discover its 
 
 ## Shared foundation contract
 
-# Frozen implementation contract, revision 23
+# Frozen implementation contract, revision 24
 
 Revision 19 adds human conversational voice through the `voice` owner. The explicitly registered `voice.transcribe` and `voice.speak` operations use the phased IO boundary for bounded interactive external speech, with durable intent and separate accounting admission before leaving the transaction. They are not worker execution profiles or autonomous tool effects. Every session requires explicit disclosure consent and acknowledgment that OpenRouter speech billing is advisory (transcription routing cannot enforce a provider price cap). Dedicated voice-only connections exclude `/responses`; raw keys remain in SecretStore. The phase's accepted command is never automatically retried after a crash or ambiguous response. Unknown reservations remain visible. Narrate owns craft and provider transport, while Zatiti owns current-authority checks, accounting, conversation identity and session fencing. Desktop only captures and plays audio and uses catalogued operations; no direct model calls or sidecar. Native Mac permission, echo and latency testing remains qualification work.
 
@@ -536,6 +536,11 @@ type EffectSubjectResolver interface {
 ```
 
 Registry exposes `EffectSubjectFor(owner string) (contract.EffectSubjectResolver, bool)` only for the assembled owner's implementation. Application requires this capability for the designated boundaries and fails closed when absent. It never gives domains a general actor-substitution API.
+
+
+## Revision 24: bounded installation-wide voice settlement
+
+The controller calls `_voice.sweep` once per tick with a bounded batch limit. The voice owner settles stale pending or unknown calls as advisory estimates of their full reservation, releasing their accounting concurrency slots even when the initiating actor never returns. The sweep contacts no provider and preserves the existing per-actor settlement semantics.
 
 ## Owned product requirements
 

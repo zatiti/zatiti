@@ -52,6 +52,7 @@ func (c *Controller) tick(ctx, workCtx context.Context, sess *session) error {
 	c.wakes(ctx, sess)
 	c.readyScan(ctx, sess)
 	c.executionTick(ctx, sess)
+	c.voiceSweep(ctx, sess)
 	c.turnWork(ctx, workCtx, sess)
 	waiting := c.jobs(ctx, workCtx, sess)
 	c.driveReconciliation(ctx, workCtx, sess, waiting)
@@ -120,6 +121,21 @@ func (c *Controller) executionTick(ctx context.Context, sess *session) {
 	}
 	err := c.write(func() error {
 		return c.call(ctx, sess, "_execution.tick", nowLimitInput{Now: c.now(), Limit: c.batch()}, nil)
+	})
+	if err != nil {
+		c.note(err)
+	}
+}
+
+// voiceSweep lets the voice owner settle calls whose outcome stayed pending
+// or unknown past their bound, so their accounting slots are released even
+// when the person never uses voice again.
+func (c *Controller) voiceSweep(ctx context.Context, sess *session) {
+	if !c.admitting() {
+		return
+	}
+	err := c.write(func() error {
+		return c.call(ctx, sess, "_voice.sweep", nowLimitInput{Now: c.now(), Limit: c.batch()}, nil)
 	})
 	if err != nil {
 		c.note(err)

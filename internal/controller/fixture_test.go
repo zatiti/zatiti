@@ -619,6 +619,7 @@ func (f *fx) catalog() *catalog {
 		"_effects.record":                 f.effectsRecord,
 		"_execution.fence":                f.executionFence,
 		"_execution.tick":                 f.executionTick,
+		"_voice.sweep":                    f.voiceSweep,
 		"_execution.observation":          f.executionObservation,
 		"_execution.job.claim":            f.jobClaim,
 		"_execution.job.record":           f.jobRecord,
