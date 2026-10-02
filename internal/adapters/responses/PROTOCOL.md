@@ -328,12 +328,14 @@ profile.
    the amount `unknown`. Revision-3 item: `cached_input_rate`,
    `cache_write_rate`.
 8. **Tool proposals** (`interpret.go`, `toolProposals`): a `function_call`
-   naming a sealed local decision tool declared in the context under its
-   deterministic identity becomes a typed `ModelToolProposal` with the
-   sealed operation mapping (contract revision 21). A response containing
-   any other call maps nothing and is flagged
-   `tool_proposal_mapping_unspecified`; the raw calls stay in the staged
-   provider response.
+   naming exactly one offered tool becomes a typed `ModelToolProposal` with
+   the tool identity and operation mapping pinned in the dispatched context
+   (contract revision 25). Mapping is all-or-nothing across the response.
+   Unoffered or ambiguous names, missing operation mappings, malformed
+   arguments, and invalid or duplicate call ids produce an evidence flag
+   and no typed proposals; raw calls stay in the staged provider response.
+   Execution rechecks the pinned mapping and current authority before
+   preparing an effect. The adapter never executes a proposal.
 9. **`max_output_tokens` below 16** is refused (`capability_unsupported`)
    because the API cannot enforce a smaller ceiling.
 
