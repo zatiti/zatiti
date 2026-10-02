@@ -457,7 +457,9 @@ func (a *Adapter) doCloseSession(ctx context.Context, dispatch contract.Dispatch
 			resp, err := entry.roundTripper.RoundTrip(req)
 			closeErr = err
 			if resp != nil {
-				closeErr = resp.Body.Close()
+				if bodyErr := resp.Body.Close(); closeErr == nil {
+					closeErr = bodyErr
+				}
 			}
 		}
 	} else {
@@ -466,6 +468,11 @@ func (a *Adapter) doCloseSession(ctx context.Context, dispatch contract.Dispatch
 	entry.roundTripper.disarm()
 	if entry.stateless {
 		_ = entry.session.Close()
+	}
+	// SDK Close can return nil when transport shutdown races the call's
+	// deadline. An expired call cannot confirm remote termination.
+	if closeErr == nil {
+		closeErr = ctx.Err()
 	}
 	finished := a.deps.Clock.Now()
 
