@@ -119,7 +119,9 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
                       button: true,
                       child: GestureDetector(
                         onTap: controller.closeDetails,
-                        child: const ColoredBox(color: ZColorLight.overlayScrim),
+                        child: const ColoredBox(
+                          color: ZColorLight.overlayScrim,
+                        ),
                       ),
                     ),
                   ),
