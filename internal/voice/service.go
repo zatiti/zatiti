@@ -609,6 +609,10 @@ func (s *Service) settleStale(ctx context.Context, u contract.Unit, query string
 		}
 		calls = append(calls, c)
 	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return 0, err
+	}
 	if err := rows.Close(); err != nil {
 		return 0, err
 	}
