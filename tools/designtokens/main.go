@@ -1,0 +1,260 @@
+package main
+
+import (
+	"bytes"
+	"encoding/json"
+	"errors"
+	"flag"
+	"fmt"
+	"os"
+	"path/filepath"
+	"regexp"
+	"sort"
+	"strings"
+)
+
+type tokens struct {
+	Schema     string                       `json:"schema"`
+	Color      map[string]map[string]string `json:"color"`
+	Spacing    map[string]int               `json:"spacing"`
+	Radius     map[string]int               `json:"radius"`
+	Typography typography                   `json:"typography"`
+	Panel      map[string]int               `json:"panel"`
+}
+
+type typography struct {
+	Family        string `json:"family"`
+	BodySmall     int    `json:"body_small"`
+	BodyMedium    int    `json:"body_medium"`
+	BodyLarge     int    `json:"body_large"`
+	TitleMedium   int    `json:"title_medium"`
+	TitleLarge    int    `json:"title_large"`
+	HeadlineSmall int    `json:"headline_small"`
+}
+
+var colorPattern = regexp.MustCompile(`^#[0-9A-F]{6}([0-9A-F]{2})?$`)
+var namePattern = regexp.MustCompile(`^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$`)
+
+func main() {
+	check := flag.Bool("check", false, "fail if committed outputs differ")
+	flag.Parse()
+	if flag.NArg() != 0 {
+		fail(errors.New("unexpected arguments"))
+	}
+	root, err := findRoot()
+	if err != nil {
+		fail(err)
+	}
+	source, err := os.ReadFile(filepath.Join(root, "design/tokens/tokens.json"))
+	if err != nil {
+		fail(err)
+	}
+	dart, css, err := generate(source)
+	if err != nil {
+		fail(err)
+	}
+	if err := syncOutputs(root, dart, css, *check); err != nil {
+		fail(err)
+	}
+}
+
+func syncOutputs(root string, dart, css []byte, check bool) error {
+	for path, data := range map[string][]byte{
+		"apps/desktop/lib/src/ui/tokens.g.dart": dart,
+		"apps/extension/panel/tokens.css":       css,
+	} {
+		path = filepath.Join(root, path)
+		if check {
+			current, err := os.ReadFile(path)
+			if err != nil || !bytes.Equal(current, data) {
+				return fmt.Errorf("generated file differs: %s", path)
+			}
+			continue
+		}
+		if err := os.WriteFile(path, data, 0o644); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func fail(err error) {
+	fmt.Fprintln(os.Stderr, err)
+	os.Exit(1)
+}
+
+func findRoot() (string, error) {
+	dir, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "design/tokens/tokens.json")); err == nil {
+			return dir, nil
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return "", errors.New("cannot find design/tokens/tokens.json")
+		}
+		dir = parent
+	}
+}
+
+func generate(source []byte) ([]byte, []byte, error) {
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal(source, &top); err != nil {
+		return nil, nil, err
+	}
+	for key := range top {
+		switch key {
+		case "schema", "color", "spacing", "radius", "typography", "panel":
+		default:
+			return nil, nil, fmt.Errorf("unknown token group %q", key)
+		}
+	}
+	var t tokens
+	decoder := json.NewDecoder(bytes.NewReader(source))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&t); err != nil {
+		return nil, nil, err
+	}
+	if t.Schema != "zatiti.design-tokens/v1" || len(t.Color) != 2 || len(t.Spacing) == 0 || len(t.Radius) == 0 || len(t.Panel) == 0 || t.Typography.Family != "system-ui" {
+		return nil, nil, errors.New("invalid token groups or schema")
+	}
+	for _, mode := range []string{"light", "dark"} {
+		if len(t.Color[mode]) == 0 {
+			return nil, nil, fmt.Errorf("missing %s colors", mode)
+		}
+		for name, value := range t.Color[mode] {
+			if !namePattern.MatchString(name) || !colorPattern.MatchString(value) {
+				return nil, nil, fmt.Errorf("invalid color %s.%s", mode, name)
+			}
+		}
+	}
+	if !sameKeys(t.Color["light"], t.Color["dark"]) {
+		return nil, nil, errors.New("light and dark color names differ")
+	}
+	for _, group := range []map[string]int{t.Spacing, t.Radius, t.Panel} {
+		for name, value := range group {
+			if !namePattern.MatchString(name) || value <= 0 {
+				return nil, nil, fmt.Errorf("invalid measure %s", name)
+			}
+		}
+	}
+	for _, value := range []int{t.Typography.BodySmall, t.Typography.BodyMedium, t.Typography.BodyLarge, t.Typography.TitleMedium, t.Typography.TitleLarge, t.Typography.HeadlineSmall} {
+		if value <= 0 {
+			return nil, nil, errors.New("invalid typography size")
+		}
+	}
+	return renderDart(t), renderCSS(t), nil
+}
+
+func sameKeys(a, b map[string]string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for key := range a {
+		if _, ok := b[key]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
+func names[V any](m map[string]V) []string {
+	out := make([]string, 0, len(m))
+	for name := range m {
+		out = append(out, name)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func camel(name string) string {
+	parts := strings.Split(name, "_")
+	for i := 1; i < len(parts); i++ {
+		parts[i] = strings.ToUpper(parts[i][:1]) + parts[i][1:]
+	}
+	return strings.Join(parts, "")
+}
+
+func dartColor(css string) string {
+	value := css[1:]
+	if len(value) == 6 {
+		return "0xFF" + value
+	}
+	return "0x" + value[6:] + value[:6]
+}
+
+func renderDart(t tokens) []byte {
+	var b strings.Builder
+	b.WriteString("// Generated by tools/designtokens. Do not edit.\nimport 'package:flutter/material.dart';\n\n")
+	for _, mode := range []string{"Light", "Dark"} {
+		fmt.Fprintf(&b, "abstract final class ZColor%s {\n", mode)
+		for _, name := range names(t.Color[strings.ToLower(mode)]) {
+			fmt.Fprintf(&b, "  static const Color %s = Color(%s);\n", camel(name), dartColor(t.Color[strings.ToLower(mode)][name]))
+		}
+		b.WriteString("}\n\n")
+	}
+	for _, group := range []struct {
+		name   string
+		values map[string]int
+	}{
+		{"ZSpacing", t.Spacing}, {"ZRadius", t.Radius}, {"ZPanel", t.Panel},
+	} {
+		fmt.Fprintf(&b, "abstract final class %s {\n", group.name)
+		for _, name := range names(group.values) {
+			fmt.Fprintf(&b, "  static const double %s = %d;\n", camel(name), group.values[name])
+		}
+		b.WriteString("}\n\n")
+	}
+	b.WriteString("abstract final class ZTypography {\n")
+	fmt.Fprintf(&b, "  static const String family = '%s';\n", t.Typography.Family)
+	for _, pair := range []struct {
+		name  string
+		value int
+	}{
+		{"bodySmall", t.Typography.BodySmall}, {"bodyMedium", t.Typography.BodyMedium},
+		{"bodyLarge", t.Typography.BodyLarge}, {"titleMedium", t.Typography.TitleMedium},
+		{"titleLarge", t.Typography.TitleLarge}, {"headlineSmall", t.Typography.HeadlineSmall},
+	} {
+		fmt.Fprintf(&b, "  static const double %s = %d;\n", pair.name, pair.value)
+	}
+	b.WriteString("}\n")
+	return []byte(b.String())
+}
+
+func renderCSS(t tokens) []byte {
+	var b strings.Builder
+	b.WriteString("/* Generated by tools/designtokens. Do not edit. */\n:root {\n")
+	for _, name := range names(t.Color["light"]) {
+		fmt.Fprintf(&b, "  --z-color-%s: %s;\n", strings.ReplaceAll(name, "_", "-"), t.Color["light"][name])
+	}
+	for _, group := range []struct {
+		name   string
+		values map[string]int
+	}{
+		{"spacing", t.Spacing}, {"radius", t.Radius}, {"panel", t.Panel},
+	} {
+		for _, name := range names(group.values) {
+			fmt.Fprintf(&b, "  --z-%s-%s: %dpx;\n", group.name, strings.ReplaceAll(name, "_", "-"), group.values[name])
+		}
+	}
+	fmt.Fprintf(&b, "  --z-font-family: %s;\n", t.Typography.Family)
+	for _, pair := range []struct {
+		name  string
+		value int
+	}{
+		{"body-small", t.Typography.BodySmall}, {"body-medium", t.Typography.BodyMedium},
+		{"body-large", t.Typography.BodyLarge}, {"title-medium", t.Typography.TitleMedium},
+		{"title-large", t.Typography.TitleLarge}, {"headline-small", t.Typography.HeadlineSmall},
+	} {
+		fmt.Fprintf(&b, "  --z-font-%s: %dpx;\n", pair.name, pair.value)
+	}
+	b.WriteString("}\n\n@media (prefers-color-scheme: dark) {\n  :root {\n")
+	for _, name := range names(t.Color["dark"]) {
+		fmt.Fprintf(&b, "    --z-color-%s: %s;\n", strings.ReplaceAll(name, "_", "-"), t.Color["dark"][name])
+	}
+	b.WriteString("  }\n}\n")
+	return []byte(b.String())
+}

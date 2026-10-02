@@ -547,7 +547,9 @@ func TestResponsesAdapterMapsSealedReplyCallToTypedProposal(t *testing.T) {
 		"execution_profile": map[string]any{"id": contract.NewID(), "version": 1},
 		"skill_versions":    []any{}, "messages": []any{}, "source_artifacts": []any{},
 		"tools": []any{map[string]any{
-			"tool": replyTool, "name": contract.LocalDecisionToolReply,
+			"operation_id":      contract.LocalDecisionOperationID(contract.LocalDecisionToolReply),
+			"operation_version": contract.LocalDecisionOperationVersion,
+			"tool":              replyTool, "name": contract.LocalDecisionToolReply,
 			"description": "sealed local decision tool: reply", "input_schema": json.RawMessage(contract.ReplyProposalSchema),
 			"output_schema": map[string]any{}, "effect": "local", "destinations": []string{},
 			"binding_id": replyID, "schema_digest": contract.Hash(contract.ReplyProposalSchema),
@@ -593,7 +595,7 @@ func TestResponsesAdapterMapsSealedReplyCallToTypedProposal(t *testing.T) {
 		t.Fatalf("evidence = %s", stepObs.Evidence)
 	}
 	p := evidence.Output.ToolProposals[0]
-	if p.ID != "call_reply_1" || p.Tool["id"] != string(replyID) || p.OperationID != "zatiti.local-decision/reply" ||
+	if p.ID != "call_reply_1" || p.Tool["id"] != string(replyID) || p.OperationID != contract.LocalDecisionOperationID(contract.LocalDecisionToolReply) ||
 		p.OperationVersion != 1 || p.SourceContext.ID != contextArtifact.ID || string(p.SourceContext.Digest) != contextArtifact.Digest ||
 		string(p.Input) != `{"text":"acknowledged"}` {
 		t.Fatalf("proposal = %+v (input %s)", p, p.Input)

@@ -10,6 +10,7 @@ import '../state/workspace_controller.dart';
 import 'action_review_dialog.dart';
 import 'message_composer.dart';
 import 'theme.dart';
+import 'tokens.g.dart';
 import 'widgets.dart';
 import 'reply_stream_view.dart';
 
@@ -426,7 +427,7 @@ class _MessageBubble extends StatelessWidget {
             ),
             decoration: BoxDecoration(
               color: Theme.of(context).brightness == Brightness.dark
-                  ? const Color(0xFF5A5A5A)
+                  ? ZColorDark.userBubble
                   : p.card,
               borderRadius: BorderRadius.circular(22),
             ),

@@ -249,11 +249,14 @@ func handleMessagingReady(ctx context.Context, s *Service, unit contract.Unit, i
 	if limit > 100 {
 		limit = 100
 	}
+	if err := s.classifyLegacyRecipients(ctx, unit, limit); err != nil {
+		return contract.Payload{}, err
+	}
 	rows, err := listReady(ctx, unit, unit.Scope().InstallationID, limit)
 	if err != nil {
 		return contract.Payload{}, err
 	}
-	if err := hydrateRecipients(ctx, unit, rows); err != nil {
+	if err := hydrateReadyRecipients(ctx, unit, rows); err != nil {
 		return contract.Payload{}, err
 	}
 	items := make([]*wireMessage, 0, len(rows))

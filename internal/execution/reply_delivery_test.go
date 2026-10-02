@@ -27,6 +27,21 @@ func TestMessageTurnAdmissionBindsTheTriggeringConversation(t *testing.T) {
 	}
 }
 
+func TestMessageTurnRefusesUnconfiguredRecipientBeforeProcessing(t *testing.T) {
+	e := newEnv(t)
+	humanRecipient := e.ids.New()
+	messageID := e.ids.New()
+	scope := e.scope
+	scope.WorkerID = humanRecipient
+	_ = e.expectFault(opTurnAdmit, turnAdmitInput{
+		Source:   wireTurnSource{Kind: "message", SourceID: messageID, SourceVersion: 1, RecipientWorkerID: humanRecipient},
+		WorkerID: humanRecipient, Scope: scope, RequesterID: e.ids.New(),
+	}, contract.CodePermissionDenied)
+	if got := len(e.ports.Processed()); got != 0 {
+		t.Fatalf("unconfigured recipient produced %d processed links", got)
+	}
+}
+
 // conversationTurnFixture is a hosted turn that answers in a conversation.
 func conversationTurnFixture(t *testing.T) (*turnFixture, contract.ID) {
 	t.Helper()

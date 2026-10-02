@@ -259,6 +259,12 @@ func (s *Service) deliver(ctx context.Context, unit contract.Unit, p *deliverPar
 	}
 	delivered := string(mustJSON(wire))
 	for _, rid := range p.RecipientIDs {
+		recipientScope := contract.Scope{InstallationID: unit.Scope().InstallationID, WorkerID: rid}
+		snapshot, err := s.peerConfigurationSnapshot(ctx, unit, recipientScope)
+		if err != nil {
+			return nil, err
+		}
+		eligible := snapshot.Resource.Worker != nil && snapshot.Resource.Worker.ID == rid
 		if err := insertRecipient(ctx, unit, &recipientRow{
 			MessageID:      p.MessageID,
 			RecipientID:    rid,
@@ -266,6 +272,7 @@ func (s *Service) deliver(ctx context.Context, unit contract.Unit, p *deliverPar
 			State:          recipientAdmitted,
 			DeliveredJSON:  delivered,
 			AdmittedAt:     now,
+			TurnEligible:   eligible,
 		}); err != nil {
 			return nil, err
 		}

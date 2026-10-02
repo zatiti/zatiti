@@ -86,19 +86,22 @@ type contextComponent struct {
 	OperationID    contract.ID         `json:"operation_id,omitempty"`
 
 	// Tool component fields.
-	ToolID            contract.ID      `json:"tool_id,omitempty"`
-	ToolVersion       contract.Version `json:"tool_version,omitempty"`
-	ConnectionID      contract.ID      `json:"connection_id,omitempty"`
-	ConnectionVersion contract.Version `json:"connection_version,omitempty"`
-	AccountIdentity   string           `json:"account_identity,omitempty"`
-	Name              string           `json:"name,omitempty"`
-	InputSchema       json.RawMessage  `json:"input_schema,omitempty"`
-	OutputSchema      json.RawMessage  `json:"output_schema,omitempty"`
-	Effect            string           `json:"effect,omitempty"`
-	Destinations      []string         `json:"destinations,omitempty"`
-	BindingID         contract.ID      `json:"binding_id,omitempty"`
-	Adapter           string           `json:"adapter,omitempty"`
-	IsModelTool       bool             `json:"is_model_tool,omitempty"`
+	ToolID               contract.ID      `json:"tool_id,omitempty"`
+	ToolVersion          contract.Version `json:"tool_version,omitempty"`
+	ConnectionID         contract.ID      `json:"connection_id,omitempty"`
+	ConnectionVersion    contract.Version `json:"connection_version,omitempty"`
+	AccountIdentity      string           `json:"account_identity,omitempty"`
+	Name                 string           `json:"name,omitempty"`
+	InputSchema          json.RawMessage  `json:"input_schema,omitempty"`
+	OutputSchema         json.RawMessage  `json:"output_schema,omitempty"`
+	Effect               string           `json:"effect,omitempty"`
+	Destinations         []string         `json:"destinations,omitempty"`
+	BindingID            contract.ID      `json:"binding_id,omitempty"`
+	Adapter              string           `json:"adapter,omitempty"`
+	IsModelTool          bool             `json:"is_model_tool,omitempty"`
+	Offered              bool             `json:"offered,omitempty"`
+	ToolOperationID      string           `json:"tool_operation_id,omitempty"`
+	ToolOperationVersion contract.Version `json:"tool_operation_version,omitempty"`
 }
 
 type contextAttachment struct {
@@ -138,15 +141,17 @@ type wireContextMessage struct {
 }
 
 type wireContextTool struct {
-	Tool         wireRef         `json:"tool"`
-	Name         string          `json:"name"`
-	Description  string          `json:"description"`
-	InputSchema  json.RawMessage `json:"input_schema"`
-	OutputSchema json.RawMessage `json:"output_schema"`
-	Effect       string          `json:"effect"`
-	Destinations []string        `json:"destinations"`
-	BindingID    contract.ID     `json:"binding_id"`
-	SchemaDigest contract.Digest `json:"schema_digest"`
+	Tool             wireRef          `json:"tool"`
+	Name             string           `json:"name"`
+	Description      string           `json:"description"`
+	InputSchema      json.RawMessage  `json:"input_schema"`
+	OutputSchema     json.RawMessage  `json:"output_schema"`
+	Effect           string           `json:"effect"`
+	Destinations     []string         `json:"destinations"`
+	BindingID        contract.ID      `json:"binding_id"`
+	SchemaDigest     contract.Digest  `json:"schema_digest"`
+	OperationID      string           `json:"operation_id,omitempty"`
+	OperationVersion contract.Version `json:"operation_version,omitempty"`
 }
 
 // wireContextText/wireContextArtifactPart/wireContextToolResult are the
@@ -413,7 +418,6 @@ func (s *Service) handleContextPrepare(ctx context.Context, unit contract.Unit, 
 			MessageID: m.ID, SenderID: m.SenderID, CreatedAt: m.CreatedAt, Attachments: attachments,
 		})
 	}
-
 	// Selected memory: filter the worker's configured memory bindings
 	// through the current authorization/freshness bound. An unauthorized
 	// or stale binding refuses the entire prepare before any further
@@ -512,6 +516,7 @@ func (s *Service) handleContextPrepare(ctx context.Context, unit contract.Unit, 
 			Adapter: tool.Adapter, IsModelTool: tool.Adapter == "responses" || tool.Adapter == "zatiti/model-responses/v1",
 		})
 	}
+	markOfferedTools(recipe.Components)
 
 	if t.State != "context_pending" {
 		// The first prepare transitions the turn; a rebuild (the turn is
@@ -639,15 +644,17 @@ func localDecisionTools() []wireContextTool {
 		id := contract.LocalDecisionToolID(spec.name)
 		digest := sha256Hex(spec.schema)
 		out = append(out, wireContextTool{
-			Tool:         wireRef{ID: id, Version: 1},
-			Name:         spec.name,
-			Description:  "sealed local decision tool: " + spec.name,
-			InputSchema:  spec.schema,
-			OutputSchema: json.RawMessage(`{}`),
-			Effect:       "local",
-			Destinations: []string{},
-			BindingID:    id,
-			SchemaDigest: digest,
+			Tool:             wireRef{ID: id, Version: 1},
+			Name:             spec.name,
+			Description:      "sealed local decision tool: " + spec.name,
+			InputSchema:      spec.schema,
+			OutputSchema:     json.RawMessage(`{}`),
+			Effect:           "local",
+			Destinations:     []string{},
+			BindingID:        id,
+			SchemaDigest:     digest,
+			OperationID:      contract.LocalDecisionOperationID(spec.name),
+			OperationVersion: contract.LocalDecisionOperationVersion,
 		})
 	}
 	return out
@@ -751,14 +758,16 @@ func (s *Service) buildContextArtifact(ctx context.Context, scope contract.Scope
 	doc.Messages = nonNilMessages(doc.Messages)
 	doc.Tools = localDecisionTools()
 	for _, c := range recipe.Components {
-		if c.Kind != "tool" || c.IsModelTool {
+		if c.Kind != "tool" || !c.Offered {
 			continue
 		}
 		doc.Tools = append(doc.Tools, wireContextTool{
 			Tool: wireRef{ID: c.ToolID, Version: c.ToolVersion}, Name: c.Name,
 			InputSchema: rawOrEmptyObject(c.InputSchema), OutputSchema: rawOrEmptyObject(c.OutputSchema),
 			Effect: c.Effect, Destinations: nonNilStrings(c.Destinations), BindingID: c.BindingID,
-			SchemaDigest: sha256Hex(c.InputSchema),
+			SchemaDigest:     sha256Hex(c.InputSchema),
+			OperationID:      c.ToolOperationID,
+			OperationVersion: c.ToolOperationVersion,
 		})
 	}
 	raw, err := canonicalJSON(doc)
@@ -913,7 +922,7 @@ func buildResponsesModelStepActionV2(plan *contextPlanRow, contextArtifact wireA
 	if modelTool == nil {
 		return nil, wireRef{}, wireRef{}, "", prerequisiteMissing("no responses adapter tool is bound for this worker")
 	}
-	toolVersions := modelVisibleToolRefs(plan)
+	toolVersions := offeredToolRefs(plan.Recipe.Components)
 	action := map[string]any{"schema": "zatiti.responses.action/v2", "kind": "model_step", "session_mode": mode, "context_artifact": contextArtifact, "max_output_tokens": maxOutput, "tool_contract_versions": toolVersions}
 	if mode == "provider_conversation" {
 		if sessionHandle == "" {
@@ -981,9 +990,12 @@ func modelStepMaximumCost(plan *contextPlanRow) (*wireMoney, error) {
 // function proves the action shape a caller has to hand it is correct.
 func buildResponsesModelStepAction(plan *contextPlanRow, contextArtifact wireArtifactRef, sessionHandle, continuationReference string) (wireResponsesModelStep, map[string]any, wireRef, wireRef, string, error) {
 	var modelTool *contextComponent
-	toolVersions := modelVisibleToolRefs(plan)
-	for i, component := range plan.Recipe.Components {
-		if component.Kind == "tool" && component.IsModelTool {
+	toolVersions := offeredToolRefs(plan.Recipe.Components)
+	for i, c := range plan.Recipe.Components {
+		if c.Kind != "tool" {
+			continue
+		}
+		if c.IsModelTool {
 			modelTool = &plan.Recipe.Components[i]
 		}
 	}
@@ -1118,19 +1130,4 @@ func nonNilStrings(in []string) []string {
 		return []string{}
 	}
 	return in
-}
-
-// Model-visible versions match the context declarations. The model dispatcher
-// is transport infrastructure; local decision tools are explicitly offered.
-func modelVisibleToolRefs(plan *contextPlanRow) []wireRef {
-	refs := []wireRef{}
-	for _, tool := range localDecisionTools() {
-		refs = append(refs, tool.Tool)
-	}
-	for _, component := range plan.Recipe.Components {
-		if component.Kind == "tool" && !component.IsModelTool {
-			refs = append(refs, wireRef{ID: component.ToolID, Version: component.ToolVersion})
-		}
-	}
-	return refs
 }

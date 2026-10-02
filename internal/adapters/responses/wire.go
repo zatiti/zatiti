@@ -249,15 +249,17 @@ type wireContextMessage struct {
 }
 
 type wireContextToolDefinition struct {
-	Tool         wireVersionRef  `json:"tool"`
-	Name         string          `json:"name"`
-	Description  string          `json:"description"`
-	InputSchema  json.RawMessage `json:"input_schema"`
-	OutputSchema json.RawMessage `json:"output_schema"`
-	Effect       string          `json:"effect"`
-	Destinations []string        `json:"destinations"`
-	BindingID    contract.ID     `json:"binding_id"`
-	SchemaDigest contract.Digest `json:"schema_digest"`
+	Tool             wireVersionRef  `json:"tool"`
+	Name             string          `json:"name"`
+	Description      string          `json:"description"`
+	InputSchema      json.RawMessage `json:"input_schema"`
+	OutputSchema     json.RawMessage `json:"output_schema"`
+	Effect           string          `json:"effect"`
+	Destinations     []string        `json:"destinations"`
+	BindingID        contract.ID     `json:"binding_id"`
+	SchemaDigest     contract.Digest `json:"schema_digest"`
+	OperationID      string          `json:"operation_id,omitempty"`
+	OperationVersion int64           `json:"operation_version,omitempty"`
 }
 
 type wireContextCompaction struct {

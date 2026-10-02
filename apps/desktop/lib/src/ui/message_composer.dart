@@ -9,6 +9,7 @@ import 'voice_mode.dart';
 import '../state/snapshot.dart';
 import '../state/workspace_controller.dart';
 import 'theme.dart';
+import 'tokens.g.dart';
 
 class MessageComposer extends StatefulWidget {
   MessageComposer({
@@ -80,7 +81,7 @@ class _MessageComposerState extends State<MessageComposer> {
     return Container(
       decoration: BoxDecoration(
         color: Theme.of(context).brightness == Brightness.dark
-            ? const Color(0xFF2F2F2F)
+            ? ZColorDark.composer
             : p.card,
         border: Border.all(color: p.line),
         borderRadius: BorderRadius.circular(26),

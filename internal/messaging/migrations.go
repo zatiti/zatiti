@@ -101,6 +101,11 @@ const migrationV2 = `CREATE TABLE messaging_turn_links (
 CREATE INDEX messaging_turn_links_recipient ON messaging_turn_links (recipient_id);
 CREATE INDEX messaging_recipients_ready ON messaging_recipients (state, admitted_at);`
 
+// Legacy rows remain unclassified until the bounded ready scan resolves
+// their recipients through configuration. New deliveries pin eligibility.
+const migrationV3 = `ALTER TABLE messaging_recipients ADD COLUMN turn_eligible INTEGER DEFAULT NULL CHECK (turn_eligible IN (0, 1));
+CREATE INDEX messaging_recipients_turn_ready ON messaging_recipients (turn_eligible, state, admitted_at);`
+
 // messagingMigrations returns the owned migration list.
 func messagingMigrations() []contract.Migration {
 	return []contract.Migration{
@@ -116,5 +121,6 @@ func messagingMigrations() []contract.Migration {
 			SQL:     migrationV2,
 			SHA256:  contract.Hash([]byte(migrationV2)),
 		},
+		{Owner: ownerName, Version: 3, SQL: migrationV3, SHA256: contract.Hash([]byte(migrationV3))},
 	}
 }

@@ -1,10 +1,110 @@
 package messaging
 
 import (
+	"path/filepath"
 	"testing"
 
 	"github.com/zatiti/zatiti/internal/contract"
+	"github.com/zatiti/zatiti/internal/storage"
 )
+
+func TestReadyScanListsOnlyWorkerRecipients(t *testing.T) {
+	env := newEnv(t)
+	conv := env.createGroup(env.owner, env.worker, env.third)
+	id := env.ids.New()
+	env.sendToConversation(conv, id, "assignment", nil, nil)
+	items := env.readyItems(10)
+	if len(items) != 1 || items[0].ID != id || len(items[0].RecipientIDs) != 1 || items[0].RecipientIDs[0] != env.worker {
+		t.Fatalf("ready recipients = %+v, want only the configured worker", items)
+	}
+	if env.readRecipient(id, env.third).TurnEligible {
+		t.Fatal("human recipient is eligible for turn discovery")
+	}
+	// Eligibility is pinned at delivery, rather than reinterpreted after a
+	// later configuration change.
+	env.ports.workers[env.third] = true
+	items = env.readyItems(10)
+	if len(items[0].RecipientIDs) != 1 {
+		t.Fatalf("later configuration changed delivered recipients: %+v", items)
+	}
+}
+
+func TestWorkerReplyToHumanIsNeverTurnDiscovered(t *testing.T) {
+	env := newEnv(t)
+	conv := env.createGroup(env.owner, env.worker)
+	env.asWorker()
+	// More than one scan page of human messages must not hide a later
+	// worker inbox admission.
+	for i := 0; i < 101; i++ {
+		env.sendToConversation(conv, env.ids.New(), "reply", nil, nil)
+	}
+	if items := env.readyItems(100); len(items) != 0 {
+		t.Fatalf("human replies were turn-discovered: %+v", items)
+	}
+	env.asOwner()
+	id := env.ids.New()
+	env.sendToConversation(conv, id, "next request", nil, nil)
+	items := env.readyItems(1)
+	if len(items) != 1 || items[0].ID != id {
+		t.Fatalf("human backlog starved the worker request: %+v", items)
+	}
+	for _, row := range recipientRows(env, env.owner) {
+		if row.State != messageStateAdmitted {
+			t.Fatalf("ready scan acknowledged human mail: %+v", row)
+		}
+	}
+}
+
+func TestUpgradeClassifiesLegacyWorkerAndHumanRecipients(t *testing.T) {
+	env := newEnv(t)
+	db, err := storage.Open(env.ctx, storage.Config{Path: filepath.Join(t.TempDir(), "legacy.db")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	migrations := messagingMigrations()
+	if err := db.Migrate(env.ctx, migrations[:2]); err != nil {
+		t.Fatal(err)
+	}
+	id := env.ids.New()
+	if err := db.Write(env.ctx, env.actor, env.scope.toContract(), func(unit contract.Unit) error {
+		for _, recipient := range []contract.ID{env.worker, env.owner} {
+			if _, err := unit.ExecContext(env.ctx, `INSERT INTO messaging_recipients
+				(message_id,recipient_id,installation_id,state,delivered_json,admitted_at,acknowledged_at)
+				VALUES (?,?,?,'admitted','{}',?,'0001-01-01T00:00:00Z')`, id, recipient, env.install, env.clock.Now().Format(timeLayout)); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Migrate(env.ctx, migrations); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Write(env.ctx, env.actor, env.scope.toContract(), func(unit contract.Unit) error {
+		if err := env.svc.classifyLegacyRecipients(env.ctx, unit, 100); err != nil {
+			return err
+		}
+		row, err := getRecipient(env.ctx, unit, id, env.worker)
+		if err != nil {
+			return err
+		}
+		if row == nil || !row.TurnEligible || row.State != recipientAdmitted {
+			t.Fatalf("migration changed legacy worker eligibility: %+v", row)
+		}
+		human, err := getRecipient(env.ctx, unit, id, env.owner)
+		if err != nil {
+			return err
+		}
+		if human == nil || human.TurnEligible || human.State != recipientAdmitted {
+			t.Fatalf("migration admitted or acknowledged legacy human mail: %+v", human)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
 
 // Revision 3: ready-recipient discovery and atomic turn admission/ack
 // fences, keyed by message ID plus recipient ID.
@@ -99,6 +199,7 @@ func TestMessagingReadyProcessedLostAckAdmitsOneTurn(t *testing.T) {
 // scan itself, untouched until it is separately processed.
 func TestMessagingReadyMultipleRecipientsEachGetOwnDelivery(t *testing.T) {
 	env := newEnv(t)
+	env.ports.workers[env.third] = true
 	env.asOwner()
 	conv := env.createGroup(env.owner, env.worker, env.third)
 	messageID := env.ids.New()
@@ -165,4 +266,47 @@ func TestMessagingProcessedRequiresAddressedRecipient(t *testing.T) {
 	_ = env.expectFault("_messaging.processed", map[string]any{
 		"message_id": messageID, "recipient_id": env.worker, "turn_id": env.ids.New(),
 	}, contract.CodeNotFound)
+}
+
+// A database upgraded from revision 2 must make progress past old human
+// inboxes while preserving their unread state and discovering worker mail.
+func TestLegacyHumanBacklogCannotStarveWorkerDiscovery(t *testing.T) {
+	env := newEnv(t)
+	conv := env.createGroup(env.owner, env.worker)
+	env.asWorker()
+	for i := 0; i < 101; i++ {
+		env.sendToConversation(conv, env.ids.New(), "legacy reply", nil, nil)
+	}
+	env.asOwner()
+	workerMessage := env.ids.New()
+	env.sendToConversation(conv, workerMessage, "legacy assignment", nil, nil)
+	if err := env.db.Write(env.ctx, env.actor, env.scope.toContract(), func(u contract.Unit) error {
+		_, err := u.ExecContext(env.ctx, "UPDATE messaging_recipients SET turn_eligible=NULL")
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// Simulate the pre-v3 rows, including a full discovery page of humans.
+	// A small batch proves classification is bounded and resumes durably.
+	found := false
+	for i := 0; i < 12; i++ {
+		for _, item := range env.readyItems(10) {
+			if item.ID == workerMessage {
+				found = true
+			}
+			for _, recipient := range item.RecipientIDs {
+				if recipient != env.worker {
+					t.Fatalf("human mail was turn-discovered: %+v", item)
+				}
+			}
+		}
+	}
+	if !found {
+		t.Fatal("legacy human backlog starved worker discovery")
+	}
+	for _, row := range recipientRows(env, env.owner) {
+		if row.State != recipientAdmitted || env.readRecipient(row.ID, env.owner).TurnEligible {
+			t.Fatalf("human inbox was processed or remained eligible: %+v", row)
+		}
+	}
 }

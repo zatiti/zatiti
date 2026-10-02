@@ -181,14 +181,11 @@ func (in *interpretation) interpret(ctx context.Context, a *Adapter, status int,
 		output.TextOutputs = append(output.TextOutputs, wireStagedLocator{Kind: "staged", StagingRef: stagedText.StagingRef, Digest: stagedText.Digest})
 	}
 	if n := len(result.ToolCalls); n > 0 {
-		proposals, reason := in.toolProposals(result.ToolCalls)
-		if reason != "" {
-			// Only the sealed local decision tools have a contract-defined
-			// operation mapping (revision 21). Any other call keeps the
-			// whole response unmapped: a partial mapping could act on a
-			// reply while silently dropping a sibling tool call. The calls
-			// remain verbatim in the staged provider_response.
-			flag("tool_proposal_mapping_unspecified", fmt.Sprintf("the model returned %d tool call(s) and no typed proposal was produced: %s (raw calls are retained in the staged provider_response)", n, reason))
+		proposals, code, reason := in.toolProposals(result.ToolCalls)
+		if code != "" {
+			// A partially mapped response could act on one call while
+			// silently dropping a sibling. Keep the raw calls as evidence.
+			flag(code, fmt.Sprintf("the model returned %d tool call(s) and no typed proposal was produced: %s (raw calls are retained in the staged provider_response)", n, reason))
 		} else {
 			output.ToolProposals = proposals
 		}
@@ -289,50 +286,47 @@ const maxProposalIDChars = 256
 // maxToolArgumentProperties bounds ModelToolProposal.input ($defs/ToolArguments).
 const maxToolArgumentProperties = 256
 
-// toolProposals maps every model tool call to a typed ModelToolProposal, or
-// none of them. A call maps only when it names a sealed local decision tool
-// declared in the admitted context under its exact deterministic identity
-// (contract.LocalDecisionToolName), carries a provider call id and a JSON
-// object of arguments. The operation mapping is the sealed
-// contract.LocalDecisionOperationID; execution still validates the input
-// against the sealed schema and authorizes against its own state. A
-// non-empty reason means nothing was mapped.
-func (in *interpretation) toolProposals(calls []protocolToolCall) ([]wireModelToolProposal, string) {
+// toolProposals copies authority only from uniquely offered definitions in
+// the admitted context. It maps the entire response or none of it.
+func (in *interpretation) toolProposals(calls []protocolToolCall) ([]wireModelToolProposal, string, string) {
 	if in.doc == nil {
-		return nil, "no admitted context declares the tools"
+		return nil, "tool_proposal_unoffered", "no admitted context declares the tools"
 	}
 	byName := make(map[string]wireContextToolDefinition, len(in.doc.Document.Tools))
+	duplicateName := make(map[string]bool)
 	for _, t := range in.doc.Document.Tools {
+		if _, ok := byName[t.Name]; ok {
+			duplicateName[t.Name] = true
+		}
 		byName[t.Name] = t
 	}
 	seen := make(map[string]bool, len(calls))
 	out := make([]wireModelToolProposal, 0, len(calls))
 	for _, call := range calls {
 		if call.ID == "" || len(call.ID) > maxProposalIDChars || seen[call.ID] {
-			return nil, "a tool call carries a missing, oversized or duplicate call id"
+			return nil, "tool_proposal_duplicate_id", "a tool call carries a missing, oversized or duplicate call id"
 		}
 		seen[call.ID] = true
 		def, ok := byName[call.Name]
-		if !ok {
-			return nil, "a tool call names a tool the context did not declare"
+		if !ok || duplicateName[call.Name] {
+			return nil, "tool_proposal_unoffered", "a tool call does not name one uniquely offered tool"
 		}
-		name, sealed := contract.LocalDecisionToolName(def.Tool.ID, def.Name)
-		if !sealed || def.Tool.Version != contract.LocalDecisionOperationVersion {
-			return nil, "only sealed local decision tools have an operation mapping"
+		if def.OperationID == "" || def.OperationVersion <= 0 {
+			return nil, "tool_proposal_mapping_unspecified", "the offered tool has no paired operation mapping"
 		}
 		args := bytes.TrimSpace(call.Arguments)
 		var object map[string]json.RawMessage
-		if len(args) == 0 || args[0] != '{' || json.Unmarshal(args, &object) != nil || len(object) > maxToolArgumentProperties {
-			return nil, "a tool call's arguments are not a bounded JSON object"
+		if len(args) == 0 || args[0] != '{' || contract.DecodeStrict(args, &object) != nil || len(object) > maxToolArgumentProperties {
+			return nil, "tool_proposal_arguments_invalid", "a tool call's arguments are not a bounded JSON object"
 		}
 		out = append(out, wireModelToolProposal{
 			ID:               call.ID,
 			Tool:             def.Tool,
-			OperationID:      contract.LocalDecisionOperationID(name),
-			OperationVersion: contract.LocalDecisionOperationVersion,
+			OperationID:      def.OperationID,
+			OperationVersion: def.OperationVersion,
 			Input:            json.RawMessage(append([]byte(nil), args...)),
 			SourceContext:    in.doc.Ref,
 		})
 	}
-	return out, ""
+	return out, "", ""
 }

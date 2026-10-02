@@ -1,9 +1,7 @@
 package execution
 
 import (
-	"context"
 	"encoding/json"
-	"fmt"
 	"testing"
 
 	"github.com/zatiti/zatiti/internal/contract"
@@ -13,24 +11,6 @@ import (
 //   - TestModelResponseSequenceReachesRealDomainOwnersWithOneFinalReport
 //   - TestModelResponseAttackShapesProduceZeroEffects (four sub-cases)
 //   - TestModelResponseStopConditions
-
-// fakeWorkerOperator is a local test double for contract.WorkerOperator: it
-// records every WorkerRequest it is asked to execute so a test can assert
-// P16's interpretation stage built the exact real-operation call it claims
-// to, without this package importing internal/application (execution's
-// allowed test doubles are local fakes, never a sibling domain package).
-type fakeWorkerOperator struct {
-	calls []contract.WorkerRequest
-}
-
-func (f *fakeWorkerOperator) ExecuteWorker(ctx context.Context, req contract.WorkerRequest) (contract.Result, error) {
-	f.calls = append(f.calls, req)
-	return contract.Result{
-		Schema:    "zatiti.result/v1",
-		CommandID: contract.ID(fmt.Sprintf("00000000-0000-4000-8000-%012d", len(f.calls))),
-		Payload:   contract.Payload{Status: contract.StatusCompleted, Data: json.RawMessage(`{}`)},
-	}, nil
-}
 
 // installProductToolBinding adds one authorized "tool" binding beyond the
 // model-dispatch tool itself, resolved under the worker's own profile
@@ -204,60 +184,31 @@ func TestModelResponseSequenceReachesRealDomainOwnersWithOneFinalReport(t *testi
 	f := newTurnFixture(t)
 	e := f.e
 
-	// Step 1: a local management operation (task/organization creation)
-	// under worker authority -- interpreted, never executed by execution
-	// itself (WorkerOperator.ExecuteWorker must run outside any Unit).
+	// Step 1: a local-management tool is not offered in revision 22. Even a
+	// structured proposal for it is refused before any operation is prepared.
 	ctx1 := f.dispatchStep(t)
 	call1 := proposal("call-1", f.localToolID, defaultResolveVersion, "task.create",
 		mustMarshal(t, map[string]string{"value": "new-task"}), ctx1)
 	f.deliver(t, buildModelOutput(t, ctx1, []wireModelToolProposal{call1}))
 
 	turnAfterStep1 := e.readTurn(f.turnID)
-	if turnAfterStep1.State != "proposal_pending" {
-		t.Fatalf("turn state after local proposal %q, want proposal_pending (awaiting the outside-unit worker-operator call)", turnAfterStep1.State)
+	if turnAfterStep1.State != "claimed" {
+		t.Fatalf("turn state after refused local proposal %q, want claimed", turnAfterStep1.State)
 	}
-	prep1 := e.mustOK(opProposalPrepare, proposalPrepareInput{
-		TurnID: f.turnID, StepIndex: 0, ProposalID: "call-1", ExpectedVersion: turnAfterStep1.Version,
-	})
-	var prepared1 proposalBody
-	e.decode(prep1.Data, &prepared1)
+	prepared1 := findProposalRowForTest(t, e, f.turnID, 0, "call-1")
 	var np1 normalizedProposal
-	if err := json.Unmarshal(prepared1.Resource.NormalizedProposal, &np1); err != nil {
+	if err := json.Unmarshal(prepared1.NormalizedProposal, &np1); err != nil {
 		t.Fatalf("decode normalized proposal: %v", err)
 	}
-	if np1.Kind != "local_operation" || np1.Operation != "task.create" {
-		t.Fatalf("step 1 interpreted as %+v, want a local_operation naming task.create", np1)
-	}
-
-	// The caller (a future controller) performs the actual call outside any
-	// Unit through contract.WorkerOperator, built directly from what
-	// execution prepared -- proving the real domain owner (task.create)
-	// would actually be reached, never a fabricated or substituted target.
-	op := &fakeWorkerOperator{}
-	result, err := op.ExecuteWorker(e.ctx, contract.WorkerRequest{
-		TurnID: f.turnID, ProposalID: "call-1", WorkerID: f.worker, Scope: e.scope,
-		Operation: np1.Operation, Version: np1.OperationVersion, Input: np1.Input,
-	})
-	if err != nil {
-		t.Fatalf("fake worker operator: %v", err)
-	}
-	if len(op.calls) != 1 || op.calls[0].Operation != "task.create" {
-		t.Fatalf("worker operator calls %+v, want exactly one call naming task.create", op.calls)
-	}
-	rec1 := e.mustOK(opProposalRecord, proposalRecordInput{
-		ProposalID: "call-1", ExpectedVersion: turnAfterStep1.Version, CommandID: result.CommandID,
-	})
-	var rec1Body turnBody
-	e.decode(rec1.Data, &rec1Body)
-	if rec1Body.Resource.State != "claimed" {
-		t.Fatalf("turn state after recording the local operation %q, want claimed (ready for the next step)", rec1Body.Resource.State)
+	if np1.Kind != "refused" || np1.RefusalCode != refusalUnauthorizedTool {
+		t.Fatalf("step 1 interpreted as %+v, want refused/%s", np1, refusalUnauthorizedTool)
 	}
 
 	// Step 2: an external tool (an HTTP read) -- an effect is prepared and
 	// its observation awaited; execution never assumes the fetch succeeded
 	// merely because the effect was accepted.
 	ctx2 := f.dispatchStep(t)
-	call2 := proposal("call-2", f.httpToolID, defaultResolveVersion, "http.read",
+	call2 := proposal("call-2", f.httpToolID, defaultResolveVersion, contract.AdapterToolOperation,
 		mustMarshal(t, map[string]string{"value": "https://example.invalid/doc"}), ctx2)
 	f.deliver(t, buildModelOutput(t, ctx2, []wireModelToolProposal{call2}))
 
@@ -296,7 +247,7 @@ func TestModelResponseSequenceReachesRealDomainOwnersWithOneFinalReport(t *testi
 	reportInput := mustMarshal(t, struct {
 		Bindings []reportBindingProposal `json:"bindings"`
 	}{Bindings: []reportBindingProposal{{Name: "result", Artifact: fetchedResult}}})
-	call3 := proposal("call-3", sealedToolID(contract.LocalDecisionToolReportOutputs), 1, "report_outputs", reportInput, ctx3)
+	call3 := proposal("call-3", sealedToolID(contract.LocalDecisionToolReportOutputs), 1, contract.LocalDecisionOperationID(contract.LocalDecisionToolReportOutputs), reportInput, ctx3)
 	f.deliver(t, buildModelOutput(t, ctx3, []wireModelToolProposal{call3}))
 
 	turnAfterReport := e.readTurn(f.turnID)
@@ -342,11 +293,26 @@ func TestModelResponseSequenceReachesRealDomainOwnersWithOneFinalReport(t *testi
 // approval embedded in model output and a proposal naming an unauthorized
 // connection must each produce zero effects.
 func TestModelResponseAttackShapesProduceZeroEffects(t *testing.T) {
+	t.Run("operation_mapping_mismatch", func(t *testing.T) {
+		f := newTurnFixture(t)
+		ctx := f.dispatchStep(t)
+		forged := proposal("mapped-1", f.httpToolID, defaultResolveVersion, "grant.create",
+			mustMarshal(t, map[string]string{"value": "x"}), ctx)
+		f.deliver(t, buildModelOutput(t, ctx, []wireModelToolProposal{forged}))
+		p := findProposalRowForTest(t, f.e, f.turnID, 0, "mapped-1")
+		var np normalizedProposal
+		if err := json.Unmarshal(p.NormalizedProposal, &np); err != nil {
+			t.Fatal(err)
+		}
+		if np.Kind != "refused" || np.RefusalCode != refusalOperationMappingMismatch || f.e.businessEffectsPrepared() != 0 {
+			t.Fatalf("forged mapping: proposal=%+v effects=%d", np, f.e.businessEffectsPrepared())
+		}
+	})
 	t.Run("duplicate_proposal_replay", func(t *testing.T) {
 		f := newTurnFixture(t)
 		e := f.e
 		ctx1 := f.dispatchStep(t)
-		call := proposal("dup-1", f.localToolID, defaultResolveVersion, "task.create",
+		call := proposal("dup-1", f.httpToolID, defaultResolveVersion, contract.AdapterToolOperation,
 			mustMarshal(t, map[string]string{"value": "x"}), ctx1)
 		output := buildModelOutput(t, ctx1, []wireModelToolProposal{call})
 
@@ -370,8 +336,8 @@ func TestModelResponseAttackShapesProduceZeroEffects(t *testing.T) {
 		if got := e.countProposalsForTest(f.turnID); got != 1 {
 			t.Fatalf("proposal rows after replay: %d, want exactly 1 (no duplicate row)", got)
 		}
-		if e.businessEffectsPrepared() != 0 {
-			t.Fatalf("replay prepared %d effects, want 0 (the local operation is never effects-routed)", e.businessEffectsPrepared())
+		if e.businessEffectsPrepared() != 1 {
+			t.Fatalf("replay prepared %d effects, want the original 1 only", e.businessEffectsPrepared())
 		}
 	})
 
@@ -385,7 +351,7 @@ func TestModelResponseAttackShapesProduceZeroEffects(t *testing.T) {
 		// context build folds in only as untrusted tool_result transcript,
 		// never as authority.
 		ctx1 := f.dispatchStep(t)
-		read := proposal("read-1", f.httpToolID, defaultResolveVersion, "http.read",
+		read := proposal("read-1", f.httpToolID, defaultResolveVersion, contract.AdapterToolOperation,
 			mustMarshal(t, map[string]string{"value": "https://example.invalid/doc"}), ctx1)
 		f.deliver(t, buildModelOutput(t, ctx1, []wireModelToolProposal{read}))
 		turnAfterRead := e.readTurn(f.turnID)
@@ -448,11 +414,11 @@ func TestModelResponseAttackShapesProduceZeroEffects(t *testing.T) {
 		if err := json.Unmarshal(p.NormalizedProposal, &np); err != nil {
 			t.Fatalf("decode normalized proposal: %v", err)
 		}
-		if np.Kind != "local_operation" || np.Operation != "grant.create" {
-			t.Fatalf("interpretation %+v, want an ordinary local_operation naming grant.create", np)
+		if np.Kind != "refused" || np.RefusalCode != refusalUnauthorizedTool {
+			t.Fatalf("interpretation %+v, want refused/%s", np, refusalUnauthorizedTool)
 		}
-		if p.State != "prepared" {
-			t.Fatalf("proposal state %q, want prepared -- never auto-executed on a fabricated approval claim", p.State)
+		if p.State != "recorded" {
+			t.Fatalf("proposal state %q, want recorded refusal", p.State)
 		}
 		// No caller ever performed the outside-unit WorkerOperator call in
 		// this sub-test: proving the fabricated explanation alone produced
@@ -460,8 +426,8 @@ func TestModelResponseAttackShapesProduceZeroEffects(t *testing.T) {
 		if e.businessEffectsPrepared() != 0 {
 			t.Fatalf("prepared %d effects from a still-prepared local operation, want 0", e.businessEffectsPrepared())
 		}
-		if got := e.readTurn(f.turnID).State; got != "proposal_pending" {
-			t.Fatalf("turn state %q, want proposal_pending: the operation is staged, never fabricated as already-approved and complete", got)
+		if got := e.readTurn(f.turnID).State; got != "claimed" {
+			t.Fatalf("turn state %q, want claimed after refusing an unoffered local tool", got)
 		}
 		// A real WorkerOperator (P04's authorization boundary, not this
 		// package) is what actually denies grant.create for a worker
@@ -477,7 +443,7 @@ func TestModelResponseAttackShapesProduceZeroEffects(t *testing.T) {
 		// A tool id/version this turn's committed context never offered --
 		// a forged or another worker's connection/tool identity.
 		forged := proposal("forged-1", contract.ID("00000000-0000-4000-8000-000000000777"), 1,
-			"http.read", mustMarshal(t, map[string]string{"value": "https://evil.invalid"}), ctx1)
+			contract.AdapterToolOperation, mustMarshal(t, map[string]string{"value": "https://evil.invalid"}), ctx1)
 		f.deliver(t, buildModelOutput(t, ctx1, []wireModelToolProposal{forged}))
 
 		p := findProposalRowForTest(t, e, f.turnID, 0, "forged-1")
@@ -520,11 +486,11 @@ func TestModelResponseMixedBatchKeepsPendingProposalReachable(t *testing.T) {
 			f := newTurnFixture(t)
 			e := f.e
 			ctx1 := f.dispatchStep(t)
-			pending := proposal("pending-1", f.httpToolID, defaultResolveVersion, "http.read",
+			pending := proposal("pending-1", f.httpToolID, defaultResolveVersion, contract.AdapterToolOperation,
 				mustMarshal(t, map[string]string{"value": "https://example.invalid/doc"}), ctx1)
 			terminal := wireModelToolProposal{
 				ID: "reply-1", Tool: wireRef{ID: sealedToolID(contract.LocalDecisionToolReply), Version: 1},
-				OperationID: "reply", OperationVersion: 1,
+				OperationID: contract.LocalDecisionOperationID(contract.LocalDecisionToolReply), OperationVersion: 1,
 				Input:         mustMarshal(t, map[string]string{"text": "done"}),
 				SourceContext: ctx1,
 			}
@@ -607,7 +573,7 @@ func TestModelResponseStopConditions(t *testing.T) {
 		ctx1 := f.dispatchStep(t)
 		reply := wireModelToolProposal{
 			ID: "reply-1", Tool: wireRef{ID: sealedToolID(contract.LocalDecisionToolReply), Version: 1},
-			OperationID: "reply", OperationVersion: 1,
+			OperationID: contract.LocalDecisionOperationID(contract.LocalDecisionToolReply), OperationVersion: 1,
 			Input:         mustMarshal(t, map[string]string{"text": "All done."}),
 			SourceContext: ctx1,
 		}
@@ -628,7 +594,7 @@ func TestModelResponseStopConditions(t *testing.T) {
 		f := newTurnFixture(t)
 		e := f.e
 		ctx1 := f.dispatchStep(t)
-		call := proposal("http-1", f.httpToolID, defaultResolveVersion, "http.read",
+		call := proposal("http-1", f.httpToolID, defaultResolveVersion, contract.AdapterToolOperation,
 			mustMarshal(t, map[string]string{"value": "https://example.invalid"}), ctx1)
 		f.deliver(t, buildModelOutput(t, ctx1, []wireModelToolProposal{call}))
 

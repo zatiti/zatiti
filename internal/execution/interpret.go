@@ -93,10 +93,11 @@ type reportBindingProposal struct {
 // Refusal codes: a proposal outside the authorized closure is recorded
 // refused with one of these, never silently dropped and never executed.
 const (
-	refusalUnauthorizedTool  = "unauthorized_tool"
-	refusalMalformedProposal = "malformed_proposal"
-	refusalStaleContext      = "stale_source_context"
-	refusalUnsupportedCycle  = "cycle_decision_requires_responsibility"
+	refusalUnauthorizedTool         = "unauthorized_tool"
+	refusalMalformedProposal        = "malformed_proposal"
+	refusalStaleContext             = "stale_source_context"
+	refusalUnsupportedCycle         = "cycle_decision_requires_responsibility"
+	refusalOperationMappingMismatch = "operation_mapping_mismatch"
 )
 
 // localDecisionToolID returns the kind name for a sealed local decision
@@ -434,21 +435,35 @@ func (s *Service) interpretOneProposal(ctx context.Context, unit contract.Unit, 
 	}
 
 	if kind := localDecisionToolID(mp.Tool.ID); kind != "" {
+		op, version, _ := contract.LocalDecisionOperation(kind)
+		if mp.Tool.Version != 1 {
+			return s.recordRefused(ctx, unit, base, refusalUnauthorizedTool,
+				"sealed decision tool version is not offered")
+		}
+		if mp.OperationID != op || mp.OperationVersion != version {
+			return s.recordRefused(ctx, unit, base, refusalOperationMappingMismatch,
+				"sealed decision operation mapping differs from the pinned mapping")
+		}
 		return s.interpretLocalDecision(ctx, unit, turn, base, kind, mp, now)
 	}
 
 	comp := findToolComponent(plan, mp.Tool.ID, mp.Tool.Version)
-	if comp == nil {
+	if comp == nil || !comp.Offered || comp.IsModelTool {
 		// Attack shape: unauthorized connection/tool. The model named
 		// something never offered in this exact step's committed context --
 		// refused, zero effects, never resolved against a guessed identity.
 		return s.recordRefused(ctx, unit, base, refusalUnauthorizedTool,
 			"proposal names a tool not offered in the turn's committed context")
 	}
+	if mp.OperationID != comp.ToolOperationID || mp.OperationVersion != comp.ToolOperationVersion {
+		return s.recordRefused(ctx, unit, base, refusalOperationMappingMismatch,
+			"tool operation mapping differs from the pinned component")
+	}
 
 	switch comp.Effect {
 	case "local":
-		return s.interpretLocalOperation(ctx, unit, base, mp)
+		return s.recordRefused(ctx, unit, base, refusalUnauthorizedTool,
+			"local-effect tools are not offered to models")
 	default:
 		return s.interpretExternalTool(ctx, unit, turn, base, comp, mp, now)
 	}
@@ -686,40 +701,6 @@ func (s *Service) interpretCycleDecision(ctx context.Context, unit contract.Unit
 		return stepDisposition{}, err
 	}
 	return dispositionFor(np, "recorded"), nil
-}
-
-// interpretLocalOperation prepares (never itself executes) a worker-authored
-// proposal to invoke an ordinary public operation under the worker's own
-// authenticated actor. contract.WorkerOperator.ExecuteWorker must run
-// outside any Unit (it re-enters full public-operation authorization in its
-// own transaction), so execution can only stage the exact typed request here
-// -- the caller performs it and reports the outcome back through
-// _execution.proposal.record. Passing operation_id/version/input through
-// unmodified is safe: WorkerOperator resolves the actor from the persisted
-// turn/worker mapping and re-enters ordinary authorization under that
-// worker's own scope, so an unlisted or unauthorized operation is refused
-// there, never by this package fabricating controller privilege to force it
-// through.
-func (s *Service) interpretLocalOperation(ctx context.Context, unit contract.Unit, base *proposalRow, mp wireModelToolProposal) (stepDisposition, error) {
-	if mp.OperationID == "" {
-		return s.recordRefused(ctx, unit, base, refusalMalformedProposal, "local operation proposal names no operation")
-	}
-	np := normalizedProposal{
-		Kind:             "local_operation",
-		Operation:        mp.OperationID,
-		OperationVersion: mp.OperationVersion,
-		Input:            mp.Input,
-	}
-	raw, err := json.Marshal(np)
-	if err != nil {
-		return stepDisposition{}, err
-	}
-	base.NormalizedProposal = raw
-	base.State = "prepared"
-	if err := insertProposal(ctx, unit, base); err != nil {
-		return stepDisposition{}, err
-	}
-	return stepDisposition{kind: "local_operation", completed: false}, nil
 }
 
 // interpretExternalTool resolves the proposal's matched tool/connection

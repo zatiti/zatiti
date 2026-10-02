@@ -70,6 +70,7 @@ type recipientRow struct {
 	DeliveredJSON  string
 	AdmittedAt     time.Time
 	AcknowledgedAt time.Time
+	TurnEligible   bool
 }
 
 // turnLinkRow is the durable (message_id, recipient_id) -> turn_id record
@@ -234,13 +235,13 @@ func updateMessageState(ctx context.Context, unit contract.Unit, r *messageRow) 
 
 // recipient columns ----------------------------------------------------------
 
-const recipientColumns = `message_id, recipient_id, installation_id, state, delivered_json, admitted_at, acknowledged_at`
+const recipientColumns = `message_id, recipient_id, installation_id, state, delivered_json, admitted_at, acknowledged_at, COALESCE(turn_eligible, 0)`
 
 func scanRecipient(row rowScanner) (*recipientRow, error) {
 	var r recipientRow
 	var admitted, acknowledged string
 	err := row.Scan(&r.MessageID, &r.RecipientID, &r.InstallationID, &r.State, &r.DeliveredJSON,
-		&admitted, &acknowledged)
+		&admitted, &acknowledged, &r.TurnEligible)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -266,10 +267,10 @@ func getRecipient(ctx context.Context, unit contract.Unit, messageID, recipientI
 
 func insertRecipient(ctx context.Context, unit contract.Unit, r *recipientRow) error {
 	_, err := unit.ExecContext(ctx, `INSERT INTO messaging_recipients
-		(message_id, recipient_id, installation_id, state, delivered_json, admitted_at, acknowledged_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		(message_id, recipient_id, installation_id, state, delivered_json, admitted_at, acknowledged_at, turn_eligible)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 		string(r.MessageID), string(r.RecipientID), string(r.InstallationID), r.State,
-		r.DeliveredJSON, r.AdmittedAt.Format(timeLayout), r.AcknowledgedAt.Format(timeLayout))
+		r.DeliveredJSON, r.AdmittedAt.Format(timeLayout), r.AcknowledgedAt.Format(timeLayout), r.TurnEligible)
 	return err
 }
 
@@ -341,7 +342,7 @@ func listReady(ctx context.Context, unit contract.Unit, installation contract.ID
 		FROM messaging_messages msg
 		JOIN messaging_recipients r ON r.message_id = msg.id
 		LEFT JOIN messaging_turn_links tl ON tl.message_id = r.message_id AND tl.recipient_id = r.recipient_id
-		WHERE msg.installation_id = ? AND r.state = ? AND tl.message_id IS NULL
+		WHERE msg.installation_id = ? AND r.state = ? AND r.turn_eligible = 1 AND tl.message_id IS NULL
 		GROUP BY msg.id
 		ORDER BY MIN(r.admitted_at) ASC, msg.id
 		LIMIT ?`
@@ -699,6 +700,14 @@ func (r *messageRow) toWire() (*wireMessage, error) {
 // hydrateRecipients fills RecipientIDs for every listed message with one
 // batched query so list pages avoid per-row round trips.
 func hydrateRecipients(ctx context.Context, unit contract.Unit, rows []*messageRow) error {
+	return hydrateRecipientRows(ctx, unit, rows, false)
+}
+
+func hydrateReadyRecipients(ctx context.Context, unit contract.Unit, rows []*messageRow) error {
+	return hydrateRecipientRows(ctx, unit, rows, true)
+}
+
+func hydrateRecipientRows(ctx context.Context, unit contract.Unit, rows []*messageRow, readyOnly bool) error {
 	if len(rows) == 0 {
 		return nil
 	}
@@ -715,8 +724,14 @@ func hydrateRecipients(ctx context.Context, unit contract.Unit, rows []*messageR
 	for _, id := range ids {
 		args = append(args, string(id))
 	}
-	query := `SELECT message_id, recipient_id FROM messaging_recipients
-		WHERE message_id IN (` + placeholders + `) ORDER BY message_id, recipient_id`
+	query := `SELECT r.message_id, r.recipient_id FROM messaging_recipients r
+		WHERE r.message_id IN (` + placeholders + `)`
+	if readyOnly {
+		query += ` AND r.turn_eligible = 1 AND r.state = 'admitted'
+			AND NOT EXISTS (SELECT 1 FROM messaging_turn_links tl
+			WHERE tl.message_id = r.message_id AND tl.recipient_id = r.recipient_id)`
+	}
+	query += ` ORDER BY r.message_id, r.recipient_id`
 	res, err := unit.QueryContext(ctx, query, args...)
 	if err != nil {
 		return err
