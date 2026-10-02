@@ -48,8 +48,8 @@ func TestNewRejectsMissingDependencies(t *testing.T) {
 func TestMigrationsShape(t *testing.T) {
 	env := newEnv(t)
 	migs := env.svc.Migrations()
-	if len(migs) != 2 {
-		t.Fatalf("migrations count %d, want 2", len(migs))
+	if len(migs) != 3 {
+		t.Fatalf("migrations count %d, want 3", len(migs))
 	}
 	m := migs[0]
 	if m.Owner != "messaging" || m.Version != 1 {
@@ -78,9 +78,12 @@ func TestMigrationsShape(t *testing.T) {
 		t.Fatalf("migration v2 SQL missing messaging_turn_links")
 	}
 	for _, mig := range migs {
-		if strings.Contains(mig.SQL, "DROP") || strings.Contains(mig.SQL, "ALTER") {
+		if strings.Contains(mig.SQL, "DROP") || (strings.Contains(mig.SQL, "ALTER") && mig.Version != 3) {
 			t.Fatalf("migration SQL must be additive only")
 		}
+	}
+	if migs[2].SQL != migrationV3 || migs[2].Version != 3 || migs[2].Owner != "messaging" || migs[2].SHA256 != contract.Hash([]byte(migrationV3)) {
+		t.Fatalf("eligibility migration drifted: %+v", migs[2])
 	}
 }
 

@@ -66,4 +66,5 @@ type AdapterDependencies struct {
 	Clock   Clock
 	Blobs   BlobStore
 	Streams ReplyStreams
+	Browser BrowserChannel
 }

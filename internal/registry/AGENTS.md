@@ -1,6 +1,6 @@
 # Implementation assignment: `internal/registry`
 
-Generated specification revision 24; source digest `7ecbe154c42881da4db25ce5eeddacf501c2e4e8ff59dcc411260f7b868d7cb5`. This file is committed implementation context. Do not independently edit it. Everything required from the product specification and adjacent interfaces is embedded below; no RFC copy is required.
+Generated specification revision 25; source digest `7926beceff0e373f82ff2751ef01593c0a48568025a27fd86754b7d7bb6a7e92`. This file is committed implementation context. Do not independently edit it. Everything required from the product specification and adjacent interfaces is embedded below; no RFC copy is required.
 
 ## Mission and scope
 
@@ -28,7 +28,7 @@ These briefs are embedded so you need not read a sibling prompt to discover its 
 
 ## Shared foundation contract
 
-# Frozen implementation contract, revision 24
+# Frozen implementation contract, revision 25
 
 Revision 19 adds human conversational voice through the `voice` owner. The explicitly registered `voice.transcribe` and `voice.speak` operations use the phased IO boundary for bounded interactive external speech, with durable intent and separate accounting admission before leaving the transaction. They are not worker execution profiles or autonomous tool effects. Every session requires explicit disclosure consent and acknowledgment that OpenRouter speech billing is advisory (transcription routing cannot enforce a provider price cap). Dedicated voice-only connections exclude `/responses`; raw keys remain in SecretStore. The phase's accepted command is never automatically retried after a crash or ambiguous response. Unknown reservations remain visible. Narrate owns craft and provider transport, while Zatiti owns current-authority checks, accounting, conversation identity and session fencing. Desktop only captures and plays audio and uses catalogued operations; no direct model calls or sidecar. Native Mac permission, echo and latency testing remains qualification work.
 
@@ -541,6 +541,46 @@ Registry exposes `EffectSubjectFor(owner string) (contract.EffectSubjectResolver
 ## Revision 24: bounded installation-wide voice settlement
 
 The controller calls `_voice.sweep` once per tick with a bounded batch limit. The voice owner settles stale pending or unknown calls as advisory estimates of their full reservation, releasing their accounting concurrency slots even when the initiating actor never returns. The sweep contacts no provider and preserves the existing per-actor settlement semantics.
+
+
+## Revision 25: tool operation mapping and durable replies
+
+Every execution-built `ContextToolDefinition` offered to a model carries paired `operation_id` and `operation_version`. Execution derives them from the pinned tool contract, never the model or adapter. The four sealed decision tools use `zatiti.local_decision.<name>@1`. Adapter-dispatched disclosure, external-read and external-mutation tools, including built-ins, MCP tools and future browser tools, use `_effects.prepare@1`. Local-effect tools and the model-dispatch tool are not offered. `tool_contract_versions` is exactly the set of offered tool references, including the decision tools. Sealed decision mappings are execution-local identifiers, never catalog operations.
+
+The Responses adapter matches each function call by name to one offered definition. Its `ModelToolProposal` copies tool reference and operation mapping from that definition and sets `source_context` to the action's context artifact on both Invoke and Reconcile. It never executes a proposal. An unoffered name produces `tool_proposal_unoffered`; a definition without a mapping produces `tool_proposal_mapping_unspecified`; non-object or oversized arguments produce `tool_proposal_arguments_invalid`; and an empty, oversized or duplicate call id produces `tool_proposal_duplicate_id`. These cases emit no typed proposal and keep the raw call as evidence.
+
+Execution rechecks each proposal against the pinned component, current authority and exact input schema before preparing an effect or recording a sealed decision. A mismatched operation mapping is refused as `operation_mapping_mismatch` with zero effects. An unoffered component, model tool or model-selected local operation is refused as unauthorized. A local operation is selected from the pinned component mapping, never the proposal's operation id.
+
+For a conversation-linked turn, a `reply` is prepared as `conversation.message.send@1` with the turn's scope and conversation id, empty attachments and task ids, and a deterministic message id derived from turn, step and proposal. The controller drives that operation through `WorkerOperator.ExecuteWorker` under the worker's own identity, then records the proposal with the resulting command id. Recording completes the turn; only a recorded durable message with exactly the preview text commits a preview. A recovery-fenced turn with a prepared reply checks history for its deterministic message id before any new model step: a present message completes the reply, and an absent one is refused as `superseded_by_recovery`. A reply without a conversation retains inline recording.
+
+Message-sourced admission adopts the processed message's conversation id when the turn has none. An unresolved worker id is refused before the processed link or acknowledgment. `_messaging.ready` lists only recipient pairs that were configured workers at delivery, so human recipients of a worker reply are not turn-discovered or auto-acknowledged. This revision adds no catalog operation. It adds paired operation fields to context tool definitions and persists the offered mapping in the context recipe. Worker-principal revision 22 and persisted-subject revision 23 remain prerequisites. Messaging migration 3 leaves legacy eligibility unknown. The internal _messaging.ready operation is now a local mutation: before scanning it classifies at most limit legacy recipient rows through _configuration.snapshot, persists eligibility, and never acknowledges human mail. Unknown rows do not occupy the discovery page; repeated calls make bounded progress. New deliveries pin eligibility immediately.
+
+
+### Optional browser transport seams
+
+Revision 25 also declares optional `AdapterDependencies.Browser BrowserChannel`
+after Streams. `BrowserChannel.Exchange` transports one governed command without
+retry; `Receipt` reads receipt evidence without executing a command. Exchange
+carries connection, operation, attempt, origin, generation, deadline and opaque
+command bytes. Results preserve delivered status, boot, generation, epoch and
+receipt evidence. Journal absence alone never proves nonexecution.
+
+`WSSession` supplies transport identity, principal binding, authenticated calls,
+bounded sends, close and completion; `WSHandler` supplies subscribe, browser
+session handling, principal transport binding and bounded drain. Call origins
+are unix, remote-ws and browser-ws; StreamResult aliases the existing Result.
+These are optional dependency seams only. No WebSocket listener, pairing flow,
+hub or browser adapter is implemented by this revision. HTTP and SSE remain the
+implemented controller transports. Future browser work must preserve the
+server-proof-before-secret pairing and sealed receipt requirements in the plan.
+
+### Shared design tokens
+
+`design/tokens/tokens.json` owns the shared color, spacing, radius, typography
+and panel values. `go run ./tools/designtokens` generates the desktop Dart and
+extension CSS outputs; `go run ./tools/designtokens -check` refuses drift. The
+desktop consumes the generated values without a visual change. Generator writes
+to these two generated paths are the explicit cross-root ownership exception.
 
 ## Owned product requirements
 

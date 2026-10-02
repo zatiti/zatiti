@@ -1,5 +1,7 @@
 # Zatiti browser extension: chat with a governed Zatiti agent from any Chrome tab
 
+Implementation reconciliation (2026-10-02): current main is contract revision 24. The reviewed prerequisite implementation lands as revision 25, including tool operation mapping, legacy inbox classification, optional browser dependency seams and shared design tokens. Earlier revision 21/22 assignments below are historical planning numbers; the remaining browser contract revision must be selected from current main at integration. This does not mark the browser transport, external owner agreements or live qualification complete. See [prerequisite reconciliation](implementation/prerequisite-reconciliation.md).
+
 Plan written 2026-09-28. Split layout: each epic lives in `docs/plans/`. 66 tasks, 3 done. Nothing below the ferro rename is implemented yet.
 
 ## 1. Context

@@ -69,6 +69,7 @@ type fakePorts struct {
 
 	// _configuration.snapshot: bindings granted to principals in scope.
 	bindings []fakeBinding
+	workers  map[contract.ID]bool
 
 	// _policy.check: the frozen disclosure gate decision.
 	policyDecision string
@@ -109,12 +110,17 @@ func (p *fakePorts) Call(_ context.Context, _ contract.Unit, inv contract.Invoca
 		if err := json.Unmarshal(inv.Input, &in); err != nil {
 			return contract.Payload{}, err
 		}
+		var worker any
+		if p.workers[in.Scope.WorkerID] {
+			worker = map[string]any{"id": in.Scope.WorkerID}
+		}
 		body = map[string]any{
 			"resource": map[string]any{
 				"scope":     in.Scope,
 				"revision":  1,
 				"ancestors": []any{},
 				"bindings":  p.bindings,
+				"worker":    worker,
 			},
 		}
 	case "_policy.check":
@@ -271,6 +277,7 @@ func newEnv(t *testing.T) *testEnv {
 	env.chief = env.ids.New()
 	env.third = env.ids.New()
 	env.worker = env.ids.New()
+	env.ports.workers = map[contract.ID]bool{env.worker: true}
 	env.actor = contract.Actor{PrincipalID: env.owner, Kind: contract.KindHuman}
 	env.scope = wireScope{InstallationID: env.install}
 	return env

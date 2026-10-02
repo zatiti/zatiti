@@ -1,4 +1,4 @@
-# ADR 007: Execution-pinned tool operation mapping and durable worker replies (contract revision 21)
+# ADR 007: Execution-pinned tool operation mapping and durable worker replies (contract revision 25)
 
 ## Status
 Accepted
@@ -21,7 +21,7 @@ Verification also found several defects:
 The contracts already say the mapping must be 'the qualified mapping for that tool' and that sealed tools are execution-local. The connections Tool contract has no operation field, and no local-effect tool exists.
 
 ## Decision
-Revision 21 adds optional, paired operation_id and operation_version fields to ContextToolDefinition.
+Revision 25, after worker-principal revision 22, adds optional, paired operation_id and operation_version fields to ContextToolDefinition.
 
 Execution, and only execution, fills them for every offered tool:
 - sealed decision tools map to zatiti.local_decision.<name>@1;
@@ -51,13 +51,13 @@ Positive outcomes:
 - Defects A, B, C, D and F are closed.
 
 Costs:
-- Revision 21 must merge before the browser milestone, which becomes revision 22. plan-v3 T2.2a, T2.2b, T2.3, T3.3, T4.1 and T2.1 rebase onto E0T's files.
+- Revision 25 must merge after worker-principal revision 22 and before the browser milestone, which follows this revision. The browser specification tasks rebase onto E0T's files.
 - internal/controller and internal/messaging change, contrary to plan-v2/v3's 'controller unchanged'.
 - Local-effect product tools are unavailable until a pinned local mapping exists. The interpret_test local-tool scenarios are rewritten as refusals.
 - A crash between ExecuteWorker and record is resolved by a history check keyed on the deterministic message_id. A narrow race can still yield a second, different reply.
 
 What stays open:
-- A real hosted chat stays blocked by gap 0 (non-MCP connection.validate has no job runner), which S2 owns.
+- Controlled hosted chat and governed connection validation pass; installed live-provider qualification remains outstanding.
 - Mailbox-only message turns stay unsupported (defect G).
 - Text-only model output still refuses the observation.
 - Live provider behavior is unqualified until the gated live case runs.

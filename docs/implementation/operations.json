@@ -1,5 +1,5 @@
 {
-  "revision": 24,
+  "revision": 25,
   "$defs": {
     "Scope": {
       "type": "object",
@@ -5163,7 +5163,23 @@
         },
         "schema_digest": {
           "$ref": "#/$defs/Adapter_Digest"
+        },
+        "operation_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "operation_version": {
+          "$ref": "#/$defs/Adapter_Version"
         }
+      },
+      "dependentRequired": {
+        "operation_id": [
+          "operation_version"
+        ],
+        "operation_version": [
+          "operation_id"
+        ]
       },
       "required": [
         "tool",
@@ -30935,7 +30951,7 @@
       "version": 1,
       "owner": "messaging",
       "visibility": "internal",
-      "mode": "query",
+      "mode": "mutation",
       "effect": "local",
       "input_schema": {
         "type": "object",
@@ -30967,7 +30983,7 @@
           "items"
         ]
       },
-      "behavior": "Bounded fair scan of admitted messages awaiting a durable worker turn, scoped and ordered without acknowledgment.",
+      "behavior": "Resolve at most limit legacy inbox recipients through configuration and persist worker eligibility without acknowledgment; then bounded fair scan of admitted messages awaiting a durable worker turn, scoped and ordered without acknowledgment.",
       "cli": [],
       "mcp": null,
       "submission_key": false,

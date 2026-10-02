@@ -33,7 +33,7 @@ var opMetas = []opMeta{
 		callers: []string{"execution", "scheduling"}},
 	{id: "_messaging.history", visibility: "internal", mode: "query", effect: "local",
 		callers: []string{"execution"}},
-	{id: "_messaging.ready", visibility: "internal", mode: "query", effect: "local",
+	{id: "_messaging.ready", visibility: "internal", mode: "mutation", effect: "local",
 		callers: []string{"execution", "controller"}},
 	{id: "_messaging.processed", visibility: "internal", mode: "mutation", effect: "local",
 		callers: []string{"execution"}},

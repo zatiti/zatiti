@@ -1,5 +1,5 @@
 {
-  "revision": 24,
+  "revision": 25,
   "packages": [
     {
       "name": "contract",
@@ -641,6 +641,45 @@
       "wave": 2,
       "refs": [],
       "boundary": "",
+      "constructor": ""
+    },
+    {
+      "name": "design-tokens",
+      "path": "design/tokens",
+      "kind": "support",
+      "imports": [],
+      "mission": "Own the canonical shared design tokens.",
+      "design": "Author tokens.json for desktop and extension colors, spacing, radius, typography and panel measures. Preserve existing desktop appearance.",
+      "tests": "Generated Dart and CSS parity, token drift checks.",
+      "wave": 0,
+      "refs": [],
+      "boundary": "",
+      "constructor": ""
+    },
+    {
+      "name": "designtokens",
+      "path": "tools/designtokens",
+      "kind": "support",
+      "imports": [],
+      "mission": "Own the standard-library design token generator.",
+      "design": "Generate apps/desktop/lib/src/ui/tokens.g.dart and apps/extension/panel/tokens.css from design/tokens/tokens.json. The -check flag refuses drift; generated outputs are the explicit cross-root exception.",
+      "tests": "Golden outputs, strict input validation and deterministic drift detection.",
+      "wave": 0,
+      "refs": [],
+      "boundary": "",
+      "constructor": ""
+    },
+    {
+      "name": "extension",
+      "path": "apps/extension",
+      "kind": "client",
+      "imports": [],
+      "mission": "Own the governed browser extension client.",
+      "design": "Use shared generated tokens. Pairing and browser transport implementation remain planned; never represent dependency seams as a working listener.",
+      "tests": "Manifest and page executor tests; browser journeys require real controller transport.",
+      "wave": 3,
+      "refs": [],
+      "boundary": "May call only the paired browser listener. Never holds provider credentials.",
       "constructor": ""
     }
   ],

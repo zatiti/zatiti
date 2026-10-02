@@ -88,6 +88,24 @@ class SpecificationIntegrity(unittest.TestCase):
         with patch.object(render,'REVISION',render.REVISION+1), self.assertRaisesRegex(AssertionError,'contracts.md title'):
             render.validate(self.requirements,self.acceptance,self.adapters,common)
 
+    def test_context_tool_definition_operation_mapping_is_paired(self):
+        definition=self.adapters['definitions']['ContextToolDefinition']
+        self.assertEqual(definition['properties']['operation_id'],
+                         {'type':'string','minLength':1,'maxLength':128})
+        self.assertEqual(definition['properties']['operation_version'],
+                         {'$ref':'#/$defs/Version'})
+        self.assertEqual(definition['dependentRequired'],
+                         {'operation_id':['operation_version'],
+                          'operation_version':['operation_id']})
+        self.assertNotIn('operation_id',definition['required'])
+        self.assertNotIn('operation_version',definition['required'])
+        self.assertIs(definition['additionalProperties'],False)
+
+    def test_local_decision_operation_ids_are_not_catalog_operations(self):
+        ids={o['id'] for o in render.OPS}
+        self.assertFalse(any(i.startswith('zatiti.local_decision.') for i in ids))
+        self.assertIn('_effects.prepare',ids)
+
     def test_client_prompt_states_wire_boundary_and_embeds_reference_briefs(self):
         packages={p['name']:p for p in render.P}
         for p in render.P:

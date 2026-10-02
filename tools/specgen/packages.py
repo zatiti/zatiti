@@ -254,3 +254,16 @@ for package in P:
 for p in P:
  if p['name'] in ['execution','controller','responses','server','voice','desktop']:
   p['design'] += ' Revision 20: authorized reply-tool text previews use a bounded recipient-scoped stream. Provider text streams retain terminal evidence; controller pushes snapshots over authenticated HTTP event streams. Execution pins Narrate craft in voice context; speech synthesizes append-only stable Narrate chunks directly without rewriting. A preview is committed only after execution records a reply proposal with its exact text; preview faults never fail the model step. No preview state claims durable message commitment.'
+
+# Revision 25: shared design tokens and deterministic generated assets.
+pkg('design-tokens','design/tokens','support','','Own the canonical shared design tokens.',
+    'Author tokens.json for desktop and extension colors, spacing, radius, typography and panel measures. Preserve existing desktop appearance.',
+    'Generated Dart and CSS parity, token drift checks.',0)
+pkg('designtokens','tools/designtokens','support','','Own the standard-library design token generator.',
+    'Generate apps/desktop/lib/src/ui/tokens.g.dart and apps/extension/panel/tokens.css from design/tokens/tokens.json. The -check flag refuses drift; generated outputs are the explicit cross-root exception.',
+    'Golden outputs, strict input validation and deterministic drift detection.',0)
+
+pkg('extension','apps/extension','client','','Own the governed browser extension client.',
+    'Use shared generated tokens. Pairing and browser transport implementation remain planned; never represent dependency seams as a working listener.',
+    'Manifest and page executor tests; browser journeys require real controller transport.',3,
+    boundary='May call only the paired browser listener. Never holds provider credentials.')

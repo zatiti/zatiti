@@ -52,6 +52,8 @@ jobs:
           echo "GOTOOLCHAIN=local" >> "$GITHUB_ENV"
           go run ./.github/workflows/cigate lock -go-version "$(go env GOVERSION)"
           go run ./.github/workflows/cigate environ -go-version "$(go env GOVERSION)" -out "$evidence/environment.json"
+      - name: Check the generated design tokens
+        run: go run ./tools/designtokens -check
       - name: Run the specification integrity tests
         run: |
           python3 --version

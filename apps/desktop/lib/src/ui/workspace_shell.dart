@@ -13,6 +13,7 @@ import 'conversation_tree.dart';
 import 'conversation_view.dart';
 import 'creation_dialogs.dart';
 import 'theme.dart';
+import 'tokens.g.dart';
 import 'widgets.dart';
 import 'worker_details_panel.dart';
 import 'workspace_settings.dart';
@@ -118,7 +119,7 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
                       button: true,
                       child: GestureDetector(
                         onTap: controller.closeDetails,
-                        child: const ColoredBox(color: Color(0x88000000)),
+                        child: const ColoredBox(color: ZColorLight.overlayScrim),
                       ),
                     ),
                   ),

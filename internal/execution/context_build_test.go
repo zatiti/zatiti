@@ -184,9 +184,8 @@ func TestContextCommitProducesSchemaValidOrderedContextAndModelStepAction(t *tes
 		t.Fatalf("tool result %s appears %d times in the context, want exactly once", toolResult.ID, toolResultCount)
 	}
 
-	// The context also carries the resolved model-dispatch tool (never the
-	// worker's own execution profile identity) plus the four sealed local
-	// decision tools.
+	// The model-dispatch tool stays in the plan for dispatch and is never
+	// offered back to the model. The four sealed decisions are offered.
 	foundModelTool := false
 	for _, tool := range doc.Tools {
 		if tool.Tool.ID == toolID {
@@ -197,7 +196,7 @@ func TestContextCommitProducesSchemaValidOrderedContextAndModelStepAction(t *tes
 		}
 	}
 	if foundModelTool {
-		t.Fatalf("context tools offer the model dispatcher %s as a decision tool", toolID)
+		t.Fatalf("context tools offer the resolved model-dispatch tool %s", toolID)
 	}
 	localNames := map[string]bool{}
 	for _, tool := range doc.Tools {

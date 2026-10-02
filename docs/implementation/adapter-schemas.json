@@ -939,7 +939,23 @@
         },
         "schema_digest": {
           "$ref": "#/$defs/Digest"
+        },
+        "operation_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "operation_version": {
+          "$ref": "#/$defs/Version"
         }
+      },
+      "dependentRequired": {
+        "operation_id": [
+          "operation_version"
+        ],
+        "operation_version": [
+          "operation_id"
+        ]
       },
       "required": [
         "tool",

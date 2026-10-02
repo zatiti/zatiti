@@ -3,14 +3,16 @@
 
 import 'package:flutter/material.dart';
 
+import 'tokens.g.dart';
+
 /// Spacing rhythm: 4, 8, 12, 16, 24, 32.
 abstract final class Space {
-  static const double xs = 4;
-  static const double sm = 8;
-  static const double md = 12;
-  static const double lg = 16;
-  static const double xl = 24;
-  static const double xxl = 32;
+  static const double xs = ZSpacing.xs;
+  static const double sm = ZSpacing.sm;
+  static const double md = ZSpacing.md;
+  static const double lg = ZSpacing.lg;
+  static const double xl = ZSpacing.xl;
+  static const double xxl = ZSpacing.xxl;
 }
 
 /// Layout measures from the design.
@@ -27,9 +29,9 @@ abstract final class Measure {
   /// Below this width the sidebar becomes a dismissible overlay.
   static const double sidebarInline = 820;
 
-  static const double controlRadius = 12;
-  static const double cardRadius = 18;
-  static const double dialogRadius = 18;
+  static const double controlRadius = ZRadius.control;
+  static const double cardRadius = ZRadius.card;
+  static const double dialogRadius = ZRadius.dialog;
 }
 
 enum AvatarTone { mint, peach, lavender, blue }
@@ -75,46 +77,70 @@ class ZatitiPalette extends ThemeExtension<ZatitiPalette> {
   final Map<AvatarTone, (Color, Color)> avatars;
 
   static const dark = ZatitiPalette(
-    canvas: Color(0xFF070707),
-    sidebar: Color(0xFF111111),
-    card: Color(0xFF262626),
-    hover: Color(0xFF323232),
-    line: Color(0xFF232323),
-    text: Color(0xFFE7E7E7),
-    muted: Color(0xFFA0A0A0),
-    subtle: Color(0xFF929292),
-    accent: Color(0xFFFCFCFC),
-    accentInk: Color(0xFF111111),
-    amber: Color(0xFFE4C391),
-    amberWash: Color(0x20B88C44),
-    decisionLine: Color(0xFF4A4334),
+    canvas: ZColorDark.canvas,
+    sidebar: ZColorDark.sidebar,
+    card: ZColorDark.card,
+    hover: ZColorDark.hover,
+    line: ZColorDark.line,
+    text: ZColorDark.text,
+    muted: ZColorDark.muted,
+    subtle: ZColorDark.subtle,
+    accent: ZColorDark.accent,
+    accentInk: ZColorDark.accentInk,
+    amber: ZColorDark.amber,
+    amberWash: ZColorDark.amberWash,
+    decisionLine: ZColorDark.decisionLine,
     avatars: {
-      AvatarTone.mint: (Color(0xFFB8D8C8), Color(0xFF20352B)),
-      AvatarTone.peach: (Color(0xFF42372E), Color(0xFFE0BA92)),
-      AvatarTone.lavender: (Color(0xFF35323F), Color(0xFFC7B9E3)),
-      AvatarTone.blue: (Color(0xFF2C3840), Color(0xFFADCCDF)),
+      AvatarTone.mint: (
+        ZColorDark.avatarMintBackground,
+        ZColorDark.avatarMintForeground,
+      ),
+      AvatarTone.peach: (
+        ZColorDark.avatarPeachBackground,
+        ZColorDark.avatarPeachForeground,
+      ),
+      AvatarTone.lavender: (
+        ZColorDark.avatarLavenderBackground,
+        ZColorDark.avatarLavenderForeground,
+      ),
+      AvatarTone.blue: (
+        ZColorDark.avatarBlueBackground,
+        ZColorDark.avatarBlueForeground,
+      ),
     },
   );
 
   static const light = ZatitiPalette(
-    canvas: Color(0xFFFAFBF8),
-    sidebar: Color(0xFFF0F2EE),
-    card: Color(0xFFFFFFFF),
-    hover: Color(0xFFE8ECE6),
-    line: Color(0xFFD8DDD6),
-    text: Color(0xFF222B25),
-    muted: Color(0xFF5D6A61),
-    subtle: Color(0xFF647168),
-    accent: Color(0xFF315F49),
-    accentInk: Color(0xFFFFFFFF),
-    amber: Color(0xFF886022),
-    amberWash: Color(0x22B88C44),
-    decisionLine: Color(0xFFC9B38F),
+    canvas: ZColorLight.canvas,
+    sidebar: ZColorLight.sidebar,
+    card: ZColorLight.card,
+    hover: ZColorLight.hover,
+    line: ZColorLight.line,
+    text: ZColorLight.text,
+    muted: ZColorLight.muted,
+    subtle: ZColorLight.subtle,
+    accent: ZColorLight.accent,
+    accentInk: ZColorLight.accentInk,
+    amber: ZColorLight.amber,
+    amberWash: ZColorLight.amberWash,
+    decisionLine: ZColorLight.decisionLine,
     avatars: {
-      AvatarTone.mint: (Color(0xFFD2E4D7), Color(0xFF254C36)),
-      AvatarTone.peach: (Color(0xFFEADBCC), Color(0xFF70533B)),
-      AvatarTone.lavender: (Color(0xFFE3DDEC), Color(0xFF635479)),
-      AvatarTone.blue: (Color(0xFFDAE5ED), Color(0xFF416278)),
+      AvatarTone.mint: (
+        ZColorLight.avatarMintBackground,
+        ZColorLight.avatarMintForeground,
+      ),
+      AvatarTone.peach: (
+        ZColorLight.avatarPeachBackground,
+        ZColorLight.avatarPeachForeground,
+      ),
+      AvatarTone.lavender: (
+        ZColorLight.avatarLavenderBackground,
+        ZColorLight.avatarLavenderForeground,
+      ),
+      AvatarTone.blue: (
+        ZColorLight.avatarBlueBackground,
+        ZColorLight.avatarBlueForeground,
+      ),
     },
   );
 
@@ -163,8 +189,8 @@ ThemeData buildZatitiTheme(Brightness brightness) {
         surfaceContainerHighest: p.hover,
         surfaceTint: Colors.transparent,
         error: brightness == Brightness.dark
-            ? const Color(0xFFE8A598)
-            : const Color(0xFF9B3B2C),
+            ? ZColorDark.error
+            : ZColorLight.error,
       );
   final control = RoundedRectangleBorder(
     borderRadius: BorderRadius.circular(Measure.controlRadius),
@@ -183,21 +209,21 @@ ThemeData buildZatitiTheme(Brightness brightness) {
       .apply(bodyColor: p.text, displayColor: p.text)
       .copyWith(
         headlineSmall: TextStyle(
-          fontSize: 24,
+          fontSize: ZTypography.headlineSmall,
           height: 1.25,
           fontWeight: FontWeight.w500,
           letterSpacing: -0.6,
           color: p.text,
         ),
         titleLarge: TextStyle(
-          fontSize: 22,
+          fontSize: ZTypography.titleLarge,
           height: 1.25,
           fontWeight: FontWeight.w500,
           letterSpacing: -0.5,
           color: p.text,
         ),
         titleMedium: TextStyle(
-          fontSize: 15,
+          fontSize: ZTypography.titleMedium,
           fontWeight: FontWeight.w500,
           color: p.text,
         ),
@@ -206,9 +232,21 @@ ThemeData buildZatitiTheme(Brightness brightness) {
           fontWeight: FontWeight.w500,
           color: p.text,
         ),
-        bodyLarge: TextStyle(fontSize: 15, height: 1.6, color: p.text),
-        bodyMedium: TextStyle(fontSize: 14, height: 1.55, color: p.text),
-        bodySmall: TextStyle(fontSize: 12, height: 1.45, color: p.muted),
+        bodyLarge: TextStyle(
+          fontSize: ZTypography.bodyLarge,
+          height: 1.6,
+          color: p.text,
+        ),
+        bodyMedium: TextStyle(
+          fontSize: ZTypography.bodyMedium,
+          height: 1.55,
+          color: p.text,
+        ),
+        bodySmall: TextStyle(
+          fontSize: ZTypography.bodySmall,
+          height: 1.45,
+          color: p.muted,
+        ),
         labelLarge: TextStyle(
           fontSize: 13,
           fontWeight: FontWeight.w500,

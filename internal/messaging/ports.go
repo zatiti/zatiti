@@ -52,6 +52,9 @@ type peerSnapshotIn struct {
 // event or quiet coordination.
 type peerScopeSnapshot struct {
 	Resource struct {
+		Worker *struct {
+			ID contract.ID `json:"id"`
+		} `json:"worker"`
 		Scope    wireScope `json:"scope"`
 		Revision int64     `json:"revision"`
 		Bindings []struct {

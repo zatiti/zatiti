@@ -98,6 +98,17 @@ func (s *Service) admitTurn(ctx context.Context, unit contract.Unit, p turnAdmit
 	if err := checkInstallation(unit, installation); err != nil {
 		return nil, false, err
 	}
+	if p.Source.Kind == "message" {
+		workerScope := p.Scope
+		workerScope.WorkerID = p.WorkerID
+		snapshot, err := s.callScopeSnapshot(ctx, unit, workerScope)
+		if err != nil {
+			return nil, false, err
+		}
+		if snapshot.Worker == nil || snapshot.Worker.ID != p.WorkerID {
+			return nil, false, permissionDenied("message recipient is not a configured worker")
+		}
+	}
 
 	// Exact identity replay: re-admission for the same source identity
 	// returns the existing turn, never a second row.
