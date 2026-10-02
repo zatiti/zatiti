@@ -132,37 +132,9 @@ func (s *Service) interpretTurnObservation(ctx context.Context, unit contract.Un
 			"observation disposition %q carries no model output to interpret", in.Observation.Disposition)
 	}
 
-	schema, err := modelOutputSchema()
+	output, err := decodeTurnModelOutput(in.Observation.Evidence, in.OperationID, turn)
 	if err != nil {
-		return contract.Outcome[attemptBody]{}, fmt.Errorf("execution: load model output schema: %w", err)
-	}
-	if err := contract.ValidateSchema(schema, in.Observation.Evidence); err != nil {
-		return contract.Outcome[attemptBody]{}, invalidInput(
-			"malformed model output: %v", err)
-	}
-	var output wireModelOutput
-	if err := contract.DecodeStrict(in.Observation.Evidence, &output); err != nil {
-		return contract.Outcome[attemptBody]{}, invalidInput("malformed model output: %v", err)
-	}
-	if output.Schema != "zatiti.model-output/v1" {
-		return contract.Outcome[attemptBody]{}, invalidInput(
-			"model output schema %q is not the accepted zatiti.model-output/v1", output.Schema)
-	}
-
-	// The request_context binds this response to the exact context this
-	// turn actually dispatched -- never to whatever the model claims. A
-	// mismatch (stale, replayed against a superseded context, or simply
-	// wrong) is a malformed/untrustworthy delivery, refused as a whole
-	// rather than partially trusted.
-	if turn.ContextArtifact == nil {
-		return contract.Outcome[attemptBody]{}, conflict(
-			"turn %s has no committed context to interpret a response against", turn.ID)
-	}
-	if output.RequestContext.Kind != "artifact" || output.RequestContext.Artifact == nil ||
-		output.RequestContext.Artifact.ID != turn.ContextArtifact.ID ||
-		output.RequestContext.Artifact.Digest != turn.ContextArtifact.Digest {
-		return contract.Outcome[attemptBody]{}, invalidInput(
-			"model output request_context does not match turn %s's committed context", turn.ID)
+		return contract.Outcome[attemptBody]{}, err
 	}
 
 	if len(output.ToolProposals) == 0 {
@@ -304,12 +276,19 @@ type wireResponsesEvidence struct {
 // unlinked provider conversation"); it parks the turn waiting on the typed
 // effect reason for explicit recovery instead.
 func (s *Service) interpretPrepareSessionObservation(ctx context.Context, unit contract.Unit, turn *turnRow, a *attemptRow, dispatch *turnDispatchRow, in observationInput) (contract.Outcome[attemptBody], error) {
+	if _, err := s.prepareSessionForTurn(ctx, unit, turn, dispatch, in); err != nil {
+		return contract.Outcome[attemptBody]{}, err
+	}
+	return completedOutcome(attemptBody{Resource: attemptOut(a)})
+}
+
+func (s *Service) prepareSessionForTurn(ctx context.Context, unit contract.Unit, turn *turnRow, dispatch *turnDispatchRow, in observationInput) (contract.Outcome[turnBody], error) {
 	if dispatch.State != "prepared" {
 		// Already interpreted once (a redelivered/duplicate observation for
 		// the identical operation_ref): refused outright rather than
 		// re-persisting a session or re-dispatching a second model_step,
 		// mirroring the legacy pre-turn path's own already-recorded refusal.
-		return contract.Outcome[attemptBody]{}, conflict(
+		return contract.Outcome[turnBody]{}, conflict(
 			"prepare_session dispatch %s for turn %s is already %s; observation replay is refused",
 			dispatch.ID, turn.ID, dispatch.State)
 	}
@@ -317,71 +296,74 @@ func (s *Service) interpretPrepareSessionObservation(ctx context.Context, unit c
 	if in.Observation.Disposition != "succeeded" && in.Observation.Disposition != "accepted" {
 		if in.Observation.Disposition == "unknown" {
 			if err := insertObligation(ctx, unit, s.newID(), "unknown_effect",
-				turn.InstallationID, a.RunID, a.ID, dispatch.ID,
+				turn.InstallationID, turn.RunID, turn.AttemptID, dispatch.ID,
 				"prepare_session outcome reported unknown; inspect the provider reference before recovery -- "+
 					"a fresh prepare_session is never dispatched against an unconfirmed result", now); err != nil {
-				return contract.Outcome[attemptBody]{}, err
+				return contract.Outcome[turnBody]{}, err
 			}
 		} else if err := updateTurnDispatchState(ctx, unit, dispatch.ID, "failed"); err != nil {
-			return contract.Outcome[attemptBody]{}, err
+			return contract.Outcome[turnBody]{}, err
 		}
 		turn.State = "waiting"
 		turn.WaitingReason = waitingEffect
+		if in.Observation.Disposition == "unknown" {
+			turn.WaitingReason = waitingRecovery
+		}
 		turn.NextWake = time.Time{}
 		turn.UpdatedAt = now
 		if err := updateTurn(ctx, unit, turn); err != nil {
-			return contract.Outcome[attemptBody]{}, err
+			return contract.Outcome[turnBody]{}, err
 		}
 		if err := emitTransition(ctx, unit, eventTurnWaiting, turn.ID, turn.Version); err != nil {
-			return contract.Outcome[attemptBody]{}, err
+			return contract.Outcome[turnBody]{}, err
 		}
-		return completedOutcome(attemptBody{Resource: attemptOut(a)})
+		return completedOutcome(turnBody{Resource: turnOut(turn)})
 	}
 
 	schema, err := responsesEvidenceSchema()
 	if err != nil {
-		return contract.Outcome[attemptBody]{}, fmt.Errorf("execution: load responses evidence schema: %w", err)
+		return contract.Outcome[turnBody]{}, fmt.Errorf("execution: load responses evidence schema: %w", err)
 	}
 	if err := contract.ValidateSchema(schema, in.Observation.Evidence); err != nil {
-		return contract.Outcome[attemptBody]{}, invalidInput("malformed prepare_session evidence: %v", err)
+		return contract.Outcome[turnBody]{}, invalidInput("malformed prepare_session evidence: %v", err)
 	}
 	var evidence wireResponsesEvidence
 	if err := contract.DecodeStrict(in.Observation.Evidence, &evidence); err != nil {
-		return contract.Outcome[attemptBody]{}, invalidInput("malformed prepare_session evidence: %v", err)
+		return contract.Outcome[turnBody]{}, invalidInput("malformed prepare_session evidence: %v", err)
 	}
 	if evidence.Schema != "zatiti.responses.evidence/v1" {
-		return contract.Outcome[attemptBody]{}, invalidInput(
+		return contract.Outcome[turnBody]{}, invalidInput(
 			"prepare_session evidence schema %q is not the accepted zatiti.responses.evidence/v1", evidence.Schema)
 	}
 	if evidence.SessionHandle == "" {
-		return contract.Outcome[attemptBody]{}, invalidInput("prepare_session evidence carries no session_handle")
+		return contract.Outcome[turnBody]{}, invalidInput("prepare_session evidence carries no session_handle")
 	}
 
 	if err := updateTurnDispatchState(ctx, unit, dispatch.ID, "recorded"); err != nil {
-		return contract.Outcome[attemptBody]{}, err
+		return contract.Outcome[turnBody]{}, err
 	}
 	turn.SessionHandle = evidence.SessionHandle
 
 	plan, err := latestCommittedContextPlan(ctx, unit, turn.ID)
 	if err != nil {
-		return contract.Outcome[attemptBody]{}, err
+		return contract.Outcome[turnBody]{}, err
 	}
 	if turn.ContextArtifact == nil {
-		return contract.Outcome[attemptBody]{}, conflict(
+		return contract.Outcome[turnBody]{}, conflict(
 			"turn %s confirmed a session but has no committed context to dispatch model_step against", turn.ID)
 	}
 	if err := s.dispatchModelEffect(ctx, unit, turn, plan, *turn.ContextArtifact, now); err != nil {
-		return contract.Outcome[attemptBody]{}, err
+		return contract.Outcome[turnBody]{}, err
 	}
 
 	turn.UpdatedAt = now
 	if err := updateTurn(ctx, unit, turn); err != nil {
-		return contract.Outcome[attemptBody]{}, err
+		return contract.Outcome[turnBody]{}, err
 	}
 	if err := emitTransition(ctx, unit, eventTurnSessionPrepared, turn.ID, turn.Version); err != nil {
-		return contract.Outcome[attemptBody]{}, err
+		return contract.Outcome[turnBody]{}, err
 	}
-	return completedOutcome(attemptBody{Resource: attemptOut(a)})
+	return completedOutcome(turnBody{Resource: turnOut(turn)})
 }
 
 // stepDisposition is the outcome of interpreting one proposal, enough to

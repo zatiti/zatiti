@@ -174,6 +174,7 @@ func (c *Controller) admitReconciliation(ctx, workCtx context.Context, sess *ses
 		return false
 	}
 	d := claimed.Resource
+	d.Adapter = registeredAdapterName(d.Adapter)
 	adapter, err := c.adapterForDispatch(d)
 	if err != nil {
 		return c.unsentReconcile(ctx, sess, e, faultOf(err))

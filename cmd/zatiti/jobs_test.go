@@ -85,11 +85,14 @@ func TestMissingJobRunnersDetectsTheKnownCatalogGap(t *testing.T) {
 		"configuration": succeedingRunner(),
 	})
 	missing := missingJobRunners(jobs)
-	if len(missing) != 1 {
-		t.Fatalf("missingJobRunners = %+v, want exactly one gap", missing)
+	if len(missing) != 2 {
+		t.Fatalf("missingJobRunners = %+v, want exactly two gaps", missing)
 	}
 	if missing[0].Owner != "artifacts" || missing[0].Operation != "artifact.export" {
 		t.Fatalf("missingJobRunners reported %+v, want {artifacts artifact.export}", missing[0])
+	}
+	if missing[1].Owner != "connections" || missing[1].Operation != "connection.rotate" {
+		t.Fatalf("missingJobRunners reported %+v, want {connections connection.rotate}", missing[1])
 	}
 }
 

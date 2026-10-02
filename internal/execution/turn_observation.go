@@ -24,7 +24,7 @@ func (s *Service) handleTurnObservation(ctx context.Context, unit contract.Unit,
 	if err != nil {
 		return contract.Outcome[turnBody]{}, err
 	}
-	if dispatch == nil || dispatch.Kind != "model_step" {
+	if dispatch == nil || (dispatch.Kind != "model_step" && dispatch.Kind != "prepare_session") {
 		return contract.Outcome[turnBody]{}, notFound("turn %s has no model-step dispatch for operation %s", turn.ID, in.OperationID)
 	}
 	if dispatch.State != "prepared" {
@@ -32,6 +32,17 @@ func (s *Service) handleTurnObservation(ctx context.Context, unit contract.Unit,
 	}
 	if dispatch.StepIndex != in.StepIndex || turn.State != "model_pending" || in.StepIndex != turn.StepsUsed {
 		return contract.Outcome[turnBody]{}, conflict("turn %s callback step %d is stale; current step is %d in state %s", turn.ID, in.StepIndex, turn.StepsUsed, turn.State)
+	}
+	if dispatch.Kind == "prepare_session" {
+		raw, err := json.Marshal(in.Observation)
+		if err != nil {
+			return contract.Outcome[turnBody]{}, err
+		}
+		var observation wireObservation
+		if err := json.Unmarshal(raw, &observation); err != nil {
+			return contract.Outcome[turnBody]{}, invalidInput("malformed session observation: %v", err)
+		}
+		return s.prepareSessionForTurn(ctx, unit, turn, dispatch, observationInput{OperationID: in.OperationID, Observation: observation})
 	}
 	now := s.now()
 	if in.Observation.Disposition != "succeeded" && in.Observation.Disposition != "accepted" {
@@ -54,20 +65,9 @@ func (s *Service) handleTurnObservation(ctx context.Context, unit contract.Unit,
 		return completedOutcome(turnBody{Resource: turnOut(turn)})
 	}
 
-	schema, err := modelOutputSchema()
+	output, err := decodeTurnModelOutput(in.Observation.Evidence, in.OperationID, turn)
 	if err != nil {
-		return contract.Outcome[turnBody]{}, fmt.Errorf("execution: load model output schema: %w", err)
-	}
-	if err := contract.ValidateSchema(schema, in.Observation.Evidence); err != nil {
-		return contract.Outcome[turnBody]{}, invalidInput("malformed model output: %v", err)
-	}
-	var output wireModelOutput
-	if err := contract.DecodeStrict(in.Observation.Evidence, &output); err != nil {
-		return contract.Outcome[turnBody]{}, invalidInput("malformed model output: %v", err)
-	}
-	if turn.ContextArtifact == nil || output.RequestContext.Kind != "artifact" || output.RequestContext.Artifact == nil ||
-		output.RequestContext.Artifact.ID != turn.ContextArtifact.ID || output.RequestContext.Artifact.Digest != turn.ContextArtifact.Digest {
-		return contract.Outcome[turnBody]{}, invalidInput("model output request_context does not match turn %s's committed context", turn.ID)
+		return contract.Outcome[turnBody]{}, err
 	}
 	plan, err := latestCommittedContextPlan(ctx, unit, turn.ID)
 	if err != nil {

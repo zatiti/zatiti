@@ -17,55 +17,7 @@ import (
 	"github.com/zatiti/zatiti/internal/contract"
 )
 
-// This file is P46 item 1's Responses-adapter half ("the actual controller,
-// Responses adapter pointed at a controlled provider") and item 2's honest
-// account of the hosted half of "message-to-chief-to-task-to-tool-to-
-// output-to-verification-to-reply": it proves the real controller really
-// dispatches the real internal/adapters/responses adapter's two-effect
-// prepare_session/model_step split against a controlled provider server --
-// a genuine physical TLS round trip, not a handler-only shortcut -- and
-// then documents, with a passing test asserting the CURRENT correct
-// behavior rather than a fabricated success, exactly where production code
-// honestly stops today.
-//
-// Status of the production gaps this file has tracked (none invented nor
-// worked around here; all cited to source):
-//
-//  0. OPEN. internal/connections implements no contract.LocalJobRunner, and
-//     connection.validate's own job carries no operation_id at creation, so
-//     the controller's generic job-claim phase can never claim or drive it:
-//     "no job runner is attached for connections/connection.validate." No
-//     connection ever leaves validation_state "unverified" through real
-//     production code, which _connections.resolve requires before any
-//     hosted dispatch. See
-//     TestConnectionValidateJobHasNoRunnerAndStaysPendingForever.
-//  1. CLOSED (revision 21). The Responses adapter maps a model call of a
-//     sealed local decision tool, declared in the dispatched context under
-//     its deterministic identity, to a typed ModelToolProposal with the
-//     sealed operation mapping (contract.LocalDecisionOperationID). Any other
-//     tool call still maps nothing and is flagged
-//     tool_proposal_mapping_unspecified. See
-//     TestResponsesAdapterMapsSealedReplyCallToTypedProposal.
-//  2. CLOSED in execution and the controller. A reply recorded in a
-//     conversation-bound turn is staged as the exact conversation.message.
-//     send its worker performs under its own authority through
-//     contract.WorkerOperator; recording that delivery completes the turn
-//     and commits its streamed preview. A message-triggered turn is bound to
-//     its triggering conversation at admission.
-//  3. CLOSED earlier: every committed hosted turn dispatches, including chat
-//     turns without an execution Attempt (turn_ops.go, dispatchModelEffect).
-//  4. OPEN. No worker, not even the bootstrap chief, is registered as an
-//     identity principal, so contract.WorkerOperator refuses every worker
-//     actor and the staged reply is never posted. See
-//     TestWorkerReplyDeliveryStopsAtMissingWorkerPrincipal.
-//
-// TestHostedTurnsNeverDispatchGivenAnUnverifiableConnection proves gap 0's
-// consequence end to end: neither a chat message nor a task ever causes a
-// physical call. TestResponsesAdapterDispatchesPrepareSessionAndModelStep
-// AgainstControlledProvider proves, independent of gap 0, that the adapter
-// completes real physical calls against a controlled provider. Each test
-// asserts the CURRENT correct behavior, exactly as this card's
-// restore-protocol section requires for that separate, already-known gap.
+// Hosted adapter and governed connection-validation integration tests.
 
 // openaiProtocolRevision is internal/adapters/responses/openai.go's
 // unexported constant naming the one qualified wire protocol revision this
@@ -343,24 +295,14 @@ func (cf *controllerFixture) wireHostedWorker(orgID contract.ID, key string) (wo
 	})
 	connID := f.findConnectionByAccount(account)
 
-	// connection.validate is accepted (a real admitted job), but see
-	// TestConnectionValidateJobHasNoRunnerAndStaysPendingForever below: it
-	// can never actually complete on this tree today (internal/connections
-	// implements no contract.LocalJobRunner, so nothing ever claims and
-	// drives its dispatch), so this connection stays validation_state
-	// "unverified" forever. Worker/binding creation below does not itself
-	// require a valid connection -- only _connections.resolve, at actual
-	// dispatch time, does -- so this fixture still returns a fully
-	// activated worker/binding/connection triple; what it can never do is
-	// make that connection resolvable.
-	f.must(f.owner, "connection.validate", key+"-validate", map[string]any{
-		"scope": f.scope(), "id": connID, "expected_version": 1,
-	})
+	// Validation admits a governed prepare_session probe. The controller
+	// claims it and records the result before hosted dispatch can resolve
+	// this connection.
 
 	f.activate(key+"-binding", "binding.create", map[string]any{
 		"definition": map[string]any{
 			"scope": f.scope(), "kind": "tool", "target_id": modelResponsesToolID,
-			"permissions": []string{"invoke"}, "destinations": []string{},
+			"permissions": []string{"invoke", string(modelResponsesToolID)}, "destinations": []string{},
 		},
 	})
 	bindingID := f.findBindingByTarget(modelResponsesToolID)
@@ -373,6 +315,7 @@ func (cf *controllerFixture) wireHostedWorker(orgID contract.ID, key string) (wo
 			"profile": map[string]any{
 				"id": contract.NewID(), "version": 1,
 				"executor": "hosted", "model": "integration-test-model", "connection_id": connID,
+				"connection_version":   2,
 				"provider_destination": modelResponsesDomainDestination, "capabilities": []string{},
 				"cost_bound":     map[string]any{"currency": "USD", "micro_units": 1000000},
 				"classification": "internal", "context_capture": "complete",
@@ -383,6 +326,9 @@ func (cf *controllerFixture) wireHostedWorker(orgID contract.ID, key string) (wo
 				"root_deadline": "2026-01-06T09:00:00Z",
 			},
 		},
+	})
+	f.must(f.owner, "connection.validate", key+"-validate", map[string]any{
+		"scope": f.scope(), "id": connID, "expected_version": 1,
 	})
 	return f.findWorkerByKey(key), connID
 }
@@ -444,137 +390,40 @@ func (f *fixture) findWorkerByKey(key string) contract.ID {
 	return ""
 }
 
-// TestConnectionValidateJobHasNoRunnerAndStaysPendingForever (P46 item 1/2,
-// gap 0 above -- discovered while building this card's controller fixture,
-// not pre-briefed): a real connection.validate call is admitted (a real
-// job is created), but internal/connections implements no
-// contract.LocalJobRunner anywhere on this tree (confirmed by direct
-// source read: zero `func...RunJob` in internal/connections/*.go) and its
-// job carries no operation_id of its own at creation, so the controller's
-// generic job-claim phase (internal/controller/jobs.go's jobs()) can never
-// claim it -- it reports a "no job runner is attached for connections/
-// connection.validate" obligation and the job stays pending forever. Not
-// even a single physical call reaches the controlled provider for the
-// validation probe itself. cmd/zatiti's own landedJobKinds/catalogJobKinds
-// tables (cmd/zatiti/jobs.go) never list "connections" at all -- unlike
-// "artifacts/artifact.export", which they do flag as a known, deliberate
-// gap -- so this looks like an unnoticed omission, not a documented
-// limitation, and it silently makes EVERY connection.validate call and
-// EVERY connection dependent on it permanently unusable in production.
-func TestConnectionValidateJobHasNoRunnerAndStaysPendingForever(t *testing.T) {
+// TestConnectionValidateProbeMakesTheConnectionValid (gap 0 above, now
+// closed): connection.validate admits one governed prepare_session probe
+// through the ordinary effects path. The controller admits and claims it,
+// the real Responses adapter makes exactly one physical call to the
+// controlled provider, and the recorded observation moves the connection
+// from unverified to valid with a bounded freshness window.
+func TestConnectionValidateProbeMakesTheConnectionValid(t *testing.T) {
 	t.Parallel()
 	f := newBootstrappedFixture(t)
 	provider := newOpenAIProviderServer(t)
 	adapter := buildResponsesAdapter(t, f, provider)
 	cf := attachController(t, f, controllerFixtureOptions{adapters: map[string]contract.Adapter{"responses": adapter}})
 
-	_, connID := cf.wireHostedWorker(cf.mustRootOrg(t), "hosted-obligation")
+	_, connID := cf.wireHostedWorker(cf.mustRootOrg(t), "hosted-validate")
 
-	waitFor(t, 10*time.Second, "the controller to report the missing connections job runner as an obligation", func() bool {
-		for _, o := range cf.ctl.Status().Obligations {
-			if o.Kind == "job" && o.Fault.Code == contract.CodePrerequisiteMissing &&
-				strings.Contains(o.Fault.Message, "connections/connection.validate") {
-				return true
-			}
+	var state, validUntil string
+	waitFor(t, 20*time.Second, "the validation probe to make the connection valid", func() bool {
+		status := f.must(f.owner, "connection.get", "", map[string]any{"scope": f.scope(), "id": connID})
+		var out struct {
+			Resource struct {
+				ValidationState string `json:"validation_state"`
+				ValidUntil      string `json:"valid_until"`
+			} `json:"resource"`
 		}
-		return false
+		decode(t, status.Data, &out)
+		state, validUntil = out.Resource.ValidationState, out.Resource.ValidUntil
+		return state == "valid"
 	})
-	time.Sleep(300 * time.Millisecond)
-	if n := provider.callCount(); n != 0 {
-		t.Fatalf("controlled provider received %d physical calls for a validation job that was never claimed, want 0: paths %v", n, provider.callPaths())
+	if validUntil == "" {
+		t.Fatalf("valid connection carries no freshness bound")
 	}
-	status := f.must(f.owner, "connection.get", "", map[string]any{"scope": f.scope(), "id": connID})
-	var out struct {
-		Resource struct {
-			ValidationState string `json:"validation_state"`
-		} `json:"resource"`
-	}
-	decode(t, status.Data, &out)
-	if out.Resource.ValidationState != "unverified" {
-		t.Fatalf("connection validation_state %q, want unverified (never fabricated valid)", out.Resource.ValidationState)
-	}
-}
-
-// TestHostedTurnsNeverDispatchGivenAnUnverifiableConnection (P46 item 2):
-// because a connection can never become valid (the test above), the two
-// independent gaps this card was briefed to expect -- a message-triggered
-// turn never receiving an AttemptID (turn_ops.go's dispatch gate) and the
-// Responses adapter never populating ModelOutput.tool_proposals (this
-// file's own top doc comment, gaps 1/2) -- are moot in practice for a
-// hosted worker on this tree: the chain breaks even earlier, at connection
-// resolution, before either of them is ever reached. This test proves that
-// earlier, more fundamental ceiling directly: neither a chat message nor a
-// task assigned to a hosted worker ever causes a single physical call to
-// the controlled provider, because _connections.resolve refuses
-// prerequisite_missing for the permanently-unverified connection and the
-// worker's tool binding is simply skipped rather than offered
-// (context_build.go: "a stale product-tool binding must never block
-// chat/task progress"). The task is left stalled, never fabricated into
-// either terminal state; the message never receives a reply.
-func TestHostedTurnsNeverDispatchGivenAnUnverifiableConnection(t *testing.T) {
-	t.Parallel()
-	f := newBootstrappedFixture(t)
-	provider := newOpenAIProviderServer(t)
-	adapter := buildResponsesAdapter(t, f, provider)
-	cf := attachController(t, f, controllerFixtureOptions{adapters: map[string]contract.Adapter{"responses": adapter}})
-
-	org := cf.mustRootOrg(t)
-	scope := contract.Scope{InstallationID: f.installationID, OrganizationID: org}
-	worker, _ := cf.wireHostedWorker(org, "hosted-stall")
-
-	// A chat message to the hosted worker.
-	conv := f.must(f.owner, "conversation.create", "hosted-stall-conv", map[string]any{
-		"scope": f.scope(), "kind": "direct", "participant_ids": []contract.ID{f.owner.PrincipalID, worker}, "title": "hosted chat",
-	})
-	var conversation struct {
-		Resource struct {
-			ID contract.ID `json:"id"`
-		} `json:"resource"`
-	}
-	decode(t, conv.Data, &conversation)
-	f.must(f.owner, "conversation.message.send", "hosted-stall-msg", map[string]any{
-		"scope": f.scope(), "conversation_id": conversation.Resource.ID, "message_id": contract.NewID(),
-		"body": "hello, hosted worker", "attachments": []any{}, "task_ids": []contract.ID{},
-	})
-
-	// A task assigned to the same hosted worker.
-	def := f.taskDefinition(scope, f.owner.PrincipalID, worker, unconfiguredCurrency)
-	created := f.must(f.owner, "task.create", "hosted-stall-task", map[string]any{"scope": scope, "definition": def})
-	var task struct {
-		Resource struct {
-			ID      contract.ID `json:"id"`
-			Version int64       `json:"version"`
-		} `json:"resource"`
-	}
-	decode(t, created.Data, &task)
-	f.must(f.owner, "task.start", "hosted-stall-start", map[string]any{
-		"scope": scope, "id": task.Resource.ID, "expected_version": task.Resource.Version,
-	})
-
-	// Many real ticks: enough for discoverMessages/turnWork/dispatch to run
-	// dozens of times over. Neither path ever reaches the provider.
-	time.Sleep(500 * time.Millisecond)
-
-	if n := provider.callCount(); n != 0 {
-		t.Fatalf("controlled provider received %d physical calls though the worker's only connection is permanently unverified, want 0: paths %v", n, provider.callPaths())
-	}
-	messages := f.must(f.owner, "conversation.message.list", "", map[string]any{"scope": f.scope(), "conversation_id": conversation.Resource.ID})
-	var ml struct {
-		Items []any `json:"items"`
-	}
-	decode(t, messages.Data, &ml)
-	if len(ml.Items) != 1 {
-		t.Fatalf("conversation carries %d messages, want exactly the owner's own -- no reply was ever produced: %s", len(ml.Items), messages.Data)
-	}
-	taskStatus := f.must(f.owner, "task.get", "", map[string]any{"scope": scope, "id": task.Resource.ID})
-	var taskOut struct {
-		Resource struct {
-			State string `json:"state"`
-		} `json:"resource"`
-	}
-	decode(t, taskStatus.Data, &taskOut)
-	if taskOut.Resource.State == "succeeded" || taskOut.Resource.State == "failed" {
-		t.Fatalf("task reached terminal state %q though its worker's connection can never resolve; independent verification must never be bypassed", taskOut.Resource.State)
+	paths := provider.callPaths()
+	if len(paths) != 1 || !strings.HasSuffix(paths[0], "/conversations") {
+		t.Fatalf("validation made physical calls %v, want exactly one prepare_session call to /conversations", paths)
 	}
 }
 
@@ -788,3 +637,88 @@ func TestWorkerReplyDeliveryUsesRegisteredWorkerPrincipal(t *testing.T) {
 		t.Fatalf("owner history = %s, want one delivered worker reply", history.Data)
 	}
 }
+
+func TestHostedMessageReplyPersistsAsTheWorker(t *testing.T) {
+	t.Parallel()
+	f := newBootstrappedFixture(t)
+	provider := newOpenAIProviderServer(t)
+	adapter := buildResponsesAdapter(t, f, provider)
+	var performer contract.ContextPerformer
+	for _, module := range f.modules {
+		if p, ok := module.(contract.ContextPerformer); ok {
+			performer = p
+			break
+		}
+	}
+	if performer == nil {
+		t.Fatal("assembled execution owner has no context performer")
+	}
+	cf := attachController(t, f, controllerFixtureOptions{
+		adapters: map[string]contract.Adapter{"responses": adapter}, context: performer,
+	})
+	worker, connection := cf.wireHostedWorker(cf.mustRootOrg(t), "hosted-durable-reply")
+	t.Cleanup(func() {
+		if t.Failed() {
+			t.Logf("controller status: %+v; provider calls: %v", cf.ctl.Status(), provider.callPaths())
+			operations := f.must(f.owner, "operation.list", "", map[string]any{"scope": f.scope(), "limit": 100})
+			t.Logf("operations: %s", operations.Data)
+			var listed struct {
+				Items []struct {
+					Action json.RawMessage `json:"action"`
+				} `json:"items"`
+			}
+			decode(t, operations.Data, &listed)
+			for _, operation := range listed.Items {
+				policy := f.must(f.owner, "policy.explain", "", map[string]any{"scope": f.scope(), "action": operation.Action})
+				t.Logf("probe policy: %s", policy.Data)
+			}
+		}
+	})
+	waitFor(t, 20*time.Second, "governed connection validation", func() bool {
+		status := f.must(f.owner, "connection.get", "", map[string]any{"scope": f.scope(), "id": connection})
+		return strings.Contains(string(status.Data), `"validation_state":"valid"`)
+	})
+	conversation := f.directConversation("hosted-durable-conversation", f.owner.PrincipalID, worker)
+	f.must(f.owner, "conversation.message.send", "hosted-durable-request", map[string]any{
+		"scope": f.scope(), "conversation_id": conversation, "message_id": contract.NewID(),
+		"body": "hello, hosted worker", "attachments": []any{}, "task_ids": []contract.ID{},
+	})
+	waitFor(t, 30*time.Second, "the durable worker reply in owner history", func() bool {
+		bodies := f.messageBodies(conversation)
+		return len(bodies) == 2 && (bodies[0] == "acknowledged" || bodies[1] == "acknowledged")
+	})
+	history := f.must(f.owner, "conversation.message.list", "", map[string]any{"scope": f.scope(), "conversation_id": conversation})
+	var messages struct {
+		Items []struct {
+			Body     string      `json:"body"`
+			SenderID contract.ID `json:"sender_id"`
+		} `json:"items"`
+	}
+	decode(t, history.Data, &messages)
+	replies := 0
+	for _, message := range messages.Items {
+		if message.Body == "acknowledged" && message.SenderID == worker {
+			replies++
+		}
+	}
+	if len(messages.Items) != 2 || replies != 1 {
+		t.Fatalf("durable history = %s", history.Data)
+	}
+	// One validation probe and exactly one prepare/model pair. No tool
+	// effect or second model step may be invented to deliver the reply.
+	paths := provider.callPaths()
+	if len(paths) != 3 || !strings.HasSuffix(paths[0], "/conversations") || !strings.HasSuffix(paths[1], "/conversations") || !strings.HasSuffix(paths[2], "/responses") {
+		t.Fatalf("hosted reply physical calls = %v", paths)
+	}
+}
+
+// TestResponsesAdapterDispatchesPrepareSessionAndModelStepAgainstControlledProvider
+// (P46 item 1, the controller-independent half: "the actual ... Responses
+// adapter pointed at a controlled provider"): proves the real internal/
+// adapters/responses adapter, constructed through its exact public
+// constructor with no test seam, genuinely completes both physical calls
+// of the revision-3 prepare_session/model_step split against a controlled
+// provider server -- a real TLS round trip, real evidence, a real returned
+// session handle. Adapter.Invoke is called directly here, as the
+// controller's perform path calls it, without connection resolution or
+// execution admission.

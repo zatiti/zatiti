@@ -75,6 +75,15 @@ var catalogJobKinds = []jobKind{
 	{Owner: "configuration", Operation: "team.export"},
 	{Owner: "configuration", Operation: "project.export"},
 	{Owner: "artifacts", Operation: "artifact.export"},
+	// connection.validate and connection.discover need no runner: both
+	// probes are admitted as governed effects whose linked jobs carry an
+	// operation_id, so the controller drives them through the ordinary
+	// dispatch/callback path and _connections.validation.record completes
+	// them. connection.rotate still creates its job without an operation
+	// identity (handlers_setup.go handleRotate) and has no runner, so it
+	// stays listed here as a known, reported gap until the rotation probe
+	// moves to the same governed path.
+	{Owner: "connections", Operation: "connection.rotate"},
 }
 
 // missingJobRunners reports every catalogJobKinds entry absent from

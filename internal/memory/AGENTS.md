@@ -1,6 +1,6 @@
 # Implementation assignment: `internal/memory`
 
-Generated specification revision 22; source digest `ed63f2e561d1e38f6849eccad54f2f3c2d5c27ac9174730f5095b0fb826a1e00`. This file is committed implementation context. Do not independently edit it. Everything required from the product specification and adjacent interfaces is embedded below; no RFC copy is required.
+Generated specification revision 23; source digest `f8bfbf0529e1526833dc8525d63bd65be5a361ec73d34a7febbf6902b14f5fa4`. This file is committed implementation context. Do not independently edit it. Everything required from the product specification and adjacent interfaces is embedded below; no RFC copy is required.
 
 ## Mission and scope
 
@@ -30,7 +30,7 @@ These briefs are embedded so you need not read a sibling prompt to discover its 
 
 ## Shared foundation contract
 
-# Frozen implementation contract, revision 22
+# Frozen implementation contract, revision 23
 
 Revision 19 adds human conversational voice through the `voice` owner. The explicitly registered `voice.transcribe` and `voice.speak` operations use the phased IO boundary for bounded interactive external speech, with durable intent and separate accounting admission before leaving the transaction. They are not worker execution profiles or autonomous tool effects. Every session requires explicit disclosure consent and acknowledgment that OpenRouter speech billing is advisory (transcription routing cannot enforce a provider price cap). Dedicated voice-only connections exclude `/responses`; raw keys remain in SecretStore. The phase's accepted command is never automatically retried after a crash or ambiguous response. Unknown reservations remain visible. Narrate owns craft and provider transport, while Zatiti owns current-authority checks, accounting, conversation identity and session fencing. Desktop only captures and plays audio and uses catalogued operations; no direct model calls or sidecar. Native Mac permission, echo and latency testing remains qualification work.
 
@@ -523,6 +523,21 @@ A message-triggered `WorkerTurn` is bound at admission, in the same transaction 
 ## Revision 22 — worker identity principals
 
 Revision 22 registers configured workers as identity principals so `contract.WorkerOperator` can resolve a worker's own actor. Identity's `_identity.activate` now handles worker changes routed with a configuration candidate: create or update registers or moves the worker principal, and archive or delete revokes it with its grants. The new internal `_identity.worker.sync` (caller: configuration) performs the same idempotent registration for the bootstrap chief and for backfill; `_configuration.worker.principals.sync` (caller: controller) passes every configured worker to it once per controller session so existing installations gain principals. A worker principal's id equals its worker id. It records the worker's organization and holds exactly one standing, installation-scoped, non-delegable allow grant (organization-scoped grants would not cover installation-scoped conversations such as the owner's chat with the chief) whose capabilities are the frozen worker-visible local operation allowlist plus `messaging.disclosure.deliver` (which every message send asks policy for), now declared once as `contract.WorkerVisibleOperations` and used by both the application executor and identity. No caller supplies or widens that grant, sync never re-grants an existing principal or reactivates a revoked one, and the owner can still narrow or revoke it through ordinary identity operations, and policy, task scope and tool bindings continue to gate every call.
+
+
+## Revision 23: persisted effect authorization subjects
+
+Effects persists the authenticated preparing Actor alongside each immutable operation. Controller admission and claim authenticate the controller first, then Application resolves the operation's persisted subject through the Effects owner's narrow `contract.EffectSubjectResolver` capability. Resolution, current principal authority checks, policy, review, reservation and claim share one transaction. Nested calls use that logical subject while preserving the original transaction and generation. Clients and controller invocation inputs cannot choose a replacement principal. Legacy operations without a subject remain inspectable and fail admission with prerequisite_missing; no principal is invented on migration or restore.
+
+Execution implements the same owner capability for context preparation, context commit, turn observations and worker effect preparation. It resolves the exact persisted turn or context plan, installation, generation and step. Callback routes identify the turn, while source_id identifies an individual effect; these IDs need not be identical. Application resolves worker authority before Effects accepts that route. Internal connection resolution permits inherited ancestor resources while continuing to refuse sibling scopes. Responses model output is extracted from its schema-validated physical evidence and bound to the exact dispatched operation and published physical request artifact; that artifact is distinct from the turn's input context. Prepare-session callbacks support chief chat without fabricating a task or Attempt. Unknown session outcomes never trigger another session request.
+
+```go
+type EffectSubjectResolver interface {
+    ResolveEffectSubject(context.Context, Unit, Invocation) (Actor, Scope, error)
+}
+```
+
+Registry exposes `EffectSubjectFor(owner string) (contract.EffectSubjectResolver, bool)` only for the assembled owner's implementation. Application requires this capability for the designated boundaries and fails closed when absent. It never gives domains a general actor-substitution API.
 
 ## Owned product requirements
 

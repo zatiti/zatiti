@@ -93,6 +93,7 @@ const (
 // operationRow is one logical effect: immutable action reference, state
 // machine position and links to related operations.
 type operationRow struct {
+	SubjectJSON              string
 	ID                       contract.ID
 	Version                  int64
 	InstallID                contract.ID
@@ -117,7 +118,7 @@ type operationRow struct {
 
 const operationColumns = `id, version, installation_id, organization_id, project_id, worker_id, task_id,
 	action_id, action_digest, source_key, state, linked_operation_id, relationship, job_id,
-	attempt_count, callback_route_json, adapter_profile_json, profile_connection_version, created_at, updated_at`
+	attempt_count, callback_route_json, adapter_profile_json, profile_connection_version, created_at, updated_at, subject_json`
 
 func scanOperation(scan func(dest ...any) error) (*operationRow, error) {
 	var o operationRow
@@ -126,7 +127,7 @@ func scanOperation(scan func(dest ...any) error) (*operationRow, error) {
 	var created, updated string
 	err := scan(&o.ID, &o.Version, &o.InstallID, &organization, &project, &worker, &task,
 		&o.ActionID, &o.ActionDigest, &sourceKey, &o.State, &linked, &relationship, &jobID,
-		&o.AttemptCount, &callbackRoute, &adapterProfile, &o.ProfileConnectionVersion, &created, &updated)
+		&o.AttemptCount, &callbackRoute, &adapterProfile, &o.ProfileConnectionVersion, &created, &updated, &o.SubjectJSON)
 	if err != nil {
 		return nil, err
 	}
@@ -183,12 +184,12 @@ func loadOperationBySource(ctx context.Context, unit contract.Unit, install cont
 // insertOperation persists a new operation row.
 func insertOperation(ctx context.Context, unit contract.Unit, o *operationRow) error {
 	_, err := unit.ExecContext(ctx, `INSERT INTO effects_operations (`+operationColumns+`)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		string(o.ID), o.Version, string(o.InstallID), string(o.OrganizationID), string(o.ProjectID),
 		string(o.WorkerID), string(o.TaskID), string(o.ActionID), o.ActionDigest, o.SourceKey,
 		o.State, string(o.LinkedOperation), o.Relationship, string(o.JobID),
 		o.AttemptCount, o.CallbackRouteJSON, o.AdapterProfileJSON, o.ProfileConnectionVersion,
-		formatStamp(o.CreatedAt), formatStamp(o.UpdatedAt))
+		formatStamp(o.CreatedAt), formatStamp(o.UpdatedAt), o.SubjectJSON)
 	return err
 }
 

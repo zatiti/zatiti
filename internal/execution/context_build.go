@@ -482,7 +482,10 @@ func (s *Service) handleContextPrepare(ctx context.Context, unit contract.Unit, 
 			conn, tool, err = s.callConnectionsResolve(ctx, unit, t.Scope,
 				wireRef{ID: worker.Profile.ConnectionID, Version: profileConnectionVersion(worker.Profile)},
 				wireRef{ID: binding.TargetID, Version: defaultResolveVersion}, destination)
-			if err != nil || tool.Adapter == "mcp" {
+			if err != nil {
+				return contract.Outcome[contextPlanBody]{}, err
+			}
+			if tool.Adapter == "mcp" {
 				continue
 			}
 		} else {
@@ -506,7 +509,7 @@ func (s *Service) handleContextPrepare(ctx context.Context, unit contract.Unit, 
 			ConnectionID: conn.ID, ConnectionVersion: conn.Version, AccountIdentity: conn.AccountIdentity,
 			Name: tool.Name, InputSchema: tool.InputSchema, OutputSchema: tool.OutputSchema,
 			Effect: tool.Effect, Destinations: tool.Destinations, BindingID: binding.ID,
-			Adapter: tool.Adapter, IsModelTool: tool.Adapter == "responses",
+			Adapter: tool.Adapter, IsModelTool: tool.Adapter == "responses" || tool.Adapter == "zatiti/model-responses/v1",
 		})
 	}
 
@@ -748,7 +751,7 @@ func (s *Service) buildContextArtifact(ctx context.Context, scope contract.Scope
 	doc.Messages = nonNilMessages(doc.Messages)
 	doc.Tools = localDecisionTools()
 	for _, c := range recipe.Components {
-		if c.Kind != "tool" {
+		if c.Kind != "tool" || c.IsModelTool {
 			continue
 		}
 		doc.Tools = append(doc.Tools, wireContextTool{
@@ -910,12 +913,7 @@ func buildResponsesModelStepActionV2(plan *contextPlanRow, contextArtifact wireA
 	if modelTool == nil {
 		return nil, wireRef{}, wireRef{}, "", prerequisiteMissing("no responses adapter tool is bound for this worker")
 	}
-	toolVersions := make([]wireRef, 0, len(plan.Recipe.Components))
-	for _, component := range plan.Recipe.Components {
-		if component.Kind == "tool" {
-			toolVersions = append(toolVersions, wireRef{ID: component.ToolID, Version: component.ToolVersion})
-		}
-	}
+	toolVersions := modelVisibleToolRefs(plan)
 	action := map[string]any{"schema": "zatiti.responses.action/v2", "kind": "model_step", "session_mode": mode, "context_artifact": contextArtifact, "max_output_tokens": maxOutput, "tool_contract_versions": toolVersions}
 	if mode == "provider_conversation" {
 		if sessionHandle == "" {
@@ -983,13 +981,9 @@ func modelStepMaximumCost(plan *contextPlanRow) (*wireMoney, error) {
 // function proves the action shape a caller has to hand it is correct.
 func buildResponsesModelStepAction(plan *contextPlanRow, contextArtifact wireArtifactRef, sessionHandle, continuationReference string) (wireResponsesModelStep, map[string]any, wireRef, wireRef, string, error) {
 	var modelTool *contextComponent
-	toolVersions := make([]wireRef, 0, len(plan.Recipe.Components))
-	for i, c := range plan.Recipe.Components {
-		if c.Kind != "tool" {
-			continue
-		}
-		toolVersions = append(toolVersions, wireRef{ID: c.ToolID, Version: c.ToolVersion})
-		if c.IsModelTool {
+	toolVersions := modelVisibleToolRefs(plan)
+	for i, component := range plan.Recipe.Components {
+		if component.Kind == "tool" && component.IsModelTool {
 			modelTool = &plan.Recipe.Components[i]
 		}
 	}
@@ -1124,4 +1118,19 @@ func nonNilStrings(in []string) []string {
 		return []string{}
 	}
 	return in
+}
+
+// Model-visible versions match the context declarations. The model dispatcher
+// is transport infrastructure; local decision tools are explicitly offered.
+func modelVisibleToolRefs(plan *contextPlanRow) []wireRef {
+	refs := []wireRef{}
+	for _, tool := range localDecisionTools() {
+		refs = append(refs, tool.Tool)
+	}
+	for _, component := range plan.Recipe.Components {
+		if component.Kind == "tool" && !component.IsModelTool {
+			refs = append(refs, wireRef{ID: component.ToolID, Version: component.ToolVersion})
+		}
+	}
+	return refs
 }

@@ -66,3 +66,11 @@ type Database interface {
 type DatabaseBackup interface {
 	Backup(ctx context.Context, w io.Writer) error
 }
+
+// EffectSubjectResolver is a trusted owner capability used only by application
+// dispatch. It resolves authority from an immutable effect or a persisted
+// worker turn, never from a caller-supplied principal. Resolution and current
+// authority checks run in the same transaction as admission or claim.
+type EffectSubjectResolver interface {
+	ResolveEffectSubject(context.Context, Unit, Invocation) (Actor, Scope, error)
+}

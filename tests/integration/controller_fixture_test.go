@@ -112,6 +112,7 @@ func (f *fixture) jobRunners() map[string]controller.JobRunner {
 // only fixture: nothing it dispatches ever calls out).
 type controllerFixtureOptions struct {
 	adapters map[string]contract.Adapter
+	context  contract.ContextPerformer
 }
 
 // newControllerFixture bootstraps an installation and attaches a real
@@ -153,6 +154,7 @@ func attachController(t testing.TB, f *fixture, opts controllerFixtureOptions) *
 		Jobs:     f.jobRunners(),
 		Operator: f.app,
 		Verifier: verifier,
+		Context:  opts.context,
 		// RestoreLifecycle intentionally omitted: see this file's package
 		// doc comment and restore_controller_test.go.
 	}); err != nil {
