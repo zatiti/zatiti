@@ -55,7 +55,7 @@ func TestWorkerReplyToHumanIsNeverTurnDiscovered(t *testing.T) {
 	}
 }
 
-func TestExistingWorkerRecipientRowsAreClassified(t *testing.T) {
+func TestUpgradeClassifiesLegacyWorkerAndHumanRecipients(t *testing.T) {
 	env := newEnv(t)
 	db, err := storage.Open(env.ctx, storage.Config{Path: filepath.Join(t.TempDir(), "legacy.db")})
 	if err != nil {
@@ -68,10 +68,14 @@ func TestExistingWorkerRecipientRowsAreClassified(t *testing.T) {
 	}
 	id := env.ids.New()
 	if err := db.Write(env.ctx, env.actor, env.scope.toContract(), func(unit contract.Unit) error {
-		_, err := unit.ExecContext(env.ctx, `INSERT INTO messaging_recipients
-			(message_id,recipient_id,installation_id,state,delivered_json,admitted_at,acknowledged_at)
-			VALUES (?,?,?,'admitted','{}',?,'0001-01-01T00:00:00Z')`, id, env.worker, env.install, env.clock.Now().Format(timeLayout))
-		return err
+		for _, recipient := range []contract.ID{env.worker, env.owner} {
+			if _, err := unit.ExecContext(env.ctx, `INSERT INTO messaging_recipients
+				(message_id,recipient_id,installation_id,state,delivered_json,admitted_at,acknowledged_at)
+				VALUES (?,?,?,'admitted','{}',?,'0001-01-01T00:00:00Z')`, id, recipient, env.install, env.clock.Now().Format(timeLayout)); err != nil {
+				return err
+			}
+		}
+		return nil
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -87,7 +91,14 @@ func TestExistingWorkerRecipientRowsAreClassified(t *testing.T) {
 			return err
 		}
 		if row == nil || !row.TurnEligible || row.State != recipientAdmitted {
-			t.Fatalf("migration changed legacy eligibility: %+v", row)
+			t.Fatalf("migration changed legacy worker eligibility: %+v", row)
+		}
+		human, err := getRecipient(env.ctx, unit, id, env.owner)
+		if err != nil {
+			return err
+		}
+		if human == nil || human.TurnEligible || human.State != recipientAdmitted {
+			t.Fatalf("migration admitted or acknowledged legacy human mail: %+v", human)
 		}
 		return nil
 	}); err != nil {
